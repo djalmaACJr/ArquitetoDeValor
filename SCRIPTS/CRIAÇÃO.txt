@@ -1,26 +1,33 @@
 -- ============================================================
--- ARQUITETO DE VALOR ó Schema PostgreSQL v1.4
+-- ARQUITETO DE VALOR ‚Äî Schema PostgreSQL v1.6
 -- Gerado a partir da SPEC SDD v1.2
--- CompatÌvel com: PostgreSQL 15+ | Supabase
+-- Compat√≠vel com: PostgreSQL 15+ | Supabase
 --
--- Changelog v1.4:
---   - CriaÁ„o explÌcita do schema arqvalor
+-- Changelog v1.6:
+--   - Cria√ß√£o expl√≠cita do schema arqvalor
 --   - SET search_path garante que todos os objetos ficam
---     dentro do schema arqvalor (n„o em public)
+--     dentro do schema arqvalor (n√£o em public)
 --   - ENUMs movidos para dentro do schema
---   - Coment·rio explicando relaÁ„o user_id <> RLS
+--   - Coment√°rio explicando rela√ß√£o user_id <> RLS
+-- Changelog v1.6:
+--   - Substitu√≠do √≠ndice DATE_TRUNC (STABLE) por coluna gerada ano_mes
+--   - Corrige erro: functions in index expression must be marked IMMUTABLE
+-- Changelog v1.6:
+--   - Substitu√≠da coluna gerada ano_mes (DATE_TRUNC) por ano_tx + mes_tx
+--     usando EXTRACT, que e IMMUTABLE e aceito em colunas geradas
 -- ============================================================
 
 -- ------------------------------------------------------------
 -- SCHEMA
--- Agrupa todas as tabelas, views e funÁıes do projeto.
+-- Agrupa todas as tabelas, views e fun√ß√µes do projeto.
 -- Evita conflitos com outros objetos em public.
 -- ------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS arqvalor;
 
--- Define arqvalor como schema padr„o desta sess„o.
--- Tudo criado a partir daqui fica em arqvalor automaticamente.
-SET search_path TO arqvalor, public;
+-- No Supabase o SET search_path de sess√£o n√£o persiste entre queries
+-- do SQL Editor. Usamos SELECT set_config que funciona na conex√£o atual,
+-- garantindo que todos os objetos abaixo sejam criados em arqvalor.
+SELECT set_config('search_path', 'arqvalor, public', false);
 
 -- ------------------------------------------------------------
 -- EXTENSOES
@@ -36,7 +43,7 @@ CREATE TYPE tipo_transacao    AS ENUM ('RECEITA', 'DESPESA');
 CREATE TYPE status_transacao  AS ENUM ('PAGO', 'PENDENTE', 'PROJECAO');
 CREATE TYPE tipo_recorrencia  AS ENUM ('PARCELA', 'PROJECAO');
 CREATE TYPE intervalo_recorr  AS ENUM ('DIA', 'SEMANA', 'MES', 'ANO');
-CREATE TYPE escopo_recorr     AS ENUM ('ESTA', 'ESTA_E_PROXIMAS', 'TODAS');
+CREATE TYPE escopo_recorr     AS ENUM ('SOMENTE_ESTE', 'ESTE_E_SEGUINTES', 'TODOS');
 
 -- ============================================================
 -- TABELA: usuarios
@@ -101,6 +108,12 @@ CREATE TABLE transacoes (
     conta_id         UUID             NOT NULL REFERENCES contas(id)      ON DELETE RESTRICT,
     categoria_id     UUID                      REFERENCES categorias(id)  ON DELETE RESTRICT,
     data             DATE             NOT NULL,
+
+    -- Colunas geradas para filtro por mes sem usar DATE_TRUNC (nao IMMUTABLE).
+    -- EXTRACT e IMMUTABLE e aceito em colunas geradas e indices.
+    -- Uso: WHERE ano_tx = 2025 AND mes_tx = 4
+    ano_tx           SMALLINT         GENERATED ALWAYS AS (EXTRACT(YEAR  FROM data)::SMALLINT) STORED,
+    mes_tx           SMALLINT         GENERATED ALWAYS AS (EXTRACT(MONTH FROM data)::SMALLINT) STORED,
     descricao        TEXT             NOT NULL CHECK (char_length(descricao) BETWEEN 2 AND 200),
     valor            NUMERIC(15,2)    NOT NULL CHECK (valor > 0),
     tipo             tipo_transacao   NOT NULL,
@@ -132,7 +145,7 @@ CREATE INDEX idx_tx_status         ON transacoes (status);
 CREATE INDEX idx_tx_id_recorrencia ON transacoes (id_recorrencia);
 CREATE INDEX idx_tx_criado_em      ON transacoes (criado_em);
 CREATE INDEX idx_tx_listagem       ON transacoes (user_id, conta_id, data ASC, criado_em ASC);
-CREATE INDEX idx_tx_ano_mes        ON transacoes (user_id, DATE_TRUNC('month', data));
+CREATE INDEX idx_tx_ano_mes        ON transacoes (user_id, ano_tx, mes_tx);
 
 -- ============================================================
 -- TABELA: auditoria
@@ -406,15 +419,15 @@ $$;
 -- ROW LEVEL SECURITY (RLS)
 --
 -- Como funciona:
---   1. O Supabase extrai o ID do usu·rio do JWT ? auth.uid()
+--   1. O Supabase extrai o ID do usu√°rio do JWT ‚Üí auth.uid()
 --   2. A POLICY aplica automaticamente: WHERE user_id = auth.uid()
---   3. Isso sÛ funciona porque CADA TABELA tem a coluna user_id.
---      A coluna user_id È o elo entre o JWT e os dados da tabela.
+--   3. Isso s√≥ funciona porque CADA TABELA tem a coluna user_id.
+--      A coluna user_id √© o elo entre o JWT e os dados da tabela.
 --
--- Resultado: mesmo que a API esqueÁa de filtrar por usu·rio,
--- o banco garante que cada um sÛ enxerga os prÛprios dados.
+-- Resultado: mesmo que a API esque√ßa de filtrar por usu√°rio,
+-- o banco garante que cada um s√≥ enxerga os pr√≥prios dados.
 --
--- ATEN«√O: no Supabase as policies usam auth.uid() da extens„o
+-- ATEN√á√ÉO: no Supabase as policies usam auth.uid() da extens√£o
 -- auth. Fora do Supabase, substituir por current_setting('app.user_id')::UUID
 -- e configurar via SET LOCAL antes de cada query.
 -- ============================================================
@@ -423,14 +436,14 @@ ALTER TABLE categorias  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transacoes  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE auditoria   ENABLE ROW LEVEL SECURITY;
 
--- SELECT, INSERT, UPDATE, DELETE: usu·rio sÛ acessa seus prÛprios dados
+-- SELECT, INSERT, UPDATE, DELETE: usu√°rio s√≥ acessa seus pr√≥prios dados
 CREATE POLICY pol_contas_user      ON contas      USING (user_id = auth.uid());
 CREATE POLICY pol_categorias_user  ON categorias  USING (user_id = auth.uid());
 CREATE POLICY pol_transacoes_user  ON transacoes  USING (user_id = auth.uid());
 CREATE POLICY pol_auditoria_user   ON auditoria   USING (user_id = auth.uid());
 
--- Garante que INSERT tambÈm respeita o user_id (WITH CHECK)
--- Impede inserir user_id diferente do usu·rio logado
+-- Garante que INSERT tamb√©m respeita o user_id (WITH CHECK)
+-- Impede inserir user_id diferente do usu√°rio logado
 ALTER POLICY pol_contas_user     ON contas     WITH CHECK (user_id = auth.uid());
 ALTER POLICY pol_categorias_user ON categorias WITH CHECK (user_id = auth.uid());
 ALTER POLICY pol_transacoes_user ON transacoes WITH CHECK (user_id = auth.uid());
@@ -490,5 +503,5 @@ INSERT INTO categorias (user_id, id_pai, descricao, icone, cor) VALUES
 */
 
 -- ============================================================
--- FIM DO SCHEMA v1.4
+-- FIM DO SCHEMA v1.6
 -- ============================================================
