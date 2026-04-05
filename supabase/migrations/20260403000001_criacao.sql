@@ -1,32 +1,24 @@
 -- ============================================================
--- ARQUITETO DE VALOR — Schema PostgreSQL v1.6
--- Gerado a partir da SPEC SDD v1.2
--- Compatível com: PostgreSQL 15+ | Supabase
+-- ARQUITETO DE VALOR — Migration idempotente v1.6
+-- Seguro para reexecutar: não gera erro se objetos já existem.
 --
--- Changelog v1.6:
---   - Criação explícita do schema arqvalor
---   - SET search_path garante que todos os objetos ficam
---     dentro do schema arqvalor (não em public)
---   - ENUMs movidos para dentro do schema
---   - Comentário explicando relação user_id <> RLS
--- Changelog v1.6:
---   - Substituído índice DATE_TRUNC (STABLE) por coluna gerada ano_mes
---   - Corrige erro: functions in index expression must be marked IMMUTABLE
--- Changelog v1.6:
---   - Substituída coluna gerada ano_mes (DATE_TRUNC) por ano_tx + mes_tx
---     usando EXTRACT, que e IMMUTABLE e aceito em colunas geradas
+-- Técnicas usadas:
+--   ENUMs        → DO $$ BEGIN ... EXCEPTION WHEN duplicate_object
+--   TABELAs      → CREATE TABLE IF NOT EXISTS
+--   ÍNDICEs      → CREATE INDEX IF NOT EXISTS
+--   TRIGGERs     → DROP TRIGGER IF EXISTS antes de CREATE
+--   FUNÇÕEs      → CREATE OR REPLACE FUNCTION
+--   VIEWs        → CREATE OR REPLACE VIEW
+--   POLICIEs     → DROP POLICY IF EXISTS antes de CREATE
+--   RLS          → ALTER TABLE ... ENABLE ROW LEVEL SECURITY
+--                  (seguro repetir — já habilitado não muda nada)
 -- ============================================================
 
 -- ------------------------------------------------------------
 -- SCHEMA
--- Agrupa todas as tabelas, views e funções do projeto.
--- Evita conflitos com outros objetos em public.
 -- ------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS arqvalor;
 
--- No Supabase o SET search_path de sessão não persiste entre queries
--- do SQL Editor. Usamos SELECT set_config que funciona na conexão atual,
--- garantindo que todos os objetos abaixo sejam criados em arqvalor.
 SELECT set_config('search_path', 'arqvalor, public', false);
 
 -- ------------------------------------------------------------
@@ -37,53 +29,78 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ------------------------------------------------------------
 -- TIPOS ENUMERADOS
+-- Protegidos com bloco DO/EXCEPTION para reexecução segura.
 -- ------------------------------------------------------------
-CREATE TYPE tipo_conta       AS ENUM ('CORRENTE', 'POUPANCA', 'CARTAO', 'INVESTIMENTO', 'CARTEIRA');
-CREATE TYPE tipo_transacao    AS ENUM ('RECEITA', 'DESPESA');
-CREATE TYPE status_transacao  AS ENUM ('PAGO', 'PENDENTE', 'PROJECAO');
-CREATE TYPE tipo_recorrencia  AS ENUM ('PARCELA', 'PROJECAO');
-CREATE TYPE intervalo_recorr  AS ENUM ('DIA', 'SEMANA', 'MES', 'ANO');
-CREATE TYPE escopo_recorr     AS ENUM ('SOMENTE_ESTE', 'ESTE_E_SEGUINTES', 'TODOS');
+DO $$ BEGIN
+    CREATE TYPE arqvalor.tipo_conta AS ENUM (
+        'CORRENTE', 'REMUNERACAO', 'CARTAO', 'INVESTIMENTO', 'CARTEIRA'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
--- ============================================================
+DO $$ BEGIN
+    CREATE TYPE arqvalor.tipo_transacao AS ENUM ('RECEITA', 'DESPESA');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE arqvalor.status_transacao AS ENUM ('PAGO', 'PENDENTE', 'PROJECAO');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE arqvalor.tipo_recorrencia AS ENUM ('PARCELA', 'PROJECAO');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE arqvalor.intervalo_recorr AS ENUM ('DIA', 'SEMANA', 'MES', 'ANO');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE arqvalor.escopo_recorr AS ENUM (
+        'SOMENTE_ESTE', 'ESTE_E_SEGUINTES', 'TODOS'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ------------------------------------------------------------
 -- TABELA: usuarios
--- ============================================================
-CREATE TABLE IF NOT EXISTS usuarios (
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS arqvalor.usuarios (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     email       TEXT        NOT NULL UNIQUE,
     nome        TEXT        NOT NULL,
     criado_em   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ============================================================
+-- ------------------------------------------------------------
 -- TABELA: contas
--- FK: user_id RESTRICT - nao exclui usuario com contas cadastradas
--- ============================================================
-CREATE TABLE contas (
-    id             UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id        UUID           NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
-    nome           TEXT           NOT NULL CHECK (char_length(nome) BETWEEN 1 AND 100),
-    tipo           tipo_conta     NOT NULL,
-    saldo_inicial  NUMERIC(15,2)  NOT NULL DEFAULT 0,
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS arqvalor.contas (
+    id             UUID                    PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id        UUID                    NOT NULL REFERENCES arqvalor.usuarios(id) ON DELETE RESTRICT,
+    nome           TEXT                    NOT NULL CHECK (char_length(nome) BETWEEN 1 AND 100),
+    tipo           arqvalor.tipo_conta     NOT NULL,
+    saldo_inicial  NUMERIC(15,2)           NOT NULL DEFAULT 0,
     icone          TEXT,
-    cor            TEXT           CHECK (cor ~ '^#[0-9A-Fa-f]{6}$'),
-    ativa          BOOLEAN        NOT NULL DEFAULT TRUE,
-    criado_em      TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
-    atualizado_em  TIMESTAMPTZ    NOT NULL DEFAULT NOW()
+    cor            TEXT                    CHECK (cor ~ '^#[0-9A-Fa-f]{6}$'),
+    ativa          BOOLEAN                 NOT NULL DEFAULT TRUE,
+    criado_em      TIMESTAMPTZ             NOT NULL DEFAULT NOW(),
+    atualizado_em  TIMESTAMPTZ             NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_contas_user_id ON contas (user_id);
-CREATE INDEX idx_contas_ativa   ON contas (user_id, ativa);
+CREATE INDEX IF NOT EXISTS idx_contas_user_id ON arqvalor.contas (user_id);
+CREATE INDEX IF NOT EXISTS idx_contas_ativa   ON arqvalor.contas (user_id, ativa);
 
--- ============================================================
+-- ------------------------------------------------------------
 -- TABELA: categorias
--- FK: user_id RESTRICT - nao exclui usuario com categorias
--- FK: id_pai  RESTRICT - nao exclui pai com filhos cadastrados
--- ============================================================
-CREATE TABLE categorias (
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS arqvalor.categorias (
     id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID        NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
-    id_pai          UUID        REFERENCES categorias(id) ON DELETE RESTRICT,
+    user_id         UUID        NOT NULL REFERENCES arqvalor.usuarios(id)    ON DELETE RESTRICT,
+    id_pai          UUID                 REFERENCES arqvalor.categorias(id)  ON DELETE RESTRICT,
     descricao       TEXT        NOT NULL CHECK (char_length(descricao) BETWEEN 1 AND 20),
     icone           TEXT,
     cor             TEXT        CHECK (cor ~ '^#[0-9A-Fa-f]{6}$'),
@@ -92,40 +109,33 @@ CREATE TABLE categorias (
     atualizado_em   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_categorias_user_id ON categorias (user_id);
-CREATE INDEX idx_categorias_pai     ON categorias (id_pai);
-CREATE INDEX idx_categorias_ativa   ON categorias (user_id, ativa);
+CREATE INDEX IF NOT EXISTS idx_categorias_user_id ON arqvalor.categorias (user_id);
+CREATE INDEX IF NOT EXISTS idx_categorias_pai     ON arqvalor.categorias (id_pai);
+CREATE INDEX IF NOT EXISTS idx_categorias_ativa   ON arqvalor.categorias (user_id, ativa);
 
--- ============================================================
+-- ------------------------------------------------------------
 -- TABELA: transacoes
--- FK: user_id      RESTRICT
--- FK: conta_id     RESTRICT - nao exclui conta com lancamentos
--- FK: categoria_id RESTRICT - nao exclui categoria com lancamentos
--- ============================================================
-CREATE TABLE transacoes (
-    id               UUID             PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id          UUID             NOT NULL REFERENCES usuarios(id)    ON DELETE RESTRICT,
-    conta_id         UUID             NOT NULL REFERENCES contas(id)      ON DELETE RESTRICT,
-    categoria_id     UUID                      REFERENCES categorias(id)  ON DELETE RESTRICT,
-    data             DATE             NOT NULL,
-
-    -- Colunas geradas para filtro por mes sem usar DATE_TRUNC (nao IMMUTABLE).
-    -- EXTRACT e IMMUTABLE e aceito em colunas geradas e indices.
-    -- Uso: WHERE ano_tx = 2025 AND mes_tx = 4
-    ano_tx           SMALLINT         GENERATED ALWAYS AS (EXTRACT(YEAR  FROM data)::SMALLINT) STORED,
-    mes_tx           SMALLINT         GENERATED ALWAYS AS (EXTRACT(MONTH FROM data)::SMALLINT) STORED,
-    descricao        TEXT             NOT NULL CHECK (char_length(descricao) BETWEEN 2 AND 200),
-    valor            NUMERIC(15,2)    NOT NULL CHECK (valor > 0),
-    tipo             tipo_transacao   NOT NULL,
-    status           status_transacao NOT NULL DEFAULT 'PENDENTE',
-    valor_projetado  NUMERIC(15,2)    CHECK (valor_projetado > 0),
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS arqvalor.transacoes (
+    id               UUID                         PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id          UUID                         NOT NULL REFERENCES arqvalor.usuarios(id)   ON DELETE RESTRICT,
+    conta_id         UUID                         NOT NULL REFERENCES arqvalor.contas(id)     ON DELETE RESTRICT,
+    categoria_id     UUID                                  REFERENCES arqvalor.categorias(id) ON DELETE RESTRICT,
+    data             DATE                         NOT NULL,
+    ano_tx           SMALLINT                     GENERATED ALWAYS AS (EXTRACT(YEAR  FROM data)::SMALLINT) STORED,
+    mes_tx           SMALLINT                     GENERATED ALWAYS AS (EXTRACT(MONTH FROM data)::SMALLINT) STORED,
+    descricao        TEXT                         NOT NULL CHECK (char_length(descricao) BETWEEN 2 AND 200),
+    valor            NUMERIC(15,2)                NOT NULL CHECK (valor > 0),
+    tipo             arqvalor.tipo_transacao      NOT NULL,
+    status           arqvalor.status_transacao    NOT NULL DEFAULT 'PENDENTE',
+    valor_projetado  NUMERIC(15,2)                CHECK (valor_projetado > 0),
     id_recorrencia   UUID,
-    nr_parcela       INTEGER          CHECK (nr_parcela >= 1),
-    total_parcelas   INTEGER          CHECK (total_parcelas >= 1),
-    tipo_recorrencia tipo_recorrencia,
+    nr_parcela       INTEGER                      CHECK (nr_parcela >= 1),
+    total_parcelas   INTEGER                      CHECK (total_parcelas >= 1),
+    tipo_recorrencia arqvalor.tipo_recorrencia,
     observacao       TEXT,
-    criado_em        TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
-    atualizado_em    TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
+    criado_em        TIMESTAMPTZ                  NOT NULL DEFAULT NOW(),
+    atualizado_em    TIMESTAMPTZ                  NOT NULL DEFAULT NOW(),
 
     CONSTRAINT chk_parcela_consistente CHECK (
         (id_recorrencia IS NULL AND nr_parcela IS NULL AND total_parcelas IS NULL)
@@ -137,21 +147,20 @@ CREATE TABLE transacoes (
     )
 );
 
-CREATE INDEX idx_tx_user_id        ON transacoes (user_id);
-CREATE INDEX idx_tx_conta_id       ON transacoes (conta_id);
-CREATE INDEX idx_tx_categoria_id   ON transacoes (categoria_id);
-CREATE INDEX idx_tx_data           ON transacoes (data);
-CREATE INDEX idx_tx_status         ON transacoes (status);
-CREATE INDEX idx_tx_id_recorrencia ON transacoes (id_recorrencia);
-CREATE INDEX idx_tx_criado_em      ON transacoes (criado_em);
-CREATE INDEX idx_tx_listagem       ON transacoes (user_id, conta_id, data ASC, criado_em ASC);
-CREATE INDEX idx_tx_ano_mes        ON transacoes (user_id, ano_tx, mes_tx);
+CREATE INDEX IF NOT EXISTS idx_tx_user_id        ON arqvalor.transacoes (user_id);
+CREATE INDEX IF NOT EXISTS idx_tx_conta_id       ON arqvalor.transacoes (conta_id);
+CREATE INDEX IF NOT EXISTS idx_tx_categoria_id   ON arqvalor.transacoes (categoria_id);
+CREATE INDEX IF NOT EXISTS idx_tx_data           ON arqvalor.transacoes (data);
+CREATE INDEX IF NOT EXISTS idx_tx_status         ON arqvalor.transacoes (status);
+CREATE INDEX IF NOT EXISTS idx_tx_id_recorrencia ON arqvalor.transacoes (id_recorrencia);
+CREATE INDEX IF NOT EXISTS idx_tx_criado_em      ON arqvalor.transacoes (criado_em);
+CREATE INDEX IF NOT EXISTS idx_tx_listagem       ON arqvalor.transacoes (user_id, conta_id, data ASC, criado_em ASC);
+CREATE INDEX IF NOT EXISTS idx_tx_ano_mes        ON arqvalor.transacoes (user_id, ano_tx, mes_tx);
 
--- ============================================================
+-- ------------------------------------------------------------
 -- TABELA: auditoria
--- Sem FK para user_id: registro de auditoria nunca e excluido.
--- ============================================================
-CREATE TABLE auditoria (
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS arqvalor.auditoria (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID        NOT NULL,
     tabela      TEXT        NOT NULL,
@@ -163,14 +172,18 @@ CREATE TABLE auditoria (
     criado_em   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_auditoria_user_id   ON auditoria (user_id);
-CREATE INDEX idx_auditoria_registro  ON auditoria (registro_id);
-CREATE INDEX idx_auditoria_criado_em ON auditoria (criado_em DESC);
+CREATE INDEX IF NOT EXISTS idx_auditoria_user_id   ON arqvalor.auditoria (user_id);
+CREATE INDEX IF NOT EXISTS idx_auditoria_registro  ON arqvalor.auditoria (registro_id);
+CREATE INDEX IF NOT EXISTS idx_auditoria_criado_em ON arqvalor.auditoria (criado_em DESC);
 
 -- ============================================================
--- TRIGGER: atualizado_em automatico
+-- FUNÇÕES (CREATE OR REPLACE — sempre seguro reexecutar)
 -- ============================================================
-CREATE OR REPLACE FUNCTION fn_set_atualizado_em()
+
+-- ------------------------------------------------------------
+-- FUNÇÃO: atualizado_em automático
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION arqvalor.fn_set_atualizado_em()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     NEW.atualizado_em = NOW();
@@ -178,23 +191,10 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER trg_contas_atualizado_em
-    BEFORE UPDATE ON contas
-    FOR EACH ROW EXECUTE FUNCTION fn_set_atualizado_em();
-
-CREATE TRIGGER trg_categorias_atualizado_em
-    BEFORE UPDATE ON categorias
-    FOR EACH ROW EXECUTE FUNCTION fn_set_atualizado_em();
-
-CREATE TRIGGER trg_transacoes_atualizado_em
-    BEFORE UPDATE ON transacoes
-    FOR EACH ROW EXECUTE FUNCTION fn_set_atualizado_em();
-
--- ============================================================
--- TRIGGER: valor_projetado
--- Ao mudar status PROJECAO -> PAGO, salva o valor original.
--- ============================================================
-CREATE OR REPLACE FUNCTION fn_preservar_valor_projetado()
+-- ------------------------------------------------------------
+-- FUNÇÃO: preservar valor_projetado ao confirmar PROJECAO → PAGO
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION arqvalor.fn_preservar_valor_projetado()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     IF OLD.status = 'PROJECAO' AND NEW.status = 'PAGO' AND NEW.valor_projetado IS NULL THEN
@@ -204,27 +204,21 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER trg_preservar_valor_projetado
-    BEFORE UPDATE ON transacoes
-    FOR EACH ROW EXECUTE FUNCTION fn_preservar_valor_projetado();
-
--- ============================================================
--- TRIGGER: isolamento de usuario na transacao
--- Garante que conta_id e categoria_id pertencem ao user_id
--- da transacao. Protecao no banco, independente da API.
--- ============================================================
-CREATE OR REPLACE FUNCTION fn_validar_isolamento_usuario()
+-- ------------------------------------------------------------
+-- FUNÇÃO: validar isolamento de usuário na transação
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION arqvalor.fn_validar_isolamento_usuario()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM contas
+        SELECT 1 FROM arqvalor.contas
         WHERE id = NEW.conta_id AND user_id = NEW.user_id AND ativa = TRUE
     ) THEN
         RAISE EXCEPTION 'CONTA_INVALIDA: A conta nao pertence ao usuario ou esta inativa.';
     END IF;
 
     IF NEW.categoria_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM categorias
+        SELECT 1 FROM arqvalor.categorias
         WHERE id = NEW.categoria_id AND user_id = NEW.user_id AND ativa = TRUE
     ) THEN
         RAISE EXCEPTION 'CATEGORIA_INVALIDA: A categoria nao pertence ao usuario ou esta inativa.';
@@ -234,18 +228,14 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER trg_validar_isolamento_usuario
-    BEFORE INSERT OR UPDATE ON transacoes
-    FOR EACH ROW EXECUTE FUNCTION fn_validar_isolamento_usuario();
-
--- ============================================================
--- TRIGGER: bloquear exclusao de conta com lancamentos
--- ============================================================
-CREATE OR REPLACE FUNCTION fn_bloquear_exclusao_conta()
+-- ------------------------------------------------------------
+-- FUNÇÃO: bloquear exclusão de conta com lançamentos
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION arqvalor.fn_bloquear_exclusao_conta()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE v_total INTEGER;
 BEGIN
-    SELECT COUNT(*) INTO v_total FROM transacoes WHERE conta_id = OLD.id;
+    SELECT COUNT(*) INTO v_total FROM arqvalor.transacoes WHERE conta_id = OLD.id;
     IF v_total > 0 THEN
         RAISE EXCEPTION 'CONTA_EM_USO: A conta "%" possui % lancamento(s) e nao pode ser excluida.', OLD.nome, v_total;
     END IF;
@@ -253,27 +243,21 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER trg_bloquear_exclusao_conta
-    BEFORE DELETE ON contas
-    FOR EACH ROW EXECUTE FUNCTION fn_bloquear_exclusao_conta();
-
--- ============================================================
--- TRIGGER: bloquear exclusao de categoria com filhos ou lancamentos
--- Ordem: verifica filhos primeiro, depois lancamentos.
--- ============================================================
-CREATE OR REPLACE FUNCTION fn_bloquear_exclusao_categoria()
+-- ------------------------------------------------------------
+-- FUNÇÃO: bloquear exclusão de categoria com filhos ou lançamentos
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION arqvalor.fn_bloquear_exclusao_categoria()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
     v_filhos      INTEGER;
     v_lancamentos INTEGER;
 BEGIN
-    SELECT COUNT(*) INTO v_filhos      FROM categorias  WHERE id_pai      = OLD.id;
-    SELECT COUNT(*) INTO v_lancamentos FROM transacoes   WHERE categoria_id = OLD.id;
+    SELECT COUNT(*) INTO v_filhos      FROM arqvalor.categorias  WHERE id_pai       = OLD.id;
+    SELECT COUNT(*) INTO v_lancamentos FROM arqvalor.transacoes   WHERE categoria_id = OLD.id;
 
     IF v_filhos > 0 THEN
         RAISE EXCEPTION 'CATEGORIA_COM_FILHOS: "%" possui % subcategoria(s). Exclua as subcategorias primeiro.', OLD.descricao, v_filhos;
     END IF;
-
     IF v_lancamentos > 0 THEN
         RAISE EXCEPTION 'CATEGORIA_EM_USO: "%" possui % lancamento(s) vinculado(s) e nao pode ser excluida.', OLD.descricao, v_lancamentos;
     END IF;
@@ -282,98 +266,18 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER trg_bloquear_exclusao_categoria
-    BEFORE DELETE ON categorias
-    FOR EACH ROW EXECUTE FUNCTION fn_bloquear_exclusao_categoria();
-
--- ============================================================
--- VIEW: vw_saldo_contas
--- ============================================================
-CREATE OR REPLACE VIEW vw_saldo_contas AS
-SELECT
-    c.id AS conta_id, c.user_id, c.nome, c.tipo, c.icone, c.cor, c.ativa, c.saldo_inicial,
-    COALESCE(SUM(CASE WHEN t.tipo='RECEITA' THEN t.valor WHEN t.tipo='DESPESA' THEN -t.valor END), 0) AS movimentacao,
-    c.saldo_inicial + COALESCE(SUM(CASE WHEN t.tipo='RECEITA' THEN t.valor WHEN t.tipo='DESPESA' THEN -t.valor END), 0) AS saldo_atual
-FROM contas c
-LEFT JOIN transacoes t ON t.conta_id = c.id
-GROUP BY c.id, c.user_id, c.nome, c.tipo, c.icone, c.cor, c.ativa, c.saldo_inicial;
-
--- ============================================================
--- VIEW: vw_transacoes_com_saldo
--- ============================================================
-CREATE OR REPLACE VIEW vw_transacoes_com_saldo AS
-SELECT
-    t.id, t.user_id, t.conta_id, t.categoria_id, t.data, t.descricao,
-    t.valor, t.valor_projetado, t.tipo, t.status,
-    t.id_recorrencia, t.nr_parcela, t.total_parcelas, t.tipo_recorrencia,
-    t.observacao, t.criado_em, t.atualizado_em,
-    cat.descricao     AS categoria_nome,
-    cat.icone         AS categoria_icone,
-    cat.cor           AS categoria_cor,
-    cat_pai.descricao AS categoria_pai_nome,
-    con.nome          AS conta_nome,
-    con.icone         AS conta_icone,
-    con.cor           AS conta_cor,
-    con.saldo_inicial + SUM(
-        CASE WHEN t.tipo='RECEITA' THEN t.valor WHEN t.tipo='DESPESA' THEN -t.valor END
-    ) OVER (
-        PARTITION BY t.conta_id
-        ORDER BY t.data ASC, t.criado_em ASC
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS saldo_acumulado
-FROM transacoes t
-JOIN  contas     con     ON con.id     = t.conta_id
-LEFT JOIN categorias cat     ON cat.id     = t.categoria_id
-LEFT JOIN categorias cat_pai ON cat_pai.id = cat.id_pai;
-
--- ============================================================
--- VIEW: vw_resumo_mensal
--- ============================================================
-CREATE OR REPLACE VIEW vw_resumo_mensal AS
-SELECT
-    user_id,
-    DATE_TRUNC('month', data) AS mes,
-    SUM(CASE WHEN tipo='RECEITA' THEN valor ELSE 0 END)  AS total_entradas,
-    SUM(CASE WHEN tipo='DESPESA' THEN valor ELSE 0 END)  AS total_saidas,
-    SUM(CASE WHEN tipo='RECEITA' THEN valor ELSE -valor END) AS resultado
-FROM transacoes
-GROUP BY user_id, DATE_TRUNC('month', data);
-
--- ============================================================
--- VIEW: vw_despesas_por_categoria
--- ============================================================
-CREATE OR REPLACE VIEW vw_despesas_por_categoria AS
-SELECT
-    t.user_id,
-    DATE_TRUNC('month', t.data)                AS mes,
-    COALESCE(cat_pai.id, t.categoria_id)       AS categoria_id,
-    COALESCE(cat_pai.descricao, cat.descricao) AS categoria_nome,
-    COALESCE(cat_pai.icone, cat.icone)         AS categoria_icone,
-    COALESCE(cat_pai.cor, cat.cor)             AS categoria_cor,
-    SUM(t.valor)                               AS total,
-    ROUND(SUM(t.valor)*100.0 / NULLIF(SUM(SUM(t.valor)) OVER (
-        PARTITION BY t.user_id, DATE_TRUNC('month', t.data)
-    ), 0), 2)                                  AS percentual
-FROM transacoes t
-LEFT JOIN categorias cat     ON cat.id     = t.categoria_id
-LEFT JOIN categorias cat_pai ON cat_pai.id = cat.id_pai
-WHERE t.tipo = 'DESPESA'
-GROUP BY t.user_id, DATE_TRUNC('month',t.data),
-    COALESCE(cat_pai.id,t.categoria_id), COALESCE(cat_pai.descricao,cat.descricao),
-    COALESCE(cat_pai.icone,cat.icone),   COALESCE(cat_pai.cor,cat.cor);
-
--- ============================================================
--- FUNCAO: fn_antecipar_parcelas
--- ============================================================
-CREATE OR REPLACE FUNCTION fn_antecipar_parcelas(p_transacao_id UUID, p_user_id UUID)
+-- ------------------------------------------------------------
+-- FUNÇÃO: fn_antecipar_parcelas
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION arqvalor.fn_antecipar_parcelas(p_transacao_id UUID, p_user_id UUID)
 RETURNS TABLE (novo_valor NUMERIC(15,2), valor_projetado_salvo NUMERIC(15,2), parcelas_excluidas INTEGER)
 LANGUAGE plpgsql AS $$
 DECLARE
-    v_tx             transacoes%ROWTYPE;
+    v_tx             arqvalor.transacoes%ROWTYPE;
     v_soma_seguintes NUMERIC(15,2);
     v_count          INTEGER;
 BEGIN
-    SELECT * INTO v_tx FROM transacoes WHERE id = p_transacao_id AND user_id = p_user_id;
+    SELECT * INTO v_tx FROM arqvalor.transacoes WHERE id = p_transacao_id AND user_id = p_user_id;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'TRANSACAO_NAO_ENCONTRADA';
     END IF;
@@ -384,14 +288,18 @@ BEGIN
         RAISE EXCEPTION 'LAST_INSTALLMENT';
     END IF;
 
-    SELECT COALESCE(SUM(valor),0), COUNT(*) INTO v_soma_seguintes, v_count
-    FROM transacoes
-    WHERE id_recorrencia = v_tx.id_recorrencia AND nr_parcela > v_tx.nr_parcela AND user_id = p_user_id;
+    SELECT COALESCE(SUM(valor), 0), COUNT(*) INTO v_soma_seguintes, v_count
+    FROM arqvalor.transacoes
+    WHERE id_recorrencia = v_tx.id_recorrencia
+      AND nr_parcela > v_tx.nr_parcela
+      AND user_id = p_user_id;
 
-    DELETE FROM transacoes
-    WHERE id_recorrencia = v_tx.id_recorrencia AND nr_parcela > v_tx.nr_parcela AND user_id = p_user_id;
+    DELETE FROM arqvalor.transacoes
+    WHERE id_recorrencia = v_tx.id_recorrencia
+      AND nr_parcela > v_tx.nr_parcela
+      AND user_id = p_user_id;
 
-    UPDATE transacoes SET
+    UPDATE arqvalor.transacoes SET
         valor_projetado = v_tx.valor,
         valor           = v_tx.valor + v_soma_seguintes,
         total_parcelas  = v_tx.nr_parcela,
@@ -405,103 +313,158 @@ BEGIN
 END;
 $$;
 
--- ============================================================
--- FUNCAO: fn_saldo_conta_ate
--- ============================================================
-CREATE OR REPLACE FUNCTION fn_saldo_conta_ate(p_conta_id UUID, p_ate TIMESTAMPTZ DEFAULT NOW())
+-- ------------------------------------------------------------
+-- FUNÇÃO: fn_saldo_conta_ate
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION arqvalor.fn_saldo_conta_ate(p_conta_id UUID, p_ate TIMESTAMPTZ DEFAULT NOW())
 RETURNS NUMERIC(15,2) LANGUAGE sql STABLE AS $$
-    SELECT (SELECT saldo_inicial FROM contas WHERE id = p_conta_id)
-        + COALESCE(SUM(CASE WHEN tipo='RECEITA' THEN valor ELSE -valor END), 0)
-    FROM transacoes WHERE conta_id = p_conta_id AND criado_em <= p_ate;
+    SELECT (SELECT saldo_inicial FROM arqvalor.contas WHERE id = p_conta_id)
+        + COALESCE(SUM(CASE WHEN tipo = 'RECEITA' THEN valor ELSE -valor END), 0)
+    FROM arqvalor.transacoes
+    WHERE conta_id = p_conta_id AND criado_em <= p_ate;
 $$;
 
 -- ============================================================
--- ROW LEVEL SECURITY (RLS)
---
--- Como funciona:
---   1. O Supabase extrai o ID do usuário do JWT → auth.uid()
---   2. A POLICY aplica automaticamente: WHERE user_id = auth.uid()
---   3. Isso só funciona porque CADA TABELA tem a coluna user_id.
---      A coluna user_id é o elo entre o JWT e os dados da tabela.
---
--- Resultado: mesmo que a API esqueça de filtrar por usuário,
--- o banco garante que cada um só enxerga os próprios dados.
---
--- ATENÇÃO: no Supabase as policies usam auth.uid() da extensão
--- auth. Fora do Supabase, substituir por current_setting('app.user_id')::UUID
--- e configurar via SET LOCAL antes de cada query.
+-- TRIGGERS
+-- DROP IF EXISTS antes de CREATE garante reexecução segura.
 -- ============================================================
-ALTER TABLE contas      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE categorias  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE transacoes  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE auditoria   ENABLE ROW LEVEL SECURITY;
 
--- SELECT, INSERT, UPDATE, DELETE: usuário só acessa seus próprios dados
-CREATE POLICY pol_contas_user      ON contas      USING (user_id = auth.uid());
-CREATE POLICY pol_categorias_user  ON categorias  USING (user_id = auth.uid());
-CREATE POLICY pol_transacoes_user  ON transacoes  USING (user_id = auth.uid());
-CREATE POLICY pol_auditoria_user   ON auditoria   USING (user_id = auth.uid());
+DROP TRIGGER IF EXISTS trg_contas_atualizado_em      ON arqvalor.contas;
+DROP TRIGGER IF EXISTS trg_categorias_atualizado_em  ON arqvalor.categorias;
+DROP TRIGGER IF EXISTS trg_transacoes_atualizado_em  ON arqvalor.transacoes;
+DROP TRIGGER IF EXISTS trg_preservar_valor_projetado ON arqvalor.transacoes;
+DROP TRIGGER IF EXISTS trg_validar_isolamento_usuario ON arqvalor.transacoes;
+DROP TRIGGER IF EXISTS trg_bloquear_exclusao_conta   ON arqvalor.contas;
+DROP TRIGGER IF EXISTS trg_bloquear_exclusao_categoria ON arqvalor.categorias;
 
--- Garante que INSERT também respeita o user_id (WITH CHECK)
--- Impede inserir user_id diferente do usuário logado
-ALTER POLICY pol_contas_user     ON contas     WITH CHECK (user_id = auth.uid());
-ALTER POLICY pol_categorias_user ON categorias WITH CHECK (user_id = auth.uid());
-ALTER POLICY pol_transacoes_user ON transacoes WITH CHECK (user_id = auth.uid());
+CREATE TRIGGER trg_contas_atualizado_em
+    BEFORE UPDATE ON arqvalor.contas
+    FOR EACH ROW EXECUTE FUNCTION arqvalor.fn_set_atualizado_em();
 
--- ============================================================
--- DADOS INICIAIS - Contas pre-cadastradas
--- Descomente e substitua USER_ID_AQUI pelo UUID do usuario.
--- ============================================================
-/*
-INSERT INTO contas (user_id, nome, tipo, saldo_inicial, icone, cor) VALUES
-    ('USER_ID_AQUI', 'Carteira',     'CARTEIRA', 0, '?',                                           '#00c896'),
-    ('USER_ID_AQUI', 'Nubank',       'CARTAO',   0, 'https://logo.clearbit.com/nubank.com.br',     '#820ad1'),
-    ('USER_ID_AQUI', 'Inter',        'CARTAO',   0, 'https://logo.clearbit.com/bancointer.com.br', '#ff7a00'),
-    ('USER_ID_AQUI', 'Sofisa',       'CORRENTE', 0, 'https://logo.clearbit.com/sofisa.com.br',     '#e91e8c'),
-    ('USER_ID_AQUI', 'C6 Bank',      'CARTAO',   0, 'https://logo.clearbit.com/c6bank.com.br',     '#2d2d2d'),
-    ('USER_ID_AQUI', 'PagBank',      'CARTAO',   0, 'https://logo.clearbit.com/pagbank.com.br',    '#f5a623'),
-    ('USER_ID_AQUI', 'Mercado Pago', 'CARTAO',   0, 'https://logo.clearbit.com/mercadopago.com.br','#00b1ea');
-*/
+CREATE TRIGGER trg_categorias_atualizado_em
+    BEFORE UPDATE ON arqvalor.categorias
+    FOR EACH ROW EXECUTE FUNCTION arqvalor.fn_set_atualizado_em();
+
+CREATE TRIGGER trg_transacoes_atualizado_em
+    BEFORE UPDATE ON arqvalor.transacoes
+    FOR EACH ROW EXECUTE FUNCTION arqvalor.fn_set_atualizado_em();
+
+CREATE TRIGGER trg_preservar_valor_projetado
+    BEFORE UPDATE ON arqvalor.transacoes
+    FOR EACH ROW EXECUTE FUNCTION arqvalor.fn_preservar_valor_projetado();
+
+CREATE TRIGGER trg_validar_isolamento_usuario
+    BEFORE INSERT OR UPDATE ON arqvalor.transacoes
+    FOR EACH ROW EXECUTE FUNCTION arqvalor.fn_validar_isolamento_usuario();
+
+CREATE TRIGGER trg_bloquear_exclusao_conta
+    BEFORE DELETE ON arqvalor.contas
+    FOR EACH ROW EXECUTE FUNCTION arqvalor.fn_bloquear_exclusao_conta();
+
+CREATE TRIGGER trg_bloquear_exclusao_categoria
+    BEFORE DELETE ON arqvalor.categorias
+    FOR EACH ROW EXECUTE FUNCTION arqvalor.fn_bloquear_exclusao_categoria();
 
 -- ============================================================
--- DADOS INICIAIS - Categorias pre-cadastradas (2 passos)
+-- VIEWS (CREATE OR REPLACE — sempre seguro reexecutar)
 -- ============================================================
-/*
--- Passo 1: categorias pai
-INSERT INTO categorias (user_id, descricao, icone, cor) VALUES
-    ('USER_ID_AQUI', 'Moradia',        '?', '#4da6ff'),
-    ('USER_ID_AQUI', 'Alimentacao',    '?', '#ff7a00'),
-    ('USER_ID_AQUI', 'Transporte',     '?', '#820ad1'),
-    ('USER_ID_AQUI', 'Saude',          '?', '#e91e8c'),
-    ('USER_ID_AQUI', 'Renda',          '?', '#00c896'),
-    ('USER_ID_AQUI', 'Transferencias', '?', '#00b1ea');
 
--- Passo 2: apos obter os IDs, inserir subcategorias com id_pai preenchido.
-INSERT INTO categorias (user_id, id_pai, descricao, icone, cor) VALUES
-    ('USER_ID_AQUI', 'UUID_MORADIA', 'Aluguel',         '?', '#4da6ff'),
-    ('USER_ID_AQUI', 'UUID_MORADIA', 'Condominio',      '?', '#4da6ff'),
-    ('USER_ID_AQUI', 'UUID_MORADIA', 'IPTU',            '?', '#4da6ff'),
-    ('USER_ID_AQUI', 'UUID_MORADIA', 'Manutencao',      '?', '#4da6ff'),
-    ('USER_ID_AQUI', 'UUID_ALIM',    'Mercado',         '?', '#ff7a00'),
-    ('USER_ID_AQUI', 'UUID_ALIM',    'Restaurantes',    '?', '#ff7a00'),
-    ('USER_ID_AQUI', 'UUID_ALIM',    'Delivery',        '?', '#ff7a00'),
-    ('USER_ID_AQUI', 'UUID_ALIM',    'Padaria',         '?', '#ff7a00'),
-    ('USER_ID_AQUI', 'UUID_TRANSP',  'Combustivel',     '?', '#820ad1'),
-    ('USER_ID_AQUI', 'UUID_TRANSP',  'Uber/Taxi',       '?', '#820ad1'),
-    ('USER_ID_AQUI', 'UUID_TRANSP',  'Transp. Publico', '?', '#820ad1'),
-    ('USER_ID_AQUI', 'UUID_TRANSP',  'Manut. Veiculo',  '?', '#820ad1'),
-    ('USER_ID_AQUI', 'UUID_SAUDE',   'Plano de Saude',  '?', '#e91e8c'),
-    ('USER_ID_AQUI', 'UUID_SAUDE',   'Farmacia',        '?', '#e91e8c'),
-    ('USER_ID_AQUI', 'UUID_SAUDE',   'Consultas',       '?', '#e91e8c'),
-    ('USER_ID_AQUI', 'UUID_SAUDE',   'Academia',        '?', '#e91e8c'),
-    ('USER_ID_AQUI', 'UUID_RENDA',   'Salario',         '?', '#00c896'),
-    ('USER_ID_AQUI', 'UUID_RENDA',   'Freelance',       '?', '#00c896'),
-    ('USER_ID_AQUI', 'UUID_RENDA',   'Aluguel Recebido','?', '#00c896'),
-    ('USER_ID_AQUI', 'UUID_RENDA',   'Dividendos',      '?', '#00c896'),
-    ('USER_ID_AQUI', 'UUID_TRANSF',  'Entre Contas',    '?', '#00b1ea'),
-    ('USER_ID_AQUI', 'UUID_TRANSF',  'Reembolsos',      '?', '#00b1ea');
-*/
+CREATE OR REPLACE VIEW arqvalor.vw_saldo_contas AS
+SELECT
+    c.id AS conta_id, c.user_id, c.nome, c.tipo, c.icone, c.cor, c.ativa, c.saldo_inicial,
+    COALESCE(SUM(CASE WHEN t.tipo = 'RECEITA' THEN t.valor WHEN t.tipo = 'DESPESA' THEN -t.valor END), 0) AS movimentacao,
+    c.saldo_inicial + COALESCE(SUM(CASE WHEN t.tipo = 'RECEITA' THEN t.valor WHEN t.tipo = 'DESPESA' THEN -t.valor END), 0) AS saldo_atual
+FROM arqvalor.contas c
+LEFT JOIN arqvalor.transacoes t ON t.conta_id = c.id
+GROUP BY c.id, c.user_id, c.nome, c.tipo, c.icone, c.cor, c.ativa, c.saldo_inicial;
+
+CREATE OR REPLACE VIEW arqvalor.vw_transacoes_com_saldo AS
+SELECT
+    t.id, t.user_id, t.conta_id, t.categoria_id, t.data, t.descricao,
+    t.valor, t.valor_projetado, t.tipo, t.status,
+    t.id_recorrencia, t.nr_parcela, t.total_parcelas, t.tipo_recorrencia,
+    t.observacao, t.criado_em, t.atualizado_em,
+    cat.descricao     AS categoria_nome,
+    cat.icone         AS categoria_icone,
+    cat.cor           AS categoria_cor,
+    cat_pai.descricao AS categoria_pai_nome,
+    con.nome          AS conta_nome,
+    con.icone         AS conta_icone,
+    con.cor           AS conta_cor,
+    con.saldo_inicial + SUM(
+        CASE WHEN t.tipo = 'RECEITA' THEN t.valor WHEN t.tipo = 'DESPESA' THEN -t.valor END
+    ) OVER (
+        PARTITION BY t.conta_id
+        ORDER BY t.data ASC, t.criado_em ASC
+        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS saldo_acumulado
+FROM arqvalor.transacoes t
+JOIN  arqvalor.contas     con     ON con.id     = t.conta_id
+LEFT JOIN arqvalor.categorias cat     ON cat.id     = t.categoria_id
+LEFT JOIN arqvalor.categorias cat_pai ON cat_pai.id = cat.id_pai;
+
+CREATE OR REPLACE VIEW arqvalor.vw_resumo_mensal AS
+SELECT
+    user_id,
+    DATE_TRUNC('month', data)                                           AS mes,
+    SUM(CASE WHEN tipo = 'RECEITA' THEN valor ELSE 0 END)              AS total_entradas,
+    SUM(CASE WHEN tipo = 'DESPESA' THEN valor ELSE 0 END)              AS total_saidas,
+    SUM(CASE WHEN tipo = 'RECEITA' THEN valor ELSE -valor END)         AS resultado
+FROM arqvalor.transacoes
+GROUP BY user_id, DATE_TRUNC('month', data);
+
+CREATE OR REPLACE VIEW arqvalor.vw_despesas_por_categoria AS
+SELECT
+    t.user_id,
+    DATE_TRUNC('month', t.data)                AS mes,
+    COALESCE(cat_pai.id, t.categoria_id)       AS categoria_id,
+    COALESCE(cat_pai.descricao, cat.descricao) AS categoria_nome,
+    COALESCE(cat_pai.icone, cat.icone)         AS categoria_icone,
+    COALESCE(cat_pai.cor, cat.cor)             AS categoria_cor,
+    SUM(t.valor)                               AS total,
+    ROUND(SUM(t.valor) * 100.0 / NULLIF(SUM(SUM(t.valor)) OVER (
+        PARTITION BY t.user_id, DATE_TRUNC('month', t.data)
+    ), 0), 2)                                  AS percentual
+FROM arqvalor.transacoes t
+LEFT JOIN arqvalor.categorias cat     ON cat.id     = t.categoria_id
+LEFT JOIN arqvalor.categorias cat_pai ON cat_pai.id = cat.id_pai
+WHERE t.tipo = 'DESPESA'
+GROUP BY t.user_id, DATE_TRUNC('month', t.data),
+    COALESCE(cat_pai.id, t.categoria_id),
+    COALESCE(cat_pai.descricao, cat.descricao),
+    COALESCE(cat_pai.icone, cat.icone),
+    COALESCE(cat_pai.cor, cat.cor);
 
 -- ============================================================
--- FIM DO SCHEMA v1.6
+-- ROW LEVEL SECURITY
+-- ENABLE ROW LEVEL SECURITY é seguro repetir (sem efeito se já ativo).
+-- DROP POLICY IF EXISTS antes de CREATE evita erro de duplicidade.
+-- ============================================================
+ALTER TABLE arqvalor.contas      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE arqvalor.categorias  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE arqvalor.transacoes  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE arqvalor.auditoria   ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS pol_contas_user      ON arqvalor.contas;
+DROP POLICY IF EXISTS pol_categorias_user  ON arqvalor.categorias;
+DROP POLICY IF EXISTS pol_transacoes_user  ON arqvalor.transacoes;
+DROP POLICY IF EXISTS pol_auditoria_user   ON arqvalor.auditoria;
+
+CREATE POLICY pol_contas_user ON arqvalor.contas
+    USING (user_id = auth.uid())
+    WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY pol_categorias_user ON arqvalor.categorias
+    USING (user_id = auth.uid())
+    WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY pol_transacoes_user ON arqvalor.transacoes
+    USING (user_id = auth.uid())
+    WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY pol_auditoria_user ON arqvalor.auditoria
+    USING (user_id = auth.uid());
+
+-- ============================================================
+-- FIM DA MIGRATION — 20260403000001_criacao_idempotente
 -- ============================================================
