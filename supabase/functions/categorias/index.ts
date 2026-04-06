@@ -68,8 +68,7 @@ async function listar(
   const ativa      = params.get("ativa");
 
   let query = db
-    .schema("arqvalor")
-    .from("categorias")
+    .from("arqvalor.categorias")
     .select("*")
     .order("descricao", { ascending: true });
 
@@ -104,8 +103,7 @@ async function buscarPorId(
   id: string
 ) {
   const { data, error } = await db
-    .schema("arqvalor")
-    .from("categorias")
+    .from("arqvalor.categorias")
     .select("*")
     .eq("id", id)
     .single();
@@ -115,8 +113,7 @@ async function buscarPorId(
   // Busca subcategorias se for categoria pai
   if (!data.id_pai) {
     const { data: subs } = await db
-      .schema("arqvalor")
-      .from("categorias")
+      .from("arqvalor.categorias")
       .select("*")
       .eq("id_pai", id)
       .order("descricao", { ascending: true });
@@ -147,8 +144,7 @@ async function criar(
   // Se informou id_pai, verifica se existe e pertence ao usuário
   if (body.id_pai) {
     const { data: pai, error: erroPai } = await db
-      .schema("arqvalor")
-      .from("categorias")
+      .from("arqvalor.categorias")
       .select("id, id_pai")
       .eq("id", body.id_pai)
       .single();
@@ -162,8 +158,7 @@ async function criar(
   }
 
   const { data, error } = await db
-    .schema("arqvalor")
-    .from("categorias")
+    .from("arqvalor.categorias")
     .insert({
       descricao: body.descricao,
       id_pai:    body.id_pai ?? null,
@@ -187,8 +182,7 @@ async function editar(
 ) {
   // Verifica se existe e pertence ao usuário
   const { error: erroBusca } = await db
-    .schema("arqvalor")
-    .from("categorias")
+    .from("arqvalor.categorias")
     .select("id")
     .eq("id", id)
     .single();
@@ -217,8 +211,7 @@ async function editar(
   // id_pai não pode ser alterado após criação — hierarquia é imutável
 
   const { data, error } = await db
-    .schema("arqvalor")
-    .from("categorias")
+    .from("arqvalor.categorias")
     .update(campos)
     .eq("id", id)
     .select()
@@ -233,8 +226,7 @@ async function editar(
 
 async function excluir(db: ReturnType<typeof createClient>, id: string) {
   const { error } = await db
-    .schema("arqvalor")
-    .from("categorias")
+    .from("arqvalor.categorias")
     .delete()
     .eq("id", id);
 

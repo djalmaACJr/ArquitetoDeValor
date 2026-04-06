@@ -100,7 +100,7 @@ async function listar(db: ReturnType<typeof createClient>, params: URLSearchPara
   // Usa a view com saldo acumulado se solicitado, tabela simples caso contrário
   const fonte = comSaldo ? "vw_transacoes_com_saldo" : "transacoes";
 
-  let query = db.schema("arqvalor").from(fonte).select("*").order("data", { ascending: true }).order("criado_em", { ascending: true }).range(offset, offset + perPage - 1);
+  let query = db.from(fonte).select("*").order("data", { ascending: true }).order("criado_em", { ascending: true }).range(offset, offset + perPage - 1);
 
   // Filtro por mês usando as colunas geradas ano_tx e mes_tx
   if (mes) {
@@ -121,7 +121,7 @@ async function listar(db: ReturnType<typeof createClient>, params: URLSearchPara
 // ── GET /transacoes/:id ───────────────────────────────────────
 
 async function buscarPorId(db: ReturnType<typeof createClient>, id: string) {
-  const { data, error } = await db.schema("arqvalor").from("vw_transacoes_com_saldo").select("*").eq("id", id).single();
+  const { data, error } = await db.from("arqvalor.vw_transacoes_com_saldo").select("*").eq("id", id).single();
   if (error) return erro(error.message, 404);
   return json(data);
 }
@@ -152,7 +152,7 @@ async function criar(db: ReturnType<typeof createClient>, body: Record<string, u
   // valor_projetado nunca vem do usuário
   const { valor_projetado, ...dadosLimpos } = body;
 
-  const { data, error } = await db.schema("arqvalor").from("transacoes").insert(dadosLimpos).select().single();
+  const { data, error } = await db.from("arqvalor.transacoes").insert(dadosLimpos).select().single();
   if (error) return erro(error.message);
 
   return json(data, 201);
@@ -167,7 +167,7 @@ async function editar(
   escopo: string
 ) {
   // Busca o lançamento atual para verificar recorrência
-  const { data: atual, error: erroBusca } = await db.schema("arqvalor").from("transacoes").select("*").eq("id", id).single();
+  const { data: atual, error: erroBusca } = await db.from("arqvalor.transacoes").select("*").eq("id", id).single();
   if (erroBusca) return erro("Lançamento não encontrado", 404);
 
   // valor_projetado nunca vem do usuário — o trigger cuida disso
@@ -177,7 +177,7 @@ async function editar(
   let ids: string[] = [id];
 
   if (atual.id_recorrencia && escopo !== "SOMENTE_ESTE") {
-    let queryIds = db.schema("arqvalor").from("transacoes").select("id").eq("id_recorrencia", atual.id_recorrencia);
+    let queryIds = db.from("arqvalor.transacoes").select("id").eq("id_recorrencia", atual.id_recorrencia);
 
     if (escopo === "ESTE_E_SEGUINTES") {
       queryIds = queryIds.gte("nr_parcela", atual.nr_parcela);
@@ -188,7 +188,7 @@ async function editar(
     ids = (recorrentes ?? []).map((r: { id: string }) => r.id);
   }
 
-  const { data, error } = await db.schema("arqvalor").from("transacoes").update(dadosLimpos).in("id", ids).select();
+  const { data, error } = await db.from("arqvalor.transacoes").update(dadosLimpos).in("id", ids).select();
   if (error) return erro(error.message);
 
   return json({ atualizados: data?.length ?? 0, dados: data });
@@ -201,13 +201,13 @@ async function excluir(
   id: string,
   escopo: string
 ) {
-  const { data: atual, error: erroBusca } = await db.schema("arqvalor").from("transacoes").select("id, id_recorrencia, nr_parcela").eq("id", id).single();
+  const { data: atual, error: erroBusca } = await db.from("arqvalor.transacoes").select("id, id_recorrencia, nr_parcela").eq("id", id).single();
   if (erroBusca) return erro("Lançamento não encontrado", 404);
 
   let ids: string[] = [id];
 
   if (atual.id_recorrencia && escopo !== "SOMENTE_ESTE") {
-    let queryIds = db.schema("arqvalor").from("transacoes").select("id").eq("id_recorrencia", atual.id_recorrencia);
+    let queryIds = db.from("arqvalor.transacoes").select("id").eq("id_recorrencia", atual.id_recorrencia);
 
     if (escopo === "ESTE_E_SEGUINTES") {
       queryIds = queryIds.gte("nr_parcela", atual.nr_parcela);
@@ -217,7 +217,7 @@ async function excluir(
     ids = (recorrentes ?? []).map((r: { id: string }) => r.id);
   }
 
-  const { error } = await db.schema("arqvalor").from("transacoes").delete().in("id", ids);
+  const { error } = await db.from("arqvalor.transacoes").delete().in("id", ids);
   if (error) return erro(error.message);
 
   return json({ excluidos: ids.length, ids });
@@ -227,7 +227,7 @@ async function excluir(
 
 async function antecipar(db: ReturnType<typeof createClient>, id: string) {
   // Chama a função fn_antecipar_parcelas criada no schema
-  const { data, error } = await db.schema("arqvalor").rpc("fn_antecipar_parcelas", {
+  const { data, error } = await db.rpc("arqvalor.fn_antecipar_parcelas", {
     p_transacao_id: id,
     p_user_id: (await db.auth.getUser()).data.user?.id,
   });

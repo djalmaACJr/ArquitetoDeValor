@@ -5,8 +5,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// ── Helpers ──────────────────────────────────────────────────
-
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -23,14 +21,13 @@ function supabaseCliente(req: Request) {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_ANON_KEY")!,
     {
+      db: { schema: "arqvalor" },          // ← define schema padrão
       global: {
         headers: { Authorization: req.headers.get("Authorization")! },
       },
     }
   );
 }
-
-// ── Roteador ─────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
@@ -39,10 +36,10 @@ Deno.serve(async (req: Request) => {
   const db = supabaseCliente(req);
 
   try {
-    if (metodo === "GET" && !id)  return await listar(db);
-    if (metodo === "GET" && id)   return await buscarPorId(db, id);
-    if (metodo === "POST")        return await criar(db, await req.json());
-    if (metodo === "PUT" && id)   return await editar(db, id, await req.json());
+    if (metodo === "GET" && !id)   return await listar(db);
+    if (metodo === "GET" && id)    return await buscarPorId(db, id);
+    if (metodo === "POST")         return await criar(db, await req.json());
+    if (metodo === "PUT" && id)    return await editar(db, id, await req.json());
     if (metodo === "DELETE" && id) return await excluir(db, id);
     return erro("Rota não encontrada", 404);
   } catch (e) {
@@ -51,13 +48,9 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-// ── GET /contas ───────────────────────────────────────────────
-// Retorna contas com saldo atual via view vw_saldo_contas
-
 async function listar(db: ReturnType<typeof createClient>) {
   const { data, error } = await db
-    .schema("arqvalor")
-    .from("vw_saldo_contas")
+    .from("vw_saldo_contas")             // ← sem prefixo arqvalor.
     .select("*")
     .order("nome", { ascending: true });
 
@@ -65,11 +58,8 @@ async function listar(db: ReturnType<typeof createClient>) {
   return json({ dados: data });
 }
 
-// ── GET /contas/:id ───────────────────────────────────────────
-
 async function buscarPorId(db: ReturnType<typeof createClient>, id: string) {
   const { data, error } = await db
-    .schema("arqvalor")
     .from("vw_saldo_contas")
     .select("*")
     .eq("conta_id", id)
@@ -79,14 +69,11 @@ async function buscarPorId(db: ReturnType<typeof createClient>, id: string) {
   return json(data);
 }
 
-// ── POST /contas ──────────────────────────────────────────────
-
 async function criar(db: ReturnType<typeof createClient>, body: Record<string, unknown>) {
-  // Validações
   if (!body.nome || String(body.nome).length < 1) {
     return erro("nome é obrigatório");
   }
-  if (String(body.nome).length > 50) {
+  if (String(body.nome).length > 100) {
     return erro("nome deve ter no máximo 100 caracteres");
   }
   if (!body.tipo) {
@@ -100,7 +87,6 @@ async function criar(db: ReturnType<typeof createClient>, body: Record<string, u
   }
 
   const { data, error } = await db
-    .schema("arqvalor")
     .from("contas")
     .insert({
       nome:          body.nome,
@@ -117,16 +103,12 @@ async function criar(db: ReturnType<typeof createClient>, body: Record<string, u
   return json(data, 201);
 }
 
-// ── PUT /contas/:id ───────────────────────────────────────────
-
 async function editar(
   db: ReturnType<typeof createClient>,
   id: string,
   body: Record<string, unknown>
 ) {
-  // Verifica se a conta existe e pertence ao usuário (RLS garante isso)
-  const { data: atual, error: erroBusca } = await db
-    .schema("arqvalor")
+  const { error: erroBusca } = await db
     .from("contas")
     .select("id")
     .eq("id", id)
@@ -134,7 +116,6 @@ async function editar(
 
   if (erroBusca) return erro("Conta não encontrada", 404);
 
-  // Validações dos campos enviados
   if (body.nome !== undefined) {
     if (String(body.nome).length < 1 || String(body.nome).length > 100) {
       return erro("nome deve ter entre 1 e 100 caracteres");
@@ -151,7 +132,6 @@ async function editar(
     }
   }
 
-  // Monta apenas os campos enviados para atualizar
   const campos: Record<string, unknown> = {};
   if (body.nome          !== undefined) campos.nome          = body.nome;
   if (body.tipo          !== undefined) campos.tipo          = body.tipo;
@@ -161,7 +141,6 @@ async function editar(
   if (body.ativa         !== undefined) campos.ativa         = body.ativa;
 
   const { data, error } = await db
-    .schema("arqvalor")
     .from("contas")
     .update(campos)
     .eq("id", id)
@@ -172,19 +151,13 @@ async function editar(
   return json(data);
 }
 
-// ── DELETE /contas/:id ────────────────────────────────────────
-// O trigger trg_bloquear_exclusao_conta impede exclusão
-// se houver lançamentos vinculados — retorna mensagem clara.
-
 async function excluir(db: ReturnType<typeof createClient>, id: string) {
   const { error } = await db
-    .schema("arqvalor")
     .from("contas")
     .delete()
     .eq("id", id);
 
   if (error) {
-    // Traduz o erro do trigger para mensagem amigável
     if (error.message.includes("CONTA_EM_USO")) {
       return erro(error.message, 409);
     }
