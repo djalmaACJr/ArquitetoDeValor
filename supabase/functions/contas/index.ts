@@ -1,4 +1,5 @@
 // ============================================================
+// ============================================================
 // Arquiteto de Valor — Edge Function: contas
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
@@ -17,19 +18,28 @@ function db(req: Request) {
   return createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: req.headers.get("Authorization")! } } }
+    {
+      db: { schema: "arqvalor" },
+      global: { headers: { Authorization: req.headers.get("Authorization")! } }
+    }
   );
 }
 
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
-  const id = url.pathname.replace(/^\/functions\/v1\/contas\/?/, "").split("/")[0] || null;
+  const partes = url.pathname.split("/").filter(Boolean);
+  const id = partes[partes.length - 1] !== "contas" ? partes[partes.length - 1] : null;
   const m = req.method;
   const c = db(req);
+
+  // Extrai user_id do JWT
+  const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
+  const userId = token ? JSON.parse(atob(token.split(".")[1])).sub : null;
+
   try {
     if (m === "GET"    && !id) return await listar(c);
     if (m === "GET"    &&  id) return await buscarPorId(c, id);
-    if (m === "POST")          return await criar(c, await req.json());
+    if (m === "POST")          return await criar(c, await req.json(), userId);
     if (m === "PUT"    &&  id) return await editar(c, id, await req.json());
     if (m === "DELETE" &&  id) return await excluir(c, id);
     return erro("Rota não encontrada", 404);
@@ -48,7 +58,8 @@ async function buscarPorId(c: ReturnType<typeof createClient>, id: string) {
   return json(data);
 }
 
-async function criar(c: ReturnType<typeof createClient>, body: Record<string, unknown>) {
+async function criar(c: ReturnType<typeof createClient>, body: Record<string, unknown>, userId: string | null) {
+  if (!userId) return erro("Usuário não autenticado", 401);
   if (!body.nome || String(body.nome).length < 1) return erro("nome é obrigatório");
   if (String(body.nome).length > 100) return erro("nome deve ter no máximo 100 caracteres");
   if (!body.tipo) return erro("tipo é obrigatório: CORRENTE | REMUNERACAO | CARTAO | INVESTIMENTO | CARTEIRA");
@@ -58,11 +69,20 @@ async function criar(c: ReturnType<typeof createClient>, body: Record<string, un
     return erro("cor deve estar no formato hex: #RRGGBB");
 
   const { data, error } = await c.from("contas").insert({
-    nome: body.nome, tipo: body.tipo,
+    user_id:       userId,
+    nome:          body.nome,
+    tipo:          body.tipo,
     saldo_inicial: body.saldo_inicial ?? 0,
-    icone: body.icone ?? null, cor: body.cor ?? null, ativa: true,
+    icone:         body.icone ?? null,
+    cor:           body.cor ?? null,
+    ativa:         true,
   }).select().single();
-  if (error) return erro(error.message);
+  if (error) {
+    if (error.message.includes("uq_contas_user_nome_tipo")) {
+      return erro("Já existe uma conta com este nome e tipo", 409);
+    }
+    return erro(error.message);
+  }
   return json(data, 201);
 }
 
@@ -88,6 +108,15 @@ async function editar(c: ReturnType<typeof createClient>, id: string, body: Reco
 }
 
 async function excluir(c: ReturnType<typeof createClient>, id: string) {
+  // Verifica se a conta existe antes de excluir
+  const { data: conta, error: erroBusca } = await c
+    .from("contas")
+    .select("id")
+    .eq("id", id)
+    .single();
+
+  if (erroBusca || !conta) return erro("Conta não encontrada", 404);
+
   const { error } = await c.from("contas").delete().eq("id", id);
   if (error) {
     if (error.message.includes("CONTA_EM_USO")) return erro(error.message, 409);

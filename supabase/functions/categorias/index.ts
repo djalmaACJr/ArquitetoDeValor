@@ -1,11 +1,8 @@
 // ============================================================
-// Arquiteto de Valor — Edge Function: categorias
-// GET / POST / PUT / DELETE
+// Arquiteto de Valor — Edge Function: contas v3
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-// ── Helpers ──────────────────────────────────────────────────
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -13,232 +10,113 @@ function json(data: unknown, status = 200) {
     headers: { "Content-Type": "application/json" },
   });
 }
-
 function erro(mensagem: string, status = 400) {
   return json({ erro: mensagem }, status);
 }
-
-function supabaseCliente(req: Request) {
+function db(req: Request) {
   return createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_ANON_KEY")!,
     {
-      global: {
-        headers: { Authorization: req.headers.get("Authorization")! },
-      },
+      db: { schema: "arqvalor" },
+      global: { headers: { Authorization: req.headers.get("Authorization")! } }
     }
   );
 }
-
-// ── Roteador ─────────────────────────────────────────────────
+function getUserId(req: Request): string | null {
+  const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
+  if (!token) return null;
+  try { return JSON.parse(atob(token.split(".")[1])).sub ?? null; }
+  catch { return null; }
+}
 
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
-  const id = url.pathname
-    .replace(/^\/functions\/v1\/categorias\/?/, "")
-    .split("/")[0] || null;
-  const metodo = req.method;
-  const db = supabaseCliente(req);
+  const partes = url.pathname.split("/").filter(Boolean);
+  const id = partes[partes.length - 1] !== "contas" ? partes[partes.length - 1] : null;
+  const m = req.method;
+  const c = db(req);
+  const userId = getUserId(req);
 
   try {
-    if (metodo === "GET" && !id)   return await listar(db, url.searchParams);
-    if (metodo === "GET" && id)    return await buscarPorId(db, id);
-    if (metodo === "POST")         return await criar(db, await req.json());
-    if (metodo === "PUT" && id)    return await editar(db, id, await req.json());
-    if (metodo === "DELETE" && id) return await excluir(db, id);
+    if (m === "GET"    && !id) return await listar(c);
+    if (m === "GET"    &&  id) return await buscarPorId(c, id);
+    if (m === "POST")          return await criar(c, await req.json(), userId);
+    if (m === "PUT"    &&  id) return await editar(c, id, await req.json());
+    if (m === "DELETE" &&  id) return await excluir(c, id);
     return erro("Rota não encontrada", 404);
-  } catch (e) {
-    console.error(e);
-    return erro("Erro interno do servidor", 500);
-  }
+  } catch (e) { console.error(e); return erro("Erro interno", 500); }
 });
 
-// ── GET /categorias ───────────────────────────────────────────
-// Parâmetros opcionais:
-//   ?hierarquia=true  → retorna estrutura pai/filho agrupada
-//   ?apenas_pai=true  → retorna apenas categorias raiz (sem pai)
-//   ?ativa=true/false → filtra por status ativo
-
-async function listar(
-  db: ReturnType<typeof createClient>,
-  params: URLSearchParams
-) {
-  const hierarquia = params.get("hierarquia") === "true";
-  const apenasRaiz = params.get("apenas_pai") === "true";
-  const ativa      = params.get("ativa");
-
-  let query = db
-    .from("arqvalor.categorias")
-    .select("*")
-    .order("descricao", { ascending: true });
-
-  if (apenasRaiz) query = query.is("id_pai", null);
-  if (ativa !== null) query = query.eq("ativa", ativa === "true");
-
-  const { data, error } = await query;
+async function listar(c: ReturnType<typeof createClient>) {
+  const { data, error } = await c.from("vw_saldo_contas").select("*").order("nome");
   if (error) return erro(error.message);
-
-  // Se hierarquia=true, monta estrutura pai/filho
-  if (hierarquia) {
-    const pais = (data ?? []).filter((c: Record<string, unknown>) => !c.id_pai);
-    const filhos = (data ?? []).filter((c: Record<string, unknown>) => c.id_pai);
-
-    const estrutura = pais.map((pai: Record<string, unknown>) => ({
-      ...pai,
-      subcategorias: filhos.filter(
-        (f: Record<string, unknown>) => f.id_pai === pai.id
-      ),
-    }));
-
-    return json({ dados: estrutura });
-  }
-
   return json({ dados: data });
 }
 
-// ── GET /categorias/:id ───────────────────────────────────────
-
-async function buscarPorId(
-  db: ReturnType<typeof createClient>,
-  id: string
-) {
-  const { data, error } = await db
-    .from("arqvalor.categorias")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (error) return erro("Categoria não encontrada", 404);
-
-  // Busca subcategorias se for categoria pai
-  if (!data.id_pai) {
-    const { data: subs } = await db
-      .from("arqvalor.categorias")
-      .select("*")
-      .eq("id_pai", id)
-      .order("descricao", { ascending: true });
-
-    return json({ ...data, subcategorias: subs ?? [] });
-  }
-
+async function buscarPorId(c: ReturnType<typeof createClient>, id: string) {
+  const { data, error } = await c.from("vw_saldo_contas").select("*").eq("conta_id", id).single();
+  if (error) return erro("Conta não encontrada", 404);
   return json(data);
 }
 
-// ── POST /categorias ──────────────────────────────────────────
-
-async function criar(
-  db: ReturnType<typeof createClient>,
-  body: Record<string, unknown>
-) {
-  // Validações
-  if (!body.descricao || String(body.descricao).length < 1) {
-    return erro("descricao é obrigatória");
-  }
-  if (String(body.descricao).length > 20) {
-    return erro("descricao deve ter no máximo 20 caracteres");
-  }
-  if (body.cor && !/^#[0-9A-Fa-f]{6}$/.test(String(body.cor))) {
+async function criar(c: ReturnType<typeof createClient>, body: Record<string, unknown>, userId: string | null) {
+  if (!userId) return erro("Usuário não autenticado", 401);
+  if (!body.nome || String(body.nome).length < 1) return erro("nome é obrigatório");
+  if (String(body.nome).length > 100) return erro("nome deve ter no máximo 100 caracteres");
+  if (!body.tipo) return erro("tipo é obrigatório: CORRENTE | REMUNERACAO | CARTAO | INVESTIMENTO | CARTEIRA");
+  if (!["CORRENTE","REMUNERACAO","CARTAO","INVESTIMENTO","CARTEIRA"].includes(String(body.tipo)))
+    return erro("tipo inválido");
+  if (body.cor && !/^#[0-9A-Fa-f]{6}$/.test(String(body.cor)))
     return erro("cor deve estar no formato hex: #RRGGBB");
+
+  const { data, error } = await c.from("contas").insert({
+    user_id:       userId,
+    nome:          body.nome,
+    tipo:          body.tipo,
+    saldo_inicial: body.saldo_inicial ?? 0,
+    icone:         body.icone ?? null,
+    cor:           body.cor ?? null,
+    ativa:         true,
+  }).select().single();
+
+  if (error) {
+    if (error.message.includes("uq_contas_user_nome_tipo"))
+      return erro("Já existe uma conta com este nome e tipo", 409);
+    return erro(error.message);
   }
-
-  // Se informou id_pai, verifica se existe e pertence ao usuário
-  if (body.id_pai) {
-    const { data: pai, error: erroPai } = await db
-      .from("arqvalor.categorias")
-      .select("id, id_pai")
-      .eq("id", body.id_pai)
-      .single();
-
-    if (erroPai) return erro("Categoria pai não encontrada", 404);
-
-    // Impede criar neto (máximo 2 níveis)
-    if (pai.id_pai) {
-      return erro("Não é possível criar subcategoria de uma subcategoria. Máximo 2 níveis.");
-    }
-  }
-
-  const { data, error } = await db
-    .from("arqvalor.categorias")
-    .insert({
-      descricao: body.descricao,
-      id_pai:    body.id_pai ?? null,
-      icone:     body.icone  ?? null,
-      cor:       body.cor    ?? null,
-      ativa:     true,
-    })
-    .select()
-    .single();
-
-  if (error) return erro(error.message);
   return json(data, 201);
 }
 
-// ── PUT /categorias/:id ───────────────────────────────────────
+async function editar(c: ReturnType<typeof createClient>, id: string, body: Record<string, unknown>) {
+  const { data: conta, error: erroBusca } = await c.from("contas").select("id").eq("id", id).single();
+  if (erroBusca || !conta) return erro("Conta não encontrada", 404);
 
-async function editar(
-  db: ReturnType<typeof createClient>,
-  id: string,
-  body: Record<string, unknown>
-) {
-  // Verifica se existe e pertence ao usuário
-  const { error: erroBusca } = await db
-    .from("arqvalor.categorias")
-    .select("id")
-    .eq("id", id)
-    .single();
+  if (body.nome !== undefined && (String(body.nome).length < 1 || String(body.nome).length > 100))
+    return erro("nome deve ter entre 1 e 100 caracteres");
+  if (body.tipo !== undefined && !["CORRENTE","REMUNERACAO","CARTAO","INVESTIMENTO","CARTEIRA"].includes(String(body.tipo)))
+    return erro("tipo inválido");
+  if (body.cor != null && !/^#[0-9A-Fa-f]{6}$/.test(String(body.cor)))
+    return erro("cor deve estar no formato hex: #RRGGBB");
 
-  if (erroBusca) return erro("Categoria não encontrada", 404);
-
-  // Validações dos campos enviados
-  if (body.descricao !== undefined) {
-    if (String(body.descricao).length < 1 || String(body.descricao).length > 50) {
-      return erro("descricao deve ter entre 1 e 50 caracteres");
-    }
-  }
-  if (body.cor !== undefined && body.cor !== null) {
-    if (!/^#[0-9A-Fa-f]{6}$/.test(String(body.cor))) {
-      return erro("cor deve estar no formato hex: #RRGGBB");
-    }
-  }
-
-  // Monta apenas os campos enviados
   const campos: Record<string, unknown> = {};
-  if (body.descricao !== undefined) campos.descricao = body.descricao;
-  if (body.icone     !== undefined) campos.icone     = body.icone;
-  if (body.cor       !== undefined) campos.cor       = body.cor;
-  if (body.ativa     !== undefined) campos.ativa     = body.ativa;
+  ["nome","tipo","saldo_inicial","icone","cor","ativa"].forEach(k => {
+    if (body[k] !== undefined) campos[k] = body[k];
+  });
 
-  // id_pai não pode ser alterado após criação — hierarquia é imutável
-
-  const { data, error } = await db
-    .from("arqvalor.categorias")
-    .update(campos)
-    .eq("id", id)
-    .select()
-    .single();
-
+  const { data, error } = await c.from("contas").update(campos).eq("id", id).select().single();
   if (error) return erro(error.message);
   return json(data);
 }
 
-// ── DELETE /categorias/:id ────────────────────────────────────
-// Bloqueado pelo trigger se tiver subcategorias ou lançamentos
+async function excluir(c: ReturnType<typeof createClient>, id: string) {
+  const { data: conta, error: erroBusca } = await c.from("contas").select("id").eq("id", id).single();
+  if (erroBusca || !conta) return erro("Conta não encontrada", 404);
 
-async function excluir(db: ReturnType<typeof createClient>, id: string) {
-  const { error } = await db
-    .from("arqvalor.categorias")
-    .delete()
-    .eq("id", id);
-
+  const { error } = await c.from("contas").delete().eq("id", id);
   if (error) {
-    if (error.message.includes("CATEGORIA_COM_FILHOS")) {
-      return erro(error.message, 409);
-    }
-    if (error.message.includes("CATEGORIA_EM_USO")) {
-      return erro(error.message, 409);
-    }
+    if (error.message.includes("CONTA_EM_USO")) return erro(error.message, 409);
     return erro(error.message);
   }
-
-  return json({ mensagem: "Categoria excluída com sucesso" });
+  return json({ mensagem: "Conta excluída com sucesso" });
 }
