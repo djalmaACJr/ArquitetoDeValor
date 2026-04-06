@@ -191,8 +191,8 @@ async function editar(
 
   // Validações dos campos enviados
   if (body.descricao !== undefined) {
-    if (String(body.descricao).length < 1 || String(body.descricao).length > 20) {
-      return erro("descricao deve ter entre 1 e 20 caracteres");
+    if (String(body.descricao).length < 1 || String(body.descricao).length > 50) {
+      return erro("descricao deve ter entre 1 e 50 caracteres");
     }
   }
   if (body.cor !== undefined && body.cor !== null) {

@@ -10,9 +10,9 @@ enabled = true
 port = 54321
 # Schemas to expose in your API. Tables, views and stored procedures in this schema will get API
 # endpoints. `public` and `graphql_public` schemas are included by default.
-schemas = ["public", "graphql_public"]
+schemas = ["public", "graphql_public", "arqvalor"]
 # Extra schemas to add to the search_path of every request.
-extra_search_path = ["public", "extensions"]
+extra_search_path = ["arqvalor", "public", "extensions"]
 # The maximum number of rows returns from a view, table, or stored procedure. Limits payload size
 # for accidental or malicious requests.
 max_rows = 1000
@@ -397,7 +397,7 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.transacoes]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/transacoes/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -408,7 +408,7 @@ entrypoint = "./functions/transacoes/index.ts"
 
 [functions.contas]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/contas/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -419,7 +419,7 @@ entrypoint = "./functions/contas/index.ts"
 
 [functions.categorias]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/categorias/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
