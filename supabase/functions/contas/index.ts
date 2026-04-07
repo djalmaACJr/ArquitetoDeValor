@@ -1,29 +1,8 @@
 // ============================================================
-// ============================================================
-// Arquiteto de Valor — Edge Function: contas
+// Arquiteto de Valor — Edge Function: contas v4
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-function erro(mensagem: string, status = 400) {
-  return json({ erro: mensagem }, status);
-}
-function db(req: Request) {
-  return createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    {
-      db: { schema: "arqvalor" },
-      global: { headers: { Authorization: req.headers.get("Authorization")! } }
-    }
-  );
-}
+import { json, erro, db, getUserId } from "../_shared/utils.ts";
 
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
@@ -31,10 +10,7 @@ Deno.serve(async (req: Request) => {
   const id = partes[partes.length - 1] !== "contas" ? partes[partes.length - 1] : null;
   const m = req.method;
   const c = db(req);
-
-  // Extrai user_id do JWT
-  const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
-  const userId = token ? JSON.parse(atob(token.split(".")[1])).sub : null;
+  const userId = getUserId(req);
 
   try {
     if (m === "GET"    && !id) return await listar(c);
@@ -46,19 +22,19 @@ Deno.serve(async (req: Request) => {
   } catch (e) { console.error(e); return erro("Erro interno", 500); }
 });
 
-async function listar(c: ReturnType<typeof createClient>) {
+async function listar(c: ReturnType<typeof db>) {
   const { data, error } = await c.from("vw_saldo_contas").select("*").order("nome");
   if (error) return erro(error.message);
   return json({ dados: data });
 }
 
-async function buscarPorId(c: ReturnType<typeof createClient>, id: string) {
+async function buscarPorId(c: ReturnType<typeof db>, id: string) {
   const { data, error } = await c.from("vw_saldo_contas").select("*").eq("conta_id", id).single();
   if (error) return erro("Conta não encontrada", 404);
   return json(data);
 }
 
-async function criar(c: ReturnType<typeof createClient>, body: Record<string, unknown>, userId: string | null) {
+async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string | null) {
   if (!userId) return erro("Usuário não autenticado", 401);
   if (!body.nome || String(body.nome).length < 1) return erro("nome é obrigatório");
   if (String(body.nome).length > 100) return erro("nome deve ter no máximo 100 caracteres");
@@ -77,21 +53,21 @@ async function criar(c: ReturnType<typeof createClient>, body: Record<string, un
     cor:           body.cor ?? null,
     ativa:         true,
   }).select().single();
+
   if (error) {
-    if (error.message.includes("uq_contas_user_nome_tipo")) {
+    if (error.message.includes("uq_contas_user_nome_tipo"))
       return erro("Já existe uma conta com este nome e tipo", 409);
-    }
     return erro(error.message);
   }
   return json(data, 201);
 }
 
-async function editar(c: ReturnType<typeof createClient>, id: string, body: Record<string, unknown>) {
-  const { error: e } = await c.from("contas").select("id").eq("id", id).single();
-  if (e) return erro("Conta não encontrada", 404);
+async function editar(c: ReturnType<typeof db>, id: string, body: Record<string, unknown>) {
+  const { data: conta, error: erroBusca } = await c.from("contas").select("id").eq("id", id).single();
+  if (erroBusca || !conta) return erro("Conta não encontrada", 404);
 
   if (body.nome !== undefined && (String(body.nome).length < 1 || String(body.nome).length > 50))
-    return erro("nome deve ter entre 1 e 100 caracteres");
+    return erro("nome deve ter entre 1 e 50 caracteres");
   if (body.tipo !== undefined && !["CORRENTE","REMUNERACAO","CARTAO","INVESTIMENTO","CARTEIRA"].includes(String(body.tipo)))
     return erro("tipo inválido");
   if (body.cor != null && !/^#[0-9A-Fa-f]{6}$/.test(String(body.cor)))
@@ -107,14 +83,8 @@ async function editar(c: ReturnType<typeof createClient>, id: string, body: Reco
   return json(data);
 }
 
-async function excluir(c: ReturnType<typeof createClient>, id: string) {
-  // Verifica se a conta existe antes de excluir
-  const { data: conta, error: erroBusca } = await c
-    .from("contas")
-    .select("id")
-    .eq("id", id)
-    .single();
-
+async function excluir(c: ReturnType<typeof db>, id: string) {
+  const { data: conta, error: erroBusca } = await c.from("contas").select("id").eq("id", id).single();
   if (erroBusca || !conta) return erro("Conta não encontrada", 404);
 
   const { error } = await c.from("contas").delete().eq("id", id);

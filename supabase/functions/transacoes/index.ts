@@ -1,34 +1,8 @@
 // ============================================================
-// Arquiteto de Valor — Edge Function: transacoes v3
+// Arquiteto de Valor — Edge Function: transacoes v4
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-function erro(mensagem: string, status = 400) {
-  return json({ erro: mensagem }, status);
-}
-function db(req: Request) {
-  return createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    {
-      db: { schema: "arqvalor" },
-      global: { headers: { Authorization: req.headers.get("Authorization")! } }
-    }
-  );
-}
-function getUserId(req: Request): string | null {
-  const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
-  if (!token) return null;
-  try { return JSON.parse(atob(token.split(".")[1])).sub ?? null; }
-  catch { return null; }
-}
+import { json, erro, db, getUserId } from "../_shared/utils.ts";
 
 Deno.serve(async (req: Request) => {
   const url    = new URL(req.url);
@@ -36,10 +10,10 @@ Deno.serve(async (req: Request) => {
   const ultimo = partes[partes.length - 1];
   const penult = partes[partes.length - 2];
   const isAntecipar = ultimo === "antecipar";
-  const id    = isAntecipar ? penult : (ultimo !== "transacoes" ? ultimo : null);
-  const acao  = isAntecipar ? "antecipar" : null;
-  const m     = req.method;
-  const c     = db(req);
+  const id     = isAntecipar ? penult : (ultimo !== "transacoes" ? ultimo : null);
+  const acao   = isAntecipar ? "antecipar" : null;
+  const m      = req.method;
+  const c      = db(req);
   const userId = getUserId(req);
 
   try {
@@ -53,7 +27,7 @@ Deno.serve(async (req: Request) => {
   } catch (e) { console.error(e); return erro("Erro interno", 500); }
 });
 
-async function listar(c: ReturnType<typeof createClient>, params: URLSearchParams) {
+async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
   const mes      = params.get("mes");
   const contaId  = params.get("conta_id");
   const catId    = params.get("categoria_id");
@@ -82,13 +56,13 @@ async function listar(c: ReturnType<typeof createClient>, params: URLSearchParam
   return json({ dados: data, pagina: page, por_pagina: perPage });
 }
 
-async function buscarPorId(c: ReturnType<typeof createClient>, id: string) {
+async function buscarPorId(c: ReturnType<typeof db>, id: string) {
   const { data, error } = await c.from("vw_transacoes_com_saldo").select("*").eq("id", id).single();
   if (error) return erro("Lançamento não encontrado", 404);
   return json(data);
 }
 
-async function criar(c: ReturnType<typeof createClient>, body: Record<string, unknown>, userId: string | null) {
+async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string | null) {
   if (!userId) return erro("Usuário não autenticado", 401);
   if (!body.descricao || String(body.descricao).length < 2) return erro("RV-001: descricao deve ter entre 2 e 200 caracteres");
   if (!body.valor || Number(body.valor) <= 0)               return erro("RV-002: valor deve ser maior que zero");
@@ -108,7 +82,7 @@ async function criar(c: ReturnType<typeof createClient>, body: Record<string, un
   return json(data, 201);
 }
 
-async function editar(c: ReturnType<typeof createClient>, id: string, body: Record<string, unknown>, escopo: string) {
+async function editar(c: ReturnType<typeof db>, id: string, body: Record<string, unknown>, escopo: string) {
   const { data: atual, error: e } = await c.from("transacoes").select("*").eq("id", id).single();
   if (e || !atual) return erro("Lançamento não encontrado", 404);
 
@@ -127,7 +101,7 @@ async function editar(c: ReturnType<typeof createClient>, id: string, body: Reco
   return json({ atualizados: data?.length ?? 0, dados: data });
 }
 
-async function excluir(c: ReturnType<typeof createClient>, id: string, escopo: string) {
+async function excluir(c: ReturnType<typeof db>, id: string, escopo: string) {
   const { data: atual, error: e } = await c.from("transacoes").select("id,id_recorrencia,nr_parcela").eq("id", id).single();
   if (e || !atual) return erro("Lançamento não encontrado", 404);
 
@@ -144,7 +118,7 @@ async function excluir(c: ReturnType<typeof createClient>, id: string, escopo: s
   return json({ excluidos: ids.length, ids });
 }
 
-async function antecipar(c: ReturnType<typeof createClient>, id: string, userId: string | null) {
+async function antecipar(c: ReturnType<typeof db>, id: string, userId: string | null) {
   if (!userId) return erro("Usuário não autenticado", 401);
 
   const { data: tx, error: eTx } = await c.from("transacoes").select("id").eq("id", id).single();

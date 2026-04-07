@@ -1,45 +1,19 @@
 // ============================================================
-// Arquiteto de Valor — Edge Function: contas v3
+// Arquiteto de Valor — Edge Function: categorias v4
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-function erro(mensagem: string, status = 400) {
-  return json({ erro: mensagem }, status);
-}
-function db(req: Request) {
-  return createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    {
-      db: { schema: "arqvalor" },
-      global: { headers: { Authorization: req.headers.get("Authorization")! } }
-    }
-  );
-}
-function getUserId(req: Request): string | null {
-  const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
-  if (!token) return null;
-  try { return JSON.parse(atob(token.split(".")[1])).sub ?? null; }
-  catch { return null; }
-}
+import { json, erro, db, getUserId } from "../_shared/utils.ts";
 
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   const partes = url.pathname.split("/").filter(Boolean);
-  const id = partes[partes.length - 1] !== "contas" ? partes[partes.length - 1] : null;
+  const id = partes[partes.length - 1] !== "categorias" ? partes[partes.length - 1] : null;
   const m = req.method;
   const c = db(req);
   const userId = getUserId(req);
 
   try {
-    if (m === "GET"    && !id) return await listar(c);
+    if (m === "GET"    && !id) return await listar(c, url.searchParams);
     if (m === "GET"    &&  id) return await buscarPorId(c, id);
     if (m === "POST")          return await criar(c, await req.json(), userId);
     if (m === "PUT"    &&  id) return await editar(c, id, await req.json());
@@ -48,75 +22,97 @@ Deno.serve(async (req: Request) => {
   } catch (e) { console.error(e); return erro("Erro interno", 500); }
 });
 
-async function listar(c: ReturnType<typeof createClient>) {
-  const { data, error } = await c.from("vw_saldo_contas").select("*").order("nome");
+async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
+  const hierarquia = params.get("hierarquia") === "true";
+  const apenasRaiz = params.get("apenas_pai") === "true";
+  const ativa      = params.get("ativa");
+
+  let q = c.from("categorias").select("*").order("descricao");
+  if (apenasRaiz) q = q.is("id_pai", null);
+  if (ativa !== null) q = q.eq("ativa", ativa === "true");
+
+  const { data, error } = await q;
   if (error) return erro(error.message);
+
+  if (hierarquia) {
+    const pais   = (data ?? []).filter((x: Record<string,unknown>) => !x.id_pai);
+    const filhos = (data ?? []).filter((x: Record<string,unknown>) =>  x.id_pai);
+    return json({ dados: pais.map((p: Record<string,unknown>) => ({
+      ...p,
+      subcategorias: filhos.filter((f: Record<string,unknown>) => f.id_pai === p.id)
+    }))});
+  }
   return json({ dados: data });
 }
 
-async function buscarPorId(c: ReturnType<typeof createClient>, id: string) {
-  const { data, error } = await c.from("vw_saldo_contas").select("*").eq("conta_id", id).single();
-  if (error) return erro("Conta não encontrada", 404);
+async function buscarPorId(c: ReturnType<typeof db>, id: string) {
+  const { data, error } = await c.from("categorias").select("*").eq("id", id).single();
+  if (error) return erro("Categoria não encontrada", 404);
+  if (!data.id_pai) {
+    const { data: subs } = await c.from("categorias").select("*").eq("id_pai", id).order("descricao");
+    return json({ ...data, subcategorias: subs ?? [] });
+  }
   return json(data);
 }
 
-async function criar(c: ReturnType<typeof createClient>, body: Record<string, unknown>, userId: string | null) {
+async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string | null) {
   if (!userId) return erro("Usuário não autenticado", 401);
-  if (!body.nome || String(body.nome).length < 1) return erro("nome é obrigatório");
-  if (String(body.nome).length > 100) return erro("nome deve ter no máximo 100 caracteres");
-  if (!body.tipo) return erro("tipo é obrigatório: CORRENTE | REMUNERACAO | CARTAO | INVESTIMENTO | CARTEIRA");
-  if (!["CORRENTE","REMUNERACAO","CARTAO","INVESTIMENTO","CARTEIRA"].includes(String(body.tipo)))
-    return erro("tipo inválido");
-  if (body.cor && !/^#[0-9A-Fa-f]{6}$/.test(String(body.cor)))
-    return erro("cor deve estar no formato hex: #RRGGBB");
+  if (!body.descricao || String(body.descricao).length < 1) return erro("descricao é obrigatória");
+  if (String(body.descricao).length > 20) return erro("descricao deve ter no máximo 20 caracteres");
+  if (body.cor && !/^#[0-9A-Fa-f]{6}$/.test(String(body.cor))) return erro("cor inválida: use #RRGGBB");
 
-  const { data, error } = await c.from("contas").insert({
-    user_id:       userId,
-    nome:          body.nome,
-    tipo:          body.tipo,
-    saldo_inicial: body.saldo_inicial ?? 0,
-    icone:         body.icone ?? null,
-    cor:           body.cor ?? null,
-    ativa:         true,
+  if (body.id_pai) {
+    const { data: pai, error: ep } = await c.from("categorias").select("id,id_pai").eq("id", body.id_pai).single();
+    if (ep) return erro("Categoria pai não encontrada", 404);
+    if (pai.id_pai) return erro("Máximo 2 níveis de hierarquia");
+  }
+
+  const { data, error } = await c.from("categorias").insert({
+    user_id:   userId,
+    descricao: body.descricao,
+    id_pai:    body.id_pai ?? null,
+    icone:     body.icone  ?? null,
+    cor:       body.cor    ?? null,
+    ativa:     true,
   }).select().single();
 
-  if (error) {
-    if (error.message.includes("uq_contas_user_nome_tipo"))
-      return erro("Já existe uma conta com este nome e tipo", 409);
+if (error) {
+    if (error.message.includes("uq_categorias_user_pai_descricao"))  return erro("Já existe uma categoria com este nome neste nível", 409);
     return erro(error.message);
   }
   return json(data, 201);
 }
 
-async function editar(c: ReturnType<typeof createClient>, id: string, body: Record<string, unknown>) {
-  const { data: conta, error: erroBusca } = await c.from("contas").select("id").eq("id", id).single();
-  if (erroBusca || !conta) return erro("Conta não encontrada", 404);
+async function editar(c: ReturnType<typeof db>, id: string, body: Record<string, unknown>) {
+  const { data: cat, error: erroBusca } = await c.from("categorias").select("id").eq("id", id).single();
+  if (erroBusca || !cat) return erro("Categoria não encontrada", 404);
 
-  if (body.nome !== undefined && (String(body.nome).length < 1 || String(body.nome).length > 100))
-    return erro("nome deve ter entre 1 e 100 caracteres");
-  if (body.tipo !== undefined && !["CORRENTE","REMUNERACAO","CARTAO","INVESTIMENTO","CARTEIRA"].includes(String(body.tipo)))
-    return erro("tipo inválido");
+  if (body.descricao !== undefined && (String(body.descricao).length < 1 || String(body.descricao).length > 50))
+    return erro("descricao deve ter entre 1 e 50 caracteres");
   if (body.cor != null && !/^#[0-9A-Fa-f]{6}$/.test(String(body.cor)))
-    return erro("cor deve estar no formato hex: #RRGGBB");
+    return erro("cor inválida: use #RRGGBB");
 
   const campos: Record<string, unknown> = {};
-  ["nome","tipo","saldo_inicial","icone","cor","ativa"].forEach(k => {
+  ["descricao","icone","cor","ativa"].forEach(k => {
     if (body[k] !== undefined) campos[k] = body[k];
   });
 
-  const { data, error } = await c.from("contas").update(campos).eq("id", id).select().single();
+  const { data, error } = await c.from("categorias").update(campos).eq("id", id).select().single();
   if (error) return erro(error.message);
   return json(data);
 }
 
-async function excluir(c: ReturnType<typeof createClient>, id: string) {
-  const { data: conta, error: erroBusca } = await c.from("contas").select("id").eq("id", id).single();
-  if (erroBusca || !conta) return erro("Conta não encontrada", 404);
+async function excluir(c: ReturnType<typeof db>, id: string) {
+  const { data: cat, error: erroBusca } = await c.from("categorias").select("id").eq("id", id).single();
+  if (erroBusca || !cat) return erro("Categoria não encontrada", 404);
 
-  const { error } = await c.from("contas").delete().eq("id", id);
-  if (error) {
-    if (error.message.includes("CONTA_EM_USO")) return erro(error.message, 409);
-    return erro(error.message);
-  }
-  return json({ mensagem: "Conta excluída com sucesso" });
+  const { error } = await c.from("categorias").delete().eq("id", id);
+if (error) {
+  if (error.message.includes("CATEGORIA_COM_FILHOS"))
+    return erro("Esta categoria possui subcategorias. Exclua as subcategorias primeiro.", 409);
+  if (error.message.includes("CATEGORIA_EM_USO"))
+    return erro("Esta categoria possui lançamentos vinculados e não pode ser excluída.", 409);
+  return erro(error.message);
+}
+  return json({ mensagem: "Categoria excluída com sucesso" });
 }
