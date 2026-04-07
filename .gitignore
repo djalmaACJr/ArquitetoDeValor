@@ -1,0 +1,13 @@
+# Adicione estas linhas ao seu .gitignore existente:
+
+# Variáveis de ambiente
+.env
+
+# Resultados de testes
+test-results/
+
+# Compilação TypeScript
+dist/
+
+# Dependências
+node_modules/

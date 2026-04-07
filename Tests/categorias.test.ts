@@ -6,61 +6,34 @@
 // ============================================================
 import { api, limparCategoria } from "./setup";
 
-const NOME_PAI   = "Jest Categoria Pai";
-const NOME_FILHA = "Jest Categoria Filha";
+const TS = Date.now();
 
-// ── Limpa categorias de teste antes de criar ─────────────────
-// 1. Busca categorias com os nomes reservados para testes
-// 2. Remove filhas primeiro (integridade referencial)
-// 3. Remove pai
-async function limparCategoriasDeTeste(): Promise<void> {
-  const { data } = await api("/categorias") as { data: { dados: Record<string, unknown>[] } };
-  const todas = data.dados ?? [];
-
-  // Encontra o pai pelo nome reservado
-  const pai = todas.find((c) => c.descricao === NOME_PAI);
-  if (!pai) return;
-
-  // Remove todas as filhas deste pai
-  const filhas = todas.filter((c) => c.id_pai === pai.id);
-  for (const filha of filhas) {
-    await limparCategoria(filha.id as string).catch(() => {});
-  }
-
-  // Remove o pai
-  await limparCategoria(pai.id as string).catch(() => {});
-}
+const CAT_PAI_VALIDA = {
+  descricao: `Teste Jest Pai ${TS}`,
+  icone: "🧪",
+  cor: "#123456",
+};
 
 describe("Categorias — CA-CAT01 a CA-CAT13", () => {
   let catPaiId: string;
   let catFilhaId: string;
 
-  beforeAll(async () => {
-    // Passo 1: limpa qualquer resíduo de execuções anteriores
-    await limparCategoriasDeTeste();
+beforeAll(async () => {
+  const { data } = await api("/categorias", "POST", CAT_PAI_VALIDA) as { data: Record<string, unknown> };
+  catPaiId = data.id as string;
 
-    // Passo 2: cria categoria pai com nome fixo e conhecido
-    const { status: s1, data } = await api("/categorias", "POST", {
-      descricao: NOME_PAI,
-      icone: "🧪",
-      cor: "#123456",
-    }) as { status: number; data: Record<string, unknown> };
-    expect(s1).toBe(201);
-    catPaiId = data.id as string;
+  const { data: filha } = await api("/categorias", "POST", {
+    descricao: `Teste Jest Filha ${TS}`,
+    id_pai: catPaiId,
+    cor: "#654321",
+  }) as { data: Record<string, unknown> };
+  catFilhaId = filha.id as string;
+});
 
-    // Passo 3: cria categoria filha
-    const { status: s2, data: filha } = await api("/categorias", "POST", {
-      descricao: NOME_FILHA,
-      id_pai: catPaiId,
-      cor: "#654321",
-    }) as { status: number; data: Record<string, unknown> };
-    expect(s2).toBe(201);
-    catFilhaId = filha.id as string;
-  });
 
   afterAll(async () => {
-    // Limpa após os testes
-    await limparCategoriasDeTeste();
+    if (catFilhaId) await limparCategoria(catFilhaId);
+    if (catPaiId)   await limparCategoria(catPaiId);
   });
 
   // ── CA-CAT01 ─────────────────────────────────────────────
@@ -95,15 +68,15 @@ describe("Categorias — CA-CAT01 a CA-CAT13", () => {
     const { status, data } = await api(`/categorias/${catPaiId}`) as { status: number; data: Record<string, unknown> };
     expect(status).toBe(200);
     expect(data).toHaveProperty("subcategorias");
+    expect(Array.isArray((data as { subcategorias: unknown[] }).subcategorias)).toBe(true);
     const subs = (data as { subcategorias: Record<string, unknown>[] }).subcategorias;
-    expect(Array.isArray(subs)).toBe(true);
     expect(subs.some((s) => s.id === catFilhaId)).toBe(true);
   });
 
   // ── CA-CAT05 ─────────────────────────────────────────────
   test("CA-CAT05 — POST /categorias cria categoria pai e retorna 201", async () => {
     const { status, data } = await api("/categorias", "POST", {
-      descricao: "Jest Categoria Temporaria",
+      descricao: `Categoria CA-CAT05 ${TS}`,
       cor: "#aabbcc",
     }) as { status: number; data: Record<string, unknown> };
     expect(status).toBe(201);
@@ -115,7 +88,7 @@ describe("Categorias — CA-CAT01 a CA-CAT13", () => {
   // ── CA-CAT06 ─────────────────────────────────────────────
   test("CA-CAT06 — POST /categorias cria subcategoria com id_pai válido", async () => {
     const { status, data } = await api("/categorias", "POST", {
-      descricao: "Jest Subcategoria Temporaria",
+      descricao: `Subcategoria CA-CAT06 ${TS}`,
       id_pai: catPaiId,
     }) as { status: number; data: Record<string, unknown> };
     expect(status).toBe(201);
@@ -126,7 +99,7 @@ describe("Categorias — CA-CAT01 a CA-CAT13", () => {
   // ── CA-CAT07 ─────────────────────────────────────────────
   test("CA-CAT07 — POST /categorias rejeita subcategoria de subcategoria (3º nível)", async () => {
     const { status, data } = await api("/categorias", "POST", {
-      descricao: "Neto Invalido",
+      descricao: "Neto Inválido",
       id_pai: catFilhaId,
     }) as { status: number; data: Record<string, unknown> };
     expect(status).toBe(400);
@@ -135,9 +108,7 @@ describe("Categorias — CA-CAT01 a CA-CAT13", () => {
 
   // ── CA-CAT08 ─────────────────────────────────────────────
   test("CA-CAT08 — POST /categorias rejeita descrição duplicada no mesmo nível com 409", async () => {
-    const { status, data } = await api("/categorias", "POST", {
-      descricao: NOME_PAI,
-    }) as { status: number; data: Record<string, unknown> };
+    const { status, data } = await api("/categorias", "POST", CAT_PAI_VALIDA) as { status: number; data: Record<string, unknown> };
     expect(status).toBe(409);
     expect((data as { erro: string }).erro).toMatch(/já existe/i);
   });
@@ -157,7 +128,7 @@ describe("Categorias — CA-CAT01 a CA-CAT13", () => {
     }) as { status: number; data: Record<string, unknown> };
     expect(status).toBe(200);
     expect((data as { cor: string }).cor).toBe("#ff0000");
-    expect((data as { descricao: string }).descricao).toBe(NOME_PAI);
+    expect((data as { descricao: string }).descricao).toBe(CAT_PAI_VALIDA.descricao);
   });
 
   // ── CA-CAT11 ─────────────────────────────────────────────

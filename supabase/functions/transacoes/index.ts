@@ -1,28 +1,33 @@
 // ============================================================
-// Arquiteto de Valor — Edge Function: transacoes v4
+// Arquiteto de Valor — Edge Function: transacoes v6
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { json, erro, db, getUserId } from "../_shared/utils.ts";
+import { json, erro, db, autenticar, extrairId, extrairAcao,
+         verificarExistencia } from "../_shared/utils.ts";
+
+const TIPOS_TX   = ["RECEITA","DESPESA"];
+const STATUS_TX  = ["PAGO","PENDENTE","PROJECAO"];
+const ESCOPOS    = ["SOMENTE_ESTE","ESTE_E_SEGUINTES","TODOS"];
 
 Deno.serve(async (req: Request) => {
-  const url    = new URL(req.url);
-  const partes = url.pathname.split("/").filter(Boolean);
-  const ultimo = partes[partes.length - 1];
-  const penult = partes[partes.length - 2];
-  const isAntecipar = ultimo === "antecipar";
-  const id     = isAntecipar ? penult : (ultimo !== "transacoes" ? ultimo : null);
-  const acao   = isAntecipar ? "antecipar" : null;
+  const auth = autenticar(req);
+  if (auth instanceof Response) return auth;
+  const userId = auth;
+
+  const id     = extrairId(req, "transacoes");
+  const acao   = extrairAcao(req, "transacoes");
   const m      = req.method;
   const c      = db(req);
-  const userId = getUserId(req);
+  const params = new URL(req.url).searchParams;
+  const escopo = params.get("escopo") ?? "SOMENTE_ESTE";
 
   try {
-    if (m === "GET"    && !id)                       return await listar(c, url.searchParams);
+    if (m === "GET"    && !id)                       return await listar(c, params);
     if (m === "GET"    &&  id)                       return await buscarPorId(c, id);
     if (m === "POST"   && !id)                       return await criar(c, await req.json(), userId);
     if (m === "POST"   &&  id && acao==="antecipar") return await antecipar(c, id, userId);
-    if (m === "PUT"    &&  id)                       return await editar(c, id, await req.json(), url.searchParams.get("escopo") ?? "SOMENTE_ESTE");
-    if (m === "DELETE" &&  id)                       return await excluir(c, id, url.searchParams.get("escopo") ?? "SOMENTE_ESTE");
+    if (m === "PUT"    &&  id)                       return await editar(c, id, await req.json(), escopo);
+    if (m === "DELETE" &&  id)                       return await excluir(c, id, escopo);
     return erro("Rota não encontrada", 404);
   } catch (e) { console.error(e); return erro("Erro interno", 500); }
 });
@@ -62,21 +67,18 @@ async function buscarPorId(c: ReturnType<typeof db>, id: string) {
   return json(data);
 }
 
-async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string | null) {
-  if (!userId) return erro("Usuário não autenticado", 401);
+async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string) {
+  // Validações de negócio (RV-001 a RV-007)
   if (!body.descricao || String(body.descricao).length < 2) return erro("RV-001: descricao deve ter entre 2 e 200 caracteres");
   if (!body.valor || Number(body.valor) <= 0)               return erro("RV-002: valor deve ser maior que zero");
   if (!body.data)                                           return erro("RV-003: data é obrigatória");
   if (!body.conta_id)                                       return erro("RV-004: conta_id é obrigatório");
-  if (!body.tipo || !["RECEITA","DESPESA"].includes(String(body.tipo)))
-    return erro("RV-006: tipo deve ser RECEITA ou DESPESA");
-  if (!body.status || !["PAGO","PENDENTE","PROJECAO"].includes(String(body.status)))
-    return erro("RV-007: status deve ser PAGO, PENDENTE ou PROJECAO");
+  if (!body.tipo || !TIPOS_TX.includes(String(body.tipo)))  return erro("RV-006: tipo deve ser RECEITA ou DESPESA");
+  if (!body.status || !STATUS_TX.includes(String(body.status))) return erro("RV-007: status deve ser PAGO, PENDENTE ou PROJECAO");
 
   const { valor_projetado, ...dadosLimpos } = body;
   const { data, error } = await c.from("transacoes").insert({
-    ...dadosLimpos,
-    user_id: userId,
+    ...dadosLimpos, user_id: userId,
   }).select().single();
   if (error) return erro(error.message);
   return json(data, 201);
@@ -89,6 +91,7 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   const { valor_projetado, ...dadosLimpos } = body;
   let ids: string[] = [id];
 
+  // Regra de escopo para lançamentos recorrentes
   if (atual.id_recorrencia && escopo !== "SOMENTE_ESTE") {
     let q = c.from("transacoes").select("id").eq("id_recorrencia", atual.id_recorrencia);
     if (escopo === "ESTE_E_SEGUINTES") q = q.gte("nr_parcela", atual.nr_parcela);
@@ -106,6 +109,8 @@ async function excluir(c: ReturnType<typeof db>, id: string, escopo: string) {
   if (e || !atual) return erro("Lançamento não encontrado", 404);
 
   let ids: string[] = [id];
+
+  // Regra de escopo para lançamentos recorrentes
   if (atual.id_recorrencia && escopo !== "SOMENTE_ESTE") {
     let q = c.from("transacoes").select("id").eq("id_recorrencia", atual.id_recorrencia);
     if (escopo === "ESTE_E_SEGUINTES") q = q.gte("nr_parcela", atual.nr_parcela);
@@ -118,15 +123,12 @@ async function excluir(c: ReturnType<typeof db>, id: string, escopo: string) {
   return json({ excluidos: ids.length, ids });
 }
 
-async function antecipar(c: ReturnType<typeof db>, id: string, userId: string | null) {
-  if (!userId) return erro("Usuário não autenticado", 401);
-
-  const { data: tx, error: eTx } = await c.from("transacoes").select("id").eq("id", id).single();
-  if (eTx || !tx) return erro("Lançamento não encontrado", 404);
+async function antecipar(c: ReturnType<typeof db>, id: string, userId: string) {
+  const naoEncontrado = await verificarExistencia(c, "transacoes", id, "Lançamento não encontrado");
+  if (naoEncontrado) return naoEncontrado;
 
   const { data, error } = await c.rpc("fn_antecipar_parcelas", {
-    p_transacao_id: id,
-    p_user_id:      userId,
+    p_transacao_id: id, p_user_id: userId,
   });
   if (error) {
     if (error.message.includes("LAST_INSTALLMENT"))         return erro("Não é possível antecipar a última parcela", 400);

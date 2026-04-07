@@ -1,19 +1,25 @@
 // ============================================================
-// Arquiteto de Valor — Edge Function: categorias v4
+// Arquiteto de Valor — Edge Function: categorias v6
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { json, erro, db, getUserId } from "../_shared/utils.ts";
+import { json, erro, db, autenticar, extrairId,
+         verificarExistencia, validarCor, camposParaAtualizar } from "../_shared/utils.ts";
 
 Deno.serve(async (req: Request) => {
-  const url = new URL(req.url);
-  const partes = url.pathname.split("/").filter(Boolean);
-  const id = partes[partes.length - 1] !== "categorias" ? partes[partes.length - 1] : null;
-  const m = req.method;
-  const c = db(req);
-  const userId = getUserId(req);
+  const auth = autenticar(req);
+  if (auth instanceof Response) return auth;
+  const userId = auth;
 
+  const id = extrairId(req, "categorias");
+  const m  = req.method;
+  const c  = db(req);
+
+  console.log("PATH:", new URL(req.url).pathname);
+  console.log("ID extraído:", id);
+  console.log("MÉTODO:", m);
+  
   try {
-    if (m === "GET"    && !id) return await listar(c, url.searchParams);
+    if (m === "GET"    && !id) return await listar(c, new URL(req.url).searchParams);
     if (m === "GET"    &&  id) return await buscarPorId(c, id);
     if (m === "POST")          return await criar(c, await req.json(), userId);
     if (m === "PUT"    &&  id) return await editar(c, id, await req.json());
@@ -55,12 +61,14 @@ async function buscarPorId(c: ReturnType<typeof db>, id: string) {
   return json(data);
 }
 
-async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string | null) {
-  if (!userId) return erro("Usuário não autenticado", 401);
+async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string) {
+  // Validações de negócio
   if (!body.descricao || String(body.descricao).length < 1) return erro("descricao é obrigatória");
-  if (String(body.descricao).length > 20) return erro("descricao deve ter no máximo 20 caracteres");
-  if (body.cor && !/^#[0-9A-Fa-f]{6}$/.test(String(body.cor))) return erro("cor inválida: use #RRGGBB");
+  if (String(body.descricao).length > 50)                   return erro("descricao deve ter no máximo 50 caracteres");
+  const corInvalida = validarCor(body.cor);
+  if (corInvalida) return corInvalida;
 
+  // Regra de hierarquia — máximo 2 níveis
   if (body.id_pai) {
     const { data: pai, error: ep } = await c.from("categorias").select("id,id_pai").eq("id", body.id_pai).single();
     if (ep) return erro("Categoria pai não encontrada", 404);
@@ -68,51 +76,46 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   }
 
   const { data, error } = await c.from("categorias").insert({
-    user_id:   userId,
-    descricao: body.descricao,
-    id_pai:    body.id_pai ?? null,
-    icone:     body.icone  ?? null,
-    cor:       body.cor    ?? null,
-    ativa:     true,
+    user_id: userId, descricao: body.descricao,
+    id_pai: body.id_pai ?? null, icone: body.icone ?? null,
+    cor: body.cor ?? null, ativa: true,
   }).select().single();
 
-if (error) {
-    if (error.message.includes("uq_categorias_user_pai_descricao"))  return erro("Já existe uma categoria com este nome neste nível", 409);
+  if (error) {
+    if (error.message.includes("uq_categorias_user_pai_descricao"))
+      return erro("Já existe uma categoria com este nome neste nível", 409);
     return erro(error.message);
   }
   return json(data, 201);
 }
 
 async function editar(c: ReturnType<typeof db>, id: string, body: Record<string, unknown>) {
-  const { data: cat, error: erroBusca } = await c.from("categorias").select("id").eq("id", id).single();
-  if (erroBusca || !cat) return erro("Categoria não encontrada", 404);
+  const naoEncontrada = await verificarExistencia(c, "categorias", id, "Categoria não encontrada");
+  if (naoEncontrada) return naoEncontrada;
 
+  // Validações de negócio
   if (body.descricao !== undefined && (String(body.descricao).length < 1 || String(body.descricao).length > 50))
     return erro("descricao deve ter entre 1 e 50 caracteres");
-  if (body.cor != null && !/^#[0-9A-Fa-f]{6}$/.test(String(body.cor)))
-    return erro("cor inválida: use #RRGGBB");
+  const corInvalida = validarCor(body.cor);
+  if (corInvalida) return corInvalida;
 
-  const campos: Record<string, unknown> = {};
-  ["descricao","icone","cor","ativa"].forEach(k => {
-    if (body[k] !== undefined) campos[k] = body[k];
-  });
-
+  const campos = camposParaAtualizar(body, ["descricao","icone","cor","ativa"]);
   const { data, error } = await c.from("categorias").update(campos).eq("id", id).select().single();
   if (error) return erro(error.message);
   return json(data);
 }
 
 async function excluir(c: ReturnType<typeof db>, id: string) {
-  const { data: cat, error: erroBusca } = await c.from("categorias").select("id").eq("id", id).single();
-  if (erroBusca || !cat) return erro("Categoria não encontrada", 404);
+  const naoEncontrada = await verificarExistencia(c, "categorias", id, "Categoria não encontrada");
+  if (naoEncontrada) return naoEncontrada;
 
   const { error } = await c.from("categorias").delete().eq("id", id);
-if (error) {
-  if (error.message.includes("CATEGORIA_COM_FILHOS"))
-    return erro("Esta categoria possui subcategorias. Exclua as subcategorias primeiro.", 409);
-  if (error.message.includes("CATEGORIA_EM_USO"))
-    return erro("Esta categoria possui lançamentos vinculados e não pode ser excluída.", 409);
-  return erro(error.message);
-}
+  if (error) {
+    if (error.message.includes("CATEGORIA_COM_FILHOS"))
+      return erro("Esta categoria possui subcategorias. Exclua as subcategorias primeiro.", 409);
+    if (error.message.includes("CATEGORIA_EM_USO"))
+      return erro("Esta categoria possui lançamentos vinculados e não pode ser excluída.", 409);
+    return erro(error.message);
+  }
   return json({ mensagem: "Categoria excluída com sucesso" });
 }
