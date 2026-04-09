@@ -14,15 +14,17 @@ echo   1. Todos os modulos
 echo   2. Contas
 echo   3. Categorias
 echo   4. Transacoes
-echo   5. Sair
+echo   5. Transferencias
+echo   6. Sair
 echo.
-set /p opcao="Digite a opcao (1-5): "
+set /p opcao="Digite a opcao (1-6): "
 
 if "%opcao%"=="1" goto TODOS
 if "%opcao%"=="2" goto CONTAS
 if "%opcao%"=="3" goto CATEGORIAS
 if "%opcao%"=="4" goto TRANSACOES
-if "%opcao%"=="5" goto FIM
+if "%opcao%"=="5" goto TRANSFERENCIAS
+if "%opcao%"=="6" goto FIM
 echo Opcao invalida.
 goto FIM
 
@@ -44,6 +46,11 @@ goto RODAR
 :TRANSACOES
 set MODULO=tests/transacoes.test.ts
 set LABEL=Modulo: Transacoes
+goto RODAR
+
+:TRANSFERENCIAS
+set MODULO=tests/transferencias.test.ts
+set LABEL=Modulo: Transferencias
 goto RODAR
 
 :RODAR

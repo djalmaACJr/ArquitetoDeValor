@@ -1,22 +1,19 @@
-// ============================================================
-// Arquiteto de Valor — Testes automatizados
-// tests/setup.ts — configuração compartilhada
-// ============================================================
+// setup.ts (VERSÃO CORRIGIDA COM AUTENTICAÇÃO)
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL      = process.env.SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY!;
-const TEST_EMAIL        = process.env.TEST_EMAIL!;
-const TEST_PASSWORD     = process.env.TEST_PASSWORD!;
-const BASE_URL          = `${SUPABASE_URL}/functions/v1`;
+const SUPABASE_URL = process.env.SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY as string;
+const TEST_EMAIL = process.env.TEST_EMAIL as string;
+const TEST_PASSWORD = process.env.TEST_PASSWORD as string;
 
+// Validação das variáveis de ambiente
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !TEST_EMAIL || !TEST_PASSWORD) {
   throw new Error("Variáveis de ambiente não configuradas. Verifique .env ou GitHub Secrets.");
 }
 
-export { BASE_URL, SUPABASE_ANON_KEY };
+export const BASE_URL = `${SUPABASE_URL}/functions/v1`;
 
-// ── Autenticação ──────────────────────────────────────────────
+// ================= AUTENTICAÇÃO =================
 let cachedToken: string | null = null;
 
 export async function getToken(): Promise<string> {
@@ -36,7 +33,9 @@ export async function getToken(): Promise<string> {
   return cachedToken;
 }
 
-// ── Headers padrão ────────────────────────────────────────────
+export const obterToken = getToken;
+
+// ================= HEADERS =================
 export async function authHeaders(): Promise<Record<string, string>> {
   const token = await getToken();
   return {
@@ -46,13 +45,23 @@ export async function authHeaders(): Promise<Record<string, string>> {
   };
 }
 
-// ── Helper: requisição à Edge Function ───────────────────────
+export function gerarHeaders(token: string): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${token}`,
+    "apikey": SUPABASE_ANON_KEY,
+  };
+}
+
+// ================= API PRINCIPAL =================
 export async function api(
   path: string,
   method: string = "GET",
-  body?: unknown
+  body?: unknown,
+  customHeaders?: Record<string, string>
 ): Promise<{ status: number; data: unknown }> {
-  const headers = await authHeaders();
+  const headers = customHeaders ?? (await authHeaders());
+  
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers,
@@ -69,7 +78,7 @@ export async function api(
   return { status: res.status, data };
 }
 
-// ── Helper: requisição sem autenticação ───────────────────────
+// ================= API SEM AUTENTICAÇÃO (para testes específicos) =================
 export async function apiSemAuth(
   path: string,
   method: string = "GET",
@@ -94,11 +103,40 @@ export async function apiSemAuth(
   return { status: res.status, data };
 }
 
-// ── Limpeza: remove registros criados nos testes ──────────────
-export async function limparConta(id: string): Promise<void> {
-  await api(`/contas/${id}`, "DELETE");
+// ================= CONTAS =================
+export async function criarConta(
+  headers: Record<string, string>,
+  nome: string,
+  tipo: string,
+  cor: string
+): Promise<string> {
+  const res = await fetch(`${BASE_URL}/contas`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      nome: nome,
+      tipo,
+      cor,
+    }),
+  });
+
+  const data: any = await res.json();
+  return data.id;
 }
 
+export async function deletarConta(
+  headers: Record<string, string>,
+  id: string
+): Promise<void> {
+  await fetch(`${BASE_URL}/contas/${id}`, {
+    method: "DELETE",
+    headers,
+  });
+}
+
+export const limparConta = deletarConta;
+
+// ================= LIMPEZA =================
 export async function limparCategoria(id: string): Promise<void> {
   await api(`/categorias/${id}`, "DELETE");
 }

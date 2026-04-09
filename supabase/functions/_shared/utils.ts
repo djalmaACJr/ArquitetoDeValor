@@ -1,5 +1,5 @@
 // ============================================================
-// Arquiteto de Valor — Módulo compartilhado v3
+// Arquiteto de Valor — Módulo compartilhado v4
 // supabase/functions/_shared/utils.ts
 // ============================================================
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -17,7 +17,7 @@ export function erro(mensagem: string, status = 400): Response {
   return json({ erro: mensagem }, status);
 }
 
-// ── Cliente Supabase com schema arqvalor ──────────────────────
+// ── Cliente Supabase com schema arqvalor (anon key + JWT do usuário) ──
 export function db(req: Request): SupabaseClient {
   return createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -26,6 +26,17 @@ export function db(req: Request): SupabaseClient {
       db: { schema: "arqvalor" },
       global: { headers: { Authorization: req.headers.get("Authorization")! } },
     }
+  );
+}
+
+// ── Cliente Supabase com service_role (bypassa RLS) ───────────
+// Usar apenas para operações que precisam de acesso irrestrito
+// (ex: criação de pares de transferência, operações em auth.users)
+export function dbAdmin(): SupabaseClient {
+  return createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { db: { schema: "arqvalor" } }
   );
 }
 
@@ -66,16 +77,20 @@ export function extrairAcao(req: Request, recurso: string): string | null {
   return partes[idx + 2];
 }
 
-// ── Verifica existência do registro — retorna Response ou null ─
+// ── Verifica existência e posse do registro ───────────────────
+// Retorna Response 404 se não encontrado, null se ok
 // Uso: const naoEncontrado = await verificarExistencia(c, "contas", id, "Conta não encontrada");
 //      if (naoEncontrado) return naoEncontrado;
 export async function verificarExistencia(
   c: SupabaseClient,
   tabela: string,
   id: string,
-  mensagem: string
+  mensagem: string,
+  userId?: string  // quando informado, filtra também por user_id
 ): Promise<Response | null> {
-  const { data, error } = await c.from(tabela).select("id").eq("id", id).single();
+  let q = c.from(tabela).select("id").eq("id", id);
+  if (userId) q = q.eq("user_id", userId);
+  const { data, error } = await q.single();
   if (error || !data) return erro(mensagem, 404);
   return null;
 }
@@ -87,6 +102,35 @@ export function validarCor(cor: unknown): Response | null {
   if (cor != null && !/^#[0-9A-Fa-f]{6}$/.test(String(cor)))
     return erro("cor deve estar no formato hex: #RRGGBB");
   return null;
+}
+
+// ── Valida status de transação/transferência ──────────────────
+// Retorna mensagem de erro ou null se válido
+export function validarStatus(status: unknown): string | null {
+  if (status !== undefined && !["PAGO", "PENDENTE", "PROJECAO"].includes(status as string))
+    return "status inválido: use PAGO | PENDENTE | PROJECAO";
+  return null;
+}
+
+// ── Valida frequência de recorrência ──────────────────────────
+// Retorna mensagem de erro ou null se válido
+export function validarFrequencia(frequencia: unknown): string | null {
+  if (!["DIARIA", "SEMANAL", "MENSAL", "ANUAL"].includes(frequencia as string))
+    return "frequencia inválida: use DIARIA | SEMANAL | MENSAL | ANUAL";
+  return null;
+}
+
+// ── Calcula data de parcela com base na frequência e offset ───
+// Uso: calcularDataParcela("2026-04-01", "MENSAL", 2) → "2026-06-01"
+export function calcularDataParcela(base: string, frequencia: string, offset: number): string {
+  const d = new Date(base + "T12:00:00Z");
+  switch (frequencia) {
+    case "DIARIA":  d.setDate(d.getDate() + offset); break;
+    case "SEMANAL": d.setDate(d.getDate() + offset * 7); break;
+    case "MENSAL":  d.setMonth(d.getMonth() + offset); break;
+    case "ANUAL":   d.setFullYear(d.getFullYear() + offset); break;
+  }
+  return d.toISOString().split("T")[0];
 }
 
 // ── Monta objeto de atualização com campos presentes no body ───

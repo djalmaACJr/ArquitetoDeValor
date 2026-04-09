@@ -39,11 +39,17 @@ async function buscarPorId(c: ReturnType<typeof db>, id: string) {
 }
 
 async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string) {
-  // Validações de negócio
-  if (!body.nome || String(body.nome).length < 1) return erro("nome é obrigatório");
-  if (String(body.nome).length > 100)             return erro("nome deve ter no máximo 100 caracteres");
-  if (!body.tipo)                                 return erro(`tipo é obrigatório: ${TIPOS_CONTA.join(" | ")}`);
-  if (!TIPOS_CONTA.includes(String(body.tipo)))   return erro("tipo inválido");
+  // RV-008: nome 1–50 chars
+  if (!body.nome || String(body.nome).length < 1)
+    return erro("nome é obrigatório (RV-008)");
+  if (String(body.nome).length > 50)
+    return erro("nome deve ter no máximo 50 caracteres (RV-008)");
+  // RV-011: tipo válido
+  if (!body.tipo)
+    return erro(`tipo é obrigatório: ${TIPOS_CONTA.join(" | ")} (RV-011)`);
+  if (!TIPOS_CONTA.includes(String(body.tipo)))
+    return erro("tipo inválido (RV-011)");
+  // RV-010: cor hex
   const corInvalida = validarCor(body.cor);
   if (corInvalida) return corInvalida;
 
@@ -65,11 +71,11 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   const naoEncontrada = await verificarExistencia(c, "contas", id, "Conta não encontrada");
   if (naoEncontrada) return naoEncontrada;
 
-  // Validações de negócio
-  if (body.nome !== undefined && (String(body.nome).length < 1 || String(body.nome).length > 100))
-    return erro("nome deve ter entre 1 e 100 caracteres");
+  if (body.nome !== undefined &&
+     (String(body.nome).length < 1 || String(body.nome).length > 50))
+    return erro("nome deve ter entre 1 e 50 caracteres (RV-008)");
   if (body.tipo !== undefined && !TIPOS_CONTA.includes(String(body.tipo)))
-    return erro("tipo inválido");
+    return erro("tipo inválido (RV-011)");
   const corInvalida = validarCor(body.cor);
   if (corInvalida) return corInvalida;
 
@@ -85,7 +91,8 @@ async function excluir(c: ReturnType<typeof db>, id: string) {
 
   const { error } = await c.from("contas").delete().eq("id", id);
   if (error) {
-    if (error.message.includes("CONTA_EM_USO")) return erro(error.message, 409);
+    if (error.message.includes("CONTA_EM_USO"))
+      return erro("Esta conta possui lançamentos vinculados e não pode ser excluída.", 409);
     return erro(error.message);
   }
   return json({ mensagem: "Conta excluída com sucesso" });

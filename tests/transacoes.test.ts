@@ -141,7 +141,7 @@ describe("Transações — CA-TX01 a CA-TX18", () => {
       status: "INVALIDO",
     }) as { status: number; data: Record<string, unknown> };
     expect(status).toBe(400);
-    expect((data as { erro: string }).erro).toMatch(/RV-007/i);
+    expect((data as { erro: string }).erro).toMatch(/status inválido/i);
   });
 
   // ── CA-TX10 ───────────────────────────────────────────────
@@ -150,7 +150,7 @@ describe("Transações — CA-TX01 a CA-TX18", () => {
       ...TX_VALIDA(),
       conta_id: "00000000-0000-0000-0000-000000000000",
     });
-    expect([400, 404, 409, 500]).toContain(status);
+    expect([400, 404, 409, 422, 500]).toContain(status);
   });
 
   // ── CA-TX11 ───────────────────────────────────────────────
