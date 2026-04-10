@@ -5,7 +5,7 @@
 // Cobre critérios de aceite: CA-CONTA01 a CA-CONTA13
 // ============================================================
 
-import { api, limparConta } from "./setup";
+import { api, apiSemAuth, limparConta } from "./setup";
 
 const NOME_CONTA      = "Jest Conta Teste";
 const NOME_CONTA_EDIT = "Jest Conta Editada";
@@ -260,5 +260,21 @@ describe("Contas — CA-CONTA01 a CA-CONTA13", () => {
     expect(encontrada.ativa).toBe(false);
 
     await limparConta(criada.id);
+  });
+
+  // ── CA-CONTA14 ──────────────────────────────────────────
+  // Requisição sem JWT deve retornar 401
+  test("CA-CONTA14 — GET /contas sem JWT retorna 401", async () => {
+    const { status } = await apiSemAuth("/contas");
+    expect(status).toBe(401);
+  });
+
+  // ── CA-CONTA15 ──────────────────────────────────────────
+  // RLS garante isolamento: UUID de outra conta (não pertencente ao usuário)
+  // deve retornar 404 — o banco filtra silenciosamente por user_id = auth.uid()
+  test("CA-CONTA15 — GET /contas/:id não expõe conta de outro usuário", async () => {
+    const idForaDoEscopo = "00000000-0000-0000-0000-000000000001";
+    const { status } = await api(`/contas/${idForaDoEscopo}`);
+    expect(status).toBe(404);
   });
 });

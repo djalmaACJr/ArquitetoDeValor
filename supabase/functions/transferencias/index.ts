@@ -1,7 +1,7 @@
 // ============================================================
 // Edge Function: transferencias v5
 // Projeto: Arquiteto de Valor
-// CORRIGIDO - Remove campos que não existem no banco
+// CORRIGIDO - Remove campos que não existem no banco 
 // ============================================================
 
 import "@supabase/functions-js/edge-runtime.d.ts";
@@ -78,10 +78,11 @@ async function verificarContaAtiva(
     .from("contas")
     .select("id, ativa")
     .eq("id", contaId)
-    .single();
+    .maybeSingle();
 
-  if (error || !data) return erro(`${label} não encontrada`, 404);
-  if (!data.ativa)    return erro(`${label} está inativa`, 422);
+  if (error) return erro(`Erro ao verificar ${label.toLowerCase()}: ` + error.message, 500);
+  if (!data)      return erro(`${label} não encontrada`, 404);
+  if (!data.ativa) return erro(`${label} está inativa`, 422);
   return null;
 }
 

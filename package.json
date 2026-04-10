@@ -5,7 +5,8 @@
     "test": "jest --runInBand",
     "test:contas": "jest tests/contas.test.ts --runInBand --verbose",
     "test:categorias": "jest tests/categorias.test.ts --runInBand --verbose",
-    "test:transacoes": "jest tests/transacoes.test.ts --runInBand --verbose"
+    "test:transacoes": "jest tests/transacoes.test.ts --runInBand --verbose",
+    "test:transferencias": "jest tests/transferencias.test.ts --runInBand --verbose"
   },
   "devDependencies": {
     "@types/jest": "^29",
