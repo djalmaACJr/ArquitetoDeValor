@@ -6,13 +6,20 @@
     "test:contas": "jest tests/contas.test.ts --runInBand --verbose",
     "test:categorias": "jest tests/categorias.test.ts --runInBand --verbose",
     "test:transacoes": "jest tests/transacoes.test.ts --runInBand --verbose",
-    "test:transferencias": "jest tests/transferencias.test.ts --runInBand --verbose"
+    "test:transferencias": "jest tests/transferencias.test.ts --runInBand --verbose",
+    "lint": "eslint tests/",
+    "lint:fix": "eslint tests/ --fix"
   },
   "devDependencies": {
+    "@eslint/js": "^9",
     "@types/jest": "^29",
+    "@typescript-eslint/eslint-plugin": "^8",
+    "@typescript-eslint/parser": "^8",
+    "eslint": "^9",
     "jest": "^29",
     "ts-jest": "^29",
-    "typescript": "^5"
+    "typescript": "^5",
+    "typescript-eslint": "^8"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2",

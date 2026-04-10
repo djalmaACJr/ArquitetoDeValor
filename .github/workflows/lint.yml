@@ -1,0 +1,36 @@
+name: Análise de Qualidade
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: ESLint — Análise estática
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Rodar ESLint
+        run: npm run lint
+
+      - name: Salvar relatório de qualidade
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-lint-${{ github.run_number }}
+          path: lint-results/
+          if-no-files-found: ignore
