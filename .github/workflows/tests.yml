@@ -1,4 +1,4 @@
-name: Testes de Integração
+name: Testes de IntegraÃ§Ã£o
 
 on:
   push:
@@ -12,16 +12,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout do repositório
-        uses: actions/checkout@v4
+      - name: Checkout do repositÃ³rio
+        uses: actions/checkout@v4.2.2
 
       - name: Configurar Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.4.0
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
-      - name: Instalar dependências
+      - name: Instalar dependÃªncias
         run: npm install
 
       - name: Rodar testes
@@ -34,10 +34,8 @@ jobs:
 
       - name: Salvar resultado dos testes
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: resultado-testes-${{ github.run_number }}
           path: test-results/
           if-no-files-found: ignore
-
-          
