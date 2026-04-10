@@ -1,8 +1,9 @@
 @echo off
+chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo ================================
-echo   Deploy - Supabase Functions
+echo   DEPLOY - Supabase Functions
 echo ================================
 echo.
 echo Escolha o modo de deploy:
@@ -25,15 +26,15 @@ echo Opcao invalida! & pause & exit /b
 
 :config_log
 echo.
-echo ================================================
+echo ================================
 echo   Configurar Nivel de Logs
-echo ================================================
+echo ================================
 echo.
 echo Niveis disponiveis:
 echo   1 - DEBUG (detalhado - desenvolvimento)
-echo   2 - INFO  (importante - homologacao)
+echo   2 - INFO (importante - homologacao)
 echo   3 - ERROR (apenas erros - producao)
-echo   4 - NONE  (sem logs)
+echo   4 - NONE (sem logs)
 echo.
 set /p nivel_log="Digite o nivel (1-4): "
 
@@ -46,64 +47,63 @@ echo.
 echo Aplicando configuracao...
 supabase secrets set --project-ref ftpelncgrakpphytfrfo LOG_LEVEL=%LOG_LEVEL% ENVIRONMENT=production
 echo.
-echo ✅ Logs configurados para: %LOG_LEVEL%
+echo [OK] Logs configurados para: %LOG_LEVEL%
 echo.
 pause
 goto fim
 
 :contas
 echo.
-echo Deploy contas...
+echo [DEPLOY] contas...
 supabase functions deploy contas --project-ref ftpelncgrakpphytfrfo
-echo ✅ contas deployed
+echo [OK] contas deployed
 goto fim
 
 :categorias
 echo.
-echo Deploy categorias...
+echo [DEPLOY] categorias...
 supabase functions deploy categorias --project-ref ftpelncgrakpphytfrfo
-echo ✅ categorias deployed
+echo [OK] categorias deployed
 goto fim
 
 :transacoes
 echo.
-echo Deploy transacoes...
+echo [DEPLOY] transacoes...
 supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo
-echo ✅ transacoes deployed
+echo [OK] transacoes deployed
 goto fim
 
 :transferencias
 echo.
-echo Deploy transferencias...
+echo [DEPLOY] transferencias...
 supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo
-echo ✅ transferencias deployed
+echo [OK] transferencias deployed
 goto fim
 
 :todos
 echo.
-echo Deploy contas...
+echo [DEPLOY] contas...
 supabase functions deploy contas --project-ref ftpelncgrakpphytfrfo
 echo.
-echo Deploy categorias...
+echo [DEPLOY] categorias...
 supabase functions deploy categorias --project-ref ftpelncgrakpphytfrfo
 echo.
-echo Deploy transacoes...
+echo [DEPLOY] transacoes...
 supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo
 echo.
-echo Deploy transferencias...
+echo [DEPLOY] transferencias...
 supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo
 echo.
-echo ✅ Todos os modulos deployados
+echo [OK] Todos os modulos deployados
 goto fim
 
 :fim
 echo.
-echo ================================================
+echo ================================
 echo   Deploy concluido!
-echo ================================================
+echo ================================
 echo.
-echo 📊 Para ver logs em tempo real:
+echo [DICA] Para ver logs em tempo real:
 echo    supabase functions logs transferencias --tail --project-ref ftpelncgrakpphytfrfo
 echo.
 pause
-endlocal

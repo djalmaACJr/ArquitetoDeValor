@@ -1,5 +1,5 @@
 // ============================================================
-// Arquiteto de Valor — Logger Configurável
+// Arquiteto de Valor — Logger Configurável v1
 // ============================================================
 
 // 🔧 Níveis de log
