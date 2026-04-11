@@ -3,13 +3,14 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId, extrairAcao,
-         verificarExistencia, validarStatus } from "../_shared/utils.ts";
+         verificarExistencia, validarStatus, corsPreFlight } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWarn } from "../_shared/logger.ts";
 
 const TIPOS_TX  = ["RECEITA","DESPESA"];
 const ESCOPOS   = ["SOMENTE_ESTE","ESTE_E_SEGUINTES","TODOS"];
 
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return corsPreFlight();
   const auth = autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;

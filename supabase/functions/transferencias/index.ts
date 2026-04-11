@@ -12,6 +12,7 @@ import {
   autenticar,
   extrairId,
   validarStatus,
+  corsPreFlight
 } from "../_shared/utils.ts";
 
 /** Busca o id da categoria protegida de Transferências do usuário */
@@ -114,6 +115,7 @@ function validarPayload(body: Record<string, unknown>, modoEdicao = false): stri
 }
 
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return corsPreFlight();
   const auth = autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;

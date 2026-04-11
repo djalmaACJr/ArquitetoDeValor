@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, List, CreditCard, Tag,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
@@ -37,6 +39,43 @@ const Logo = () => (
   </svg>
 )
 
+// ── Componente reutilizável de ícone de conta ─────────────
+// Exportado para uso em DashboardPage e ContasPage
+export function IconeConta({
+  icone, cor, size = 'md',
+}: {
+  icone?: string | null
+  cor?:   string | null
+  size?:  'sm' | 'md' | 'lg'
+}) {
+  const dims  = { sm: 'w-5 h-5', md: 'w-8 h-8', lg: 'w-10 h-10' }[size]
+  const texto = { sm: 'text-xs',  md: 'text-sm',  lg: 'text-lg'  }[size]
+  const bg    = cor ? `${cor}20` : 'rgba(77,166,255,0.12)'
+  const isUrl = !!(icone?.startsWith('http') || icone?.startsWith('/') || icone?.startsWith('data:'))
+
+  return (
+    <div
+      className={`${dims} rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden`}
+      style={{ background: bg }}
+    >
+      {isUrl ? (
+        <img
+          src={icone!}
+          alt=""
+          className="w-full h-full object-contain p-[3px]"
+          onError={e => {
+            const img = e.target as HTMLImageElement
+            img.style.display = 'none'
+            img.parentElement!.textContent = '🏦'
+          }}
+        />
+      ) : (
+        <span className={texto}>{icone || '🏦'}</span>
+      )}
+    </div>
+  )
+}
+
 interface NavItem {
   to:    string
   icon:  React.ReactNode
@@ -57,29 +96,38 @@ const navFerramentas: NavItem[] = [
   { to: '/relatorios', icon: <FileText size={15}/>,       label: 'Relatórios', soon: true },
 ]
 
-function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
+function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]; collapsed: boolean }) {
   return (
     <div className="mb-2">
-      <p className="text-[10px] uppercase tracking-widest text-blue-400/50 px-2 mb-1">{label}</p>
+      {!collapsed && (
+        <p className="text-[10px] uppercase tracking-widest text-blue-400/50 px-2 mb-1">{label}</p>
+      )}
       {items.map(item => (
         <NavLink
           key={item.to}
           to={item.to}
           end={item.to === '/'}
+          title={collapsed ? item.label : undefined}
           className={({ isActive }) =>
             `flex items-center gap-2 px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
+              collapsed ? 'justify-center' : ''
+            } ${
               isActive
                 ? 'bg-av-green/15 text-av-green font-medium'
-                : 'text-white/50 hover:bg-blue-400/8 hover:text-white/85'
+                : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
             }`
           }
         >
           {item.icon}
-          <span className="flex-1">{item.label}</span>
-          {item.soon && (
-            <span className="text-[9px] px-[6px] py-[2px] rounded-full bg-av-amber/15 text-av-amber">
-              em breve
-            </span>
+          {!collapsed && (
+            <>
+              <span className="flex-1">{item.label}</span>
+              {item.soon && (
+                <span className="text-[9px] px-[6px] py-[2px] rounded-full bg-av-amber/15 text-av-amber">
+                  em breve
+                </span>
+              )}
+            </>
           )}
         </NavLink>
       ))}
@@ -90,49 +138,72 @@ function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
 export default function Sidebar() {
   const { dark, toggle } = useTheme()
   const { signOut, session } = useAuth()
+  const [collapsed, setCollapsed] = useState(false)
 
-  const nome = session?.user?.user_metadata?.nome
+  const nome  = session?.user?.user_metadata?.nome
     ?? session?.user?.email?.split('@')[0]
     ?? 'Usuário'
+  const email = session?.user?.email ?? ''
 
   return (
-    <nav className="w-[216px] flex-shrink-0 bg-av-dark flex flex-col px-4 py-5 rounded-r-2xl">
+    <nav
+      className={`flex-shrink-0 bg-av-dark flex flex-col px-3 py-5 rounded-r-2xl transition-all duration-300 relative sticky top-0 h-screen ${
+        collapsed ? 'w-[60px]' : 'w-[216px]'
+      }`}
+    >
+      {/* Botão de colapso */}
+      <button
+        onClick={() => setCollapsed(v => !v)}
+        title={collapsed ? 'Expandir menu' : 'Recolher menu'}
+        className="absolute -right-3 top-6 z-10 w-6 h-6 rounded-full bg-av-dark border border-blue-400/30 flex items-center justify-center text-white/60 hover:text-av-green hover:border-av-green/50 transition-colors shadow-md"
+      >
+        {collapsed ? <ChevronRight size={12}/> : <ChevronLeft size={12}/>}
+      </button>
+
       {/* Logo */}
-      <div className="flex items-center gap-3 mb-7 pb-4 border-b border-blue-400/20">
+      <div className={`flex items-center gap-3 mb-7 pb-4 border-b border-blue-400/20 ${collapsed ? 'justify-center' : ''}`}>
         <div className="w-9 h-9 rounded-[10px] bg-av-dark border border-blue-400/30 flex items-center justify-center flex-shrink-0">
           <Logo />
         </div>
-        <div>
-          <p className="text-[13px] font-bold text-white leading-tight">Arquiteto<br/>de Valor</p>
-          <p className="text-[9px] text-av-green tracking-[2px]">BLUEPRINT</p>
-        </div>
+        {!collapsed && (
+          <div>
+            <p className="text-[13px] font-bold text-white leading-tight">Arquiteto<br/>de Valor</p>
+            <p className="text-[9px] text-av-green tracking-[2px]">BLUEPRINT</p>
+          </div>
+        )}
       </div>
 
-      <NavGroup label="Principal"   items={navPrincipal}   />
+      <NavGroup label="Principal"   items={navPrincipal}   collapsed={collapsed} />
       <div className="h-px bg-blue-400/15 my-2" />
-      <NavGroup label="Cadastros"   items={navCadastros}   />
+      <NavGroup label="Cadastros"   items={navCadastros}   collapsed={collapsed} />
       <div className="h-px bg-blue-400/15 my-2" />
-      <NavGroup label="Ferramentas" items={navFerramentas} />
+      <NavGroup label="Ferramentas" items={navFerramentas} collapsed={collapsed} />
 
       <div className="flex-1" />
 
-      {/* Rodapé */}
-      <div className="flex items-center justify-between pt-3 border-t border-blue-400/15">
-        <span className="text-[11px] text-white/30 truncate">{nome}</span>
-        <div className="flex items-center gap-1">
+      {/* Rodapé — fixo no fundo, sempre visível */}
+      <div className={`pt-3 border-t border-blue-400/30 bg-av-dark ${collapsed ? 'flex flex-col items-center gap-2' : ''}`}>
+        {!collapsed && (
+          <div className="mb-2 px-1 py-1 rounded-lg bg-blue-400/8">
+            <p className="text-[12px] font-semibold text-white truncate">{nome}</p>
+            <p className="text-[10px] text-blue-300/60 truncate">{email}</p>
+          </div>
+        )}
+        <div className={`flex items-center gap-1 ${collapsed ? 'flex-col' : 'px-1'}`}>
           <button
             onClick={toggle}
-            className="p-1.5 rounded-md text-white/30 hover:text-white/70 hover:bg-white/5 transition-colors"
+            className="p-2 rounded-lg text-white/70 hover:text-av-amber hover:bg-av-amber/15 transition-colors flex-shrink-0"
             title={dark ? 'Tema claro' : 'Tema escuro'}
           >
-            {dark ? <Sun size={14}/> : <Moon size={14}/>}
+            {dark ? <Sun size={15}/> : <Moon size={15}/>}
           </button>
           <button
             onClick={signOut}
-            className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-white/5 transition-colors"
+            className="flex-1 flex items-center gap-2 px-2 py-2 rounded-lg text-white/70 hover:text-red-400 hover:bg-red-400/10 transition-colors"
             title="Sair"
           >
-            <LogOut size={14}/>
+            <LogOut size={15}/>
+            {!collapsed && <span className="text-[12px] font-medium">Sair</span>}
           </button>
         </div>
       </div>

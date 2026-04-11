@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Plus, Pencil, X, AlertTriangle, Check } from 'lucide-react'
 import { useContas } from '../hooks/useContas'
 import { formatBRL, GRUPOS_CONTA } from '../lib/utils'
+import { IconeConta } from '../components/ui/IconeConta'
 import type { Conta, TipoConta } from '../types'
 
 const TIPOS: { value: TipoConta; label: string }[] = [
@@ -167,13 +168,70 @@ function FormConta({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
-            Ícone (emoji)
+            Ícone / Logo
           </label>
-          <input
-            value={form.icone} onChange={e => set({ icone: e.target.value })}
-            placeholder="🏦"
-            className="w-full border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 rounded-lg px-3 py-2 text-[18px] focus:outline-none focus:border-av-green transition-colors"
-          />
+          <div className="flex items-center gap-2">
+            {/* Preview */}
+            <div
+              className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden border border-gray-200 dark:border-gray-600"
+              style={{ background: form.cor ? `${form.cor}20` : 'rgba(77,166,255,0.12)' }}
+            >
+              {form.icone?.startsWith('data:') ? (
+                <img src={form.icone} alt="" className="w-full h-full object-contain p-[3px]"/>
+              ) : (
+                <span className="text-lg">{form.icone || '🏦'}</span>
+              )}
+            </div>
+            <div className="flex-1 flex flex-col gap-1">
+              {/* Upload de imagem */}
+              <label className="cursor-pointer flex items-center gap-1.5 text-[11px] text-av-blue border border-av-blue/30 rounded-lg px-2 py-1.5 hover:bg-av-blue/5 transition-colors">
+                <span>📁</span> Escolher imagem
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const reader = new FileReader()
+                    reader.onload = ev => {
+                      const img = new Image()
+                      img.onload = () => {
+                        const canvas = document.createElement('canvas')
+                        canvas.width = 64
+                        canvas.height = 64
+                        const ctx = canvas.getContext('2d')!
+                        // fundo transparente, imagem centralizada com object-contain
+                        const scale = Math.min(64 / img.width, 64 / img.height)
+                        const w = img.width * scale
+                        const h = img.height * scale
+                        ctx.drawImage(img, (64 - w) / 2, (64 - h) / 2, w, h)
+                        set({ icone: canvas.toDataURL('image/png') })
+                      }
+                      img.src = ev.target?.result as string
+                    }
+                    reader.readAsDataURL(file)
+                  }}
+                />
+              </label>
+              {/* Ou emoji */}
+              <input
+                value={form.icone?.startsWith('data:') ? '' : (form.icone ?? '')}
+                onChange={e => set({ icone: e.target.value })}
+                placeholder="ou digite um emoji 🏦"
+                className="w-full border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 rounded-lg px-2 py-1 text-[14px] focus:outline-none focus:border-av-green transition-colors"
+              />
+              {/* Limpar */}
+              {form.icone && (
+                <button
+                  onClick={() => set({ icone: '' })}
+                  className="text-[10px] text-gray-400 hover:text-red-400 text-left transition-colors"
+                >
+                  ✕ Remover ícone
+                </button>
+              )}
+            </div>
+          </div>
         </div>
         <div>
           <label className="block text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
@@ -251,12 +309,7 @@ function CardConta({ conta, onClick }: { conta: Conta; onClick: () => void }) {
       onClick={onClick}
       className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl p-3.5 flex items-center gap-3 hover:border-av-green/50 hover:bg-white dark:hover:bg-gray-600 transition-all group text-left"
     >
-      <div
-        className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-        style={{ background: conta.cor ? `${conta.cor}20` : 'rgba(77,166,255,0.12)' }}
-      >
-        {conta.icone ?? '🏦'}
-      </div>
+      <IconeConta icone={conta.icone} cor={conta.cor} size="lg" />
       <div className="flex-1 min-w-0">
         <p className="text-[13px] font-semibold text-gray-800 dark:text-gray-100 truncate">{conta.nome}</p>
         <p className="text-[11px] text-gray-400">{conta.tipo}{!conta.ativa && ' · inativa'}</p>
