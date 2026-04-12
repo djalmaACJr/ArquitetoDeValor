@@ -32,6 +32,7 @@ export interface Categoria {
   subcategorias?: Categoria[]
 }
 
+
 // ── Transações ────────────────────────────────────────────
 export type TipoTransacao  = 'RECEITA' | 'DESPESA'
 export type StatusTransacao = 'PAGO' | 'PENDENTE' | 'PROJECAO'

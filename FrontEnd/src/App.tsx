@@ -4,10 +4,11 @@ import AppLayout from './components/layout/AppLayout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import {
-  LancamentosPage, CategoriasPage,
   ImportarPage, RelatoriosPage,
 } from './pages/Placeholders'
 import ContasPage from './pages/ContasPage'
+import CategoriasPage from './pages/CategoriasPage'
+import LancamentosPage from './pages/LancamentosPage'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
