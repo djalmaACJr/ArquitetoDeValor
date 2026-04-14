@@ -1,6 +1,5 @@
 // src/lib/api.ts
-// Cliente HTTP centralizado — substitui headers() e getToken() duplicados em cada hook.
-// Todos os hooks devem importar apiFetch/apiMutate daqui.
+// Cliente HTTP centralizado.
 
 import { supabase } from './supabase'
 
@@ -13,7 +12,6 @@ export interface ApiResult<T = unknown> {
   status: number
 }
 
-// ── Token: lido do contexto Supabase (sem nova roundtrip ao servidor) ──────────
 async function getSession() {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.access_token) throw new Error('Não autenticado')
@@ -28,7 +26,7 @@ function makeHeaders(token: string): Record<string, string> {
   }
 }
 
-// ── GET ────────────────────────────────────────────────────────────────────────
+// ── GET ───────────────────────────────────────────────────────────────────────
 export async function apiFetch<T = unknown>(
   path: string,
   signal?: AbortSignal
@@ -47,12 +45,12 @@ export async function apiFetch<T = unknown>(
       status: res.status,
     }
   } catch (e) {
-    if ((e as Error).name === 'AbortError') throw e  // propaga abort para o hook tratar
+    if ((e as Error).name === 'AbortError') throw e
     return { ok: false, dados: null, erro: (e as Error).message, status: 0 }
   }
 }
 
-// ── POST / PUT / DELETE ────────────────────────────────────────────────────────
+// ── POST / PUT / DELETE ───────────────────────────────────────────────────────
 export async function apiMutate<T = unknown>(
   path: string,
   method: 'POST' | 'PUT' | 'DELETE',
@@ -75,4 +73,20 @@ export async function apiMutate<T = unknown>(
   } catch (e) {
     return { ok: false, dados: null, erro: (e as Error).message, status: 0 }
   }
+}
+
+// ── Helper: extrai array de dados do envelope da API ─────────────────────────
+// A API retorna { dados: T[] } mas apiFetch já desembala um nível via data.dados ?? data.
+// Em alguns hooks o retorno ainda vinha duplamente envelopado. Esta função
+// resolve ambos os casos sem precisar de "as unknown as" no código chamador.
+export function extrairLista<T>(raw: unknown): T[] {
+  if (!raw) return []
+  // Caso 1: { dados: T[] }  — envelope ainda presente
+  if (typeof raw === 'object' && 'dados' in (raw as object)) {
+    const env = (raw as { dados: unknown }).dados
+    return Array.isArray(env) ? (env as T[]) : []
+  }
+  // Caso 2: T[]  — já é o array direto
+  if (Array.isArray(raw)) return raw as T[]
+  return []
 }

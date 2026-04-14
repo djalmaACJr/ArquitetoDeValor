@@ -1,12 +1,18 @@
 // ============================================================
-// Arquiteto de Valor — Módulo compartilhado v5
+// Arquiteto de Valor — Módulo compartilhado v6
 // supabase/functions/_shared/utils.ts
+// Alteração: CORS com origem configurável via ALLOWED_ORIGIN
 // ============================================================
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// ── Headers CORS — obrigatórios para chamadas do browser ──────
+// ── CORS — origem restrita em produção ────────────────────────────────────────
+// Em produção, defina a variável de ambiente:
+//   supabase secrets set ALLOWED_ORIGIN=https://seu-dominio.com
+// Em desenvolvimento local, deixe em branco para usar "*".
+const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
+
 export const CORS_HEADERS = {
-  "Access-Control-Allow-Origin":  "*",
+  "Access-Control-Allow-Origin":  ALLOWED_ORIGIN,
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type",
 };

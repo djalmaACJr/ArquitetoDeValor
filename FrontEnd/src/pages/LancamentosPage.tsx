@@ -4,7 +4,7 @@ import { Plus, Pencil, Zap, ChevronDown, Check, Repeat2, ArrowLeftRight } from '
 import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
-import { formatBRL } from '../lib/utils'
+import { formatBRL, mesLabel } from '../lib/utils'
 import { IconeConta } from '../components/ui/IconeConta'
 import {
   Drawer, Field, Input, SelectDark, Toggle,
@@ -17,11 +17,7 @@ import { MonthPicker } from '../components/ui/MonthPicker'
 function mesAtual() {
   return new Date().toISOString().slice(0, 7)
 }
-function mesLabel(ym: string) {
-  const [y, m] = ym.split('-')
-  const nome = new Date(Number(y), Number(m) - 1).toLocaleDateString('pt-BR', { month: 'long' })
-  return `${nome.charAt(0).toUpperCase()}${nome.slice(1)}/${y}`
-}
+
 function fmtData(iso: string) {
   const [y, m, d] = iso.split('-')
   return `${d}/${m}/${y}`

@@ -13,6 +13,7 @@ import {
   validarStatus,
   corsPreFlight
 } from "../_shared/utils.ts";
+import { logError } from "../_shared/logger.ts";
 
 // ── Tipos internos ────────────────────────────────────────────────────────────
 interface Transacao {
@@ -152,7 +153,7 @@ Deno.serve(async (req: Request) => {
     if (m === "DELETE" && id)  return await excluir(c, id, userId);
     return erro("Rota não encontrada", 404);
   } catch (e) {
-    console.error("Erro no handler:", e);
+    logError("Handler principal", e);
     return erro("Erro interno: " + (e as Error).message, 500);
   }
 });
@@ -234,8 +235,11 @@ async function criar(
   const erroVal = validarPayload(body);
   if (erroVal) return erro(erroVal, 422);
 
-  const semOrigem  = await verificarContaAtiva(c, body.conta_origem_id  as string, "Conta de origem");
-  const semDestino = await verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino");
+  // Verificações de conta em paralelo — reduz latência pela metade
+  const [semOrigem, semDestino] = await Promise.all([
+    verificarContaAtiva(c, body.conta_origem_id  as string, "Conta de origem"),
+    verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino"),
+  ]);
   if (semOrigem)  return semOrigem;
   if (semDestino) return semDestino;
 
@@ -266,7 +270,7 @@ async function criar(
     .select().single();
 
   if (e1 || !debito) {
-    console.error("Erro débito:", e1);
+    logError("Criar transferência — débito", e1);
     return erro("Erro ao criar lançamento de saída: " + (e1?.message || "erro desconhecido"), 500);
   }
 
@@ -290,7 +294,7 @@ async function criar(
 
   if (e2 || !credito) {
     await c.from("transacoes").delete().eq("id", debito.id);
-    console.error("Erro crédito:", e2);
+    logError("Criar transferência — crédito", e2);
     return erro("Erro ao criar lançamento de entrada: " + (e2?.message || "erro desconhecido"), 500);
   }
 
@@ -309,13 +313,18 @@ async function editar(
   const par = await buscarPar(c, idPar, userId);
   if (!par) return erro("Transferência não encontrada", 404);
 
-  if (body.conta_origem_id && body.conta_origem_id !== par.debito.conta_id) {
-    const r = await verificarContaAtiva(c, body.conta_origem_id as string, "Conta de origem");
-    if (r) return r;
-  }
-  if (body.conta_destino_id && body.conta_destino_id !== par.credito.conta_id) {
-    const r = await verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino");
-    if (r) return r;
+  // Verificações de conta em paralelo quando há mudança de conta
+  {
+    const verificacoes = await Promise.all([
+      body.conta_origem_id  && body.conta_origem_id  !== par.debito.conta_id
+        ? verificarContaAtiva(c, body.conta_origem_id  as string, "Conta de origem")
+        : Promise.resolve(null),
+      body.conta_destino_id && body.conta_destino_id !== par.credito.conta_id
+        ? verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino")
+        : Promise.resolve(null),
+    ]);
+    if (verificacoes[0]) return verificacoes[0];
+    if (verificacoes[1]) return verificacoes[1];
   }
 
   const novaOrigem  = body.conta_origem_id  ?? par.debito.conta_id;

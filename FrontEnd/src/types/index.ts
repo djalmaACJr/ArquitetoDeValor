@@ -1,3 +1,5 @@
+// src/types/index.ts
+
 // ── Contas ────────────────────────────────────────────────
 export type TipoConta =
   | 'CORRENTE'
@@ -7,16 +9,16 @@ export type TipoConta =
   | 'CARTEIRA'
 
 export interface Conta {
-  conta_id:     string
-  user_id:      string
-  nome:         string
-  tipo:         TipoConta
-  icone:        string | null
-  cor:          string | null
-  ativa:        boolean
+  conta_id:      string
+  user_id:       string
+  nome:          string
+  tipo:          TipoConta
+  icone:         string | null
+  cor:           string | null
+  ativa:         boolean
   saldo_inicial: number
-  movimentacao: number
-  saldo_atual:  number
+  movimentacao:  number
+  saldo_atual:   number
 }
 
 // ── Categorias ────────────────────────────────────────────
@@ -32,9 +34,8 @@ export interface Categoria {
   subcategorias?: Categoria[]
 }
 
-
 // ── Transações ────────────────────────────────────────────
-export type TipoTransacao  = 'RECEITA' | 'DESPESA'
+export type TipoTransacao   = 'RECEITA' | 'DESPESA'
 export type StatusTransacao = 'PAGO' | 'PENDENTE' | 'PROJECAO'
 
 export interface Transacao {
@@ -64,6 +65,7 @@ export interface Transacao {
   categoria_pai_nome?: string | null
   conta_nome?:         string | null
   conta_icone?:        string | null
+  conta_cor?:          string | null
   saldo_acumulado?:    number
 }
 
@@ -86,21 +88,20 @@ export interface Transferencia {
 }
 
 // ── Resumo mensal (dashboard) ─────────────────────────────
+// Nota: user_id removido — é um tipo de agregação derivada, não uma entidade.
 export interface ResumoMensal {
-  user_id:        string
   mes:            string
   total_entradas: number
   total_saidas:   number
 }
 
 // ── Despesas por categoria (dashboard) ───────────────────
+// Nota: user_id e mes removidos — dados derivados de agregação local.
 export interface DespesaCategoria {
-  user_id:        string
-  mes:            string
-  categoria_id:   string
-  categoria_nome: string
-  categoria_icone:string
-  total:          number
+  categoria_id:    string
+  categoria_nome:  string
+  categoria_icone: string
+  total:           number
 }
 
 // ── Auth ──────────────────────────────────────────────────

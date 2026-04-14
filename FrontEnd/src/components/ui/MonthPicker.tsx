@@ -4,16 +4,10 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
+import { mesLabel } from '../../lib/utils'
 
 const MESES_ABREV = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
                      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-
-function mesLabel(ym: string): string {
-  const [y, m] = ym.split('-')
-  const nome = new Date(Number(y), Number(m) - 1)
-    .toLocaleDateString('pt-BR', { month: 'long' })
-  return `${nome.charAt(0).toUpperCase()}${nome.slice(1)}/${y}`
-}
 
 interface MonthPickerProps {
   value: string                   // formato "YYYY-MM"
@@ -33,7 +27,6 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
   const anoAtual = parseInt(value.split('-')[0])
   const mesAtual = parseInt(value.split('-')[1])
 
-  // Fecha ao clicar fora
   useEffect(() => {
     function handle(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
@@ -42,7 +35,6 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
     return () => document.removeEventListener('mousedown', handle)
   }, [])
 
-  // Sincroniza o ano do grid com o valor externo
   useEffect(() => {
     setAnoGrid(parseInt(value.split('-')[0]))
   }, [value])
@@ -79,7 +71,6 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
     <div ref={ref} className={`relative ${className}`}>
       {/* ── Controle principal ── */}
       <div className="flex items-center gap-1">
-        {/* Botão retroceder */}
         <button
           onClick={() => navMes(-1)}
           disabled={!!(min && value <= min)}
@@ -89,7 +80,7 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
           <ChevronLeft size={14} />
         </button>
 
-        {/* Label clicável abre o grid */}
+        {/* Usa mesLabel('longo') da utils — formato "Abril/2026" */}
         <button
           onClick={() => setOpen(o => !o)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md min-w-[148px] justify-center
@@ -97,10 +88,9 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
                      hover:bg-blue-400/20 transition-colors"
         >
           <Calendar size={13} className="opacity-70" />
-          {mesLabel(value)}
+          {mesLabel(value, 'longo')}
         </button>
 
-        {/* Botão avançar */}
         <button
           onClick={() => navMes(1)}
           disabled={!!(max && value >= max)}
@@ -115,7 +105,6 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
       {open && (
         <div className="absolute top-full left-0 mt-2 z-50 rounded-xl border border-blue-400/20
                         bg-[#1a1f2e] shadow-2xl p-3 w-[220px]">
-
           {/* Navegação de ano */}
           <div className="flex items-center justify-between mb-3">
             <button
