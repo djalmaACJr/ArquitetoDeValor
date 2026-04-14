@@ -1,3 +1,5 @@
+// supabase/functions/transacoes/index.ts
+
 // ============================================================
 // Arquiteto de Valor — Edge Function: transacoes v8
 // ============================================================
@@ -54,10 +56,22 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
     .order("criado_em", { ascending: true })
     .range(offset, offset + perPage - 1);
 
+  // ← CORRIGIDO: Calcular ano e mês a partir da data se não existir
   if (mes) {
     const [ano, mesNum] = mes.split("-").map(Number);
-    q = q.eq("ano_tx", ano).eq("mes_tx", mesNum);
+    
+    // Se a fonte é a view, ela já tem ano_tx e mes_tx
+    // Se é a tabela, precisamos calcular
+    if (fonte === "vw_transacoes_com_saldo") {
+      q = q.eq("ano_tx", ano).eq("mes_tx", mesNum);
+    } else {
+      // Para a tabela transacoes, filtrar por data
+      const primeiroDia = `${ano}-${String(mesNum).padStart(2, '0')}-01`;
+      const ultimoDia   = `${ano}-${String(mesNum + 1).padStart(2, '0')}-01`;
+      q = q.gte("data", primeiroDia).lt("data", ultimoDia);
+    }
   }
+  
   if (contaId) q = q.eq("conta_id", contaId);
   if (catId)   q = q.eq("categoria_id", catId);
   if (status)  q = q.eq("status", status);
@@ -65,9 +79,11 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
   const { data, error } = await q;
   if (error) {
     logError("Listar transações", error);
+    console.log("❌ Erro ao listar:", error);
     return erro(error.message);
   }
   
+  console.log(`✅ Listadas ${data?.length ?? 0} transações`);
   logResponse(200, { count: data?.length, page, perPage });
   return json({ dados: data, pagina: page, por_pagina: perPage });
 }
@@ -88,7 +104,6 @@ async function buscarPorId(c: ReturnType<typeof db>, id: string) {
 async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string) {
   logRequest("POST", "/transacoes", body);
   
-  // Validações de negócio (RV-001 a RV-007)
   if (!body.descricao || String(body.descricao).length < 2) {
     logResponse(422, { erro: "RV-001: descricao deve ter entre 2 e 200 caracteres" });
     return erro("RV-001: descricao deve ter entre 2 e 200 caracteres");
@@ -157,7 +172,6 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
     return erro("Lançamento não encontrado", 404);
   }
 
-  // Validações opcionais dos campos enviados
   if (body.status !== undefined) {
     const erroStatus = validarStatus(body.status);
     if (erroStatus) {

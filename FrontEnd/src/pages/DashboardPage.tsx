@@ -1,4 +1,5 @@
-import { useState } from 'react'
+// src/pages/DashboardPage.tsx
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Eye, EyeOff, ChevronDown, ChevronRight } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
@@ -240,7 +241,7 @@ function GraficoBarras({ historico }: { historico: { mes: string; total_entradas
           </div>
         ))}
       </div>
-      <div className="h-[160px]">
+      <div style={{ position: 'relative', height: '300px', width: '100%' }}>
         <Bar
           data={{
             labels: historico.map(h => mesLabel(h.mes)),
@@ -250,11 +251,27 @@ function GraficoBarras({ historico }: { historico: { mes: string; total_entradas
             ],
           }}
           options={{
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { 
+              legend: { display: false },
+              filler: { propagate: true }
+            },
             scales: {
-              x: { ticks: { color: '#9ca3af', font: { size: 10 } }, grid: { display: false }, border: { display: false } },
-              y: { ticks: { color: '#9ca3af', font: { size: 10 }, callback: v => `R$${(Number(v)/1000).toFixed(0)}k` }, grid: { color: 'rgba(128,128,128,0.1)' }, border: { display: false } },
+              x: { 
+                ticks: { color: '#9ca3af', font: { size: 10 } }, 
+                grid: { display: false }, 
+                border: { display: false } 
+              },
+              y: { 
+                ticks: { 
+                  color: '#9ca3af', 
+                  font: { size: 10 }, 
+                  callback: v => `R$${(Number(v)/1000).toFixed(0)}k` 
+                }, 
+                grid: { color: 'rgba(128,128,128,0.1)' }, 
+                border: { display: false } 
+              },
             },
           }}
         />
@@ -276,19 +293,31 @@ function GraficoDonut({ titulo, subtitulo, total, dados, corCentro }: {
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
       <p className="text-[13px] font-semibold text-gray-700 dark:text-gray-200 mb-0.5">{titulo}</p>
       <p className="text-[11px] text-gray-400 mb-3">{subtitulo} · total {formatBRL(total)}</p>
-      <div className="relative w-[140px] h-[140px] mx-auto mb-3">
+      <div style={{ position: 'relative', width: '100%', height: '250px', marginBottom: '1rem' }}>
         <Doughnut
-          data={{ labels, datasets: [{ data: values, backgroundColor: cores, borderWidth: 0, hoverOffset: 4 }] }}
-          options={{ responsive: true, maintainAspectRatio: true, cutout: '68%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${formatBRL(ctx.parsed)}` } } } }}
+          data={{ 
+            labels, 
+            datasets: [{ 
+              data: values, 
+              backgroundColor: cores, 
+              borderWidth: 0, 
+              hoverOffset: 4 
+            }] 
+          }}
+          options={{ 
+            responsive: true, 
+            maintainAspectRatio: false,
+            cutout: '68%', 
+            plugins: { 
+              legend: { display: false }, 
+              tooltip: { 
+                callbacks: { 
+                  label: ctx => ` ${formatBRL(ctx.parsed)}` 
+                } 
+              } 
+            } 
+          }}
         />
-        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-[14px] font-bold text-gray-700 dark:text-gray-200">
-            {total >= 1000 ? `R$${(total/1000).toFixed(1)}k` : formatBRL(total)}
-          </span>
-          <span className="text-[10px]" style={{ color: corCentro }}>
-            {corCentro === '#ff6b4a' ? 'saídas' : 'entradas'}
-          </span>
-        </div>
       </div>
       <div className="space-y-1.5">
         {dados.map((d, i) => (
@@ -349,7 +378,22 @@ export default function DashboardPage() {
   const [mes, setMes]       = useState(mesAtual())
   const [oculto, setOculto] = useState(false)
 
-  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading } = useDashboard(mes)
+  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading, error } = useDashboard(mes)
+
+  // Debug
+  useEffect(() => {
+    console.log('🔍 Estado do Dashboard:', {
+      contas: contas.length,
+      pendentes: pendentes.length,
+      proximas: proximas.length,
+      resumo,
+      despesasCat: despesasCat.length,
+      receitasCat: receitasCat.length,
+      historico: historico.length,
+      loading,
+      error
+    })
+  }, [contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading, error])
 
   const totalPendentes = pendentes.reduce((s, t) => s + (t.tipo === 'DESPESA' ? -t.valor : t.valor), 0)
   const totalProximas  = proximas.reduce((s, t)  => s + (t.tipo === 'DESPESA' ? -t.valor : t.valor), 0)

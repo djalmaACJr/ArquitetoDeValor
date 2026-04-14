@@ -250,7 +250,7 @@ export default function LancamentosPage() {
     return { receitas, despesas, resultado: receitas - despesas }
   }, [lancamentos])
 
-  // Categorias pai para o select (exclui protegidas)
+  // CategoriasCategorias pai para o select (exclui protegidas)
   const catsPai = categorias.filter(c => !c.id_pai && !c.protegida)
   const catsSub = categorias.filter(c => !!c.id_pai)
 
@@ -291,32 +291,33 @@ export default function LancamentosPage() {
             cor: c.cor ?? undefined,
           }))}
         />
-
         {/* Categoria — multi-select agrupado */}
-        <MultiSelect
-          placeholder="Todas as categorias"
-          className="w-48"
-          values={filtCats}
-          onChange={setFiltCats}
-          options={[
-            ...catsPai.map(p => ({
-              value: p.id,
-              label: p.descricao,
-              icone: p.icone ?? undefined,
-              cor: p.cor ?? undefined,
-            })),
-            ...catsSub.map(s => {
-              const pai = catsPai.find(p => p.id === s.id_pai)
-              return {
-                value: s.id,
-                label: s.descricao,
-                icone: s.icone ?? undefined,
-                cor: s.cor ?? undefined,
-                grupo: pai?.descricao ?? '',
-              }
-            }),
-          ]}
-        />
+<MultiSelect
+  placeholder="Todas as categorias"
+  className="w-48"
+  values={filtCats}
+  onChange={setFiltCats}
+  options={[
+    ...catsPai.map(p => ({
+      value: p.id,
+      label: p.descricao,
+      icone: p.icone ?? undefined,
+      cor: p.cor ?? undefined,
+      // ← ADICIONE ISSO (não tem pai)
+    })),
+    ...catsSub.map(s => {
+      const pai = catsPai.find(p => p.id === s.id_pai)
+      return {
+        value: s.id,
+        label: s.descricao,
+        icone: s.icone ?? undefined,
+        cor: s.cor ?? undefined,
+        grupo: pai?.descricao ?? '',
+        idPai: s.id_pai ?? undefined, // ← ADICIONE ISSO
+      }
+    }),
+  ]}
+/> 
 
         {/* Status */}
         <SelectDark value={filtStatus} onChange={e => setFiltStatus(e.target.value)} className="w-36">
