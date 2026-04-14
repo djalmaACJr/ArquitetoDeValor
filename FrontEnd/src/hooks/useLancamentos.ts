@@ -166,5 +166,48 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     return editar(id, { status }, 'SOMENTE_ESTE')
   }
 
-  return { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus }
+  const criarTransferencia = async (payload: {
+    conta_origem_id: string
+    conta_destino_id: string
+    valor: number
+    data: string
+    descricao: string
+    status: 'PAGO' | 'PENDENTE' | 'PROJECAO'
+    observacao?: string
+  }): Promise<OpResult> => {
+    try {
+      const token = await getToken()
+      const res   = await fetch(`${BASE}/transferencias`, {
+        method: 'POST', headers: headers(token), body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (res.ok) await carregar()
+      return { ok: res.ok, erro: data?.erro ?? null }
+    } catch (e) { return { ok: false, erro: (e as Error).message } }
+  }
+
+  const editarTransferencia = async (
+    id: string,
+    payload: {
+      conta_origem_id?: string
+      conta_destino_id?: string
+      valor?: number
+      data?: string
+      descricao?: string
+      status?: 'PAGO' | 'PENDENTE' | 'PROJECAO'
+      observacao?: string
+    }
+  ): Promise<OpResult> => {
+    try {
+      const token = await getToken()
+      const res   = await fetch(`${BASE}/transferencias/${id}`, {
+        method: 'PUT', headers: headers(token), body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (res.ok) await carregar()
+      return { ok: res.ok, erro: data?.erro ?? null }
+    } catch (e) { return { ok: false, erro: (e as Error).message } }
+  }
+
+  return { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus, criarTransferencia, editarTransferencia }
 }

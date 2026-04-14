@@ -3,7 +3,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Eye, EyeOff, ChevronDown, ChevronRight } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
-import { mesAtual, mesesDisponiveis, mesLabel, formatBRL, formatData, GRUPOS_CONTA, CORES_CATEGORIA } from '../lib/utils'
+import { mesAtual, mesLabel, formatBRL, formatData, GRUPOS_CONTA, CORES_CATEGORIA } from '../lib/utils'
+import { MonthPicker } from '../components/ui/MonthPicker'
 import { Bar, Doughnut } from 'react-chartjs-2'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement,
@@ -71,6 +72,13 @@ function CardSaldo({ contas, oculto }: { contas: Conta[]; oculto: boolean }) {
   const total     = contas.reduce((s, c) => s + c.saldo_atual, 0)
   const projetado = total * 1.15
 
+  const progressoMes = (() => {
+    const hoje      = new Date()
+    const diaAtual  = hoje.getDate()
+    const totalDias = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
+    return Math.round((diaAtual / totalDias) * 100)
+  })()
+
   return (
     <div className="bg-av-dark rounded-xl p-4 relative overflow-hidden">
       <div className="absolute inset-0 opacity-[0.07]" style={{
@@ -96,7 +104,7 @@ function CardSaldo({ contas, oculto }: { contas: Conta[]; oculto: boolean }) {
       </p>
       <div className="relative mt-3 h-[3px] rounded-full bg-blue-400/15">
         <div className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-av-green to-av-amber"
-          style={{ width: oculto ? '0%' : (modo === 'hoje' ? '68%' : '85%') }}/>
+          style={{ width: oculto ? '0%' : (modo === 'fim' ? '100%' : `${progressoMes}%`) }}/>
       </div>
     </div>
   )
@@ -374,7 +382,6 @@ function SecaoContas({ contas }: { contas: Conta[] }) {
 // ── Dashboard Page ────────────────────────────────────────
 export default function DashboardPage() {
   const navigate = useNavigate()
-  const meses    = mesesDisponiveis(12)
   const [mes, setMes]       = useState(mesAtual())
   const [oculto, setOculto] = useState(false)
 
@@ -414,14 +421,7 @@ export default function DashboardPage() {
             {oculto ? 'Mostrar' : 'Ocultar'}
           </button>
 
-          <select
-            value={mes} onChange={e => setMes(e.target.value)}
-            className="text-[12px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 text-gray-500 dark:text-gray-300 cursor-pointer"
-          >
-            {meses.map(m => (
-              <option key={m} value={m}>{mesLabel(m).replace('/', ' 20')}</option>
-            ))}
-          </select>
+          <MonthPicker value={mes} onChange={setMes} />
 
           <button
             onClick={() => navigate('/lancamentos?novo=1')}

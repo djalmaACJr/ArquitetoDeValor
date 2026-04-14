@@ -1,6 +1,6 @@
 // src/pages/LancamentosPage.tsx
 import { useState, useMemo } from 'react'
-import { Plus, Pencil, Zap, ChevronDown, Check, X as XIcon } from 'lucide-react'
+import { Plus, Pencil, Zap, ChevronDown, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
 import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
@@ -11,6 +11,7 @@ import {
   BtnSalvar, BtnCancelar, Toast, ModalExcluir, Segmented,
 } from '../components/ui/shared'
 import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelect'
+import { MonthPicker } from '../components/ui/MonthPicker'
 
 // ── Helpers de data ───────────────────────────────────────────
 function mesAtual() {
@@ -18,21 +19,26 @@ function mesAtual() {
 }
 function mesLabel(ym: string) {
   const [y, m] = ym.split('-')
-  return new Date(Number(y), Number(m) - 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
-}
-function mesesOpcoes() {
-  const opts = []
-  const hoje = new Date()
-  for (let i = -3; i <= 6; i++) {
-    const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1)
-    const ym = d.toISOString().slice(0, 7)
-    opts.push({ value: ym, label: mesLabel(ym) })
-  }
-  return opts
+  const nome = new Date(Number(y), Number(m) - 1).toLocaleDateString('pt-BR', { month: 'long' })
+  return `${nome.charAt(0).toUpperCase()}${nome.slice(1)}/${y}`
 }
 function fmtData(iso: string) {
   const [y, m, d] = iso.split('-')
   return `${d}/${m}/${y}`
+}
+function fmtDataLabel(iso: string) {
+  const d = new Date(iso + 'T12:00:00')
+  const label = d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+function agruparPorData<T extends { data: string }>(items: T[]): [string, T[]][] {
+  const map = new Map<string, T[]>()
+  for (const l of items) {
+    const arr = map.get(l.data) ?? []
+    arr.push(l)
+    map.set(l.data, arr)
+  }
+  return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
 }
 function hoje() {
   return new Date().toISOString().slice(0, 10)
@@ -88,11 +94,17 @@ function AcaoBtn({ onClick, title, color = '#8b92a8', children }: {
 }
 
 // ── Modal de escopo de recorrência ────────────────────────────
-function ModalEscopo({ onConfirmar, onCancelar, acao }: {
+function ModalEscopo({ onConfirmar, onCancelar, acao, temPagasAnteriores }: {
   onConfirmar: (escopo: 'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS') => void
   onCancelar: () => void
   acao: 'editar' | 'excluir'
+  temPagasAnteriores: boolean
 }) {
+  const opcoes: ['SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS', string, string | null][] = [
+    ['SOMENTE_ESTE',     'Somente este lançamento',  null],
+    ['ESTE_E_SEGUINTES', 'Este e os seguintes',       null],
+    ['TODOS',            'Todos da série',            temPagasAnteriores ? 'Existem parcelas anteriores já pagas' : null],
+  ]
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onCancelar} />
@@ -104,18 +116,24 @@ function ModalEscopo({ onConfirmar, onCancelar, acao }: {
           Este lançamento faz parte de uma série. O que deseja {acao === 'editar' ? 'editar' : 'excluir'}?
         </p>
         <div className="flex flex-col gap-2">
-          {([
-            ['SOMENTE_ESTE',       'Somente este lançamento'],
-            ['ESTE_E_SEGUINTES',   'Este e os seguintes'],
-            ['TODOS',              'Todos da série'],
-          ] as const).map(([val, label]) => (
-            <button key={val} onClick={() => onConfirmar(val)}
-              className="w-full py-2.5 px-4 rounded-lg border border-white/10 text-[13px] text-left
-                transition-all hover:border-av-green hover:bg-av-green/5"
-              style={{ color: '#e8eaf0' }}>
-              {label}
-            </button>
-          ))}
+          {opcoes.map(([val, label, aviso]) => {
+            const desabilitado = val === 'TODOS' && temPagasAnteriores
+            return (
+              <button key={val}
+                onClick={() => !desabilitado && onConfirmar(val)}
+                disabled={desabilitado}
+                className={`w-full py-2.5 px-4 rounded-lg border text-[13px] text-left transition-all
+                  ${desabilitado
+                    ? 'border-white/5 opacity-40 cursor-not-allowed'
+                    : 'border-white/10 hover:border-av-green hover:bg-av-green/5 cursor-pointer'}`}
+                style={{ color: '#e8eaf0' }}>
+                <span>{label}</span>
+                {aviso && (
+                  <span className="block text-[10px] mt-0.5" style={{ color: '#f0b429' }}>{aviso}</span>
+                )}
+              </button>
+            )
+          })}
         </div>
         <button onClick={onCancelar} className="mt-3 text-[11px] w-full text-center"
           style={{ color: '#8b92a8' }}>Cancelar</button>
@@ -125,22 +143,31 @@ function ModalEscopo({ onConfirmar, onCancelar, acao }: {
 }
 
 // ── Formulário de lançamento ──────────────────────────────────
-type TipoTx = 'RECEITA' | 'DESPESA'
+type TipoTx = 'RECEITA' | 'DESPESA' | 'TRANSFERENCIA'
 type StatusTx = 'PAGO' | 'PENDENTE' | 'PROJECAO'
 interface FormState {
   tipo: TipoTx; data: string; descricao: string; valor: string
-  conta_id: string; categoria_id: string; status: StatusTx; observacao: string
+  conta_id: string; conta_destino_id: string; categoria_id: string
+  status: StatusTx; observacao: string
   recorrente: boolean; total_parcelas: string; tipo_recorrencia: string
 }
 const FORM_VAZIO: FormState = {
   tipo: 'DESPESA', data: hoje(), descricao: '', valor: '',
-  conta_id: '', categoria_id: '', status: 'PAGO', observacao: '',
+  conta_id: '', conta_destino_id: '', categoria_id: '', status: 'PAGO', observacao: '',
   recorrente: false, total_parcelas: '2', tipo_recorrencia: 'MENSAL',
 }
 function formDeLanc(l: Lancamento): FormState {
+  // Para transferências: descricao tem formato "[Transf. saída] Descrição 1/1"
+  // extraímos a descrição limpa e identificamos origem/destino pelo id_recorrencia
+  const isTransf = l.descricao?.startsWith('[Transf')
+  const descricaoLimpa = isTransf
+    ? l.descricao.replace(/^\[Transf\. (saída|entrada)\] /, '').replace(/ \d+\/\d+$/, '')
+    : l.descricao
   return {
-    tipo: l.tipo, data: l.data, descricao: l.descricao,
+    tipo: isTransf ? 'TRANSFERENCIA' : l.tipo,
+    data: l.data, descricao: descricaoLimpa,
     valor: String(l.valor), conta_id: l.conta_id,
+    conta_destino_id: '', // preenchido dinamicamente no abrirEditar para transferências
     categoria_id: l.categoria_id ?? '', status: l.status,
     observacao: l.observacao ?? '',
     recorrente: !!l.id_recorrencia, total_parcelas: String(l.total_parcelas ?? 2),
@@ -156,7 +183,7 @@ export default function LancamentosPage() {
   const [filtStatus,  setFiltStatus]  = useState('')
   const [comSaldo,    setComSaldo]    = useState(false)
 
-  const { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus } =
+  const { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus, criarTransferencia, editarTransferencia } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status: filtStatus, com_saldo: comSaldo })
 
   const { contas }     = useContas()
@@ -165,7 +192,7 @@ export default function LancamentosPage() {
   const [drawerOpen,  setDrawerOpen]  = useState(false)
   const [editando,    setEditando]    = useState<Lancamento | null>(null)
   const [excluindo,   setExcluindo]   = useState<Lancamento | null>(null)
-  const [escopoAcao,  setEscopoAcao]  = useState<{ lancamento: Lancamento; acao: 'editar' | 'excluir' } | null>(null)
+  const [escopoAcao,  setEscopoAcao]  = useState<{ lancamento: Lancamento; acao: 'editar' | 'excluir'; temPagasAnteriores: boolean } | null>(null)
   const [feedback,    setFeedback]    = useState<string | null>(null)
   const [form,        setForm]        = useState<FormState>(FORM_VAZIO)
   const [erro,        setErro]        = useState<string | null>(null)
@@ -181,19 +208,75 @@ export default function LancamentosPage() {
 
   const abrirNovo   = () => { setEditando(null); setForm(FORM_VAZIO); setErro(null); setDrawerOpen(true) }
   const abrirEditar = (l: Lancamento) => {
-    if (l.id_recorrencia) { setEscopoAcao({ lancamento: l, acao: 'editar' }); return }
-    setEditando(l); setForm(formDeLanc(l)); setErro(null); setDrawerOpen(true)
+    const isTransf = l.descricao?.startsWith('[Transf')
+    // Transferências: escopo não se aplica, abre direto
+    if (!isTransf && l.id_recorrencia) {
+      // Verifica se há parcelas anteriores pagas (nr_parcela > 1 com alguma paga antes)
+      const temPagasAnteriores = lancamentos.some(
+        x => x.id_recorrencia === l.id_recorrencia &&
+             x.status === 'PAGO' &&
+             (x.nr_parcela ?? 0) < (l.nr_parcela ?? 1)
+      )
+      setEscopoAcao({ lancamento: l, acao: 'editar', temPagasAnteriores })
+      return
+    }
+    const f = formDeLanc(l)
+    // Para transferência de saída, conta_destino_id é a outra perna (não temos diretamente — usuário informa)
+    // Para facilitar, buscamos o par pelo id_recorrencia na lista de lançamentos
+    if (isTransf && l.id_recorrencia) {
+      const par = lancamentos.find(x => x.id_recorrencia === l.id_recorrencia && x.id !== l.id)
+      if (par) {
+        // Garante que estamos editando sempre pela perna de saída
+        const saida   = l.descricao?.includes('saída')  ? l   : par
+        const entrada = l.descricao?.includes('entrada') ? l   : par
+        f.conta_id         = saida.conta_id
+        f.conta_destino_id = entrada.conta_id
+        setEditando(saida)
+        setForm(f); setErro(null); setDrawerOpen(true)
+        return
+      }
+    }
+    setEditando(l); setForm(f); setErro(null); setDrawerOpen(true)
   }
   const fechar = () => { setDrawerOpen(false); setEditando(null); setErro(null) }
 
   const salvar = async () => {
     if (!form.descricao.trim()) { setErro('Descrição é obrigatória.'); return }
     if (!form.valor || isNaN(parseFloat(form.valor))) { setErro('Valor inválido.'); return }
-    if (!form.conta_id) { setErro('Selecione a conta.'); return }
+    if (!form.conta_id) { setErro('Selecione a conta de origem.'); return }
     setSalvando(true); setErro(null)
 
+    // ── Transferência ──────────────────────────────────────
+    if (form.tipo === 'TRANSFERENCIA') {
+      if (!form.conta_destino_id) { setSalvando(false); setErro('Selecione a conta de destino.'); return }
+      if (form.conta_id === form.conta_destino_id) { setSalvando(false); setErro('Conta de origem e destino devem ser diferentes.'); return }
+      const payload = {
+        conta_origem_id:  form.conta_id,
+        conta_destino_id: form.conta_destino_id,
+        valor:       parseFloat(form.valor),
+        data:        form.data,
+        descricao:   form.descricao.trim(),
+        status:      form.status,
+        observacao:  form.observacao || undefined,
+      }
+      if (editando) {
+        // A API espera o id_recorrencia (UUID do par), não o id da transação individual
+        const idPar = editando.id_recorrencia ?? editando.id
+        const { ok, erro: e } = await editarTransferencia(idPar, payload)
+        setSalvando(false)
+        if (ok) { fechar(); toast('Transferência atualizada!') } else { setErro(e ?? 'Erro ao salvar.') }
+      } else {
+        const { ok, erro: e } = await criarTransferencia(payload)
+        setSalvando(false)
+        if (ok) { fechar(); toast('Transferência criada!') } else { setErro(e ?? 'Erro ao salvar.') }
+      }
+      return
+    }
+
+    // ── Receita / Despesa ──────────────────────────────────
     const payload: Partial<Lancamento> = {
-      tipo: form.tipo, data: form.data, descricao: form.descricao.trim(),
+      tipo: form.tipo as 'RECEITA' | 'DESPESA',
+      data: form.data, descricao: form.descricao.trim(),
       valor: parseFloat(form.valor), conta_id: form.conta_id,
       categoria_id: form.categoria_id || undefined,
       status: form.status,
@@ -230,7 +313,12 @@ export default function LancamentosPage() {
   const handleExcluir = async () => {
     if (!excluindo) return
     if (excluindo.id_recorrencia) {
-      setExcluindo(null); setEscopoAcao({ lancamento: excluindo, acao: 'excluir' }); return
+      const temPagasAnteriores = lancamentos.some(
+        x => x.id_recorrencia === excluindo.id_recorrencia &&
+             x.status === 'PAGO' &&
+             (x.nr_parcela ?? 0) < (excluindo.nr_parcela ?? 1)
+      )
+      setExcluindo(null); setEscopoAcao({ lancamento: excluindo, acao: 'excluir', temPagasAnteriores }); return
     }
     const { ok, erro: e } = await excluir(excluindo.id)
     setExcluindo(null)
@@ -271,13 +359,7 @@ export default function LancamentosPage() {
       {/* Filtros */}
       <div className="flex flex-wrap gap-2 mb-4 items-center">
         {/* Mês */}
-        <SelectDark value={mes} onChange={e => setMes(e.target.value)} className="w-44">
-          {mesesOpcoes().map(o => (
-            <option key={o.value} value={o.value} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
-              {o.label}
-            </option>
-          ))}
-        </SelectDark>
+        <MonthPicker value={mes} onChange={setMes} />
 
         {/* Conta — multi-select */}
         <MultiSelect
@@ -292,32 +374,31 @@ export default function LancamentosPage() {
           }))}
         />
         {/* Categoria — multi-select agrupado */}
-<MultiSelect
-  placeholder="Todas as categorias"
-  className="w-48"
-  values={filtCats}
-  onChange={setFiltCats}
-  options={[
-    ...catsPai.map(p => ({
-      value: p.id,
-      label: p.descricao,
-      icone: p.icone ?? undefined,
-      cor: p.cor ?? undefined,
-      // ← ADICIONE ISSO (não tem pai)
-    })),
-    ...catsSub.map(s => {
-      const pai = catsPai.find(p => p.id === s.id_pai)
-      return {
-        value: s.id,
-        label: s.descricao,
-        icone: s.icone ?? undefined,
-        cor: s.cor ?? undefined,
-        grupo: pai?.descricao ?? '',
-        idPai: s.id_pai ?? undefined, // ← ADICIONE ISSO
-      }
-    }),
-  ]}
-/> 
+        <MultiSelect
+          placeholder="Todas as categorias"
+          className="w-48"
+          values={filtCats}
+          onChange={setFiltCats}
+          options={[
+            ...catsPai.map(p => ({
+              value: p.id,
+              label: p.descricao,
+              icone: p.icone ?? undefined,
+              cor: p.cor ?? undefined,
+            })),
+            ...catsSub.map(s => {
+              const pai = catsPai.find(p => p.id === s.id_pai)
+              return {
+                value: s.id,
+                label: s.descricao,
+                icone: s.icone ?? undefined,
+                cor: s.cor ?? undefined,
+                grupo: pai?.descricao ?? '',
+                idPai: s.id_pai ?? undefined,
+              }
+            }),
+          ]}
+        />
 
         {/* Status */}
         <SelectDark value={filtStatus} onChange={e => setFiltStatus(e.target.value)} className="w-36">
@@ -367,182 +448,221 @@ export default function LancamentosPage() {
           ) : (
             <>
               {/* ── Tabela desktop ── */}
-              <div className="hidden md:block">
-                <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
-                  {/* Header */}
-                  <div className="grid gap-2 px-4 py-2.5 border-b border-white/10"
-                    style={{ gridTemplateColumns: '80px 1fr 1fr 1fr 90px auto 110px' }}>
-                    {['Data','Descrição','Categoria','Conta','Valor','Status',''].map(h => (
-                      <span key={h} className="text-[10px] font-bold uppercase tracking-wide"
-                        style={{ color: '#8b92a8' }}>{h}</span>
-                    ))}
-                  </div>
-                  {/* Linhas */}
-                  {lancamentos.map(l => {
-                    const isTransf = l.categoria_nome?.includes('Transfer') || l.descricao?.startsWith('[Transf')
-                    return (
-                      <div key={l.id}
-                        className="grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center"
-                        style={{ gridTemplateColumns: '80px 1fr 1fr 1fr 90px auto 110px' }}>
+              <div className="hidden md:block space-y-4">
+                {agruparPorData(lancamentos).map(([data, grupo]) => (
+                  <div key={data} className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
+                    {/* Cabeçalho do grupo de data */}
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 bg-white/[0.03]">
+                      <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
+                        {fmtDataLabel(data)}
+                      </span>
+                    </div>
+                    {/* Header colunas */}
+                    <div className="grid gap-2 px-4 py-2 border-b border-white/5"
+                      style={{ gridTemplateColumns: '28px 1fr 180px 160px 110px 80px 70px' }}>
+                      {['','Descrição','Categoria','Conta','Valor','Status',''].map((h, i) => (
+                        <span key={i} className="text-[10px] font-bold uppercase tracking-wide"
+                          style={{ color: '#4a5168' }}>{h}</span>
+                      ))}
+                    </div>
+                    {/* Linhas */}
+                    {grupo.map(l => {
+                      const isTransf  = l.categoria_nome?.includes('Transfer') || l.descricao?.startsWith('[Transf')
+                      const isRecorr  = !!l.id_recorrencia && !isTransf
+                      const isPago    = l.status === 'PAGO'
+                      const podeEditar = !(isRecorr && isPago && l.nr_parcela !== undefined && l.total_parcelas !== undefined && l.nr_parcela < l.total_parcelas)
+                      return (
+                        <div key={l.id}
+                          className="grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center"
+                          style={{ gridTemplateColumns: '28px 1fr 180px 160px 110px 80px 70px' }}>
 
-                        {/* Data */}
-                        <span className="text-[12px]" style={{ color: '#8b92a8' }}>{fmtData(l.data)}</span>
-
-                        {/* Descrição */}
-                        <div className="min-w-0">
-                          <p className="text-[12px] font-medium truncate" style={{ color: '#e8eaf0' }}>
-                            {l.descricao}
-                            {l.nr_parcela && l.total_parcelas && (
-                              <span className="ml-1 text-[10px]" style={{ color: '#8b92a8' }}>
-                                {l.nr_parcela}/{l.total_parcelas}
-                              </span>
+                          {/* Ícone tipo */}
+                          <div className="flex items-center justify-center">
+                            {isTransf ? (
+                              <ArrowLeftRight size={13} style={{ color: '#818cf8' }} />
+                            ) : isRecorr ? (
+                              <Repeat2 size={13} style={{ color: '#f0b429' }} title="Recorrente" />
+                            ) : (
+                              <span className="w-1.5 h-1.5 rounded-full bg-white/20 inline-block" />
                             )}
-                          </p>
-                          {l.observacao && (
-                            <p className="text-[10px] truncate mt-0.5" style={{ color: '#8b92a8' }}>{l.observacao}</p>
-                          )}
-                        </div>
-
-                        {/* Categoria */}
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {l.categoria_icone && (
-                            <span className="text-[13px] flex-shrink-0">{l.categoria_icone}</span>
-                          )}
-                          <span className="text-[11px] truncate" style={{ color: '#c5cad8' }}>
-                            {l.categoria_pai_nome
-                              ? `${l.categoria_pai_nome} / ${l.categoria_nome}`
-                              : (l.categoria_nome ?? '—')}
-                          </span>
-                        </div>
-
-                        {/* Conta */}
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <IconeConta icone={l.conta_icone} cor={l.conta_cor} size="sm" />
-                          <span className="text-[11px] truncate" style={{ color: '#c5cad8' }}>
-                            {l.conta_nome ?? '—'}
-                          </span>
-                        </div>
-
-                        {/* Valor */}
-                        <div>
-                          <p className="text-[13px] font-bold"
-                            style={{ color: l.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}>
-                            {l.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(l.valor)}
-                          </p>
-                          {l.valor_projetado && (
-                            <p className="text-[9px]" style={{ color: '#f0b429' }}>
-                              proj: {formatBRL(l.valor_projetado)}
-                            </p>
-                          )}
-                          {comSaldo && l.saldo_acumulado !== undefined && (
-                            <p className="text-[9px]" style={{ color: l.saldo_acumulado >= 0 ? '#00c896' : '#f87171' }}>
-                              saldo: {formatBRL(l.saldo_acumulado)}
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Status — clicável */}
-                        <div className="relative">
-                          <div onClick={() => setStatusOpen(statusOpen === l.id ? null : l.id)}
-                            className="cursor-pointer">
-                            <StatusBadge status={l.status} />
                           </div>
-                          {statusOpen === l.id && (
-                            <div className="absolute top-6 left-0 bg-[#252d42] border border-white/10 rounded-lg overflow-hidden z-10 shadow-xl">
-                              {(['PAGO','PENDENTE','PROJECAO'] as StatusTx[]).map(s => (
-                                <button key={s} onClick={() => handleStatus(l, s)}
-                                  className="flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-white/5 transition-colors">
-                                  {l.status === s && <Check size={10} style={{ color: '#00c896' }} />}
-                                  <span className="text-[11px]" style={{ color: '#e8eaf0' }}>
-                                    {s === 'PAGO' ? 'Pago' : s === 'PENDENTE' ? 'Pendente' : 'Projeção'}
-                                  </span>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
 
-                        {/* Ações */}
-                        <div className="flex items-center gap-1 justify-end">
-                          {!isTransf && l.status !== 'PAGO' && (
-                            <AcaoBtn onClick={() => setAntecipando(l)}
-                              title="Antecipar — ver detalhes e confirmar" color="#f0b429">
-                              <Zap size={12} />
-                            </AcaoBtn>
-                          )}
-                          {!isTransf && (
-                            <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
-                              <Pencil size={12} />
-                            </AcaoBtn>
-                          )}
-                          <div className="w-1" />
-                          {!isTransf && (
-                            <AcaoBtn onClick={() => setExcluindo(l)} title="Excluir" color="#f87171">
-                              <XIcon size={12} />
-                            </AcaoBtn>
-                          )}
+                          {/* Descrição */}
+                          <div className="min-w-0">
+                            <p className="text-[12px] font-medium truncate" style={{ color: '#e8eaf0' }}>
+                              {isTransf
+                                ? l.descricao?.replace(/^\[Transf\. (saída|entrada)\] /, '')
+                                : l.descricao}
+                              {l.nr_parcela && l.total_parcelas && (
+                                <span className="ml-1 text-[10px]" style={{ color: '#8b92a8' }}>
+                                  {l.nr_parcela}/{l.total_parcelas}
+                                </span>
+                              )}
+                            </p>
+                            {l.observacao && (
+                              <p className="text-[10px] truncate mt-0.5" style={{ color: '#8b92a8' }}>{l.observacao}</p>
+                            )}
+                          </div>
+
+                          {/* Categoria */}
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {l.categoria_icone && (
+                              <span className="text-[13px] flex-shrink-0">{l.categoria_icone}</span>
+                            )}
+                            <span className="text-[11px] truncate" style={{ color: '#c5cad8' }}>
+                              {l.categoria_pai_nome
+                                ? `${l.categoria_pai_nome} / ${l.categoria_nome}`
+                                : (l.categoria_nome ?? '—')}
+                            </span>
+                          </div>
+
+                          {/* Conta */}
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <IconeConta icone={l.conta_icone} cor={l.conta_cor} size="sm" />
+                            <span className="text-[11px] truncate" style={{ color: '#c5cad8' }}>
+                              {l.conta_nome ?? '—'}
+                            </span>
+                          </div>
+
+                          {/* Valor */}
+                          <div>
+                            <p className="text-[13px] font-bold"
+                              style={{ color: l.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}>
+                              {l.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(l.valor)}
+                            </p>
+                            {comSaldo && l.saldo_acumulado !== undefined && (
+                              <p className="text-[9px]" style={{ color: l.saldo_acumulado >= 0 ? '#00c896' : '#f87171' }}>
+                                saldo: {formatBRL(l.saldo_acumulado)}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Status — clicável */}
+                          <div className="relative">
+                            <div onClick={() => setStatusOpen(statusOpen === l.id ? null : l.id)}
+                              className="cursor-pointer">
+                              <StatusBadge status={l.status} />
+                            </div>
+                            {statusOpen === l.id && (
+                              <div className="absolute top-6 left-0 bg-[#252d42] border border-white/10 rounded-lg overflow-hidden z-10 shadow-xl">
+                                {(['PAGO','PENDENTE','PROJECAO'] as StatusTx[]).map(s => (
+                                  <button key={s} onClick={() => handleStatus(l, s)}
+                                    className="flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-white/5 transition-colors">
+                                    {l.status === s && <Check size={10} style={{ color: '#00c896' }} />}
+                                    <span className="text-[11px]" style={{ color: '#e8eaf0' }}>
+                                      {s === 'PAGO' ? 'Pago' : s === 'PENDENTE' ? 'Pendente' : 'Projeção'}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Ações */}
+                          <div className="flex items-center gap-1 justify-end">
+                            {!isTransf && !isPago && (
+                              isRecorr ? (
+                                <AcaoBtn onClick={() => setAntecipando(l)}
+                                  title="Antecipar parcelas" color="#f0b429">
+                                  <Zap size={12} />
+                                </AcaoBtn>
+                              ) : (
+                                <AcaoBtn onClick={() => setAntecipando(l)}
+                                  title="Pagar" color="#00c896">
+                                  <Check size={12} />
+                                </AcaoBtn>
+                              )
+                            )}
+                            {podeEditar && (
+                              <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
+                                <Pencil size={12} />
+                              </AcaoBtn>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )
-                  })}
-                </div>
+                      )
+                    })}
+                  </div>
+                ))}
               </div>
 
               {/* ── Cards mobile ── */}
-              <div className="md:hidden space-y-2">
-                {lancamentos.map(l => {
-                  const isTransf = l.descricao?.startsWith('[Transf')
-                  return (
-                    <div key={l.id}
-                      className="bg-[#1a1f2e] border border-white/10 rounded-xl p-3">
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-semibold truncate" style={{ color: '#e8eaf0' }}>
-                            {l.descricao}
-                            {l.nr_parcela && l.total_parcelas && (
-                              <span className="ml-1 text-[10px]" style={{ color: '#8b92a8' }}>
-                                {l.nr_parcela}/{l.total_parcelas}
-                              </span>
-                            )}
-                          </p>
-                          <p className="text-[10px] mt-0.5" style={{ color: '#8b92a8' }}>
-                            {fmtData(l.data)}
-                            {l.categoria_nome ? ` · ${l.categoria_nome}` : ''}
-                          </p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-[14px] font-bold"
-                            style={{ color: l.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}>
-                            {l.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(l.valor)}
-                          </p>
-                          <StatusBadge status={l.status} />
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <IconeConta icone={l.conta_icone} cor={l.conta_cor} size="sm" />
-                          <span className="text-[11px]" style={{ color: '#8b92a8' }}>{l.conta_nome}</span>
-                        </div>
-                        {!isTransf && (
-                          <div className="flex gap-1">
-                            {l.status !== 'PAGO' && (
-                              <AcaoBtn onClick={() => setAntecipando(l)}
-                                title="Antecipar" color="#f0b429">
-                                <Zap size={11} />
-                              </AcaoBtn>
-                            )}
-                            <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
-                              <Pencil size={11} />
-                            </AcaoBtn>
-                            <AcaoBtn onClick={() => setExcluindo(l)} title="Excluir" color="#f87171">
-                              <XIcon size={11} />
-                            </AcaoBtn>
+              <div className="md:hidden space-y-4">
+                {agruparPorData(lancamentos).map(([data, grupo]) => (
+                  <div key={data}>
+                    <p className="text-[11px] font-semibold px-1 mb-2" style={{ color: '#8b92a8' }}>
+                      {fmtDataLabel(data)}
+                    </p>
+                    <div className="space-y-2">
+                      {grupo.map(l => {
+                        const isTransf  = l.descricao?.startsWith('[Transf')
+                        const isRecorr  = !!l.id_recorrencia && !isTransf
+                        const isPago    = l.status === 'PAGO'
+                        const podeEditar = !(isRecorr && isPago && l.nr_parcela !== undefined && l.total_parcelas !== undefined && l.nr_parcela < l.total_parcelas)
+                        return (
+                          <div key={l.id}
+                            className="bg-[#1a1f2e] border border-white/10 rounded-xl p-3">
+                            <div className="flex items-start justify-between gap-2 mb-2">
+                              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                {isTransf ? (
+                                  <ArrowLeftRight size={12} style={{ color: '#818cf8', flexShrink: 0 }} />
+                                ) : isRecorr ? (
+                                  <Repeat2 size={12} style={{ color: '#f0b429', flexShrink: 0 }} />
+                                ) : null}
+                                <div className="min-w-0">
+                                  <p className="text-[13px] font-semibold truncate" style={{ color: '#e8eaf0' }}>
+                                    {isTransf
+                                      ? l.descricao?.replace(/^\[Transf\. (saída|entrada)\] /, '')
+                                      : l.descricao}
+                                    {l.nr_parcela && l.total_parcelas && (
+                                      <span className="ml-1 text-[10px]" style={{ color: '#8b92a8' }}>
+                                        {l.nr_parcela}/{l.total_parcelas}
+                                      </span>
+                                    )}
+                                  </p>
+                                  <p className="text-[10px] mt-0.5" style={{ color: '#8b92a8' }}>
+                                    {l.categoria_nome ?? ''}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <p className="text-[14px] font-bold"
+                                  style={{ color: l.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}>
+                                  {l.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(l.valor)}
+                                </p>
+                                <StatusBadge status={l.status} />
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <IconeConta icone={l.conta_icone} cor={l.conta_cor} size="sm" />
+                                <span className="text-[11px]" style={{ color: '#8b92a8' }}>{l.conta_nome}</span>
+                              </div>
+                              <div className="flex gap-1">
+                                {!isTransf && !isPago && (
+                                  isRecorr ? (
+                                    <AcaoBtn onClick={() => setAntecipando(l)} title="Antecipar parcelas" color="#f0b429">
+                                      <Zap size={11} />
+                                    </AcaoBtn>
+                                  ) : (
+                                    <AcaoBtn onClick={() => setAntecipando(l)} title="Pagar" color="#00c896">
+                                      <Check size={11} />
+                                    </AcaoBtn>
+                                  )
+                                )}
+                                {podeEditar && (
+                                  <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
+                                    <Pencil size={11} />
+                                  </AcaoBtn>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        )}
-                      </div>
+                        )
+                      })}
                     </div>
-                  )
-                })}
+                  </div>
+                ))}
               </div>
             </>
           )}
@@ -565,8 +685,12 @@ export default function LancamentosPage() {
         {/* Tipo */}
         <Field label="Tipo">
           <Segmented
-            opcoes={[{ value: 'DESPESA', label: 'Despesa' }, { value: 'RECEITA', label: 'Receita' }]}
-            value={form.tipo} onChange={v => set({ tipo: v as TipoTx })} />
+            opcoes={[
+              { value: 'DESPESA',       label: 'Despesa'       },
+              { value: 'RECEITA',       label: 'Receita'       },
+              { value: 'TRANSFERENCIA', label: 'Transferência' },
+            ]}
+            value={form.tipo} onChange={v => set({ tipo: v as TipoTx, categoria_id: '' })} />
         </Field>
 
         {/* Data */}
@@ -590,8 +714,8 @@ export default function LancamentosPage() {
             onChange={e => set({ valor: e.target.value })} placeholder="0,00" />
         </Field>
 
-        {/* Conta */}
-        <Field label="Conta *">
+        {/* Conta origem */}
+        <Field label={form.tipo === 'TRANSFERENCIA' ? 'Conta origem *' : 'Conta *'}>
           <SelectDark value={form.conta_id} onChange={e => set({ conta_id: e.target.value })}>
             <option value="">Selecione...</option>
             {contas.filter(c => c.ativa).map(c => (
@@ -602,8 +726,22 @@ export default function LancamentosPage() {
           </SelectDark>
         </Field>
 
-        {/* Categoria */}
-        <Field label="Categoria">
+        {/* Conta destino — só para transferência */}
+        {form.tipo === 'TRANSFERENCIA' && (
+          <Field label="Conta destino *">
+            <SelectDark value={form.conta_destino_id} onChange={e => set({ conta_destino_id: e.target.value })}>
+              <option value="">Selecione...</option>
+              {contas.filter(c => c.ativa && c.conta_id !== form.conta_id).map(c => (
+                <option key={c.conta_id} value={c.conta_id} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
+                  {c.nome}
+                </option>
+              ))}
+            </SelectDark>
+          </Field>
+        )}
+
+        {/* Categoria — oculta em transferências */}
+        {form.tipo !== 'TRANSFERENCIA' && <Field label="Categoria">
           <SelectDark value={form.categoria_id} onChange={e => set({ categoria_id: e.target.value })}>
             <option value="">Sem categoria</option>
             {catsPai.map(p => (
@@ -617,7 +755,7 @@ export default function LancamentosPage() {
               </optgroup>
             ))}
           </SelectDark>
-        </Field>
+        </Field>}
 
         {/* Status */}
         <Field label="Status">
@@ -630,31 +768,54 @@ export default function LancamentosPage() {
             value={form.status} onChange={v => set({ status: v as StatusTx })} />
         </Field>
 
-        {/* Recorrência — só na criação */}
-        {!editando && (
-          <Field label="Recorrência">
-            <Toggle checked={form.recorrente} onChange={v => set({ recorrente: v })}
-              label={form.recorrente ? 'Recorrente' : 'Lançamento único'} />
-            {form.recorrente && (
-              <div className="mt-2 flex gap-2">
-                <div className="flex-1">
-                  <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Frequência</p>
-                  <SelectDark value={form.tipo_recorrencia}
-                    onChange={e => set({ tipo_recorrencia: e.target.value })}>
-                    <option value="MENSAL"  style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Mensal</option>
-                    <option value="SEMANAL" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Semanal</option>
-                    <option value="ANUAL"   style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Anual</option>
-                    <option value="DIARIA"  style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Diária</option>
-                  </SelectDark>
+        {/* Recorrência */}
+        {!editando ? (
+          // Criação: toggle completo
+          form.tipo !== 'TRANSFERENCIA' && (
+            <Field label="Recorrência">
+              <Toggle checked={form.recorrente} onChange={v => set({ recorrente: v })}
+                label={form.recorrente ? 'Recorrente' : 'Lançamento único'} />
+              {form.recorrente && (
+                <div className="mt-2 flex gap-2">
+                  <div className="flex-1">
+                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Frequência</p>
+                    <SelectDark value={form.tipo_recorrencia}
+                      onChange={e => set({ tipo_recorrencia: e.target.value })}>
+                      <option value="MENSAL"  style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Mensal</option>
+                      <option value="SEMANAL" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Semanal</option>
+                      <option value="ANUAL"   style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Anual</option>
+                      <option value="DIARIA"  style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Diária</option>
+                    </SelectDark>
+                  </div>
+                  <div className="w-24">
+                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
+                    <Input type="number" min="2" max="999" value={form.total_parcelas}
+                      onChange={e => set({ total_parcelas: e.target.value })} />
+                  </div>
                 </div>
-                <div className="w-24">
-                  <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
-                  <Input type="number" min="2" max="999" value={form.total_parcelas}
-                    onChange={e => set({ total_parcelas: e.target.value })} />
+              )}
+            </Field>
+          )
+        ) : (
+          // Edição: exibe info de recorrência somente leitura (se recorrente)
+          editando.id_recorrencia && form.tipo !== 'TRANSFERENCIA' && (
+            <Field label="Recorrência">
+              <div className="flex items-center gap-2 bg-[#252d42] border border-white/10 rounded-lg px-3 py-2">
+                <Repeat2 size={14} style={{ color: '#f0b429', flexShrink: 0 }} />
+                <div>
+                  <p className="text-[12px] font-semibold" style={{ color: '#e8eaf0' }}>
+                    Parcela {editando.nr_parcela} de {editando.total_parcelas}
+                  </p>
+                  <p className="text-[10px]" style={{ color: '#8b92a8' }}>
+                    {editando.tipo_recorrencia === 'MENSAL'  ? 'Recorrência mensal'  :
+                     editando.tipo_recorrencia === 'SEMANAL' ? 'Recorrência semanal' :
+                     editando.tipo_recorrencia === 'ANUAL'   ? 'Recorrência anual'   :
+                     editando.tipo_recorrencia === 'DIARIA'  ? 'Recorrência diária'  : 'Recorrente'}
+                  </p>
                 </div>
               </div>
-            )}
-          </Field>
+            </Field>
+          )
         )}
 
         {/* Observação */}
@@ -692,6 +853,7 @@ export default function LancamentosPage() {
       {escopoAcao && (
         <ModalEscopo
           acao={escopoAcao.acao}
+          temPagasAnteriores={escopoAcao.temPagasAnteriores}
           onConfirmar={handleEscopoConfirmado}
           onCancelar={() => setEscopoAcao(null)}
         />
@@ -703,84 +865,146 @@ export default function LancamentosPage() {
       )}
 
       {/* Modal de antecipação */}
-      {antecipando && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setAntecipando(null)} />
-          <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-yellow-400/10 flex items-center justify-center">
-                <Zap size={16} style={{ color: '#f0b429' }} />
-              </div>
-              <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar antecipação</p>
-            </div>
+      {antecipando && (() => {
+        const isRecorrModal = !!antecipando.id_recorrencia
+        // Parcelas futuras não pagas da mesma série (nr_parcela > atual)
+        const futuras = isRecorrModal
+          ? lancamentos.filter(x =>
+              x.id_recorrencia === antecipando.id_recorrencia &&
+              x.id !== antecipando.id &&
+              x.status !== 'PAGO' &&
+              (x.nr_parcela ?? 0) > (antecipando.nr_parcela ?? 0)
+            ).sort((a, b) => (a.nr_parcela ?? 0) - (b.nr_parcela ?? 0))
+          : []
+        const valorFuturas   = futuras.reduce((s, x) => s + x.valor, 0)
+        const valorTotal     = antecipando.valor + valorFuturas
+        const totalParcelas  = 1 + futuras.length
+        const corValor       = antecipando.tipo === 'RECEITA' ? '#00c896' : '#f87171'
+        const sinal          = antecipando.tipo === 'RECEITA' ? '+' : '-'
 
-            {/* Dados do lançamento */}
-            <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
-              <div className="flex justify-between">
-                <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
-                <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{antecipando.descricao}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[11px]" style={{ color: '#8b92a8' }}>Data</span>
-                <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{fmtData(antecipando.data)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor</span>
-                <span className="text-[13px] font-bold"
-                  style={{ color: antecipando.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}>
-                  {antecipando.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(antecipando.valor)}
-                </span>
-              </div>
-              {antecipando.valor_projetado && (
-                <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor projetado original</span>
-                  <span className="text-[12px]" style={{ color: '#f0b429' }}>{formatBRL(antecipando.valor_projetado)}</span>
+        return (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60" onClick={() => setAntecipando(null)} />
+            <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
+
+              {/* Título */}
+              <div className="flex items-center gap-2 mb-4">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isRecorrModal ? 'bg-yellow-400/10' : 'bg-green-400/10'}`}>
+                  {isRecorrModal
+                    ? <Zap size={16} style={{ color: '#f0b429' }} />
+                    : <Check size={16} style={{ color: '#00c896' }} />}
                 </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-[11px]" style={{ color: '#8b92a8' }}>Status atual</span>
-                <StatusBadge status={antecipando.status} />
+                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>
+                  {isRecorrModal ? 'Confirmar antecipação' : 'Confirmar pagamento'}
+                </p>
               </div>
-              {antecipando.conta_nome && (
+
+              {/* Resumo */}
+              <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
+                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{antecipando.descricao}</span>
+                </div>
                 <div className="flex justify-between">
                   <span className="text-[11px]" style={{ color: '#8b92a8' }}>Conta</span>
-                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{antecipando.conta_nome}</span>
+                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{antecipando.conta_nome ?? '—'}</span>
                 </div>
-              )}
-              {antecipando.nr_parcela && antecipando.total_parcelas && (
-                <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcela</span>
-                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{antecipando.nr_parcela}/{antecipando.total_parcelas}</span>
-                </div>
-              )}
-            </div>
+                {isRecorrModal ? (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcela atual</span>
+                      <span className="text-[12px]" style={{ color: '#e8eaf0' }}>
+                        {antecipando.nr_parcela}/{antecipando.total_parcelas} — {formatBRL(antecipando.valor)}
+                      </span>
+                    </div>
+                    {futuras.length > 0 && (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcelas futuras a eliminar</span>
+                          <span className="text-[12px]" style={{ color: '#f87171' }}>
+                            {futuras.length}× — {formatBRL(valorFuturas)}
+                          </span>
+                        </div>
+                        <div className="border-t border-white/5 pt-2 flex justify-between">
+                          <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
+                            Total antecipado ({totalParcelas} parcelas)
+                          </span>
+                          <span className="text-[13px] font-bold" style={{ color: corValor }}>
+                            {sinal}{formatBRL(valorTotal)}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                    {futuras.length === 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor</span>
+                        <span className="text-[13px] font-bold" style={{ color: corValor }}>
+                          {sinal}{formatBRL(antecipando.valor)}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex justify-between">
+                    <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor</span>
+                    <span className="text-[13px] font-bold" style={{ color: corValor }}>
+                      {sinal}{formatBRL(antecipando.valor)}
+                    </span>
+                  </div>
+                )}
+              </div>
 
-            <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
-              O lançamento será marcado como <span style={{ color: '#00c896' }}>PAGO</span> com a data de hoje.
-            </p>
+              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
+                {isRecorrModal && futuras.length > 0
+                  ? <>A parcela atual será marcada como <span style={{ color: '#00c896' }}>PAGA</span> com o valor acumulado e as {futuras.length} parcelas futuras serão removidas.</>
+                  : <>O lançamento será marcado como <span style={{ color: '#00c896' }}>PAGO</span> com a data de hoje.</>
+                }
+              </p>
 
-            <div className="flex gap-2">
-              <button onClick={() => setAntecipando(null)}
-                className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20"
-                style={{ color: '#8b92a8' }}>
-                Cancelar
-              </button>
-              <button
-                onClick={async () => {
-                  const l = antecipando
-                  setAntecipando(null)
-                  const { ok, erro: e } = await antecipar(l.id)
-                  if (ok) toast('Lançamento antecipado!')
-                  else toast(e ?? 'Erro ao antecipar.')
-                }}
-                className="flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:bg-yellow-400/90"
-                style={{ background: '#f0b429', color: '#0a0f1a' }}>
-                <Zap size={12} className="inline mr-1" /> Confirmar
-              </button>
+              <div className="flex gap-2">
+                <button onClick={() => setAntecipando(null)}
+                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20"
+                  style={{ color: '#8b92a8' }}>
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    const l       = antecipando
+                    const futs    = futuras
+                    const vTotal  = valorTotal
+                    setAntecipando(null)
+                    if (isRecorrModal && futs.length > 0) {
+                      // 1. Atualiza a parcela atual: marca paga com valor acumulado
+                      const { ok: ok1, erro: e1 } = await editar(l.id, {
+                        status: 'PAGO',
+                        valor: vTotal,
+                        total_parcelas: l.nr_parcela, // encerra série na parcela atual
+                      }, 'SOMENTE_ESTE')
+                      if (!ok1) { toast(e1 ?? 'Erro ao antecipar.'); return }
+                      // 2. Exclui as futuras uma a uma (SOMENTE_ESTE)
+                      for (const f of futs) {
+                        await excluir(f.id, 'SOMENTE_ESTE')
+                      }
+                      toast(`Antecipado! ${futs.length} parcela${futs.length > 1 ? 's removidas' : ' removida'}.`)
+                    } else {
+                      // Avulso ou última parcela: só marca como pago
+                      const { ok, erro: e } = await antecipar(l.id)
+                      if (ok) toast('Pago!')
+                      else toast(e ?? 'Erro ao pagar.')
+                    }
+                  }}
+                  className={`flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all ${isRecorrModal ? 'hover:bg-yellow-400/90' : 'hover:bg-green-500/90'}`}
+                  style={{ background: isRecorrModal ? '#f0b429' : '#00c896', color: '#0a0f1a' }}>
+                  {isRecorrModal
+                    ? <><Zap size={12} className="inline mr-1" /> Antecipar</>
+                    : <><Check size={12} className="inline mr-1" /> Pagar</>
+                  }
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
