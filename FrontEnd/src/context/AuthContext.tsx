@@ -1,4 +1,7 @@
 // src/context/AuthContext.tsx
+// Correção: usa apenas onAuthStateChange com INITIAL_SESSION para estado inicial,
+// eliminando a race condition entre getSession() e onAuthStateChange() simultâneos.
+
 import { createContext, useContext, useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Session } from '@supabase/supabase-js'
@@ -17,22 +20,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (error || !data.session) {
-        supabase.auth.signOut()
-        setSession(null)
-      } else {
-        setSession(data.session)
-      }
-      setLoading(false)
-    })
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, s) => {
+    // Usando apenas onAuthStateChange — o evento INITIAL_SESSION dispara
+    // imediatamente com a sessão atual, eliminando a necessidade de
+    // chamar getSession() separadamente e a race condition que isso causava.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s)
-      setLoading(false)
+      // INITIAL_SESSION e todos os eventos subsequentes encerram o loading
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+        setLoading(false)
+      }
     })
 
-    return () => listener.subscription.unsubscribe()
+    return () => subscription.unsubscribe()
   }, [])
 
   const signIn = (email: string, password: string) =>

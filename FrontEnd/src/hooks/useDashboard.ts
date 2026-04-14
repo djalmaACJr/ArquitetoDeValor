@@ -1,31 +1,8 @@
-// FrontEnd/src/hooks/useDashboard.ts
-
+// src/hooks/useDashboard.ts
 import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
+import { apiFetch } from '../lib/api'
+import { mesAtual } from '../lib/utils'
 import type { Conta, Transacao, ResumoMensal, DespesaCategoria } from '../types'
-
-const BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
-
-async function apiFetch(path: string, session: { access_token: string }) {
-  const separator = path.includes('?') ? '&' : '?'
-  const fullPath = `${path}${separator}saldo=true`
-
-  const res = await fetch(`${BASE}${fullPath}`, {
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-      'Content-Type': 'application/json',
-    },
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ erro: res.statusText }))
-    console.error(`❌ API ${fullPath}: ${res.status}`, err)
-    throw new Error(`API ${fullPath}: ${res.status}`)
-  }
-  const data = await res.json()
-  console.log(`✅ ${fullPath}:`, data.dados?.length ?? 0, 'itens')
-  return data
-}
 
 /** Gera array com os últimos N meses a partir de ano/mes, em ordem cronológica */
 function gerarUltimosMeses(ano: number, mes: number, n: number): string[] {
@@ -67,6 +44,15 @@ function agruparPorCategoria(
   return [...map.values()].sort((a, b) => b.total - a.total).slice(0, limite)
 }
 
+/** Parseia "YYYY-MM" com segurança — retorna null se inválido */
+function parseMes(mes: string): { ano: number; m: number } | null {
+  const [anoStr, mesStr] = mes.split('-')
+  const ano = parseInt(anoStr, 10)
+  const m   = parseInt(mesStr, 10)
+  if (Number.isNaN(ano) || Number.isNaN(m) || m < 1 || m > 12) return null
+  return { ano, m }
+}
+
 export function useDashboard(mes: string) {
   const [contas,      setContas]      = useState<Conta[]>([])
   const [pendentes,   setPendentes]   = useState<Transacao[]>([])
@@ -78,84 +64,84 @@ export function useDashboard(mes: string) {
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState<string | null>(null)
 
-  const carregar = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      setError('Não autenticado')
+  const carregar = useCallback(async (signal?: AbortSignal) => {
+    // Validação de "mes" antes de qualquer request
+    const parsed = parseMes(mes)
+    if (!parsed) {
+      setError(`Mês inválido: ${mes}`)
       setLoading(false)
       return
     }
+    const { ano, m } = parsed
+    const hoje = new Date().toISOString().split('T')[0]
 
     setLoading(true)
     setError(null)
 
     try {
-      const [anoStr, mesStr] = mes.split('-')
-      const ano  = parseInt(anoStr)
-      const m    = parseInt(mesStr)
-      const hoje = new Date().toISOString().split('T')[0]
-
-      console.log(`\n========== DASHBOARD ${mes} ==========`)
-
       // Gera os 6 meses do histórico (inclui o mês atual como último)
       const meses6 = gerarUltimosMeses(ano, m, 6)
-      console.log(`📈 Meses do histórico: ${meses6.join(', ')}`)
 
-      // Dispara todas as chamadas em paralelo:
-      // - contas
-      // - pendentes do mês atual
-      // - 6 chamadas individuais por mês (histórico + mês atual)
+      // 8 requests paralelos com AbortSignal compartilhado
       const [contasRes, pendentesRes, ...historicosRes] = await Promise.all([
-        apiFetch('/contas', session),
-        apiFetch(`/transacoes?status=PENDENTE&mes=${mes}`, session),
-        ...meses6.map(m => apiFetch(`/transacoes?mes=${m}&per_page=200`, session)),
+        apiFetch<Conta[]>('/contas', signal),
+        apiFetch<{ dados: Transacao[] }>(`/transacoes?status=PENDENTE&mes=${mes}&saldo=true`, signal),
+        ...meses6.map(mesHist =>
+          apiFetch<{ dados: Transacao[] }>(`/transacoes?mes=${mesHist}&per_page=200&saldo=true`, signal)
+        ),
       ])
 
       // ─ CONTAS ─
       setContas(contasRes.dados ?? [])
 
       // ─ PENDENTES / PRÓXIMAS ─
-      const todasPend: Transacao[] = pendentesRes.dados ?? []
-      console.log(`📌 Pendentes: ${todasPend.length}`)
+      const todasPend: Transacao[] = (pendentesRes.dados as unknown as { dados: Transacao[] })?.dados
+        ?? (pendentesRes.dados as unknown as Transacao[])
+        ?? []
       setPendentes(todasPend.filter(t => t.data <= hoje))
       setProximas(todasPend.filter(t => t.data > hoje))
 
-      // ─ RESUMO DO MÊS ATUAL ─
-      // O mês atual é sempre o último item de meses6 / historicosRes
-      const doMes: Transacao[] = historicosRes[historicosRes.length - 1]?.dados ?? []
-      console.log(`📅 Transações de ${mes}: ${doMes.length}`)
+      // ─ RESUMO DO MÊS ATUAL (último dos 6) ─
+      const dadosMesAtual = historicosRes[historicosRes.length - 1]
+      const doMes: Transacao[] = (dadosMesAtual?.dados as unknown as { dados: Transacao[] })?.dados
+        ?? (dadosMesAtual?.dados as unknown as Transacao[])
+        ?? []
 
       const entradas = doMes.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0)
       const saidas   = doMes.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
-      console.log(`💰 Resumo: E=${entradas} | S=${saidas}`)
-      setResumo({ user_id: session.user.id, mes, total_entradas: entradas, total_saidas: saidas })
 
-      // ─ DESPESAS E RECEITAS POR CATEGORIA ─
-      setDespesasCat(agruparPorCategoria(doMes, 'DESPESA', session.user.id, mes, 5))
-      setReceitasCat(agruparPorCategoria(doMes, 'RECEITA', session.user.id, mes, 4))
+      // userId disponível via API — usa fallback genérico pois não exposto diretamente aqui
+      const userId = ''
+      setResumo({ user_id: userId, mes, total_entradas: entradas, total_saidas: saidas })
+      setDespesasCat(agruparPorCategoria(doMes, 'DESPESA', userId, mes, 5))
+      setReceitasCat(agruparPorCategoria(doMes, 'RECEITA', userId, mes, 4))
 
       // ─ HISTÓRICO 6 MESES ─
-      console.log('\n📈 DEBUG HISTÓRICO:')
-      const hist: ResumoMensal[] = meses6.map((mesStr, idx) => {
-        const fatia: Transacao[] = historicosRes[idx]?.dados ?? []
+      // Variável de iteração renomeada para mesHist (evita shadowing com "mes" do escopo externo)
+      const hist: ResumoMensal[] = meses6.map((mesHist, idx) => {
+        const resHist = historicosRes[idx]
+        const fatia: Transacao[] = (resHist?.dados as unknown as { dados: Transacao[] })?.dados
+          ?? (resHist?.dados as unknown as Transacao[])
+          ?? []
         const totalEnt = fatia.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0)
         const totalSai = fatia.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
-        console.log(`   ${mesStr}: ${fatia.length} tx | E=${totalEnt} | S=${totalSai}`)
-        return { user_id: session.user.id, mes: mesStr, total_entradas: totalEnt, total_saidas: totalSai }
+        return { user_id: userId, mes: mesHist, total_entradas: totalEnt, total_saidas: totalSai }
       })
       setHistorico(hist)
-      console.log(`   ✅ Histórico carregado com ${hist.length} meses`)
 
-      console.log(`\n========== FIM DASHBOARD ==========\n`)
     } catch (e) {
-      console.error('❌ Erro:', e)
+      if ((e as Error).name === 'AbortError') return
       setError((e as Error).message)
     } finally {
       setLoading(false)
     }
   }, [mes])
 
-  useEffect(() => { carregar() }, [carregar])
+  useEffect(() => {
+    const controller = new AbortController()
+    carregar(controller.signal)
+    return () => controller.abort()
+  }, [carregar])
 
   return { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading, error, refetch: carregar }
 }

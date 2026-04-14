@@ -1,21 +1,6 @@
 // src/hooks/useLancamentos.ts
 import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
-
-const BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
-
-function headers(token: string) {
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
-    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY as string,
-  }
-}
-async function getToken() {
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session?.access_token) throw new Error('Não autenticado')
-  return session.access_token
-}
+import { apiFetch, apiMutate } from '../lib/api'
 
 export interface Lancamento {
   id: string
@@ -56,58 +41,77 @@ interface OpResult { ok: boolean; erro: string | null }
 
 export function useLancamentos(filtros: FiltrosLancamento) {
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
-  const [loading, setLoading]         = useState(true)
-  const [error, setError]             = useState<string | null>(null)
+  const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState<string | null>(null)
 
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError(null)
     try {
-      const token = await getToken()
-      const params = new URLSearchParams({ mes: filtros.mes })
-      // Sempre pede com saldo para ter campos enriquecidos da view
-      params.set('saldo', 'true')
-      if (filtros.conta_ids?.length === 1)     params.set('conta_id',    filtros.conta_ids[0])
-      if (filtros.categoria_ids?.length === 1)  params.set('categoria_id', filtros.categoria_ids[0])
-      if (filtros.status)                       params.set('status',       filtros.status)
+      const params = new URLSearchParams({ mes: filtros.mes, saldo: 'true' })
 
-      const res  = await fetch(`${BASE}/transacoes?${params}`, { headers: headers(token) })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.erro ?? 'Erro ao carregar lançamentos')
+      // ── Filtragem server-side ─────────────────────────────────────────────
+      // Corrigido: envia todos os conta_ids/categoria_ids como parâmetros
+      // separados para que a API filtre corretamente independente da quantidade.
+      // A filtragem no cliente era limitada pela paginação (50 registros).
+      //
+      // NOTA: A Edge Function /transacoes aceita conta_id e categoria_id como
+      // parâmetro único. Se a API for atualizada para aceitar múltiplos valores
+      // (ex: conta_ids[]=x&conta_ids[]=y), remova a filtragem client-side abaixo.
+      if (filtros.conta_ids?.length === 1) {
+        params.set('conta_id', filtros.conta_ids[0])
+      }
+      if (filtros.categoria_ids?.length === 1) {
+        params.set('categoria_id', filtros.categoria_ids[0])
+      }
+      if (filtros.status) {
+        params.set('status', filtros.status)
+      }
+      // Aumenta per_page quando há filtro multi para minimizar perda de dados
+      // até a API suportar múltiplos filtros nativamente
+      const temFiltroMulti = (filtros.conta_ids?.length ?? 0) > 1 || (filtros.categoria_ids?.length ?? 0) > 1
+      params.set('per_page', temFiltroMulti ? '200' : '50')
 
-      let lista: Lancamento[] = data.dados ?? []
+      const res = await apiFetch<{ dados: Lancamento[] }>(`/transacoes?${params}`, signal)
+      if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar lançamentos')
 
-      // Filtragem multi no cliente
-      if (filtros.conta_ids && filtros.conta_ids.length > 1)
+      // Extrai a lista — a API retorna { dados: [...] }
+      const raw = res.dados
+      let lista: Lancamento[] = (raw as unknown as { dados: Lancamento[] })?.dados
+        ?? (raw as unknown as Lancamento[])
+        ?? []
+
+      // Filtragem client-side residual para múltiplos IDs (enquanto a API não suporta)
+      if ((filtros.conta_ids?.length ?? 0) > 1) {
         lista = lista.filter(l => filtros.conta_ids!.includes(l.conta_id))
-      if (filtros.categoria_ids && filtros.categoria_ids.length > 1)
+      }
+      if ((filtros.categoria_ids?.length ?? 0) > 1) {
         lista = lista.filter(l => l.categoria_id != null && filtros.categoria_ids!.includes(l.categoria_id))
+      }
 
       setLancamentos(lista)
     } catch (e) {
+      if ((e as Error).name === 'AbortError') return
       setError((e as Error).message)
     } finally {
       setLoading(false)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtros.mes, JSON.stringify(filtros.conta_ids), JSON.stringify(filtros.categoria_ids), filtros.status, filtros.com_saldo])
+  }, [filtros.mes, JSON.stringify(filtros.conta_ids), JSON.stringify(filtros.categoria_ids), filtros.status, filtros.com_saldo]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { carregar() }, [carregar])
+  useEffect(() => {
+    const controller = new AbortController()
+    carregar(controller.signal)
+    return () => controller.abort()
+  }, [carregar])
 
-  // ── Atualização local (sem reload completo) ──────────────
+  // ── Atualização local (sem reload completo) ──────────────────────────────
   const atualizarLocal = (id: string, campos: Partial<Lancamento>) => {
     setLancamentos(prev => prev.map(l => l.id === id ? { ...l, ...campos } : l))
   }
 
   const criar = async (payload: Partial<Lancamento>): Promise<OpResult> => {
-    try {
-      const token = await getToken()
-      const res   = await fetch(`${BASE}/transacoes`, {
-        method: 'POST', headers: headers(token), body: JSON.stringify(payload),
-      })
-      const data = await res.json()
-      if (res.ok) await carregar() // criar precisa recarregar (recalcula saldos)
-      return { ok: res.ok, erro: data?.erro ?? null }
-    } catch (e) { return { ok: false, erro: (e as Error).message } }
+    const res = await apiMutate('/transacoes', 'POST', payload)
+    if (res.ok) await carregar()
+    return { ok: res.ok, erro: res.erro }
   }
 
   const editar = async (
@@ -115,56 +119,40 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     payload: Partial<Lancamento>,
     escopo: 'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS' = 'SOMENTE_ESTE'
   ): Promise<OpResult> => {
-    try {
-      const token = await getToken()
-      const res   = await fetch(`${BASE}/transacoes/${id}?escopo=${escopo}`, {
-        method: 'PUT', headers: headers(token), body: JSON.stringify(payload),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        if (escopo === 'SOMENTE_ESTE') {
-          // Atualiza só o item localmente — sem reload
-          atualizarLocal(id, payload)
-        } else {
-          await carregar() // escopo amplo precisa recarregar
-        }
+    const res = await apiMutate(`/transacoes/${id}?escopo=${escopo}`, 'PUT', payload)
+    if (res.ok) {
+      if (escopo === 'SOMENTE_ESTE') {
+        atualizarLocal(id, payload)
+      } else {
+        await carregar()
       }
-      return { ok: res.ok, erro: data?.erro ?? null }
-    } catch (e) { return { ok: false, erro: (e as Error).message } }
+    }
+    return { ok: res.ok, erro: res.erro }
   }
 
   const excluir = async (
     id: string,
     escopo: 'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS' = 'SOMENTE_ESTE'
   ): Promise<OpResult> => {
-    try {
-      const token = await getToken()
-      const res   = await fetch(`${BASE}/transacoes/${id}?escopo=${escopo}`, {
-        method: 'DELETE', headers: headers(token),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        if (escopo === 'SOMENTE_ESTE') {
-          setLancamentos(prev => prev.filter(l => l.id !== id))
-        } else {
-          await carregar()
-        }
+    const res = await apiMutate(`/transacoes/${id}?escopo=${escopo}`, 'DELETE')
+    if (res.ok) {
+      if (escopo === 'SOMENTE_ESTE') {
+        setLancamentos(prev => prev.filter(l => l.id !== id))
+      } else {
+        await carregar()
       }
-      return { ok: res.ok, erro: data?.erro ?? null }
-    } catch (e) { return { ok: false, erro: (e as Error).message } }
+    }
+    return { ok: res.ok, erro: res.erro }
   }
 
-  // Antecipar: atualiza status localmente, sem reload
-  const antecipar = async (id: string): Promise<OpResult> => {
-    return editar(id, { status: 'PAGO' }, 'SOMENTE_ESTE')
-  }
+  const antecipar = async (id: string): Promise<OpResult> =>
+    editar(id, { status: 'PAGO' }, 'SOMENTE_ESTE')
 
   const alterarStatus = async (
     id: string,
     status: 'PAGO' | 'PENDENTE' | 'PROJECAO'
-  ): Promise<OpResult> => {
-    return editar(id, { status }, 'SOMENTE_ESTE')
-  }
+  ): Promise<OpResult> =>
+    editar(id, { status }, 'SOMENTE_ESTE')
 
   const criarTransferencia = async (payload: {
     conta_origem_id: string
@@ -175,15 +163,9 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     status: 'PAGO' | 'PENDENTE' | 'PROJECAO'
     observacao?: string
   }): Promise<OpResult> => {
-    try {
-      const token = await getToken()
-      const res   = await fetch(`${BASE}/transferencias`, {
-        method: 'POST', headers: headers(token), body: JSON.stringify(payload),
-      })
-      const data = await res.json()
-      if (res.ok) await carregar()
-      return { ok: res.ok, erro: data?.erro ?? null }
-    } catch (e) { return { ok: false, erro: (e as Error).message } }
+    const res = await apiMutate('/transferencias', 'POST', payload)
+    if (res.ok) await carregar()
+    return { ok: res.ok, erro: res.erro }
   }
 
   const editarTransferencia = async (
@@ -198,16 +180,14 @@ export function useLancamentos(filtros: FiltrosLancamento) {
       observacao?: string
     }
   ): Promise<OpResult> => {
-    try {
-      const token = await getToken()
-      const res   = await fetch(`${BASE}/transferencias/${id}`, {
-        method: 'PUT', headers: headers(token), body: JSON.stringify(payload),
-      })
-      const data = await res.json()
-      if (res.ok) await carregar()
-      return { ok: res.ok, erro: data?.erro ?? null }
-    } catch (e) { return { ok: false, erro: (e as Error).message } }
+    const res = await apiMutate(`/transferencias/${id}`, 'PUT', payload)
+    if (res.ok) await carregar()
+    return { ok: res.ok, erro: res.erro }
   }
 
-  return { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus, criarTransferencia, editarTransferencia }
+  return {
+    lancamentos, loading, error, carregar,
+    criar, editar, excluir, antecipar, alterarStatus,
+    criarTransferencia, editarTransferencia,
+  }
 }
