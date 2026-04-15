@@ -14,6 +14,7 @@ export interface Lancamento {
   status: 'PAGO' | 'PENDENTE' | 'PROJECAO'
   valor_projetado: number | null
   id_recorrencia: string | null
+  id_par_transferencia: string | null  // identifica o par de transferência
   nr_parcela: number | null
   total_parcelas: number | null
   tipo_recorrencia: string | null
@@ -188,6 +189,6 @@ export function useLancamentos(filtros: FiltrosLancamento) {
   return {
     lancamentos, loading, error, carregar,
     criar, editar, excluir, antecipar, alterarStatus,
-    criarTransferencia, editarTransferencia,
+    criarTransferencia, editarTransferencia, excluirTransferencia,
   }
 }

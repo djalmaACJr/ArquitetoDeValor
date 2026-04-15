@@ -153,9 +153,8 @@ const FORM_VAZIO: FormState = {
   recorrente: false, total_parcelas: '2', tipo_recorrencia: 'MENSAL',
 }
 function formDeLanc(l: Lancamento): FormState {
-  // Para transferências: descricao tem formato "[Transf. saída] Descrição 1/1"
-  // extraímos a descrição limpa e identificamos origem/destino pelo id_recorrencia
-  const isTransf = l.descricao?.startsWith('[Transf')
+  // Identificação de transferência pelo campo dedicado id_par_transferencia
+  const isTransf = !!l.id_par_transferencia
   const descricaoLimpa = isTransf
     ? l.descricao.replace(/^\[Transf\. (saída|entrada)\] /, '').replace(/ \d+\/\d+$/, '')
     : l.descricao
@@ -179,7 +178,7 @@ export default function LancamentosPage() {
   const [filtStatus,  setFiltStatus]  = useState('')
   const [comSaldo,    setComSaldo]    = useState(false)
 
-  const { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus, criarTransferencia, editarTransferencia } =
+  const { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus, criarTransferencia, editarTransferencia, excluirTransferencia } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status: filtStatus, com_saldo: comSaldo })
 
   const { contas }     = useContas()
@@ -219,8 +218,8 @@ export default function LancamentosPage() {
     const f = formDeLanc(l)
     // Para transferência de saída, conta_destino_id é a outra perna (não temos diretamente — usuário informa)
     // Para facilitar, buscamos o par pelo id_recorrencia na lista de lançamentos
-    if (isTransf && l.id_recorrencia) {
-      const par = lancamentos.find(x => x.id_recorrencia === l.id_recorrencia && x.id !== l.id)
+    if (isTransf && l.id_par_transferencia) {
+      const par = lancamentos.find(x => x.id_par_transferencia === l.id_par_transferencia && x.id !== l.id)
       if (par) {
         // Garante que estamos editando sempre pela perna de saída
         const saida   = l.descricao?.includes('saída')  ? l   : par
@@ -256,8 +255,8 @@ export default function LancamentosPage() {
         observacao:  form.observacao || undefined,
       }
       if (editando) {
-        // A API espera o id_recorrencia (UUID do par), não o id da transação individual
-        const idPar = editando.id_recorrencia ?? editando.id
+        // A API espera o id_par_transferencia (campo dedicado)
+        const idPar = editando.id_par_transferencia ?? editando.id
         const { ok, erro: e } = await editarTransferencia(idPar, payload)
         setSalvando(false)
         if (ok) { fechar(); toast('Transferência atualizada!') } else { setErro(e ?? 'Erro ao salvar.') }
@@ -463,7 +462,7 @@ export default function LancamentosPage() {
                     </div>
                     {/* Linhas */}
                     {grupo.map(l => {
-                      const isTransf  = l.categoria_nome?.includes('Transfer') || l.descricao?.startsWith('[Transf')
+                      const isTransf  = !!l.id_par_transferencia
                       const isRecorr  = !!l.id_recorrencia && !isTransf
                       const isPago    = l.status === 'PAGO'
                       const podeEditar = !(isRecorr && isPago && l.nr_parcela !== undefined && l.total_parcelas !== undefined && l.nr_parcela < l.total_parcelas)
@@ -591,7 +590,7 @@ export default function LancamentosPage() {
                     </p>
                     <div className="space-y-2">
                       {grupo.map(l => {
-                        const isTransf  = l.descricao?.startsWith('[Transf')
+                        const isTransf  = !!l.id_par_transferencia
                         const isRecorr  = !!l.id_recorrencia && !isTransf
                         const isPago    = l.status === 'PAGO'
                         const podeEditar = !(isRecorr && isPago && l.nr_parcela !== undefined && l.total_parcelas !== undefined && l.nr_parcela < l.total_parcelas)

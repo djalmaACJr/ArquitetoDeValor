@@ -1,7 +1,7 @@
 // supabase/functions/transferencias/index.ts
-// Correção principal: função listar() reescrita para eliminar N+1 queries.
-// Antes: 1 SELECT para débitos + N SELECTs individuais para créditos.
-// Depois: 1 SELECT para débitos + 1 SELECT com .in() para todos os créditos.
+// Usa id_par_transferencia (campo dedicado) em vez de id_recorrencia
+// para identificar o par débito+crédito de uma transferência.
+// Isso libera id_recorrencia para transferências recorrentes.
 
 import "@supabase/functions-js/edge-runtime.d.ts";
 import {
@@ -27,6 +27,7 @@ interface Transacao {
   descricao: string
   status: string
   id_recorrencia: string | null
+  id_par_transferencia: string | null
   nr_parcela: number | null
   total_parcelas: number | null
   tipo_recorrencia: string | null
@@ -51,16 +52,16 @@ async function idCategoriaTransferencias(
   return data?.id ?? null;
 }
 
-/** Retorna o par de transações (débito + crédito) pelo id_recorrencia */
+/** Retorna o par de transações (débito + crédito) pelo id_par_transferencia */
 async function buscarPar(
   c: ReturnType<typeof db>,
-  idRecorrencia: string,
+  idPar: string,
   userId: string
 ): Promise<{ debito: Transacao; credito: Transacao } | null> {
   const { data, error } = await c
     .from("transacoes")
     .select("*")
-    .eq("id_recorrencia", idRecorrencia)
+    .eq("id_par_transferencia", idPar)
     .eq("user_id", userId)
     .order("tipo");
 
@@ -74,19 +75,21 @@ async function buscarPar(
 /** Monta o objeto de resposta consolidado do par */
 function montarTransferencia(debito: Transacao, credito: Transacao) {
   return {
-    id_par:           debito.id_recorrencia,
-    conta_origem_id:  debito.conta_id,
-    conta_destino_id: credito.conta_id,
-    valor:            debito.valor,
-    data:             debito.data,
-    descricao:        debito.descricao?.replace(/^\[Transf\. saída\] ?/, "") || null,
-    status:           debito.status,
-    total_parcelas:   debito.total_parcelas ?? null,
-    parcela_atual:    debito.nr_parcela ?? null,
-    id_debito:        debito.id,
-    id_credito:       credito.id,
-    criado_em:        debito.criado_em,
-    atualizado_em:    debito.atualizado_em,
+    id_par:               debito.id_par_transferencia,
+    conta_origem_id:      debito.conta_id,
+    conta_destino_id:     credito.conta_id,
+    valor:                debito.valor,
+    data:                 debito.data,
+    descricao:            debito.descricao?.replace(/^\[Transf\. saída\] ?/, "") || null,
+    status:               debito.status,
+    id_recorrencia:       debito.id_recorrencia,
+    total_parcelas:       debito.total_parcelas ?? null,
+    parcela_atual:        debito.nr_parcela ?? null,
+    tipo_recorrencia:     debito.tipo_recorrencia ?? null,
+    id_debito:            debito.id,
+    id_credito:           credito.id,
+    criado_em:            debito.criado_em,
+    atualizado_em:        debito.atualizado_em,
   };
 }
 
@@ -164,7 +167,6 @@ async function buscarPorId(c: ReturnType<typeof db>, idPar: string, userId: stri
   return json(montarTransferencia(par.debito, par.credito));
 }
 
-// ── LISTAR — corrigido: de N+1 para 2 queries ────────────────────────────────
 async function listar(
   c: ReturnType<typeof db>,
   userId: string,
@@ -173,14 +175,13 @@ async function listar(
   const catId = await idCategoriaTransferencias(c, userId);
   if (!catId) return erro("Categoria Transferências não encontrada", 500);
 
-  // Query 1: busca todos os débitos (perna de saída) do período
   let query = c
     .from("transacoes")
     .select("*")
     .eq("user_id", userId)
     .eq("categoria_id", catId)
     .eq("tipo", "DESPESA")
-    .not("id_recorrencia", "is", null)
+    .not("id_par_transferencia", "is", null)
     .order("data", { ascending: false });
 
   const mes = params.get("mes");
@@ -199,26 +200,26 @@ async function listar(
   if (err) return erro(err.message, 500);
   if (!debitos || debitos.length === 0) return json([]);
 
-  // Query 2: busca TODOS os créditos de uma vez com .in()
-  const idsRecorrencia = debitos.map((d: Transacao) => d.id_recorrencia).filter(Boolean);
+  const idsPar = debitos
+    .map((d: Transacao) => d.id_par_transferencia)
+    .filter(Boolean);
+
   const { data: creditos, error: errCred } = await c
     .from("transacoes")
     .select("*")
-    .in("id_recorrencia", idsRecorrencia)
+    .in("id_par_transferencia", idsPar)
     .eq("tipo", "RECEITA");
 
   if (errCred) return erro(errCred.message, 500);
 
-  // Monta um Map para lookup O(1)
   const creditoMap = new Map<string, Transacao>();
   (creditos ?? []).forEach((cr: Transacao) => {
-    if (cr.id_recorrencia) creditoMap.set(cr.id_recorrencia, cr);
+    if (cr.id_par_transferencia) creditoMap.set(cr.id_par_transferencia, cr);
   });
 
-  // Monta os pares sem queries adicionais
   const transferencias = debitos
     .map((debito: Transacao) => {
-      const credito = creditoMap.get(debito.id_recorrencia!);
+      const credito = creditoMap.get(debito.id_par_transferencia!);
       if (!credito) return null;
       return montarTransferencia(debito, credito);
     })
@@ -235,7 +236,6 @@ async function criar(
   const erroVal = validarPayload(body);
   if (erroVal) return erro(erroVal, 422);
 
-  // Verificações de conta em paralelo — reduz latência pela metade
   const [semOrigem, semDestino] = await Promise.all([
     verificarContaAtiva(c, body.conta_origem_id  as string, "Conta de origem"),
     verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino"),
@@ -249,23 +249,28 @@ async function criar(
   const status = (body.status as string) ?? "PAGO";
   const valor  = Number(body.valor);
   const desc   = (body.descricao as string) ?? "";
-  const idGrupoPar = crypto.randomUUID();
+  const idPar  = crypto.randomUUID();
+
+  const base = {
+    user_id:              userId,
+    categoria_id:         catId,
+    valor,
+    data:                 body.data,
+    status,
+    id_par_transferencia: idPar,
+    id_recorrencia:       null,
+    nr_parcela:           null,
+    total_parcelas:       null,
+    tipo_recorrencia:     null,
+  };
 
   const { data: debito, error: e1 } = await c
     .from("transacoes")
     .insert({
-      user_id: userId,
-      conta_id: body.conta_origem_id,
-      categoria_id: catId,
-      tipo: "DESPESA",
-      valor,
-      data: body.data,
+      ...base,
+      conta_id:  body.conta_origem_id,
+      tipo:      "DESPESA",
       descricao: `[Transf. saída] ${desc}`.trim(),
-      status,
-      id_recorrencia: idGrupoPar,
-      nr_parcela: 1,
-      total_parcelas: 1,
-      tipo_recorrencia: null,
     })
     .select().single();
 
@@ -277,18 +282,10 @@ async function criar(
   const { data: credito, error: e2 } = await c
     .from("transacoes")
     .insert({
-      user_id: userId,
-      conta_id: body.conta_destino_id,
-      categoria_id: catId,
-      tipo: "RECEITA",
-      valor,
-      data: body.data,
+      ...base,
+      conta_id:  body.conta_destino_id,
+      tipo:      "RECEITA",
       descricao: `[Transf. entrada] ${desc}`.trim(),
-      status,
-      id_recorrencia: idGrupoPar,
-      nr_parcela: 1,
-      total_parcelas: 1,
-      tipo_recorrencia: null,
     })
     .select().single();
 
@@ -313,19 +310,16 @@ async function editar(
   const par = await buscarPar(c, idPar, userId);
   if (!par) return erro("Transferência não encontrada", 404);
 
-  // Verificações de conta em paralelo quando há mudança de conta
-  {
-    const verificacoes = await Promise.all([
-      body.conta_origem_id  && body.conta_origem_id  !== par.debito.conta_id
-        ? verificarContaAtiva(c, body.conta_origem_id  as string, "Conta de origem")
-        : Promise.resolve(null),
-      body.conta_destino_id && body.conta_destino_id !== par.credito.conta_id
-        ? verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino")
-        : Promise.resolve(null),
-    ]);
-    if (verificacoes[0]) return verificacoes[0];
-    if (verificacoes[1]) return verificacoes[1];
-  }
+  const verificacoes = await Promise.all([
+    body.conta_origem_id  && body.conta_origem_id  !== par.debito.conta_id
+      ? verificarContaAtiva(c, body.conta_origem_id  as string, "Conta de origem")
+      : Promise.resolve(null),
+    body.conta_destino_id && body.conta_destino_id !== par.credito.conta_id
+      ? verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino")
+      : Promise.resolve(null),
+  ]);
+  if (verificacoes[0]) return verificacoes[0];
+  if (verificacoes[1]) return verificacoes[1];
 
   const novaOrigem  = body.conta_origem_id  ?? par.debito.conta_id;
   const novaDestino = body.conta_destino_id ?? par.credito.conta_id;
@@ -367,7 +361,7 @@ async function excluir(
   if (!par) return erro("Transferência não encontrada", 404);
 
   const { error: eu1 } = await c.from("transacoes")
-    .update({ id_recorrencia: null })
+    .update({ id_par_transferencia: null })
     .in("id", [par.debito.id, par.credito.id]);
   if (eu1) return erro("Erro ao preparar exclusão: " + eu1.message, 500);
 

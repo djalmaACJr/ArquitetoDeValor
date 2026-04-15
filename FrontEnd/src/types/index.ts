@@ -51,8 +51,9 @@ export interface Transacao {
   valor_projetado:  number | null
   tipo:             TipoTransacao
   status:           StatusTransacao
-  id_recorrencia:   string | null
-  nr_parcela:       number | null
+  id_recorrencia:       string | null
+  id_par_transferencia: string | null   // identifica o par débito+crédito de uma transferência
+  nr_parcela:           number | null
   total_parcelas:   number | null
   tipo_recorrencia: string | null
   observacao:       string | null
@@ -71,20 +72,21 @@ export interface Transacao {
 
 // ── Transferências ────────────────────────────────────────
 export interface Transferencia {
-  id_par:           string
-  conta_origem_id:  string
-  conta_destino_id: string
-  valor:            number
-  data:             string
-  descricao:        string | null
-  status:           StatusTransacao
-  recorrente:       boolean
-  total_parcelas:   number | null
-  parcela_atual:    number | null
-  id_debito:        string
-  id_credito:       string
-  criado_em:        string
-  atualizado_em:    string
+  id_par:               string       // = id_par_transferencia nas transacoes
+  conta_origem_id:      string
+  conta_destino_id:     string
+  valor:                number
+  data:                 string
+  descricao:            string | null
+  status:               StatusTransacao
+  id_recorrencia:       string | null  // recorrência independente (futuro)
+  tipo_recorrencia:     string | null
+  total_parcelas:       number | null
+  parcela_atual:        number | null
+  id_debito:            string
+  id_credito:           string
+  criado_em:            string
+  atualizado_em:        string
 }
 
 // ── Resumo mensal (dashboard) ─────────────────────────────
