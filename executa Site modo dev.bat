@@ -1,5 +1,5 @@
 @echo off
-
+cd C:\Pessoal\ArquitetoDeValor\FrontEnd
 REM Inicia o servidor (em nova janela)
 start cmd /c "npm run dev"
 

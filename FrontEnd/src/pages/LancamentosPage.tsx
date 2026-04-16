@@ -1,5 +1,6 @@
 // src/pages/LancamentosPage.tsx
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Plus, Pencil, Zap, ChevronDown, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
 import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
@@ -145,12 +146,12 @@ interface FormState {
   tipo: TipoTx; data: string; descricao: string; valor: string
   conta_id: string; conta_destino_id: string; categoria_id: string
   status: StatusTx; observacao: string
-  recorrente: boolean; total_parcelas: string; tipo_recorrencia: string
+  recorrente: boolean; total_parcelas: string; tipo_recorrencia: string; intervalo_recorrencia: string
 }
 const FORM_VAZIO: FormState = {
   tipo: 'DESPESA', data: hoje(), descricao: '', valor: '',
   conta_id: '', conta_destino_id: '', categoria_id: '', status: 'PAGO', observacao: '',
-  recorrente: false, total_parcelas: '2', tipo_recorrencia: 'MENSAL',
+  recorrente: false, total_parcelas: '2', tipo_recorrencia: 'MENSAL', intervalo_recorrencia: '1',
 }
 function formDeLanc(l: Lancamento): FormState {
   // Identificação de transferência pelo campo dedicado id_par_transferencia
@@ -167,16 +168,18 @@ function formDeLanc(l: Lancamento): FormState {
     observacao: l.observacao ?? '',
     recorrente: !!l.id_recorrencia, total_parcelas: String(l.total_parcelas ?? 2),
     tipo_recorrencia: l.tipo_recorrencia ?? 'MENSAL',
+    intervalo_recorrencia: String((l as any).intervalo_recorrencia ?? 1),
   }
 }
 
 // ── Página principal ──────────────────────────────────────────
 export default function LancamentosPage() {
+  const location = useLocation()
   const [mes,         setMes]         = useState(mesAtual())
   const [filtContas,  setFiltContas]  = useState<string[]>([])
   const [filtCats,    setFiltCats]    = useState<string[]>([])
   const [filtStatus,  setFiltStatus]  = useState('')
-  const [comSaldo,    setComSaldo]    = useState(false)
+  const [comSaldo,    setComSaldo]    = useState(true)
 
   const { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus, criarTransferencia, editarTransferencia, excluirTransferencia } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status: filtStatus, com_saldo: comSaldo })
@@ -199,16 +202,43 @@ export default function LancamentosPage() {
   const [antecipando,        setAntecipando]        = useState<Lancamento | null>(null)
   const [confirmandoProjecao, setConfirmandoProjecao] = useState<Lancamento | null>(null)
   const [valorConfirmado,     setValorConfirmado]     = useState<string>('')
+  // Seleção múltipla
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const toggleSelecionado = (id: string) => setSelecionados(prev => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
 
   const set   = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
 
+  // Ler state da navegação (vindo do Dashboard)
+  useEffect(() => {
+    const state = location.state as any
+    if (!state) return
+    if (state.novoLancamento) {
+      setEditando(null); setForm(FORM_VAZIO); setErro(null); setDrawerOpen(true)
+    }
+    if (state.filtroStatus) {
+      setFiltStatus(state.filtroStatus)
+    }
+    if (state.mes) {
+      setMes(state.mes)
+    }
+    if (state.editarId && lancamentos.length > 0) {
+      const tx = lancamentos.find(l => l.id === state.editarId)
+      if (tx) abrirEditar(tx)
+    }
+    // Limpar state para não reabrir ao recarregar
+    window.history.replaceState({}, '')
+  }, [location.state, lancamentos])
+
   const abrirNovo   = () => { setEditando(null); setForm(FORM_VAZIO); setErro(null); setDrawerOpen(true) }
   const abrirEditar = (l: Lancamento) => {
     const isTransf = l.descricao?.startsWith('[Transf')
-    // Transferências: escopo não se aplica, abre direto
-    if (!isTransf && l.id_recorrencia) {
-      // Verifica se há parcelas anteriores pagas (nr_parcela > 1 com alguma paga antes)
+    // Se PAGO e recorrente: edita só este, sem modal de escopo
+    if (!isTransf && l.id_recorrencia && l.status !== 'PAGO') {
       const temPagasAnteriores = lancamentos.some(
         x => x.id_recorrencia === l.id_recorrencia &&
              x.status === 'PAGO' &&
@@ -281,6 +311,7 @@ export default function LancamentosPage() {
       ...(form.recorrente && !editando ? {
         total_parcelas: parseInt(form.total_parcelas) || 2,
         tipo_recorrencia: form.tipo_recorrencia,
+        intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
       } : {}),
     }
 
@@ -324,14 +355,24 @@ export default function LancamentosPage() {
 
   const handleStatus = async (l: Lancamento, status: StatusTx) => {
     setStatusOpen(null)
-    // PROJECAO → PAGO: abre modal para confirmar/ajustar o valor real
-    if (l.status === 'PROJECAO' && status === 'PAGO') {
-      setValorConfirmado(String(l.valor))
-      setConfirmandoProjecao(l)
-      return
-    }
     const { ok, erro: e } = await alterarStatus(l.id, status)
     if (!ok) toast(e ?? 'Erro ao alterar status.')
+  }
+
+  // Pagar em lote — só o status, sem modal
+  const pagarSelecionados = async () => {
+    const ids = [...selecionados]
+    await Promise.all(ids.map(id => alterarStatus(id, 'PAGO')))
+    setSelecionados(new Set())
+    toast(`${ids.length} lançamento(s) pagos!`)
+  }
+
+  // Cancelar pgto em lote — volta para PENDENTE
+  const cancelarPgtoSelecionados = async () => {
+    const ids = [...selecionados]
+    await Promise.all(ids.map(id => alterarStatus(id, 'PENDENTE')))
+    setSelecionados(new Set())
+    toast(`${ids.length} lançamento(s) revertidos para pendente!`)
   }
 
   // Totais do mês filtrado — exclui transferências
@@ -457,17 +498,22 @@ export default function LancamentosPage() {
         />
 
         {/* Status */}
-        <SelectDark value={filtStatus} onChange={e => setFiltStatus(e.target.value)} className="w-32">
-          <option value="">Todos status</option>
+        <select
+          value={filtStatus}
+          onChange={e => setFiltStatus(e.target.value)}
+          style={{ width: 128, flexShrink: 0, minWidth: 0, color: '#e8eaf0' }}
+          className="bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-1.5 text-[12px] outline-none focus:border-av-green transition-colors cursor-pointer"
+        >
+          <option value="" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Todos status</option>
           <option value="PAGO"     style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Pago</option>
           <option value="PENDENTE" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Pendente</option>
           <option value="PROJECAO" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Projeção</option>
-        </SelectDark>
+        </select>
 
         {/* Toggle moderno — incluir saldo anterior */}
         <button
           onClick={() => setComSaldo(v => !v)}
-          className="flex items-center gap-2 ml-auto flex-shrink-0 px-3 py-1.5 rounded-lg border transition-all"
+          className="flex items-center gap-2 flex-shrink-0 px-3 py-1.5 rounded-lg border transition-all"
           style={{
             background: comSaldo ? 'rgba(0,200,150,0.1)' : 'transparent',
             borderColor: comSaldo ? 'rgba(0,200,150,0.4)' : 'rgba(255,255,255,0.1)',
@@ -493,6 +539,57 @@ export default function LancamentosPage() {
           >
             Saldo anterior
           </span>
+        </button>
+      </div>
+
+      {/* Barra de ações em lote — sempre visível, fixa no topo quando há selecionados */}
+      <div
+        className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl border transition-all"
+        style={{
+          background: selecionados.size > 0 ? 'rgba(0,200,150,0.06)' : 'rgba(255,255,255,0.02)',
+          borderColor: selecionados.size > 0 ? 'rgba(0,200,150,0.2)' : 'rgba(255,255,255,0.06)',
+        }}
+      >
+        <span className="text-[11px] font-medium flex-1" style={{ color: '#8b92a8' }}>
+          {selecionados.size > 0
+            ? `${selecionados.size} selecionado(s)`
+            : <span style={{ color: '#4a5168' }}>Selecione registros para ações em lote</span>
+          }
+        </span>
+        <button
+          onClick={pagarSelecionados}
+          disabled={selecionados.size === 0}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all"
+          style={{
+            background: selecionados.size > 0 ? '#00c896' : 'rgba(255,255,255,0.05)',
+            color: selecionados.size > 0 ? '#0a0f1a' : '#4a5168',
+            cursor: selecionados.size > 0 ? 'pointer' : 'not-allowed',
+          }}
+        >
+          <Check size={12} /> Pagar
+        </button>
+        <button
+          onClick={cancelarPgtoSelecionados}
+          disabled={selecionados.size === 0}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-all"
+          style={{
+            borderColor: selecionados.size > 0 ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.06)',
+            color: selecionados.size > 0 ? '#8b92a8' : '#4a5168',
+            cursor: selecionados.size > 0 ? 'pointer' : 'not-allowed',
+          }}
+        >
+          Cancelar pgto
+        </button>
+        <button
+          onClick={() => setSelecionados(new Set())}
+          disabled={selecionados.size === 0}
+          className="text-[11px] px-2 py-1 rounded-lg transition-all"
+          style={{
+            color: selecionados.size > 0 ? '#8b92a8' : '#4a5168',
+            cursor: selecionados.size > 0 ? 'pointer' : 'not-allowed',
+          }}
+        >
+          Limpar
         </button>
       </div>
 
@@ -546,8 +643,8 @@ export default function LancamentosPage() {
                     </div>
                     {/* Header colunas */}
                     <div className="grid gap-2 px-4 py-2 border-b border-white/5"
-                      style={{ gridTemplateColumns: '28px 1fr 180px 160px 110px 80px 70px' }}>
-                      {['','Descrição','Categoria','Conta','Valor','Status',''].map((h, i) => (
+                      style={{ gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px' }}>
+                      {['','','Descrição','Categoria','Conta','Valor','Status',''].map((h, i) => (
                         <span key={i} className="text-[10px] font-bold uppercase tracking-wide"
                           style={{ color: '#4a5168' }}>{h}</span>
                       ))}
@@ -561,7 +658,25 @@ export default function LancamentosPage() {
                       return (
                         <div key={l.id}
                           className="grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center"
-                          style={{ gridTemplateColumns: '28px 1fr 180px 160px 110px 80px 70px' }}>
+                          style={{ gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px' }}>
+
+                          {/* Checkbox seleção */}
+                          <div className="flex items-center justify-center">
+                            <span
+                              onClick={() => toggleSelecionado(l.id)}
+                              className="w-4 h-4 rounded flex items-center justify-center border cursor-pointer transition-all flex-shrink-0"
+                              style={{
+                                background: selecionados.has(l.id) ? '#00c896' : 'transparent',
+                                borderColor: selecionados.has(l.id) ? '#00c896' : 'rgba(255,255,255,0.2)',
+                              }}
+                            >
+                              {selecionados.has(l.id) && (
+                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                  <path d="M1.5 5L4 7.5L8.5 2.5" stroke="#0a0f1a" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                              )}
+                            </span>
+                          </div>
 
                           {/* Ícone tipo */}
                           <div className="flex items-center justify-center">
@@ -647,24 +762,32 @@ export default function LancamentosPage() {
 
                           {/* Ações */}
                           <div className="flex items-center gap-1 justify-end">
-                            {!isTransf && !isPago && (
-                              isRecorr ? (
-                                <AcaoBtn onClick={() => setAntecipando(l)}
-                                  title="Antecipar parcelas" color="#f0b429">
-                                  <Zap size={12} />
-                                </AcaoBtn>
-                              ) : (
-                                <AcaoBtn onClick={() => setAntecipando(l)}
-                                  title="Pagar" color="#00c896">
-                                  <Check size={12} />
+                            {/* Botão pagar — para qualquer não-PAGO */}
+                            {!isTransf && !isPago && (() => {
+                              // Antecipar só aparece se NÃO for a última parcela
+                              const isUltimaParcela = isRecorr &&
+                                l.nr_parcela !== undefined &&
+                                l.total_parcelas !== undefined &&
+                                l.nr_parcela >= l.total_parcelas
+                              const deveAntecipar = isRecorr && !isUltimaParcela
+                              return (
+                                <AcaoBtn onClick={async (e) => {
+                                  e.stopPropagation()
+                                  if (deveAntecipar) {
+                                    setAntecipando(l)
+                                  } else {
+                                    const { ok, erro: e2 } = await alterarStatus(l.id, 'PAGO')
+                                    if (!ok) toast(e2 ?? 'Erro ao pagar.')
+                                    else toast('Pago!')
+                                  }
+                                }} title={deveAntecipar ? "Antecipar parcelas" : "Pagar"} color={deveAntecipar ? "#f0b429" : "#00c896"}>
+                                  {deveAntecipar ? <Zap size={12} /> : <Check size={12} />}
                                 </AcaoBtn>
                               )
-                            )}
-                            {podeEditar && (
-                              <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
-                                <Pencil size={12} />
-                              </AcaoBtn>
-                            )}
+                            })()}
+                            <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
+                              <Pencil size={12} />
+                            </AcaoBtn>
                           </div>
                         </div>
                       )
@@ -672,9 +795,8 @@ export default function LancamentosPage() {
                     {/* Rodapé do grupo com saldo do dia — alinhado com coluna Valor */}
                     {saldoPorData.has(data) && (
                       <div className="grid gap-2 px-4 py-2 border-t border-white/5 items-center"
-                        style={{ gridTemplateColumns: '28px 1fr 180px 160px 110px 80px 70px', background: 'rgba(255,255,255,0.015)' }}>
-                        {/* ícone + descrição + categoria + conta = 4 colunas vazias */}
-                        <span/>
+                        style={{ gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px', background: 'rgba(255,255,255,0.015)' }}>
+                        <span/><span/>
                         <span className="text-[10px] font-medium uppercase tracking-wider text-right" style={{ color: '#4a5168' }}>Saldo do dia</span>
                         <span/><span/>
                         <span className="text-[12px] font-bold text-right"
@@ -903,8 +1025,19 @@ export default function LancamentosPage() {
                 label={form.recorrente ? 'Recorrente' : 'Lançamento único'} />
               {form.recorrente && (
                 <div className="mt-2 flex gap-2">
+                  {/* A cada N */}
+                  <div className="w-20">
+                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
+                    <Input type="number" min="1" max="99" value={form.intervalo_recorrencia}
+                      onChange={e => set({ intervalo_recorrencia: e.target.value })} />
+                  </div>
+                  {/* Frequência */}
                   <div className="flex-1">
-                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Frequência</p>
+                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
+                      {parseInt(form.intervalo_recorrencia) > 1
+                        ? { MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' }[form.tipo_recorrencia] ?? 'períodos'
+                        : 'Frequência'}
+                    </p>
                     <SelectDark value={form.tipo_recorrencia}
                       onChange={e => set({ tipo_recorrencia: e.target.value })}>
                       <option value="MENSAL"  style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Mensal</option>
@@ -913,7 +1046,8 @@ export default function LancamentosPage() {
                       <option value="DIARIA"  style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Diária</option>
                     </SelectDark>
                   </div>
-                  <div className="w-24">
+                  {/* Parcelas */}
+                  <div className="w-20">
                     <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
                     <Input type="number" min="2" max="999" value={form.total_parcelas}
                       onChange={e => set({ total_parcelas: e.target.value })} />
@@ -1084,96 +1218,6 @@ export default function LancamentosPage() {
         )
       })()}
 
-      {/* ── Modal confirmar projeção → pago ─────────────────── */}
-      {confirmandoProjecao && (() => {
-        const l      = confirmandoProjecao
-        const corVal = l.tipo === 'RECEITA' ? '#00c896' : '#f87171'
-        const sinal  = l.tipo === 'RECEITA' ? '+' : '-'
-        const vOrig  = l.valor
-        const vConf  = parseFloat(valorConfirmado.replace(',', '.')) || 0
-        const diff   = vConf - vOrig
-        const hasDiff = Math.abs(diff) > 0.01
-        return (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/60" onClick={() => setConfirmandoProjecao(null)} />
-            <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-green-400/10">
-                  <Check size={16} style={{ color: '#00c896' }} />
-                </div>
-                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar valor real</p>
-              </div>
-              <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
-                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{l.descricao}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Conta</span>
-                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{l.conta_nome ?? '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor projetado</span>
-                  <span className="text-[12px]" style={{ color: '#8b92a8' }}>{sinal}{formatBRL(vOrig)}</span>
-                </div>
-                <div className="flex justify-between items-center gap-3">
-                  <span className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Valor real</span>
-                  <div className="flex items-center gap-1">
-                    <span className="text-[12px]" style={{ color: corVal }}>{sinal}</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={valorConfirmado}
-                      onChange={e => setValorConfirmado(e.target.value)}
-                      className="w-32 text-right text-[13px] font-bold bg-[#1a1f2e] border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:border-white/30"
-                      style={{ color: corVal }}
-                      autoFocus
-                    />
-                  </div>
-                </div>
-                {hasDiff && (
-                  <div className="flex justify-between border-t border-white/5 pt-2">
-                    <span className="text-[11px]" style={{ color: '#8b92a8' }}>Diferença</span>
-                    <span className="text-[12px]" style={{ color: diff > 0 ? '#00c896' : '#f87171' }}>
-                      {diff > 0 ? '+' : ''}{formatBRL(diff)}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
-                O valor projetado será preservado e o lançamento marcado como{' '}
-                <span style={{ color: '#00c896' }}>PAGO</span>.
-              </p>
-              <div className="flex gap-2">
-                <button onClick={() => setConfirmandoProjecao(null)}
-                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20"
-                  style={{ color: '#8b92a8' }}>
-                  Cancelar
-                </button>
-                <button
-                  onClick={async () => {
-                    const valorReal = parseFloat(valorConfirmado.replace(',', '.'))
-                    if (isNaN(valorReal) || valorReal <= 0) { toast('Valor inválido.'); return }
-                    setConfirmandoProjecao(null)
-                    const { ok, erro: e } = await editar(l.id, {
-                      status: 'PAGO',
-                      valor: valorReal,
-                      valor_projetado: vOrig,
-                    }, 'SOMENTE_ESTE')
-                    if (ok) toast('Lançamento confirmado como pago!')
-                    else toast(e ?? 'Erro ao confirmar.')
-                  }}
-                  className="flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:bg-green-500/90"
-                  style={{ background: '#00c896', color: '#0a0f1a' }}>
-                  <Check size={12} className="inline mr-1" /> Confirmar pago
-                </button>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
-
        {/* ── Modal confirmar projeção → pago ─────────────────── */}
       {confirmandoProjecao && (() => {
         const l      = confirmandoProjecao
@@ -1263,6 +1307,43 @@ export default function LancamentosPage() {
           </div>
         )
       })()}
+
+      {/* Barra de ações flutuante — fixa no topo quando há selecionados */}
+      {selecionados.size > 0 && (
+        <div
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl border shadow-xl"
+          style={{
+            position: 'fixed',
+            top: 16,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 200,
+            background: '#1a1f2e',
+            borderColor: 'rgba(0,200,150,0.35)',
+            boxShadow: '0 4px 24px rgba(0,200,150,0.15)',
+            minWidth: 360,
+          }}
+        >
+          <span className="text-[11px] font-medium flex-1" style={{ color: '#8b92a8' }}>
+            {selecionados.size} selecionado(s)
+          </span>
+          <button onClick={pagarSelecionados}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all hover:opacity-90"
+            style={{ background: '#00c896', color: '#0a0f1a' }}>
+            <Check size={12} /> Pagar
+          </button>
+          <button onClick={cancelarPgtoSelecionados}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-all hover:bg-white/5"
+            style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#8b92a8' }}>
+            Cancelar pgto
+          </button>
+          <button onClick={() => setSelecionados(new Set())}
+            className="text-[11px] px-2 py-1 rounded-lg hover:bg-white/5 transition-all"
+            style={{ color: '#8b92a8' }}>
+            ✕ Limpar
+          </button>
+        </div>
+      )}
 
      {antecipando && (() => {
         const isRecorrModal  = !!antecipando.id_recorrencia && antecipando.tipo_recorrencia === 'PARCELA'

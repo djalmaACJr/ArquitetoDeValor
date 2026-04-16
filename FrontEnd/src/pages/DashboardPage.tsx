@@ -152,10 +152,11 @@ function CardSaldo({ contas, oculto, mes, historico }: {
 
 // ── Grupo de conta dentro do card de alertas ─────────────
 function GrupoConta({
-  nomeConta, icone, cor, total, itens, corTotal,
+  nomeConta, icone, cor, total, itens, corTotal, onEditar,
 }: {
   nomeConta: string; icone: string | null; cor: string | null
   total: number; itens: Transacao[]; corTotal: string
+  onEditar: (tx: Transacao) => void
 }) {
   const [aberto, setAberto] = useState(false)
 
@@ -193,7 +194,8 @@ function GrupoConta({
           {itens.map(tx => (
             <div
               key={tx.id}
-              className="grid grid-cols-[1fr_56px_72px] items-center px-6 py-[5px] border-b border-gray-100 dark:border-gray-700 last:border-0"
+              onClick={() => onEditar(tx)}
+              className="grid grid-cols-[1fr_56px_72px] items-center px-6 py-[5px] border-b border-gray-100 dark:border-gray-700 last:border-0 cursor-pointer hover:bg-white/5 transition-colors"
             >
               <span className="text-[12px] text-gray-700 dark:text-gray-200 truncate flex items-center gap-1">
                 {tx.id_recorrencia && (
@@ -218,10 +220,10 @@ function GrupoConta({
 
 // ── Card de alertas agrupado por conta ───────────────────
 function CardAlertas({
-  titulo, cor, total, itens, contas, onVerTodos,
+  titulo, cor, total, itens, contas, onVerTodos, onEditar,
 }: {
   titulo: string; cor: string; total: number
-  itens: Transacao[]; contas: Conta[]; onVerTodos: () => void
+  itens: Transacao[]; contas: Conta[]; onVerTodos: () => void; onEditar: (tx: Transacao) => void
 }) {
   // Agrupar itens por conta_id
   const porConta = itens.reduce<Record<string, Transacao[]>>((acc, tx) => {
@@ -261,6 +263,7 @@ function CardAlertas({
               total={totalConta}
               itens={txs}
               corTotal={corTotal}
+              onEditar={onEditar}
             />
           )
         })}
@@ -479,6 +482,12 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const [mes, setMes]       = useState(mesAtual())
   const [oculto, setOculto] = useState(false)
+  const [editandoTx, setEditandoTx] = useState<Transacao | null>(null)
+
+  const abrirEdicao = (tx: Transacao) => {
+    // Navega para lançamentos passando o id via state para abrir o drawer
+    navigate('/lancamentos', { state: { editarId: tx.id, mes: tx.data.slice(0, 7) } })
+  }
 
   const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading, error } = useDashboard(mes)
 
@@ -519,7 +528,7 @@ export default function DashboardPage() {
           <MonthPicker value={mes} onChange={setMes} />
 
           <button
-            onClick={() => navigate('/lancamentos?novo=1')}
+            onClick={() => navigate('/lancamentos', { state: { novoLancamento: true } })}
             className="flex items-center gap-1.5 bg-av-green text-av-dark text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
           >
             <Plus size={14}/> Novo lançamento
@@ -547,7 +556,8 @@ export default function DashboardPage() {
               total={totalPendentes}
               itens={pendentes}
               contas={contas}
-              onVerTodos={() => navigate('/lancamentos?status=PENDENTE')}
+              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: 'PENDENTE' } })}
+              onEditar={abrirEdicao}
             />
             <CardAlertas
               titulo="Próximas contas não pagas"
@@ -555,7 +565,8 @@ export default function DashboardPage() {
               total={totalProximas}
               itens={proximas}
               contas={contas}
-              onVerTodos={() => navigate('/lancamentos?status=PENDENTE')}
+              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: 'PENDENTE' } })}
+              onEditar={abrirEdicao}
             />
           </div>
 
