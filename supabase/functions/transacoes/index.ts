@@ -47,8 +47,12 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
   const status   = params.get("status");
   const comSaldo = params.get("saldo") === "true";
   const page     = parseInt(params.get("page") ?? "1");
-  const perPage  = Math.min(parseInt(params.get("per_page") ?? "50"), 200);
-  const offset   = (page - 1) * perPage;
+  // Quando comSaldo=true, busca todos os registros do mês sem limite
+  // para garantir que o saldo_acumulado do último lançamento seja o saldo real do dia
+  const perPage  = comSaldo
+    ? 1000
+    : Math.min(parseInt(params.get("per_page") ?? "50"), 200);
+  const offset   = comSaldo ? 0 : (page - 1) * perPage;
 
   const fonte = comSaldo ? "vw_transacoes_com_saldo" : "transacoes";
   let q = c.from(fonte).select("*")

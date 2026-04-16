@@ -50,8 +50,8 @@ function CardResultados({
       </div>
       <div className="grid grid-cols-3 gap-0 divide-x divide-gray-200 dark:divide-gray-700">
         {[
-          { label: 'Entradas',  value: resumo?.total_entradas ?? 0, cor: 'text-av-green' },
-          { label: 'Saídas',    value: resumo?.total_saidas   ?? 0, cor: 'text-red-400'  },
+          { label: 'Receitas',  value: resumo?.total_entradas ?? 0, cor: 'text-av-green' },
+          { label: 'Despesas',  value: resumo?.total_saidas   ?? 0, cor: 'text-red-400'  },
           { label: 'Resultado', value: resultado,                    cor: resultado >= 0 ? 'text-av-green' : 'text-red-400' },
         ].map(({ label, value, cor }) => (
           <div key={label} className="px-3 first:pl-0 last:pr-0">
@@ -67,16 +67,49 @@ function CardResultados({
 }
 
 // ── Card de saldo acumulado ──────────────────────────────
-function CardSaldo({ contas, oculto }: { contas: Conta[]; oculto: boolean }) {
+function CardSaldo({ contas, oculto, mes, historico }: {
+  contas: Conta[]
+  oculto: boolean
+  mes: string
+  historico: { mes: string; saldo_mes?: number }[]
+}) {
+  const mesAtualStr = new Date().toISOString().slice(0, 7)
+  const isMesAtual  = mes === mesAtualStr
   const [modo, setModo] = useState<'hoje' | 'fim'>('hoje')
-  const total     = contas.reduce((s, c) => s + c.saldo_atual, 0)
-  const projetado = total * 1.15
+
+  // Saldo até hoje (soma dos saldos_atual das contas — posição real agora)
+  const saldoHoje = contas.reduce((s, c) => s + c.saldo_atual, 0)
+
+  // Saldo do mês selecionado: último saldo_acumulado do mês no histórico
+  const entradaMes  = historico.find(h => h.mes === mes)
+  const saldoFimMes = entradaMes?.saldo_mes ?? null
+
+  // Lógica de exibição:
+  // - Mês atual + "até hoje"  → saldo real das contas agora
+  // - Mês atual + "até fim"   → saldo_acumulado fim do mês (histórico)
+  // - Qualquer outro mês      → saldo_acumulado fim do mês (histórico) — NUNCA saldoHoje
+  const saldoExibido = isMesAtual
+    ? (modo === 'hoje' ? saldoHoje : (saldoFimMes ?? saldoHoje))
+    : (saldoFimMes ?? 0)
 
   const progressoMes = (() => {
+    if (!isMesAtual) return 100
     const hoje      = new Date()
     const diaAtual  = hoje.getDate()
     const totalDias = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
     return Math.round((diaAtual / totalDias) * 100)
+  })()
+
+  // Label do subtítulo
+  const labelData = (() => {
+    if (!isMesAtual) {
+      const [ano, m] = mes.split('-')
+      const ultimoDia = new Date(parseInt(ano), parseInt(m), 0).getDate()
+      return `Saldo em ${ultimoDia}/${m}/${ano}`
+    }
+    return modo === 'hoje'
+      ? `Posição em ${formatData(new Date().toISOString().split('T')[0])}`
+      : 'Projetado até fim do mês'
   })()
 
   return (
@@ -85,26 +118,33 @@ function CardSaldo({ contas, oculto }: { contas: Conta[]; oculto: boolean }) {
         backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px),repeating-linear-gradient(90deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px)'
       }}/>
       <div className="relative flex items-center justify-between mb-2">
-        <span className="text-[12px] font-semibold text-white/50">Saldo acumulado</span>
-        <select
-          value={modo} onChange={e => setModo(e.target.value as 'hoje' | 'fim')}
-          className="text-[11px] bg-blue-400/10 border border-blue-400/30 rounded-md text-av-blue px-2 py-1 cursor-pointer"
-        >
-          <option value="hoje">Até hoje</option>
-          <option value="fim">Projetado fim do mês</option>
-        </select>
+        <span className="text-[12px] font-semibold text-white/50">
+          {isMesAtual ? 'Saldo acumulado' : `Saldo em ${mes.split('-')[1]}/${mes.split('-')[0]}`}
+        </span>
+        {isMesAtual && (
+          <select
+            value={modo} onChange={e => setModo(e.target.value as 'hoje' | 'fim')}
+            className="text-[11px] bg-blue-400/10 border border-blue-400/30 rounded-md text-av-blue px-2 py-1 cursor-pointer"
+          >
+            <option value="hoje">Até hoje</option>
+            <option value="fim">Até fim do mês</option>
+          </select>
+        )}
+        {!isMesAtual && (
+          <span className="text-[11px] bg-blue-400/10 border border-blue-400/30 rounded-md text-av-blue px-2 py-1">
+            {mes.split('-')[1]}/{mes.split('-')[0]}
+          </span>
+        )}
       </div>
       <p className="relative text-[28px] font-bold text-av-green leading-none">
-        {oculto ? OCULTO : formatBRL(modo === 'hoje' ? total : projetado)}
+        {oculto ? OCULTO : formatBRL(saldoExibido)}
       </p>
       <p className="relative text-[11px] text-white/35 mt-1.5">
-        {oculto ? '—' : (modo === 'hoje'
-          ? `Posição em ${formatData(new Date().toISOString().split('T')[0])}`
-          : 'Estimativa até fim do mês')}
+        {oculto ? '—' : labelData}
       </p>
       <div className="relative mt-3 h-[3px] rounded-full bg-blue-400/15">
         <div className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-av-green to-av-amber"
-          style={{ width: oculto ? '0%' : (modo === 'fim' ? '100%' : `${progressoMes}%`) }}/>
+          style={{ width: oculto ? '0%' : `${progressoMes}%` }}/>
       </div>
     </div>
   )
@@ -245,7 +285,7 @@ function GraficoBarras({ historico }: { historico: { mes: string; total_entradas
     datasets: [
       {
         type: 'bar' as const,
-        label: 'Entradas',
+        label: 'Receitas',
         data: historico.map(h => h.total_entradas),
         backgroundColor: '#00c896',
         borderRadius: 4,
@@ -254,7 +294,7 @@ function GraficoBarras({ historico }: { historico: { mes: string; total_entradas
       },
       {
         type: 'bar' as const,
-        label: 'Saídas',
+        label: 'Despesas',
         data: historico.map(h => h.total_saidas),
         backgroundColor: '#ff6b4a',
         borderRadius: 4,
@@ -328,9 +368,9 @@ function GraficoBarras({ historico }: { historico: { mes: string; total_entradas
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
       <p className="text-[13px] font-semibold text-gray-700 dark:text-gray-200 mb-0.5">Evolução mensal</p>
-      <p className="text-[11px] text-gray-400 mb-3">Entradas, saídas e saldo — últimos 6 meses</p>
+      <p className="text-[11px] text-gray-400 mb-3">Receitas, despesas e saldo — últimos 6 meses</p>
       <div className="flex gap-3 mb-2">
-        {[['#00c896','Entradas'],['#ff6b4a','Saídas'],['#a78bfa','Saldo']].map(([cor,label]) => (
+        {[['#00c896','Receitas'],['#ff6b4a','Despesas'],['#a78bfa','Saldo']].map(([cor,label]) => (
           <div key={label} className="flex items-center gap-1.5 text-[11px] text-gray-400">
             <span className="w-2 h-2 rounded-sm" style={{ background: cor }}/>{label}
           </div>
@@ -496,7 +536,7 @@ export default function DashboardPage() {
           {/* Linha 1: resultados + saldo */}
           <div className="grid grid-cols-2 gap-3">
             <CardResultados resumo={resumo} oculto={oculto}/>
-            <CardSaldo contas={contas} oculto={oculto}/>
+            <CardSaldo contas={contas} oculto={oculto} mes={mes} historico={historico}/>
           </div>
 
           {/* Linha 2: alertas agrupados por conta */}

@@ -73,13 +73,14 @@ export function useDashboard(mes: string) {
     setError(null)
 
     try {
+      // Gera 6 meses terminando no mês selecionado (garante que o mês selecionado sempre esteja no histórico)
       const meses6 = gerarUltimosMeses(ano, m, 6)
 
       const [contasRes, pendentesRes, ...historicosRes] = await Promise.all([
         apiFetch<Conta[]>('/contas', signal),
         apiFetch(`/transacoes?status=PENDENTE&mes=${mes}&saldo=true`, signal),
         ...meses6.map(mesHist =>
-          apiFetch(`/transacoes?mes=${mesHist}&per_page=200&saldo=true`, signal)
+          apiFetch(`/transacoes?mes=${mesHist}&per_page=1000&saldo=true`, signal)
         ),
       ])
 
@@ -88,15 +89,24 @@ export function useDashboard(mes: string) {
       setContas(extrairLista<Conta>(contasRes.dados))
 
       // ─ PENDENTES / PRÓXIMAS ─
-      const todasPend = extrairLista<Transacao>(pendentesRes.dados).filter(t => !t.id_par_transferencia)
+      const todasPend = extrairLista<Transacao>(pendentesRes.dados).filter(t =>
+        !t.id_par_transferencia &&
+        !t.descricao?.startsWith('[Transf.') &&
+        t.categoria_nome !== 'Transferências'
+      )
       setPendentes(todasPend.filter(t => t.data <= hoje))
       setProximas(todasPend.filter(t => t.data > hoje))
 
       // ─ RESUMO DO MÊS ATUAL (último dos 6) ─
       const doMes = extrairLista<Transacao>(historicosRes[historicosRes.length - 1]?.dados)
 
-      const entradas = doMes.filter(t => t.tipo === 'RECEITA' && !t.id_par_transferencia).reduce((s, t) => s + t.valor, 0)
-      const saidas   = doMes.filter(t => t.tipo === 'DESPESA' && !t.id_par_transferencia).reduce((s, t) => s + t.valor, 0)
+      // Exclui transferências — pelo id_par_transferencia, prefixo na descrição OU categoria "Transferências"
+      const isTransf = (t: Transacao) =>
+        !!t.id_par_transferencia ||
+        t.descricao?.startsWith('[Transf.') ||
+        t.categoria_nome === 'Transferências'
+      const entradas = doMes.filter(t => t.tipo === 'RECEITA' && !isTransf(t)).reduce((s, t) => s + t.valor, 0)
+      const saidas   = doMes.filter(t => t.tipo === 'DESPESA' && !isTransf(t)).reduce((s, t) => s + t.valor, 0)
 
       setResumo({ mes, total_entradas: entradas, total_saidas: saidas })
       setDespesasCat(agruparPorCategoria(doMes, 'DESPESA', 5))
@@ -106,14 +116,19 @@ export function useDashboard(mes: string) {
       // saldo_acumulado: pega o maior saldo_acumulado do último lançamento PAGO do mês
       const hist: ResumoMensal[] = meses6.map((mesHist, idx) => {
         const fatia = extrairLista<Transacao>(historicosRes[idx]?.dados)
-        const totalEnt = fatia.filter(t => t.tipo === 'RECEITA' && !t.id_par_transferencia).reduce((s, t) => s + t.valor, 0)
-        const totalSai = fatia.filter(t => t.tipo === 'DESPESA' && !t.id_par_transferencia).reduce((s, t) => s + t.valor, 0)
-        // Saldo ao final do mês: maior saldo_acumulado entre todas as contas no último lançamento PAGO
-        // Usa a soma dos saldos_acumulados de cada conta (último lançamento pago de cada conta no mês)
-        const pagos = fatia.filter(t => t.status === 'PAGO' && t.saldo_acumulado !== undefined)
-        const saldoPorConta = new Map<string, number>()
-        pagos.forEach(t => saldoPorConta.set(t.conta_id, t.saldo_acumulado!))
-        const saldo_mes = [...saldoPorConta.values()].reduce((s, v) => s + v, 0)
+        const isTransfH = (t: Transacao) =>
+          !!t.id_par_transferencia ||
+          t.descricao?.startsWith('[Transf.') ||
+          t.categoria_nome === 'Transferências'
+        const totalEnt = fatia.filter(t => t.tipo === 'RECEITA' && !isTransfH(t)).reduce((s, t) => s + t.valor, 0)
+        const totalSai = fatia.filter(t => t.tipo === 'DESPESA' && !isTransfH(t)).reduce((s, t) => s + t.valor, 0)
+        // Saldo ao final do mês: saldo_acumulado do último lançamento do mês
+        // (global — PARTITION BY user_id na view, já inclui todas as contas)
+        // Usa o último lançamento independente de status (data ASC, criado_em ASC)
+        const comSaldoAcum = fatia.filter(t => t.saldo_acumulado !== undefined)
+        const saldo_mes = comSaldoAcum.length > 0
+          ? comSaldoAcum[comSaldoAcum.length - 1].saldo_acumulado!
+          : 0
         return { mes: mesHist, total_entradas: totalEnt, total_saidas: totalSai, saldo_mes }
       })
       setHistorico(hist)

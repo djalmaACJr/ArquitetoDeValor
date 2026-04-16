@@ -334,11 +334,63 @@ export default function LancamentosPage() {
     if (!ok) toast(e ?? 'Erro ao alterar status.')
   }
 
-  // Totais do mês filtrado
+  // Totais do mês filtrado — exclui transferências
   const totais = useMemo(() => {
-    const receitas  = lancamentos.filter(l => l.tipo === 'RECEITA').reduce((s, l) => s + l.valor, 0)
-    const despesas  = lancamentos.filter(l => l.tipo === 'DESPESA').reduce((s, l) => s + l.valor, 0)
+    const isTransf = (l: Lancamento) =>
+      !!l.id_par_transferencia ||
+      l.descricao?.startsWith('[Transf.') ||
+      l.categoria_nome === 'Transferências'
+    const receitas = lancamentos.filter(l => l.tipo === 'RECEITA' && !isTransf(l)).reduce((s, l) => s + l.valor, 0)
+    const despesas = lancamentos.filter(l => l.tipo === 'DESPESA' && !isTransf(l)).reduce((s, l) => s + l.valor, 0)
     return { receitas, despesas, resultado: receitas - despesas }
+  }, [lancamentos])
+
+  // Saldo por data calculado no frontend — 2 modos:
+  // comSaldo=false → acumula só movimentações do mês (sem saldo inicial)
+  //                  dia 01: soma dos lançamentos do dia 01
+  //                  dia 03: soma dia01 + dia03, etc.
+  // comSaldo=true  → usa saldo_acumulado da API (inclui saldo histórico real de meses anteriores)
+  const saldoPorData = useMemo(() => {
+    const grupos = agruparPorData(lancamentos)
+    const map = new Map<string, number>()
+
+    if (comSaldo) {
+      // Usa saldo_acumulado que vem da API — inclui saldo histórico
+      for (const [data, grupo] of grupos) {
+        const ultimo = grupo[grupo.length - 1]
+        if (ultimo?.saldo_acumulado !== undefined) map.set(data, ultimo.saldo_acumulado)
+      }
+    } else {
+      // Calcula acumulado só das movimentações do mês atual, sem saldo inicial
+      let acumulado = 0
+      for (const [data, grupo] of grupos) {
+        for (const l of grupo) {
+          if (l.tipo === 'RECEITA') acumulado += l.valor
+          else if (l.tipo === 'DESPESA') acumulado -= l.valor
+          // transferências: as duas pernas (RECEITA+DESPESA) já se anulam
+        }
+        map.set(data, acumulado)
+      }
+    }
+    return map
+  }, [lancamentos, comSaldo])
+
+  // Saldo anterior ao mês — exibido só no 1º grupo quando check ativo
+  // Usa saldo_acumulado do 1º lançamento menos o impacto desse lançamento
+  const saldoAnterior = useMemo(() => {
+    if (!comSaldo || lancamentos.length === 0) return null
+    const grupos = agruparPorData(lancamentos)
+    if (grupos.length === 0) return null
+    const primeiro = grupos[0][1][0]
+    if (primeiro?.saldo_acumulado === undefined) return null
+    const delta = primeiro.tipo === 'RECEITA' ? primeiro.valor : -primeiro.valor
+    return primeiro.saldo_acumulado - delta
+  }, [lancamentos, comSaldo])
+
+  // Primeira data do mês para exibir o badge de saldo anterior
+  const primeiraData = useMemo(() => {
+    const grupos = agruparPorData(lancamentos)
+    return grupos.length > 0 ? grupos[0][0] : null
   }, [lancamentos])
 
   // CategoriasCategorias pai para o select (exclui protegidas)
@@ -359,7 +411,7 @@ export default function LancamentosPage() {
 
       <Toast msg={feedback} />
 
-      {/* Filtros */}
+      {/* Filtros — tudo em uma linha */}
       <div className="flex flex-wrap gap-2 mb-4 items-center">
         {/* Mês */}
         <MonthPicker value={mes} onChange={setMes} />
@@ -367,7 +419,7 @@ export default function LancamentosPage() {
         {/* Conta — multi-select */}
         <MultiSelect
           placeholder="Todas as contas"
-          className="w-44"
+          className="w-40"
           values={filtContas}
           onChange={setFiltContas}
           options={contas.map(c => ({
@@ -376,10 +428,11 @@ export default function LancamentosPage() {
             cor: c.cor ?? undefined,
           }))}
         />
+
         {/* Categoria — multi-select agrupado */}
         <MultiSelect
-          placeholder="Todas as categorias"
-          className="w-48"
+          placeholder="Categorias"
+          className="w-44"
           values={filtCats}
           onChange={setFiltCats}
           options={[
@@ -404,22 +457,43 @@ export default function LancamentosPage() {
         />
 
         {/* Status */}
-        <SelectDark value={filtStatus} onChange={e => setFiltStatus(e.target.value)} className="w-36">
-          <option value="">Todos os status</option>
+        <SelectDark value={filtStatus} onChange={e => setFiltStatus(e.target.value)} className="w-32">
+          <option value="">Todos status</option>
           <option value="PAGO"     style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Pago</option>
           <option value="PENDENTE" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Pendente</option>
           <option value="PROJECAO" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Projeção</option>
         </SelectDark>
 
-        {/* Toggle saldo acumulado */}
-        <div className="flex items-center gap-2 ml-auto">
-          <span className="text-[11px]" style={{ color: '#8b92a8' }}>Saldo acumulado</span>
-          <button onClick={() => setComSaldo(v => !v)}
-            className={`w-9 h-5 rounded-full relative transition-colors ${comSaldo ? 'bg-av-green' : 'bg-white/10'}`}>
-            <span className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all"
-              style={{ left: comSaldo ? '18px' : '2px' }} />
-          </button>
-        </div>
+        {/* Toggle moderno — incluir saldo anterior */}
+        <button
+          onClick={() => setComSaldo(v => !v)}
+          className="flex items-center gap-2 ml-auto flex-shrink-0 px-3 py-1.5 rounded-lg border transition-all"
+          style={{
+            background: comSaldo ? 'rgba(0,200,150,0.1)' : 'transparent',
+            borderColor: comSaldo ? 'rgba(0,200,150,0.4)' : 'rgba(255,255,255,0.1)',
+          }}
+        >
+          {/* mini toggle pill */}
+          <span
+            className="relative flex-shrink-0"
+            style={{ width: 28, height: 16 }}
+          >
+            <span
+              className="absolute inset-0 rounded-full transition-colors"
+              style={{ background: comSaldo ? '#00c896' : 'rgba(255,255,255,0.12)' }}
+            />
+            <span
+              className="absolute top-[2px] w-3 h-3 bg-white rounded-full shadow transition-all"
+              style={{ left: comSaldo ? '13px' : '2px' }}
+            />
+          </span>
+          <span
+            className="text-[11px] font-medium whitespace-nowrap transition-colors"
+            style={{ color: comSaldo ? '#00c896' : '#8b92a8' }}
+          >
+            Saldo anterior
+          </span>
+        </button>
       </div>
 
       {/* Cards de resumo */}
@@ -455,10 +529,20 @@ export default function LancamentosPage() {
                 {agruparPorData(lancamentos).map(([data, grupo]) => (
                   <div key={data} className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
                     {/* Cabeçalho do grupo de data */}
-                    <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 bg-white/[0.03]">
+                    <div className="flex items-center gap-3 px-4 py-2 border-b border-white/10 bg-white/[0.03]">
                       <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
                         {fmtDataLabel(data)}
                       </span>
+                      {comSaldo && data === primeiraData && saldoAnterior !== null && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full border"
+                          style={{
+                            color: saldoAnterior >= 0 ? '#00c896' : '#f87171',
+                            borderColor: saldoAnterior >= 0 ? 'rgba(0,200,150,0.25)' : 'rgba(248,113,113,0.25)',
+                            background: saldoAnterior >= 0 ? 'rgba(0,200,150,0.08)' : 'rgba(248,113,113,0.08)',
+                          }}>
+                          saldo anterior: {formatBRL(saldoAnterior)}
+                        </span>
+                      )}
                     </div>
                     {/* Header colunas */}
                     <div className="grid gap-2 px-4 py-2 border-b border-white/5"
@@ -528,7 +612,7 @@ export default function LancamentosPage() {
                           </div>
 
                           {/* Valor */}
-                          <div>
+                          <div className="text-right">
                             <p className="text-[13px] font-bold"
                               style={{ color: l.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}>
                               {l.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(l.valor)}
@@ -585,6 +669,21 @@ export default function LancamentosPage() {
                         </div>
                       )
                     })}
+                    {/* Rodapé do grupo com saldo do dia — alinhado com coluna Valor */}
+                    {saldoPorData.has(data) && (
+                      <div className="grid gap-2 px-4 py-2 border-t border-white/5 items-center"
+                        style={{ gridTemplateColumns: '28px 1fr 180px 160px 110px 80px 70px', background: 'rgba(255,255,255,0.015)' }}>
+                        {/* ícone + descrição + categoria + conta = 4 colunas vazias */}
+                        <span/>
+                        <span className="text-[10px] font-medium uppercase tracking-wider text-right" style={{ color: '#4a5168' }}>Saldo do dia</span>
+                        <span/><span/>
+                        <span className="text-[12px] font-bold text-right"
+                          style={{ color: (saldoPorData.get(data) ?? 0) >= 0 ? '#00c896' : '#f87171' }}>
+                          {formatBRL(saldoPorData.get(data) ?? 0)}
+                        </span>
+                        <span/><span/>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -593,9 +692,21 @@ export default function LancamentosPage() {
               <div className="md:hidden space-y-4">
                 {agruparPorData(lancamentos).map(([data, grupo]) => (
                   <div key={data}>
-                    <p className="text-[11px] font-semibold px-1 mb-2" style={{ color: '#8b92a8' }}>
-                      {fmtDataLabel(data)}
-                    </p>
+                    <div className="flex items-center gap-2 px-1 mb-2">
+                      <p className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
+                        {fmtDataLabel(data)}
+                      </p>
+                      {comSaldo && data === primeiraData && saldoAnterior !== null && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full border"
+                          style={{
+                            color: saldoAnterior >= 0 ? '#00c896' : '#f87171',
+                            borderColor: saldoAnterior >= 0 ? 'rgba(0,200,150,0.25)' : 'rgba(248,113,113,0.25)',
+                            background: saldoAnterior >= 0 ? 'rgba(0,200,150,0.08)' : 'rgba(248,113,113,0.08)',
+                          }}>
+                          anterior: {formatBRL(saldoAnterior)}
+                        </span>
+                      )}
+                    </div>
                     <div className="space-y-2">
                       {grupo.map(l => {
                         const isTransf  = !!l.id_par_transferencia
@@ -664,6 +775,18 @@ export default function LancamentosPage() {
                         )
                       })}
                     </div>
+                    {/* Rodapé mobile com saldo do dia */}
+                    {saldoPorData.has(data) && (
+                      <div className="flex items-center gap-2 px-2 pt-2 mt-1 border-t border-white/5">
+                        <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: '#4a5168' }}>
+                          Saldo do dia
+                        </span>
+                        <span className="text-[11px] font-bold"
+                          style={{ color: (saldoPorData.get(data) ?? 0) >= 0 ? '#00c896' : '#f87171' }}>
+                          {formatBRL(saldoPorData.get(data) ?? 0)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
