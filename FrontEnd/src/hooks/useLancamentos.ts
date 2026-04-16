@@ -146,8 +146,11 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     return { ok: res.ok, erro: res.erro }
   }
 
-  const antecipar = async (id: string): Promise<OpResult> =>
-    editar(id, { status: 'PAGO' }, 'SOMENTE_ESTE')
+  const antecipar = async (id: string): Promise<OpResult> => {
+    const res = await apiMutate(`/transacoes/${id}/antecipar`, 'POST')
+    if (res.ok) await carregar()
+    return { ok: res.ok, erro: res.erro ?? null }
+  }
 
   const alterarStatus = async (
     id: string,
@@ -184,6 +187,12 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     const res = await apiMutate(`/transferencias/${id}`, 'PUT', payload)
     if (res.ok) await carregar()
     return { ok: res.ok, erro: res.erro }
+  }
+
+  const excluirTransferencia = async (idPar: string): Promise<OpResult> => {
+    const res = await apiMutate(`/transferencias/${idPar}`, 'DELETE')
+    if (res.ok) await carregar()
+    return { ok: res.ok, erro: res.erro ?? null }
   }
 
   return {

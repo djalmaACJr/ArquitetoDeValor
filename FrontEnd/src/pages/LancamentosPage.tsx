@@ -196,7 +196,9 @@ export default function LancamentosPage() {
   // Status dropdown aberto
   const [statusOpen,  setStatusOpen]  = useState<string | null>(null)
   // Modal de antecipação
-  const [antecipando, setAntecipando] = useState<Lancamento | null>(null)
+  const [antecipando,        setAntecipando]        = useState<Lancamento | null>(null)
+  const [confirmandoProjecao, setConfirmandoProjecao] = useState<Lancamento | null>(null)
+  const [valorConfirmado,     setValorConfirmado]     = useState<string>('')
 
   const set   = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
@@ -322,6 +324,12 @@ export default function LancamentosPage() {
 
   const handleStatus = async (l: Lancamento, status: StatusTx) => {
     setStatusOpen(null)
+    // PROJECAO → PAGO: abre modal para confirmar/ajustar o valor real
+    if (l.status === 'PROJECAO' && status === 'PAGO') {
+      setValorConfirmado(String(l.valor))
+      setConfirmandoProjecao(l)
+      return
+    }
     const { ok, erro: e } = await alterarStatus(l.id, status)
     if (!ok) toast(e ?? 'Erro ao alterar status.')
   }
@@ -860,22 +868,303 @@ export default function LancamentosPage() {
       )}
 
       {/* Modal de antecipação */}
-      {antecipando && (() => {
-        const isRecorrModal = !!antecipando.id_recorrencia
-        // Parcelas futuras não pagas da mesma série (nr_parcela > atual)
-        const futuras = isRecorrModal
+      {/* ── Modal confirmar projeção → pago ─────────────────── */}
+      {confirmandoProjecao && (() => {
+        const l      = confirmandoProjecao
+        const corVal = l.tipo === 'RECEITA' ? '#00c896' : '#f87171'
+        const sinal  = l.tipo === 'RECEITA' ? '+' : '-'
+        const vOrig  = l.valor
+        const vConf  = parseFloat(valorConfirmado.replace(',', '.')) || 0
+        const diff   = vConf - vOrig
+        const hasDiff = Math.abs(diff) > 0.01
+        return (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60" onClick={() => setConfirmandoProjecao(null)} />
+            <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-green-400/10">
+                  <Check size={16} style={{ color: '#00c896' }} />
+                </div>
+                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar valor real</p>
+              </div>
+
+              <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
+                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{l.descricao}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Conta</span>
+                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{l.conta_nome ?? '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor projetado</span>
+                  <span className="text-[12px]" style={{ color: '#8b92a8' }}>{sinal}{formatBRL(vOrig)}</span>
+                </div>
+                <div className="flex justify-between items-center gap-3">
+                  <span className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Valor real</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[12px]" style={{ color: corVal }}>{sinal}</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={valorConfirmado}
+                      onChange={e => setValorConfirmado(e.target.value)}
+                      className="w-32 text-right text-[13px] font-bold bg-[#1a1f2e] border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:border-white/30"
+                      style={{ color: corVal }}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                {hasDiff && (
+                  <div className="flex justify-between border-t border-white/5 pt-2">
+                    <span className="text-[11px]" style={{ color: '#8b92a8' }}>Diferença</span>
+                    <span className="text-[12px]" style={{ color: diff > 0 ? '#00c896' : '#f87171' }}>
+                      {diff > 0 ? '+' : ''}{formatBRL(diff)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
+                O valor projetado será preservado e o lançamento marcado como{' '}
+                <span style={{ color: '#00c896' }}>PAGO</span>.
+              </p>
+
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmandoProjecao(null)}
+                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20"
+                  style={{ color: '#8b92a8' }}>
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    const valorReal = parseFloat(valorConfirmado.replace(',', '.'))
+                    if (isNaN(valorReal) || valorReal <= 0) { toast('Valor inválido.'); return }
+                    setConfirmandoProjecao(null)
+                    const { ok, erro: e } = await editar(l.id, {
+                      status: 'PAGO',
+                      valor: valorReal,
+                      valor_projetado: vOrig,  // preserva o valor original como projetado
+                    }, 'SOMENTE_ESTE')
+                    if (ok) toast('Lançamento confirmado como pago!')
+                    else toast(e ?? 'Erro ao confirmar.')
+                  }}
+                  className="flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:bg-green-500/90"
+                  style={{ background: '#00c896', color: '#0a0f1a' }}>
+                  <Check size={12} className="inline mr-1" /> Confirmar pago
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── Modal confirmar projeção → pago ─────────────────── */}
+      {confirmandoProjecao && (() => {
+        const l      = confirmandoProjecao
+        const corVal = l.tipo === 'RECEITA' ? '#00c896' : '#f87171'
+        const sinal  = l.tipo === 'RECEITA' ? '+' : '-'
+        const vOrig  = l.valor
+        const vConf  = parseFloat(valorConfirmado.replace(',', '.')) || 0
+        const diff   = vConf - vOrig
+        const hasDiff = Math.abs(diff) > 0.01
+        return (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60" onClick={() => setConfirmandoProjecao(null)} />
+            <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-green-400/10">
+                  <Check size={16} style={{ color: '#00c896' }} />
+                </div>
+                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar valor real</p>
+              </div>
+              <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
+                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{l.descricao}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Conta</span>
+                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{l.conta_nome ?? '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor projetado</span>
+                  <span className="text-[12px]" style={{ color: '#8b92a8' }}>{sinal}{formatBRL(vOrig)}</span>
+                </div>
+                <div className="flex justify-between items-center gap-3">
+                  <span className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Valor real</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[12px]" style={{ color: corVal }}>{sinal}</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={valorConfirmado}
+                      onChange={e => setValorConfirmado(e.target.value)}
+                      className="w-32 text-right text-[13px] font-bold bg-[#1a1f2e] border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:border-white/30"
+                      style={{ color: corVal }}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                {hasDiff && (
+                  <div className="flex justify-between border-t border-white/5 pt-2">
+                    <span className="text-[11px]" style={{ color: '#8b92a8' }}>Diferença</span>
+                    <span className="text-[12px]" style={{ color: diff > 0 ? '#00c896' : '#f87171' }}>
+                      {diff > 0 ? '+' : ''}{formatBRL(diff)}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
+                O valor projetado será preservado e o lançamento marcado como{' '}
+                <span style={{ color: '#00c896' }}>PAGO</span>.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmandoProjecao(null)}
+                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20"
+                  style={{ color: '#8b92a8' }}>
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    const valorReal = parseFloat(valorConfirmado.replace(',', '.'))
+                    if (isNaN(valorReal) || valorReal <= 0) { toast('Valor inválido.'); return }
+                    setConfirmandoProjecao(null)
+                    const { ok, erro: e } = await editar(l.id, {
+                      status: 'PAGO',
+                      valor: valorReal,
+                      valor_projetado: vOrig,
+                    }, 'SOMENTE_ESTE')
+                    if (ok) toast('Lançamento confirmado como pago!')
+                    else toast(e ?? 'Erro ao confirmar.')
+                  }}
+                  className="flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:bg-green-500/90"
+                  style={{ background: '#00c896', color: '#0a0f1a' }}>
+                  <Check size={12} className="inline mr-1" /> Confirmar pago
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+       {/* ── Modal confirmar projeção → pago ─────────────────── */}
+      {confirmandoProjecao && (() => {
+        const l      = confirmandoProjecao
+        const corVal = l.tipo === 'RECEITA' ? '#00c896' : '#f87171'
+        const sinal  = l.tipo === 'RECEITA' ? '+' : '-'
+        const vOrig  = l.valor
+        const vConf  = parseFloat(valorConfirmado.replace(',', '.')) || 0
+        const diff   = vConf - vOrig
+        const hasDiff = Math.abs(diff) > 0.01
+        return (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60" onClick={() => setConfirmandoProjecao(null)} />
+            <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-green-400/10">
+                  <Check size={16} style={{ color: '#00c896' }} />
+                </div>
+                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar valor real</p>
+              </div>
+              <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
+                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{l.descricao}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Conta</span>
+                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{l.conta_nome ?? '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor projetado</span>
+                  <span className="text-[12px]" style={{ color: '#8b92a8' }}>{sinal}{formatBRL(vOrig)}</span>
+                </div>
+                <div className="flex justify-between items-center gap-3">
+                  <span className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Valor real</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[12px]" style={{ color: corVal }}>{sinal}</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={valorConfirmado}
+                      onChange={e => setValorConfirmado(e.target.value)}
+                      className="w-32 text-right text-[13px] font-bold bg-[#1a1f2e] border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:border-white/30"
+                      style={{ color: corVal }}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                {hasDiff && (
+                  <div className="flex justify-between border-t border-white/5 pt-2">
+                    <span className="text-[11px]" style={{ color: '#8b92a8' }}>Diferença</span>
+                    <span className="text-[12px]" style={{ color: diff > 0 ? '#00c896' : '#f87171' }}>
+                      {diff > 0 ? '+' : ''}{formatBRL(diff)}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
+                O valor projetado será preservado e o lançamento marcado como{' '}
+                <span style={{ color: '#00c896' }}>PAGO</span>.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmandoProjecao(null)}
+                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20"
+                  style={{ color: '#8b92a8' }}>
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    const valorReal = parseFloat(valorConfirmado.replace(',', '.'))
+                    if (isNaN(valorReal) || valorReal <= 0) { toast('Valor inválido.'); return }
+                    setConfirmandoProjecao(null)
+                    const { ok, erro: e } = await editar(l.id, {
+                      status: 'PAGO',
+                      valor: valorReal,
+                      valor_projetado: vOrig,
+                    }, 'SOMENTE_ESTE')
+                    if (ok) toast('Lançamento confirmado como pago!')
+                    else toast(e ?? 'Erro ao confirmar.')
+                  }}
+                  className="flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:bg-green-500/90"
+                  style={{ background: '#00c896', color: '#0a0f1a' }}>
+                  <Check size={12} className="inline mr-1" /> Confirmar pago
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+     {antecipando && (() => {
+        const isRecorrModal  = !!antecipando.id_recorrencia && antecipando.tipo_recorrencia === 'PARCELA'
+        const corValor       = antecipando.tipo === 'RECEITA' ? '#00c896' : '#f87171'
+        const sinal          = antecipando.tipo === 'RECEITA' ? '+' : '-'
+
+        // Calcula parcelas futuras pelos metadados da transação (não depende do mês carregado)
+        const nrAtual        = antecipando.nr_parcela ?? 0
+        const totalParc      = antecipando.total_parcelas ?? 0
+        const nFuturas       = Math.max(0, totalParc - nrAtual)
+        const temFuturas     = isRecorrModal && nFuturas > 0
+
+        // Parcelas visíveis no mês atual (para exibir valor estimado se disponível)
+        const futurasVisiveis = isRecorrModal
           ? lancamentos.filter(x =>
               x.id_recorrencia === antecipando.id_recorrencia &&
               x.id !== antecipando.id &&
               x.status !== 'PAGO' &&
-              (x.nr_parcela ?? 0) > (antecipando.nr_parcela ?? 0)
-            ).sort((a, b) => (a.nr_parcela ?? 0) - (b.nr_parcela ?? 0))
+              (x.nr_parcela ?? 0) > nrAtual
+            )
           : []
-        const valorFuturas   = futuras.reduce((s, x) => s + x.valor, 0)
-        const valorTotal     = antecipando.valor + valorFuturas
-        const totalParcelas  = 1 + futuras.length
-        const corValor       = antecipando.tipo === 'RECEITA' ? '#00c896' : '#f87171'
-        const sinal          = antecipando.tipo === 'RECEITA' ? '+' : '-'
+        // Valor estimado: usa as visíveis * valor unitário para as demais
+        const valorUnitario  = antecipando.valor
+        const valorFutEst    = nFuturas * valorUnitario
+        const valorTotal     = antecipando.valor + valorFutEst
 
         return (
           <div className="fixed inset-0 z-[200] flex items-center justify-center">
@@ -909,20 +1198,20 @@ export default function LancamentosPage() {
                     <div className="flex justify-between">
                       <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcela atual</span>
                       <span className="text-[12px]" style={{ color: '#e8eaf0' }}>
-                        {antecipando.nr_parcela}/{antecipando.total_parcelas} — {formatBRL(antecipando.valor)}
+                        {nrAtual}/{totalParc} — {formatBRL(valorUnitario)}
                       </span>
                     </div>
-                    {futuras.length > 0 && (
+                    {temFuturas && (
                       <>
                         <div className="flex justify-between">
-                          <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcelas futuras a eliminar</span>
+                          <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcelas a eliminar</span>
                           <span className="text-[12px]" style={{ color: '#f87171' }}>
-                            {futuras.length}× — {formatBRL(valorFuturas)}
+                            {nFuturas}× — {formatBRL(valorFutEst)}
                           </span>
                         </div>
                         <div className="border-t border-white/5 pt-2 flex justify-between">
                           <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
-                            Total antecipado ({totalParcelas} parcelas)
+                            Total antecipado ({nFuturas + 1} parcelas)
                           </span>
                           <span className="text-[13px] font-bold" style={{ color: corValor }}>
                             {sinal}{formatBRL(valorTotal)}
@@ -930,11 +1219,11 @@ export default function LancamentosPage() {
                         </div>
                       </>
                     )}
-                    {futuras.length === 0 && (
+                    {!temFuturas && (
                       <div className="flex justify-between">
                         <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor</span>
                         <span className="text-[13px] font-bold" style={{ color: corValor }}>
-                          {sinal}{formatBRL(antecipando.valor)}
+                          {sinal}{formatBRL(valorUnitario)}
                         </span>
                       </div>
                     )}
@@ -950,8 +1239,8 @@ export default function LancamentosPage() {
               </div>
 
               <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
-                {isRecorrModal && futuras.length > 0
-                  ? <>A parcela atual será marcada como <span style={{ color: '#00c896' }}>PAGA</span> com o valor acumulado e as {futuras.length} parcelas futuras serão removidas.</>
+                {temFuturas
+                  ? <>A parcela atual será marcada como <span style={{ color: '#00c896' }}>PAGA</span> com o valor consolidado e as {nFuturas} parcelas seguintes serão removidas.</>
                   : <>O lançamento será marcado como <span style={{ color: '#00c896' }}>PAGO</span> com a data de hoje.</>
                 }
               </p>
@@ -964,28 +1253,24 @@ export default function LancamentosPage() {
                 </button>
                 <button
                   onClick={async () => {
-                    const l       = antecipando
-                    const futs    = futuras
-                    const vTotal  = valorTotal
+                    const l = antecipando
                     setAntecipando(null)
-                    if (isRecorrModal && futs.length > 0) {
-                      // 1. Atualiza a parcela atual: marca paga com valor acumulado
-                      const { ok: ok1, erro: e1 } = await editar(l.id, {
-                        status: 'PAGO',
-                        valor: vTotal,
-                        total_parcelas: l.nr_parcela, // encerra série na parcela atual
-                      }, 'SOMENTE_ESTE')
-                      if (!ok1) { toast(e1 ?? 'Erro ao antecipar.'); return }
-                      // 2. Exclui as futuras uma a uma (SOMENTE_ESTE)
-                      for (const f of futs) {
-                        await excluir(f.id, 'SOMENTE_ESTE')
-                      }
-                      toast(`Antecipado! ${futs.length} parcela${futs.length > 1 ? 's removidas' : ' removida'}.`)
-                    } else {
-                      // Avulso ou última parcela: só marca como pago
+                    if (isRecorrModal) {
+                      // Sempre usa o endpoint do banco — consolida parcelas futuras
+                      // independente de estarem ou não visíveis no mês atual
                       const { ok, erro: e } = await antecipar(l.id)
-                      if (ok) toast('Pago!')
-                      else toast(e ?? 'Erro ao pagar.')
+                      if (ok) toast('Antecipado! Parcelas futuras consolidadas.')
+                      else toast(e ?? 'Erro ao antecipar.')
+                    } else {
+                      // Avulso: se for projeção, abre modal de confirmação de valor
+                      if (l.status === 'PROJECAO') {
+                        setValorConfirmado(String(l.valor))
+                        setConfirmandoProjecao(l)
+                      } else {
+                        const { ok, erro: e } = await alterarStatus(l.id, 'PAGO')
+                        if (ok) toast('Pago!')
+                        else toast(e ?? 'Erro ao pagar.')
+                      }
                     }
                   }}
                   className={`flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all ${isRecorrModal ? 'hover:bg-yellow-400/90' : 'hover:bg-green-500/90'}`}

@@ -5,14 +5,14 @@ import { Plus, Eye, EyeOff, ChevronDown, ChevronRight } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { mesAtual, mesLabel, formatBRL, formatData, GRUPOS_CONTA, CORES_CATEGORIA } from '../lib/utils'
 import { MonthPicker } from '../components/ui/MonthPicker'
-import { Bar, Doughnut } from 'react-chartjs-2'
+import { Bar, Doughnut, Chart } from 'react-chartjs-2'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement,
-  ArcElement, Tooltip, Legend,
+  ArcElement, Tooltip, Legend, LineElement, PointElement,
 } from 'chart.js'
 import type { Conta, Transacao, DespesaCategoria } from '../types'
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend)
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, LineElement, PointElement)
 
 // ── Ícone de conta inline (sem dependência externa) ──────
 function IconeConta({ icone, cor, size = 'md' }: {
@@ -236,53 +236,108 @@ function CardAlertas({
   )
 }
 
-// ── Gráfico de barras ────────────────────────────────────
-function GraficoBarras({ historico }: { historico: { mes: string; total_entradas: number; total_saidas: number }[] }) {
+// ── Gráfico barras + linha de saldo ──────────────────────
+function GraficoBarras({ historico }: { historico: { mes: string; total_entradas: number; total_saidas: number; saldo_mes?: number }[] }) {
+  const labels = historico.map(h => mesLabel(h.mes))
+
+  const data = {
+    labels,
+    datasets: [
+      {
+        type: 'bar' as const,
+        label: 'Entradas',
+        data: historico.map(h => h.total_entradas),
+        backgroundColor: '#00c896',
+        borderRadius: 4,
+        yAxisID: 'y',
+        order: 2,
+      },
+      {
+        type: 'bar' as const,
+        label: 'Saídas',
+        data: historico.map(h => h.total_saidas),
+        backgroundColor: '#ff6b4a',
+        borderRadius: 4,
+        yAxisID: 'y',
+        order: 2,
+      },
+      {
+        type: 'line' as const,
+        label: 'Saldo',
+        data: historico.map(h => h.saldo_mes ?? null),
+        borderColor: '#a78bfa',
+        backgroundColor: 'rgba(167,139,250,0.15)',
+        borderWidth: 2,
+        pointRadius: 4,
+        pointBackgroundColor: '#a78bfa',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 1.5,
+        tension: 0.35,
+        fill: false,
+        yAxisID: 'ySaldo',
+        order: 1,
+      },
+    ],
+  }
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index' as const, intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx: any) => {
+            const v = ctx.parsed.y
+            if (v === null || v === undefined) return ''
+            return ` ${ctx.dataset.label}: ${formatBRL(v)}`
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        ticks: { color: '#9ca3af', font: { size: 10 } },
+        grid: { display: false },
+        border: { display: false },
+      },
+      y: {
+        position: 'left' as const,
+        ticks: {
+          color: '#9ca3af',
+          font: { size: 10 },
+          callback: (v: any) => `R$${(Number(v)/1000).toFixed(0)}k`,
+        },
+        grid: { color: 'rgba(128,128,128,0.1)' },
+        border: { display: false },
+      },
+      ySaldo: {
+        position: 'right' as const,
+        ticks: {
+          color: '#a78bfa',
+          font: { size: 10 },
+          callback: (v: any) => `R$${(Number(v)/1000).toFixed(0)}k`,
+        },
+        grid: { display: false },
+        border: { display: false },
+      },
+    },
+  }
+
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
       <p className="text-[13px] font-semibold text-gray-700 dark:text-gray-200 mb-0.5">Evolução mensal</p>
-      <p className="text-[11px] text-gray-400 mb-3">Entradas e saídas — últimos 6 meses</p>
+      <p className="text-[11px] text-gray-400 mb-3">Entradas, saídas e saldo — últimos 6 meses</p>
       <div className="flex gap-3 mb-2">
-        {[['#00c896','Entradas'],['#ff6b4a','Saídas']].map(([cor,label]) => (
+        {[['#00c896','Entradas'],['#ff6b4a','Saídas'],['#a78bfa','Saldo']].map(([cor,label]) => (
           <div key={label} className="flex items-center gap-1.5 text-[11px] text-gray-400">
             <span className="w-2 h-2 rounded-sm" style={{ background: cor }}/>{label}
           </div>
         ))}
       </div>
       <div style={{ position: 'relative', height: '300px', width: '100%' }}>
-        <Bar
-          data={{
-            labels: historico.map(h => mesLabel(h.mes)),
-            datasets: [
-              { label: 'Entradas', data: historico.map(h => h.total_entradas), backgroundColor: '#00c896', borderRadius: 4 },
-              { label: 'Saídas',   data: historico.map(h => h.total_saidas),   backgroundColor: '#ff6b4a', borderRadius: 4 },
-            ],
-          }}
-          options={{
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { 
-              legend: { display: false },
-              filler: { propagate: true }
-            },
-            scales: {
-              x: { 
-                ticks: { color: '#9ca3af', font: { size: 10 } }, 
-                grid: { display: false }, 
-                border: { display: false } 
-              },
-              y: { 
-                ticks: { 
-                  color: '#9ca3af', 
-                  font: { size: 10 }, 
-                  callback: v => `R$${(Number(v)/1000).toFixed(0)}k` 
-                }, 
-                grid: { color: 'rgba(128,128,128,0.1)' }, 
-                border: { display: false } 
-              },
-            },
-          }}
-        />
+        <Chart type="bar" data={data} options={options} />
       </div>
     </div>
   )

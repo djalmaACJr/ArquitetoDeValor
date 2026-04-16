@@ -19,7 +19,7 @@ function agruparPorCategoria(
   limite: number
 ): DespesaCategoria[] {
   const comCat = transacoes.filter(
-    t => t.tipo === tipo && t.categoria_id && t.categoria_nome
+    t => t.tipo === tipo && t.categoria_id && t.categoria_nome && !t.id_par_transferencia
   )
   const map = new Map<string, DespesaCategoria>()
   comCat.forEach(t => {
@@ -88,26 +88,33 @@ export function useDashboard(mes: string) {
       setContas(extrairLista<Conta>(contasRes.dados))
 
       // ─ PENDENTES / PRÓXIMAS ─
-      const todasPend = extrairLista<Transacao>(pendentesRes.dados)
+      const todasPend = extrairLista<Transacao>(pendentesRes.dados).filter(t => !t.id_par_transferencia)
       setPendentes(todasPend.filter(t => t.data <= hoje))
       setProximas(todasPend.filter(t => t.data > hoje))
 
       // ─ RESUMO DO MÊS ATUAL (último dos 6) ─
       const doMes = extrairLista<Transacao>(historicosRes[historicosRes.length - 1]?.dados)
 
-      const entradas = doMes.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0)
-      const saidas   = doMes.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
+      const entradas = doMes.filter(t => t.tipo === 'RECEITA' && !t.id_par_transferencia).reduce((s, t) => s + t.valor, 0)
+      const saidas   = doMes.filter(t => t.tipo === 'DESPESA' && !t.id_par_transferencia).reduce((s, t) => s + t.valor, 0)
 
       setResumo({ mes, total_entradas: entradas, total_saidas: saidas })
       setDespesasCat(agruparPorCategoria(doMes, 'DESPESA', 5))
       setReceitasCat(agruparPorCategoria(doMes, 'RECEITA', 4))
 
       // ─ HISTÓRICO 6 MESES ─
+      // saldo_acumulado: pega o maior saldo_acumulado do último lançamento PAGO do mês
       const hist: ResumoMensal[] = meses6.map((mesHist, idx) => {
         const fatia = extrairLista<Transacao>(historicosRes[idx]?.dados)
-        const totalEnt = fatia.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0)
-        const totalSai = fatia.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
-        return { mes: mesHist, total_entradas: totalEnt, total_saidas: totalSai }
+        const totalEnt = fatia.filter(t => t.tipo === 'RECEITA' && !t.id_par_transferencia).reduce((s, t) => s + t.valor, 0)
+        const totalSai = fatia.filter(t => t.tipo === 'DESPESA' && !t.id_par_transferencia).reduce((s, t) => s + t.valor, 0)
+        // Saldo ao final do mês: maior saldo_acumulado entre todas as contas no último lançamento PAGO
+        // Usa a soma dos saldos_acumulados de cada conta (último lançamento pago de cada conta no mês)
+        const pagos = fatia.filter(t => t.status === 'PAGO' && t.saldo_acumulado !== undefined)
+        const saldoPorConta = new Map<string, number>()
+        pagos.forEach(t => saldoPorConta.set(t.conta_id, t.saldo_acumulado!))
+        const saldo_mes = [...saldoPorConta.values()].reduce((s, v) => s + v, 0)
+        return { mes: mesHist, total_entradas: totalEnt, total_saidas: totalSai, saldo_mes }
       })
       setHistorico(hist)
 

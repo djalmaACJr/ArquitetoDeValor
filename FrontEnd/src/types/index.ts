@@ -95,6 +95,7 @@ export interface ResumoMensal {
   mes:            string
   total_entradas: number
   total_saidas:   number
+  saldo_mes?:     number  // saldo acumulado ao final do mês
 }
 
 // ── Despesas por categoria (dashboard) ───────────────────

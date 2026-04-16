@@ -40,7 +40,7 @@ describe("Transações — CA-TX01 a CA-TX18", () => {
     // Cria grupo de parcelas para testes de recorrência
     grupoRecorrenciaId = crypto.randomUUID();
     for (let i = 1; i <= 3; i++) {
-      const { data: p } = await api("/transacoes", "POST", {
+      const resP = await api("/transacoes", "POST", {
         ...TX_VALIDA(),
         descricao: `Parcela ${i}/3`,
         id_recorrencia: grupoRecorrenciaId,
@@ -48,9 +48,15 @@ describe("Transações — CA-TX01 a CA-TX18", () => {
         total_parcelas: 3,
         tipo_recorrencia: "PARCELA",
         status: "PENDENTE",
-      }) as { data: Record<string, unknown> };
+      }) as { status: number; data: Record<string, unknown> };
+      if (!resP.data.id) {
+        console.error(`DIAGNÓSTICO beforeAll parcela ${i}: status=${resP.status} body=`, JSON.stringify(resP.data));
+      }
+      const p = resP.data;
+      expect(p.id).toBeDefined(); // garante que a parcela foi criada
       parcelas.push(p.id as string);
     }
+    expect(parcelas.length).toBe(3); // garante que todas as parcelas existem
   });
 
   afterAll(async () => {
@@ -156,16 +162,28 @@ describe("Transações — CA-TX01 a CA-TX18", () => {
   // ── CA-TX11 ───────────────────────────────────────────────
   test("CA-TX11 — PUT com escopo SOMENTE_ESTE atualiza apenas 1 lançamento", async () => {
     const novaDescricao = "Atualizado SOMENTE_ESTE";
+
+    // PUT em parcelas[1] com escopo SOMENTE_ESTE
     const { status, data } = await api(
       `/transacoes/${parcelas[1]}?escopo=SOMENTE_ESTE`,
       "PUT",
       { descricao: novaDescricao }
     ) as { status: number; data: Record<string, unknown> };
     expect(status).toBe(200);
+
+    // Deve ter atualizado exatamente 1 registro
     expect((data as { atualizados: number }).atualizados).toBe(1);
 
-    const { data: tx0 } = await api(`/transacoes/${parcelas[0]}`) as { data: Record<string, unknown> };
-    expect((tx0 as { descricao: string }).descricao).toBe("Parcela 1/3");
+    // O registro atualizado deve ser parcelas[1] com a nova descrição
+    const dados = (data as { dados: Record<string, unknown>[] }).dados;
+    expect(dados.length).toBe(1);
+    expect((dados[0] as { id: string }).id).toBe(parcelas[1]);
+    expect((dados[0] as { descricao: string }).descricao).toBe(novaDescricao);
+
+    // parcelas[0] e parcelas[2] NÃO devem estar nos dados retornados
+    const idsAtualizados = dados.map((t) => (t as { id: string }).id);
+    expect(idsAtualizados).not.toContain(parcelas[0]);
+    expect(idsAtualizados).not.toContain(parcelas[2]);
   });
 
   // ── CA-TX12 ───────────────────────────────────────────────
