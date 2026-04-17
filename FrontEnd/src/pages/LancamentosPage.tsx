@@ -91,17 +91,17 @@ function AcaoBtn({ onClick, title, color = '#8b92a8', children }: {
 }
 
 // ── Modal de escopo de recorrência ────────────────────────────
-function ModalEscopo({ onConfirmar, onCancelar, acao, temPagasAnteriores }: {
+function ModalEscopo({ onConfirmar, onCancelar, acao, opcoes }: {
   onConfirmar: (escopo: 'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS') => void
   onCancelar: () => void
   acao: 'editar' | 'excluir'
-  temPagasAnteriores: boolean
+  opcoes: ('SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS')[]
 }) {
-  const opcoes: ['SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS', string, string | null][] = [
-    ['SOMENTE_ESTE',     'Somente este lançamento',  null],
-    ['ESTE_E_SEGUINTES', 'Este e os seguintes',       null],
-    ['TODOS',            'Todos da série',            temPagasAnteriores ? 'Existem parcelas anteriores já pagas' : null],
-  ]
+  const labels: Record<string, string> = {
+    SOMENTE_ESTE:     'Somente este lançamento',
+    ESTE_E_SEGUINTES: 'Este e os seguintes',
+    TODOS:            'Todos da série',
+  }
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onCancelar} />
@@ -113,24 +113,14 @@ function ModalEscopo({ onConfirmar, onCancelar, acao, temPagasAnteriores }: {
           Este lançamento faz parte de uma série. O que deseja {acao === 'editar' ? 'editar' : 'excluir'}?
         </p>
         <div className="flex flex-col gap-2">
-          {opcoes.map(([val, label, aviso]) => {
-            const desabilitado = val === 'TODOS' && temPagasAnteriores
-            return (
-              <button key={val}
-                onClick={() => !desabilitado && onConfirmar(val)}
-                disabled={desabilitado}
-                className={`w-full py-2.5 px-4 rounded-lg border text-[13px] text-left transition-all
-                  ${desabilitado
-                    ? 'border-white/5 opacity-40 cursor-not-allowed'
-                    : 'border-white/10 hover:border-av-green hover:bg-av-green/5 cursor-pointer'}`}
-                style={{ color: '#e8eaf0' }}>
-                <span>{label}</span>
-                {aviso && (
-                  <span className="block text-[10px] mt-0.5" style={{ color: '#f0b429' }}>{aviso}</span>
-                )}
-              </button>
-            )
-          })}
+          {opcoes.map(val => (
+            <button key={val}
+              onClick={() => onConfirmar(val)}
+              className="w-full py-2.5 px-4 rounded-lg border text-[13px] text-left transition-all border-white/10 hover:border-av-green hover:bg-av-green/5 cursor-pointer"
+              style={{ color: '#e8eaf0' }}>
+              {labels[val]}
+            </button>
+          ))}
         </div>
         <button onClick={onCancelar} className="mt-3 text-[11px] w-full text-center"
           style={{ color: '#8b92a8' }}>Cancelar</button>
@@ -178,11 +168,11 @@ export default function LancamentosPage() {
   const [mes,         setMes]         = useState(mesAtual())
   const [filtContas,  setFiltContas]  = useState<string[]>([])
   const [filtCats,    setFiltCats]    = useState<string[]>([])
-  const [filtStatus,  setFiltStatus]  = useState('')
+  const [filtStatus,  setFiltStatus]  = useState<string[]>([])
   const [comSaldo,    setComSaldo]    = useState(true)
 
   const { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus, criarTransferencia, editarTransferencia, excluirTransferencia } =
-    useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status: filtStatus, com_saldo: comSaldo })
+    useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus, com_saldo: comSaldo })
 
   const { contas }     = useContas()
   const { categorias } = useCategorias()
@@ -190,7 +180,7 @@ export default function LancamentosPage() {
   const [drawerOpen,  setDrawerOpen]  = useState(false)
   const [editando,    setEditando]    = useState<Lancamento | null>(null)
   const [excluindo,   setExcluindo]   = useState<Lancamento | null>(null)
-  const [escopoAcao,  setEscopoAcao]  = useState<{ lancamento: Lancamento; acao: 'editar' | 'excluir'; temPagasAnteriores: boolean } | null>(null)
+  const [escopoAcao,  setEscopoAcao]  = useState<{ lancamento: Lancamento; acao: 'editar' | 'excluir'; opcoes: ('SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS')[] } | null>(null)
   const [feedback,    setFeedback]    = useState<string | null>(null)
   const [form,        setForm]        = useState<FormState>(FORM_VAZIO)
   const [erro,        setErro]        = useState<string | null>(null)
@@ -235,16 +225,43 @@ export default function LancamentosPage() {
   }, [location.state, lancamentos])
 
   const abrirNovo   = () => { setEditando(null); setForm(FORM_VAZIO); setErro(null); setDrawerOpen(true) }
+  const calcularOpcoesEscopo = (l: Lancamento, acao: 'editar' | 'excluir'): ('SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS')[] => {
+    const opcoes: ('SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS')[] = []
+    const nrAtual   = l.nr_parcela ?? 1
+    const total     = l.total_parcelas ?? 1
+    const ePrimeira = nrAtual === 1
+    const isPago    = l.status === 'PAGO'
+
+    // "Este e os seguintes" — só se houver parcelas futuras
+    const temFuturas = lancamentos.some(
+      x => x.id_recorrencia === l.id_recorrencia &&
+           (x.nr_parcela ?? 0) > nrAtual
+    ) || nrAtual < total
+
+    // "Todos da série" — só se for a 1ª parcela E não estiver paga
+    const podeTodos = ePrimeira && !isPago
+
+    if (temFuturas) opcoes.push('ESTE_E_SEGUINTES')
+    if (podeTodos)  opcoes.push('TODOS')
+
+    // "Somente este" — sempre disponível
+    opcoes.push('SOMENTE_ESTE')
+
+    return opcoes
+  }
+
   const abrirEditar = (l: Lancamento) => {
     const isTransf = l.descricao?.startsWith('[Transf')
-    // Se PAGO e recorrente: edita só este, sem modal de escopo
-    if (!isTransf && l.id_recorrencia && l.status !== 'PAGO') {
-      const temPagasAnteriores = lancamentos.some(
-        x => x.id_recorrencia === l.id_recorrencia &&
-             x.status === 'PAGO' &&
-             (x.nr_parcela ?? 0) < (l.nr_parcela ?? 1)
-      )
-      setEscopoAcao({ lancamento: l, acao: 'editar', temPagasAnteriores })
+    // Recorrente não-transferência: calcular opções disponíveis
+    if (!isTransf && l.id_recorrencia) {
+      const opcoes = calcularOpcoesEscopo(l, 'editar')
+      // Se só restar "Somente este", abre direto sem modal
+      if (opcoes.length === 1 && opcoes[0] === 'SOMENTE_ESTE') {
+        const f = formDeLanc(l)
+        setEditando(l); setForm(f); setErro(null); setDrawerOpen(true)
+        return
+      }
+      setEscopoAcao({ lancamento: l, acao: 'editar', opcoes })
       return
     }
     const f = formDeLanc(l)
@@ -341,12 +358,15 @@ export default function LancamentosPage() {
   const handleExcluir = async () => {
     if (!excluindo) return
     if (excluindo.id_recorrencia) {
-      const temPagasAnteriores = lancamentos.some(
-        x => x.id_recorrencia === excluindo.id_recorrencia &&
-             x.status === 'PAGO' &&
-             (x.nr_parcela ?? 0) < (excluindo.nr_parcela ?? 1)
-      )
-      setExcluindo(null); setEscopoAcao({ lancamento: excluindo, acao: 'excluir', temPagasAnteriores }); return
+      const opcoes = calcularOpcoesEscopo(excluindo, 'excluir')
+      if (opcoes.length === 1 && opcoes[0] === 'SOMENTE_ESTE') {
+        // Só uma opção, excluir direto
+        const { ok, erro: e } = await excluir(excluindo.id)
+        setExcluindo(null)
+        if (ok) { toast('Lançamento excluído.') } else { toast(e ?? 'Não foi possível excluir.') }
+        return
+      }
+      setExcluindo(null); setEscopoAcao({ lancamento: excluindo, acao: 'excluir', opcoes }); return
     }
     const { ok, erro: e } = await excluir(excluindo.id)
     setExcluindo(null)
@@ -497,18 +517,18 @@ export default function LancamentosPage() {
           ]}
         />
 
-        {/* Status */}
-        <select
-          value={filtStatus}
-          onChange={e => setFiltStatus(e.target.value)}
-          style={{ width: 128, flexShrink: 0, minWidth: 0, color: '#e8eaf0' }}
-          className="bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-1.5 text-[12px] outline-none focus:border-av-green transition-colors cursor-pointer"
-        >
-          <option value="" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Todos status</option>
-          <option value="PAGO"     style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Pago</option>
-          <option value="PENDENTE" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Pendente</option>
-          <option value="PROJECAO" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Projeção</option>
-        </select>
+        {/* Status — multi-select */}
+        <MultiSelect
+          placeholder="Todos status"
+          className="w-36"
+          values={filtStatus}
+          onChange={setFiltStatus}
+          options={[
+            { value: 'PAGO',     label: 'Pago',     cor: '#00c896' },
+            { value: 'PENDENTE', label: 'Pendente', cor: '#4da6ff' },
+            { value: 'PROJECAO', label: 'Projeção', cor: '#f0b429' },
+          ]}
+        />
 
         {/* Toggle moderno — incluir saldo anterior */}
         <button
@@ -627,6 +647,40 @@ export default function LancamentosPage() {
                   <div key={data} className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
                     {/* Cabeçalho do grupo de data */}
                     <div className="flex items-center gap-3 px-4 py-2 border-b border-white/10 bg-white/[0.03]">
+                      {/* Check selecionar todos do dia */}
+                      {(() => {
+                        const idsGrupo = grupo.map(l => l.id)
+                        const todosMarcados = idsGrupo.every(id => selecionados.has(id))
+                        const algumMarcado  = idsGrupo.some(id => selecionados.has(id))
+                        return (
+                          <span
+                            onClick={() => {
+                              setSelecionados(prev => {
+                                const next = new Set(prev)
+                                if (todosMarcados) idsGrupo.forEach(id => next.delete(id))
+                                else idsGrupo.forEach(id => next.add(id))
+                                return next
+                              })
+                            }}
+                            className="w-4 h-4 rounded flex items-center justify-center border cursor-pointer transition-all flex-shrink-0"
+                            style={{
+                              background: todosMarcados ? '#00c896' : algumMarcado ? 'rgba(0,200,150,0.3)' : 'transparent',
+                              borderColor: todosMarcados || algumMarcado ? '#00c896' : 'rgba(255,255,255,0.2)',
+                            }}
+                          >
+                            {todosMarcados && (
+                              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                <path d="M1.5 5L4 7.5L8.5 2.5" stroke="#0a0f1a" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                            {!todosMarcados && algumMarcado && (
+                              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                <path d="M2 5h6" stroke="#0a0f1a" strokeWidth="1.8" strokeLinecap="round"/>
+                              </svg>
+                            )}
+                          </span>
+                        )
+                      })()}
                       <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
                         {fmtDataLabel(data)}
                       </span>
@@ -1113,7 +1167,7 @@ export default function LancamentosPage() {
       {escopoAcao && (
         <ModalEscopo
           acao={escopoAcao.acao}
-          temPagasAnteriores={escopoAcao.temPagasAnteriores}
+          opcoes={escopoAcao.opcoes}
           onConfirmar={handleEscopoConfirmado}
           onCancelar={() => setEscopoAcao(null)}
         />

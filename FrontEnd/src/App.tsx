@@ -3,9 +3,8 @@ import { useAuth } from './hooks/useAuth'
 import AppLayout from './components/layout/AppLayout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
-import {
-  ImportarPage, RelatoriosPage,
-} from './pages/Placeholders'
+import { ImportarPage } from './pages/Placeholders'
+import RelatoriosPage from './pages/RelatoriosPage'
 import ContasPage from './pages/ContasPage'
 import CategoriasPage from './pages/CategoriasPage'
 import LancamentosPage from './pages/LancamentosPage'

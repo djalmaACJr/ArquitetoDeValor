@@ -11,3 +11,6 @@ dist/
 
 # Dependências
 node_modules/
+
+#arquivos do vistual studio
+.vs/

@@ -15,7 +15,7 @@ import DrawerLancamento from '../components/ui/DrawerLancamento'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, LineElement, PointElement)
 
-// -- Icone de conta inline (sem dependencia externa) ------
+// ── Ícone de conta inline (sem dependência externa) ──────
 function IconeConta({ icone, cor, size = 'md' }: {
   icone?: string | null; cor?: string | null; size?: 'sm' | 'md' | 'lg'
 }) {
@@ -33,9 +33,9 @@ function IconeConta({ icone, cor, size = 'md' }: {
   )
 }
 
-const OCULTO = '??????'
+const OCULTO = '••••••'
 
-// -- Card de resultado do mes -----------------------------
+// ── Card de resultado do mês ─────────────────────────────
 function CardResultados({
   resumo,
 }: {
@@ -66,7 +66,7 @@ function CardResultados({
   )
 }
 
-// -- Card de saldo acumulado ------------------------------
+// ── Card de saldo acumulado ──────────────────────────────
 function CardSaldo({ contas, oculto, mes, historico }: {
   contas: Conta[]
   oculto: boolean
@@ -77,17 +77,17 @@ function CardSaldo({ contas, oculto, mes, historico }: {
   const isMesAtual  = mes === mesAtualStr
   const [modo, setModo] = useState<'hoje' | 'fim'>('hoje')
 
-  // Saldo ate hoje (soma dos saldos_atual das contas - posicao real agora)
+  // Saldo até hoje (soma dos saldos_atual das contas — posição real agora)
   const saldoHoje = contas.reduce((s, c) => s + c.saldo_atual, 0)
 
-  // Saldo do mes selecionado: ultimo saldo_acumulado do mes no historico
+  // Saldo do mês selecionado: último saldo_acumulado do mês no histórico
   const entradaMes  = historico.find(h => h.mes === mes)
   const saldoFimMes = entradaMes?.saldo_mes ?? null
 
-  // Logica de exibicao:
-  // - Mes atual + "ate hoje"  -> saldo real das contas agora
-  // - Mes atual + "ate fim"   -> saldo_acumulado fim do mes (historico)
-  // - Qualquer outro mes      -> saldo_acumulado fim do mes (historico) - NUNCA saldoHoje
+  // Lógica de exibição:
+  // - Mês atual + "até hoje"  → saldo real das contas agora
+  // - Mês atual + "até fim"   → saldo_acumulado fim do mês (histórico)
+  // - Qualquer outro mês      → saldo_acumulado fim do mês (histórico) — NUNCA saldoHoje
   const saldoExibido = isMesAtual
     ? (modo === 'hoje' ? saldoHoje : (saldoFimMes ?? saldoHoje))
     : (saldoFimMes ?? 0)
@@ -100,7 +100,7 @@ function CardSaldo({ contas, oculto, mes, historico }: {
     return Math.round((diaAtual / totalDias) * 100)
   })()
 
-  // Label do subtitulo
+  // Label do subtítulo
   const labelData = (() => {
     if (!isMesAtual) {
       const [ano, m] = mes.split('-')
@@ -140,7 +140,7 @@ function CardSaldo({ contas, oculto, mes, historico }: {
         {oculto ? OCULTO : formatBRL(saldoExibido)}
       </p>
       <p className="relative text-[11px] text-white/35 mt-1.5">
-        {oculto ? '-' : labelData}
+        {oculto ? '—' : labelData}
       </p>
       <div className="relative mt-3 h-[3px] rounded-full bg-blue-400/15">
         <div className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-av-green to-av-amber"
@@ -150,7 +150,7 @@ function CardSaldo({ contas, oculto, mes, historico }: {
   )
 }
 
-// -- Grupo de conta dentro do card de alertas -------------
+// ── Grupo de conta dentro do card de alertas ─────────────
 function GrupoConta({
   nomeConta, icone, cor, total, itens, corTotal, onEditar,
 }: {
@@ -162,7 +162,7 @@ function GrupoConta({
 
   return (
     <div className="border-b border-gray-100 dark:border-gray-700 last:border-0">
-      {/* Cabecalho do grupo - clicavel */}
+      {/* Cabeçalho do grupo — clicável */}
       <button
         onClick={() => setAberto(a => !a)}
         className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
@@ -185,7 +185,7 @@ function GrupoConta({
         </span>
       </button>
 
-      {/* Lancamentos expandidos */}
+      {/* Lançamentos expandidos */}
       {aberto && (
         <div className="bg-gray-50/50 dark:bg-gray-700/30">
           <div className="grid grid-cols-[1fr_56px_72px] px-6 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-700">
@@ -218,7 +218,7 @@ function GrupoConta({
   )
 }
 
-// -- Card de alertas agrupado por conta -------------------
+// ── Card de alertas agrupado por conta ───────────────────
 function CardAlertas({
   titulo, cor, total, itens, contas, onVerTodos, onEditar, filtravel, mes,
 }: {
@@ -229,15 +229,15 @@ function CardAlertas({
   const [aberto, setAberto] = useState(true)
   const [periodo, setPeriodo] = useState<'mes' | '30dias'>('mes')
 
-  // Filtrar itens pelo periodo selecionado (so quando filtravel=true)
+  // Filtrar itens pelo período selecionado (só quando filtravel=true)
   const itensFiltrados = (() => {
     if (!filtravel) return itens
     if (periodo === 'mes') {
-      // Somente do mes selecionado no dashboard
+      // Somente do mês selecionado no dashboard
       const anoMes = mes ?? new Date().toISOString().slice(0, 7)
       return itens.filter(t => t.data.startsWith(anoMes))
     }
-    // 30 dias: a partir de HOJE ate hoje+30 - independente do mes selecionado
+    // 30 dias: a partir de HOJE até hoje+30 — independente do mês selecionado
     const hoje = new Date()
     const limite = new Date(hoje)
     limite.setDate(hoje.getDate() + 30)
@@ -259,7 +259,7 @@ function CardAlertas({
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-      {/* Cabecalho do card - clicavel */}
+      {/* Cabeçalho do card — clicável */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
         <button
           onClick={() => setAberto(a => !a)}
@@ -331,7 +331,7 @@ function CardAlertas({
   )
 }
 
-// -- Grafico barras + linha de saldo ----------------------
+// ── Gráfico barras + linha de saldo ──────────────────────
 function GraficoBarras({ historico, oculto }: { historico: { mes: string; total_entradas: number; total_saidas: number; saldo_mes?: number }[]; oculto: boolean }) {
   const labels = historico.map(h => mesLabel(h.mes))
 
@@ -424,7 +424,7 @@ function GraficoBarras({ historico, oculto }: { historico: { mes: string; total_
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
       <p className="text-[13px] font-semibold text-gray-700 dark:text-gray-200 mb-0.5">Evolução mensal</p>
-      <p className="text-[11px] text-gray-400 mb-3">Receitas, despesas e saldo - últimos 6 meses</p>
+      <p className="text-[11px] text-gray-400 mb-3">Receitas, despesas e saldo — últimos 6 meses</p>
       <div className="flex gap-3 mb-2">
         {[['#00c896','Receitas'],['#ff6b4a','Despesas'],['#a78bfa','Saldo']].map(([cor,label]) => (
           <div key={label} className="flex items-center gap-1.5 text-[11px] text-gray-400">
@@ -439,7 +439,7 @@ function GraficoBarras({ historico, oculto }: { historico: { mes: string; total_
   )
 }
 
-// -- Grafico donut de categoria ---------------------------
+// ── Gráfico donut de categoria ───────────────────────────
 function GraficoDonut({ titulo, subtitulo, total, dados, corCentro }: {
   titulo: string; subtitulo: string; total: number
   dados: DespesaCategoria[]; corCentro: string
@@ -493,7 +493,7 @@ function GraficoDonut({ titulo, subtitulo, total, dados, corCentro }: {
   )
 }
 
-// -- Contas agrupadas -------------------------------------
+// ── Contas agrupadas ─────────────────────────────────────
 function SecaoContas({ contas, oculto }: { contas: Conta[]; oculto: boolean }) {
   // Agrupamento personalizado para o dashboard
   const gruposDash = [
@@ -554,7 +554,7 @@ function SecaoContas({ contas, oculto }: { contas: Conta[]; oculto: boolean }) {
   )
 }
 
-// -- Dashboard Page ----------------------------------------
+// ── Dashboard Page ────────────────────────────────────────
 export default function DashboardPage() {
   const navigate = useNavigate()
   const [mes, setMes]       = useState(mesAtual())
@@ -592,7 +592,7 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
         <div className="flex items-center gap-2">
-          {/* Botao ocultar valores */}
+          {/* Botão ocultar valores */}
           <button
             onClick={() => setOculto(o => !o)}
             title={oculto ? 'Mostrar valores' : 'Ocultar valores'}
@@ -649,7 +649,7 @@ export default function DashboardPage() {
             />
           </div>
 
-          {/* Linha 3: grafico de barras */}
+          {/* Linha 3: gráfico de barras */}
           <GraficoBarras historico={historico} oculto={oculto}/>
 
           {/* Linha 4: donuts */}
@@ -674,7 +674,7 @@ export default function DashboardPage() {
           <SecaoContas contas={contas} oculto={oculto}/>
         </div>
       )}
-      {/* Drawer de edicao de lancamento */}
+      {/* Drawer de edição de lançamento */}
       {lancamentoEditando && (
         <DrawerLancamento
           lancamento={lancamentoEditando}

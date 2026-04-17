@@ -93,7 +93,7 @@ const navCadastros: NavItem[] = [
 ]
 const navFerramentas: NavItem[] = [
   { to: '/importar',   icon: <ArrowLeftRight size={15}/>, label: 'Importar / Exportar' },
-  { to: '/relatorios', icon: <FileText size={15}/>,       label: 'Relatórios', soon: true },
+  { to: '/relatorios', icon: <FileText size={15}/>,       label: 'Relatórios' },
 ]
 
 function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]; collapsed: boolean }) {

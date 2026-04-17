@@ -76,24 +76,35 @@ export function useDashboard(mes: string) {
       // Gera 6 meses terminando no mês selecionado (garante que o mês selecionado sempre esteja no histórico)
       const meses6 = gerarUltimosMeses(ano, m, 6)
 
-      const [contasRes, pendentesRes, ...historicosRes] = await Promise.all([
+      // Mês seguinte para cobrir "próximos 30 dias"
+      const [anoN, mesN] = mes.split('-').map(Number)
+      const mesSeguinte  = mesN === 12
+        ? `${anoN + 1}-01`
+        : `${anoN}-${String(mesN + 1).padStart(2, '0')}`
+
+      const [contasRes, pendentesRes, proximosRes, ...historicosRes] = await Promise.all([
         apiFetch<Conta[]>('/contas', signal),
-        apiFetch(`/transacoes?status=PENDENTE&mes=${mes}&saldo=true`, signal),
+        apiFetch(`/transacoes?status=PENDENTE&mes=${mes}&per_page=500&saldo=true`, signal),
+        apiFetch(`/transacoes?status=PENDENTE&mes=${mesSeguinte}&per_page=500&saldo=true`, signal),
         ...meses6.map(mesHist =>
           apiFetch(`/transacoes?mes=${mesHist}&per_page=1000&saldo=true`, signal)
         ),
       ])
 
       // ─ CONTAS ─
-      // A API de contas retorna { dados: Conta[] } — extrairLista resolve sem cast
       setContas(extrairLista<Conta>(contasRes.dados))
 
       // ─ PENDENTES / PRÓXIMAS ─
-      const todasPend = extrairLista<Transacao>(pendentesRes.dados).filter(t =>
+      // Combina mês atual + mês seguinte para suportar filtro "30 dias"
+      const filtrarTransf = (t: Transacao) =>
         !t.id_par_transferencia &&
         !t.descricao?.startsWith('[Transf.') &&
         t.categoria_nome !== 'Transferências'
-      )
+
+      const pendMes      = extrairLista<Transacao>(pendentesRes.dados).filter(filtrarTransf)
+      const pendProximos = extrairLista<Transacao>(proximosRes.dados).filter(filtrarTransf)
+      const todasPend    = [...pendMes, ...pendProximos]
+
       setPendentes(todasPend.filter(t => t.data <= hoje))
       setProximas(todasPend.filter(t => t.data > hoje))
 

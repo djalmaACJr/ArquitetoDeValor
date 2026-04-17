@@ -34,7 +34,8 @@ export interface FiltrosLancamento {
   mes: string
   conta_ids?: string[]
   categoria_ids?: string[]
-  status?: string
+  status?: string       // legado — valor único
+  status_ids?: string[] // novo — múltiplos status
   com_saldo?: boolean
 }
 
@@ -64,12 +65,13 @@ export function useLancamentos(filtros: FiltrosLancamento) {
       if (filtros.categoria_ids?.length === 1) {
         params.set('categoria_id', filtros.categoria_ids[0])
       }
-      if (filtros.status) {
+      // Status: se só 1 selecionado, manda para a API; se múltiplos, filtra client-side
+      if ((filtros.status_ids?.length ?? 0) === 1) {
+        params.set('status', filtros.status_ids![0])
+      } else if (filtros.status) {
         params.set('status', filtros.status)
       }
-      // Aumenta per_page quando há filtro multi para minimizar perda de dados
-      // até a API suportar múltiplos filtros nativamente
-      const temFiltroMulti = (filtros.conta_ids?.length ?? 0) > 1 || (filtros.categoria_ids?.length ?? 0) > 1
+      const temFiltroMulti = (filtros.conta_ids?.length ?? 0) > 1 || (filtros.categoria_ids?.length ?? 0) > 1 || (filtros.status_ids?.length ?? 0) > 1
       params.set('per_page', temFiltroMulti ? '200' : '50')
 
       const res = await apiFetch<{ dados: Lancamento[] }>(`/transacoes?${params}`, signal)
@@ -88,6 +90,9 @@ export function useLancamentos(filtros: FiltrosLancamento) {
       if ((filtros.categoria_ids?.length ?? 0) > 1) {
         lista = lista.filter(l => l.categoria_id != null && filtros.categoria_ids!.includes(l.categoria_id))
       }
+      if ((filtros.status_ids?.length ?? 0) > 1) {
+        lista = lista.filter(l => filtros.status_ids!.includes(l.status))
+      }
 
       setLancamentos(lista)
     } catch (e) {
@@ -96,7 +101,7 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     } finally {
       setLoading(false)
     }
-  }, [filtros.mes, JSON.stringify(filtros.conta_ids), JSON.stringify(filtros.categoria_ids), filtros.status, filtros.com_saldo]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filtros.mes, JSON.stringify(filtros.conta_ids), JSON.stringify(filtros.categoria_ids), filtros.status, JSON.stringify(filtros.status_ids), filtros.com_saldo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const controller = new AbortController()
