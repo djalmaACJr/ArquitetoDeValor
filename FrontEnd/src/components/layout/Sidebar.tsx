@@ -92,7 +92,7 @@ const navCadastros: NavItem[] = [
   { to: '/categorias', icon: <Tag size={15}/>,        label: 'Categorias' },
 ]
 const navFerramentas: NavItem[] = [
-  { to: '/importar',   icon: <ArrowLeftRight size={15}/>, label: 'Importar / Exportar' },
+  { to: '/importexport', icon: <ArrowLeftRight size={15}/>, label: 'Ferramentas' },
   { to: '/relatorios', icon: <FileText size={15}/>,       label: 'Relatórios' },
 ]
 

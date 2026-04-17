@@ -3,6 +3,7 @@ setlocal enabledelayedexpansion
 
 cd /d C:\Pessoal\ArquitetoDeValor
 
+:MENU_PRINCIPAL
 echo.
 echo ================================================
 echo   ARQUITETO DE VALOR - TESTES AUTOMATIZADOS
@@ -10,25 +11,27 @@ echo ================================================
 echo.
 echo Escolha o modulo a testar:
 echo.
-echo   1. Todos os modulos
+echo   1. Todos os modulos (com backup e restore)
 echo   2. Contas
 echo   3. Categorias
 echo   4. Transacoes
 echo   5. Transferencias
-echo   6. Configurar nivel de logs
-echo   7. Sair
+echo   6. Limpar (com backup e restore automaticos)
+echo   7. Configurar nivel de logs
+echo   8. Sair
 echo.
-set /p opcao="Digite a opcao (1-7): "
+set /p opcao="Digite a opcao (1-8): "
 
 if "%opcao%"=="1" goto TODOS
 if "%opcao%"=="2" goto CONTAS
 if "%opcao%"=="3" goto CATEGORIAS
 if "%opcao%"=="4" goto TRANSACOES
 if "%opcao%"=="5" goto TRANSFERENCIAS
-if "%opcao%"=="6" goto CONFIG_LOG
-if "%opcao%"=="7" goto FIM
+if "%opcao%"=="6" goto LIMPAR
+if "%opcao%"=="7" goto CONFIG_LOG
+if "%opcao%"=="8" goto FIM
 echo Opcao invalida.
-goto FIM
+goto MENU_PRINCIPAL
 
 :CONFIG_LOG
 echo.
@@ -62,61 +65,116 @@ pause
 goto MENU_PRINCIPAL
 
 :TODOS
-set MODULO=
 set LABEL=Todos os modulos
-goto RODAR
+echo.
+echo ================================================
+echo   Executando: %LABEL%
+echo ================================================
+echo.
+call :FAZER_BACKUP
+if errorlevel 1 goto FIM
+call :RODAR_TODOS
+call :FAZER_RESTORE
+goto MENU_APOS
 
 :CONTAS
-set MODULO=tests/contas.test.ts
+set MODULO=tests/01_contas.test.ts
 set LABEL=Modulo: Contas
-goto RODAR
+goto RODAR_SIMPLES
 
 :CATEGORIAS
-set MODULO=tests/categorias.test.ts
+set MODULO=tests/02_categorias.test.ts
 set LABEL=Modulo: Categorias
-goto RODAR
+goto RODAR_SIMPLES
 
 :TRANSACOES
-set MODULO=tests/transacoes.test.ts
+set MODULO=tests/03_transacoes.test.ts
 set LABEL=Modulo: Transacoes
-goto RODAR
+goto RODAR_SIMPLES
 
 :TRANSFERENCIAS
-set MODULO=tests/transferencias.test.ts
+set MODULO=tests/04_transferencias.test.ts
 set LABEL=Modulo: Transferencias
-goto RODAR
+goto RODAR_SIMPLES
 
-:MENU_PRINCIPAL
+:LIMPAR
 echo.
 echo ================================================
-echo   ARQUITETO DE VALOR - TESTES AUTOMATIZADOS
+echo   ATENCAO: Teste de Limpeza
 echo ================================================
 echo.
-echo Escolha o modulo a testar:
+echo Este teste vai APAGAR todos os dados do usuario
+echo de teste. Um backup sera feito automaticamente
+echo antes e um restore sera feito apos os testes.
 echo.
-echo   1. Todos os modulos
-echo   2. Contas
-echo   3. Categorias
-echo   4. Transacoes
-echo   5. Transferencias
-echo   6. Configurar nivel de logs
-echo   7. Sair
+set /p confirma="Tem certeza? (S/N): "
+if /i not "%confirma%"=="S" (
+  echo Cancelado.
+  goto MENU_PRINCIPAL
+)
+set MODULO=tests/99_limpar.test.ts
+set LABEL=Modulo: Limpar
 echo.
-set /p opcao="Digite a opcao (1-7): "
+echo ================================================
+echo   Executando: %LABEL%
+echo ================================================
+echo.
+call :FAZER_BACKUP
+if errorlevel 1 goto FIM
+call :RODAR_MODULO
+call :FAZER_RESTORE
+goto MENU_APOS
 
-if "%opcao%"=="1" goto TODOS
-if "%opcao%"=="2" goto CONTAS
-if "%opcao%"=="3" goto CATEGORIAS
-if "%opcao%"=="4" goto TRANSACOES
-if "%opcao%"=="5" goto TRANSFERENCIAS
-if "%opcao%"=="6" goto CONFIG_LOG
-if "%opcao%"=="7" goto FIM
-echo Opcao invalida.
-goto MENU_PRINCIPAL
+:RODAR_SIMPLES
+echo.
+echo ================================================
+echo   Executando: %LABEL%
+echo ================================================
+echo.
+call :RODAR_MODULO
+goto MENU_APOS
 
-:RODAR
+:: ── Subrotinas ────────────────────────────────────────────────────
+
+:FAZER_BACKUP
+echo   Fazendo backup dos dados...
+npx ts-node -r dotenv/config tests/backup.ts
+if errorlevel 1 (
+  echo.
+  echo   ERRO no backup! Abortando testes por seguranca.
+  exit /b 1
+)
+exit /b 0
+
+:FAZER_RESTORE
+echo.
+echo   Restaurando dados...
+npx ts-node -r dotenv/config tests/restore.ts
+exit /b 0
+
+:RODAR_MODULO
 if not exist test-results mkdir test-results
+call :GERAR_TIMESTAMP
+set ARQUIVO=test-results\resultado_%ANO%-%MES%-%DIA%_%HH%-%MM%.txt
+echo   Resultado sera salvo em: %ARQUIVO%
+echo.
+npx jest %MODULO% --runInBand --verbose 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQUIVO%'"
+echo.
+echo   Resultado salvo em: %ARQUIVO%
+exit /b 0
 
+:RODAR_TODOS
+if not exist test-results mkdir test-results
+call :GERAR_TIMESTAMP
+set ARQUIVO=test-results\resultado_%ANO%-%MES%-%DIA%_%HH%-%MM%.txt
+echo   Resultado sera salvo em: %ARQUIVO%
+echo.
+npx jest --runInBand --verbose 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQUIVO%'"
+echo.
+echo   Resultado salvo em: %ARQUIVO%
+exit /b 0
+
+:GERAR_TIMESTAMP
 for /f "tokens=1-3 delims=/" %%a in ("%date%") do (
   set DIA=%%a
   set MES=%%b
@@ -127,27 +185,12 @@ for /f "tokens=1-2 delims=:." %%a in ("%time%") do (
   set MM=%%b
 )
 set HH=%HH: =0%
-set ARQUIVO=test-results\resultado_%ANO%-%MES%-%DIA%_%HH%-%MM%.txt
+exit /b 0
 
+:MENU_APOS
 echo.
-echo ================================================
-echo   Executando: %LABEL%
-echo ================================================
-echo.
-echo Resultado sera salvo em: %ARQUIVO%
-echo.
-
-if "%MODULO%"=="" (
-  npx jest --runInBand --verbose 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQUIVO%'"
-) else (
-  npx jest %MODULO% --runInBand --verbose 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQUIVO%'"
-)
-
-echo.
-echo ================================================
-echo   Resultado salvo em: %ARQUIVO%
-echo ================================================
-echo.
+pause
+goto MENU_PRINCIPAL
 
 :FIM
 echo.

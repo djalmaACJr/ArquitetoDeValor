@@ -3,11 +3,11 @@ import { useAuth } from './hooks/useAuth'
 import AppLayout from './components/layout/AppLayout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
-import { ImportarPage } from './pages/Placeholders'
 import RelatoriosPage from './pages/RelatoriosPage'
 import ContasPage from './pages/ContasPage'
 import CategoriasPage from './pages/CategoriasPage'
 import LancamentosPage from './pages/LancamentosPage'
+import ImportExportPage from './pages/ImportExportPage'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
@@ -29,12 +29,12 @@ export default function App() {
             <AppLayout/>
           </PrivateRoute>
         }>
-          <Route index             element={<DashboardPage/>}/>
+          <Route index              element={<DashboardPage/>}/>
           <Route path="lancamentos" element={<LancamentosPage/>}/>
           <Route path="contas"      element={<ContasPage/>}/>
           <Route path="categorias"  element={<CategoriasPage/>}/>
-          <Route path="importar"    element={<ImportarPage/>}/>
           <Route path="relatorios"  element={<RelatoriosPage/>}/>
+          <Route path="importexport" element={<ImportExportPage/>}/>
         </Route>
         <Route path="*" element={<Navigate to="/" replace/>}/>
       </Routes>

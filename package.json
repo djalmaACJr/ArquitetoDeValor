@@ -3,15 +3,19 @@
   "version": "1.0.0",
   "scripts": {
     "test": "jest --runInBand",
-    "test:contas": "jest tests/contas.test.ts --runInBand --verbose",
-    "test:categorias": "jest tests/categorias.test.ts --runInBand --verbose",
-    "test:transacoes": "jest tests/transacoes.test.ts --runInBand --verbose",
-    "test:transferencias": "jest tests/transferencias.test.ts --runInBand --verbose"
+    "test:contas": "jest tests/01_contas.test.ts --runInBand --verbose",
+    "test:categorias": "jest tests/02_categorias.test.ts --runInBand --verbose",
+    "test:transacoes": "jest tests/03_transacoes.test.ts --runInBand --verbose",
+    "test:transferencias": "jest tests/04_transferencias.test.ts --runInBand --verbose",
+    "test:limpar": "jest tests/99_limpar.test.ts --runInBand --verbose",
+    "backup": "ts-node tests/backup.ts",
+    "restore": "ts-node tests/restore.ts"
   },
   "devDependencies": {
     "@types/jest": "^29",
     "jest": "^29",
     "ts-jest": "^29",
+    "ts-node": "^10",
     "typescript": "^5"
   },
   "dependencies": {

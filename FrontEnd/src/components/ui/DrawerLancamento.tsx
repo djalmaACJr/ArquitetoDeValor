@@ -73,6 +73,7 @@ export default function DrawerLancamento({
   const [erro,      setErro]      = useState<string | null>(null)
   const [salvando,  setSalvando]  = useState(false)
   const [carregando, setCarregando] = useState(false)
+  const [escopo, setEscopo] = useState<'SOMENTE_ESTE' | 'ESTE_E_FUTUROS' | 'TODOS'>('SOMENTE_ESTE')
 
   const set = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
 
@@ -81,11 +82,13 @@ export default function DrawerLancamento({
     if (novoLancamento) {
       setEditando(null)
       setForm(FORM_VAZIO)
+      setEscopo('SOMENTE_ESTE')
       return
     }
     if (lancamentoProp) {
       setEditando(lancamentoProp)
       setForm(formDeLanc(lancamentoProp))
+      setEscopo('SOMENTE_ESTE')
       return
     }
     if (lancamentoId) {
@@ -147,7 +150,7 @@ export default function DrawerLancamento({
       } : {}),
     }
 
-    const url    = editando ? `/transacoes/${editando.id}?escopo=SOMENTE_ESTE` : '/transacoes'
+    const url    = editando ? `/transacoes/${editando.id}?escopo=${escopo}` : '/transacoes'
     const method = editando ? 'PUT' : 'POST'
     const res    = await apiMutate(url, method, payload)
     setSalvando(false)
@@ -299,7 +302,8 @@ export default function DrawerLancamento({
       ) : (
         editando.id_recorrencia && form.tipo !== 'TRANSFERENCIA' && (
           <Field label="Recorrência">
-            <div className="flex items-center gap-2 bg-[#252d42] border border-white/10 rounded-lg px-3 py-2">
+            {/* Info da série */}
+            <div className="flex items-center gap-2 bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 mb-2">
               <Repeat2 size={14} style={{ color: '#f0b429', flexShrink: 0 }} />
               <div>
                 <p className="text-[12px] font-semibold" style={{ color: '#e8eaf0' }}>
@@ -312,6 +316,36 @@ export default function DrawerLancamento({
                    editando.tipo_recorrencia === 'DIARIA'  ? 'Recorrência diária'  : 'Recorrente'}
                 </p>
               </div>
+            </div>
+            {/* Seletor de escopo */}
+            <p className="text-[10px] mb-1.5" style={{ color: '#8b92a8' }}>Alterar</p>
+            <div className="flex flex-col gap-1">
+              {([
+                { value: 'SOMENTE_ESTE',   label: 'Somente este lançamento' },
+                { value: 'ESTE_E_FUTUROS', label: 'Este e os próximos' },
+                { value: 'TODOS',          label: 'Todos da série' },
+              ] as const).map(op => (
+                <label
+                  key={op.value}
+                  className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border transition-colors"
+                  style={{
+                    background: escopo === op.value ? 'rgba(0,200,150,0.08)' : 'transparent',
+                    borderColor: escopo === op.value ? 'rgba(0,200,150,0.4)' : 'rgba(255,255,255,0.08)',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="escopo"
+                    value={op.value}
+                    checked={escopo === op.value}
+                    onChange={() => setEscopo(op.value)}
+                    className="accent-av-green"
+                  />
+                  <span className="text-[12px]" style={{ color: escopo === op.value ? '#e8eaf0' : '#8b92a8' }}>
+                    {op.label}
+                  </span>
+                </label>
+              ))}
             </div>
           </Field>
         )

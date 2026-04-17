@@ -566,7 +566,7 @@ export default function DashboardPage() {
     setLancamentoEditando(tx)
   }
 
-  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading, error } = useDashboard(mes)
+  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading, error, refetch } = useDashboard(mes)
 
   // Debug
   useEffect(() => {
@@ -679,7 +679,7 @@ export default function DashboardPage() {
         <DrawerLancamento
           lancamento={lancamentoEditando}
           onFechar={() => setLancamentoEditando(null)}
-          onSalvo={() => { setLancamentoEditando(null) }}
+          onSalvo={() => { setLancamentoEditando(null); refetch() }}
         />
       )}
     </div>
