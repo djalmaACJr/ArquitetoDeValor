@@ -3,7 +3,7 @@
 // Pode ser usado em LancamentosPage, RelatoriosPage, DashboardPage, etc.
 
 import { useState, useEffect } from 'react'
-import { Repeat2 } from 'lucide-react'
+import { Repeat2, Trash2 } from 'lucide-react'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
 import { useLancamentos, type Lancamento } from '../../hooks/useLancamentos'
@@ -56,14 +56,15 @@ interface DrawerLancamentoProps {
   novoLancamento?: boolean          // Abre para criar novo
 
   // Callbacks
-  onFechar:  () => void
-  onSalvo?:  () => void  // Chamado após salvar com sucesso
+  onFechar:   () => void
+  onSalvo?:   () => void  // Chamado após salvar com sucesso
+  onExcluido?: () => void  // Chamado após excluir com sucesso
 }
 
 // ── Componente ─────────────────────────────────────────────────
 export default function DrawerLancamento({
   lancamentoId, lancamento: lancamentoProp, novoLancamento,
-  onFechar, onSalvo,
+  onFechar, onSalvo, onExcluido,
 }: DrawerLancamentoProps) {
   const { contas }     = useContas()
   const { categorias } = useCategorias()
@@ -73,6 +74,8 @@ export default function DrawerLancamento({
   const [erro,      setErro]      = useState<string | null>(null)
   const [salvando,  setSalvando]  = useState(false)
   const [carregando, setCarregando] = useState(false)
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false)
+  const [excluindo, setExcluindo] = useState(false)
   const [escopo, setEscopo] = useState<'SOMENTE_ESTE' | 'ESTE_E_FUTUROS' | 'TODOS'>('SOMENTE_ESTE')
 
   const set = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
@@ -158,6 +161,20 @@ export default function DrawerLancamento({
     else setErro(res.erro ?? 'Erro ao salvar.')
   }
 
+  const excluir = async () => {
+    if (!editando) return
+    setExcluindo(true)
+    const isTransf = !!editando.id_par_transferencia
+    const url = isTransf
+      ? `/transferencias/${editando.id_par_transferencia}`
+      : `/transacoes/${editando.id}?escopo=${escopo}`
+    const res = await apiMutate(url, 'DELETE', {})
+    setExcluindo(false)
+    if (res.ok) { onExcluido?.(); onFechar() }
+    else setErro(res.erro ?? 'Erro ao excluir.')
+    setConfirmandoExclusao(false)
+  }
+
   const aberto = !!(novoLancamento || lancamentoProp || lancamentoId)
 
   if (carregando) return null
@@ -170,6 +187,34 @@ export default function DrawerLancamento({
       subtitulo={editando?.descricao ?? 'Preencha os dados abaixo'}
       rodape={
         <>
+          {editando && !confirmandoExclusao && (
+            <button
+              onClick={() => setConfirmandoExclusao(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold transition-colors mr-auto"
+              style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
+            >
+              <Trash2 size={13} /> Excluir
+            </button>
+          )}
+          {editando && confirmandoExclusao && (
+            <div className="flex items-center gap-2 mr-auto">
+              <span className="text-[11px] text-red-400">Confirmar exclusão?</span>
+              <button
+                onClick={excluir}
+                disabled={excluindo}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[12px] font-semibold text-white transition-colors"
+                style={{ background: '#ff6b4a' }}
+              >
+                {excluindo ? 'Excluindo...' : 'Sim, excluir'}
+              </button>
+              <button
+                onClick={() => setConfirmandoExclusao(false)}
+                className="px-3 py-1.5 rounded-lg text-[12px] font-semibold text-gray-400 bg-gray-700 transition-colors"
+              >
+                Não
+              </button>
+            </div>
+          )}
           <BtnCancelar onClick={onFechar} />
           <BtnSalvar editando={!!editando} salvando={salvando} onClick={salvar}
             labelSalvar="Salvar" labelEditar="Atualizar" />

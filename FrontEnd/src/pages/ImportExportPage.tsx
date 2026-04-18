@@ -177,17 +177,17 @@ function SecaoLimpeza() {
 
     try {
       // 1. Transações
-      const resTx = await apiMutate('/limpar?entidade=transacoes', 'DELETE', {})
+      const resTx = await apiMutate('/limpar?entidade=transacoes', 'DELETE')
       if (resTx.ok) addLog('ok', 'Transações excluídas com sucesso')
       else addLog('erro', `Erro ao excluir transações: ${resTx.erro}`)
 
       // 2. Categorias (não protegidas — o backend ignora as protegidas)
-      const resCat = await apiMutate('/limpar?entidade=categorias', 'DELETE', {})
+      const resCat = await apiMutate('/limpar?entidade=categorias', 'DELETE')
       if (resCat.ok) addLog('ok', 'Categorias excluídas (protegidas mantidas)')
       else addLog('erro', `Erro ao excluir categorias: ${resCat.erro}`)
 
       // 3. Contas
-      const resConta = await apiMutate('/limpar?entidade=contas', 'DELETE', {})
+      const resConta = await apiMutate('/limpar?entidade=contas', 'DELETE')
       if (resConta.ok) addLog('ok', 'Contas excluídas com sucesso')
       else addLog('erro', `Erro ao excluir contas: ${resConta.erro}`)
 
@@ -355,19 +355,6 @@ function SecaoExport() {
         XLSX.utils.book_append_sheet(wb, ws, 'Transações')
       }
 
-      // Aba: Modelo de Importação
-      const modelo = [{
-        data: '15/01/2024',
-        descricao: 'Exemplo de lançamento',
-        valor: -150.00,
-        conta: 'Nome da Conta',
-        categoria: 'Nome da Categoria',
-        observacao: 'Observação opcional',
-      }]
-      const wsModelo = XLSX.utils.json_to_sheet(modelo)
-      wsModelo['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 12 }, { wch: 20 }, { wch: 22 }, { wch: 30 }]
-      XLSX.utils.book_append_sheet(wb, wsModelo, 'Modelo Importação')
-
       const nomeArq = `arqvalor_export_${mesInicio}_${mesFim}.xlsx`
       XLSX.writeFile(wb, nomeArq)
     } catch (e) {
@@ -447,19 +434,45 @@ function SecaoExport() {
 
 // Linha editável no grid de revisão
 interface LinhaGrid extends LinhaImport {
-  importar: boolean        // checkbox — importar ou não
-  duplicada: boolean       // já existe no banco
-  problema: string         // descrição do problema se houver
+  importar: boolean
+  duplicada: boolean
+  problema: string
 }
+
+interface ContaImport {
+  idx: number
+  nome: string
+  tipo: string
+  saldo_inicial: number
+  icone: string
+  cor: string
+  importar: boolean
+  problema: string
+}
+
+interface CategoriaImport {
+  idx: number
+  categoria: string     // nome do pai
+  subcategoria: string  // nome do filho (vazio = é pai)
+  icone: string
+  cor: string
+  importar: boolean
+  problema: string
+}
+
+type ModoImport = 'transacoes' | 'contas' | 'categorias'
 
 function SecaoImport() {
   const { contas, recarregar: recarregarContas } = useContas() as any
   const { categorias, recarregar: recarregarCats } = useCategorias() as any
 
   const inputRef = useRef<HTMLInputElement>(null)
+  const [modo, setModo] = useState<ModoImport>('transacoes')
   const [etapa, setEtapa] = useState<'idle' | 'revisando' | 'importando' | 'concluido'>('idle')
   const [dragOver, setDragOver] = useState(false)
   const [grid, setGrid] = useState<LinhaGrid[]>([])
+  const [gridContas, setGridContas] = useState<ContaImport[]>([])
+  const [gridCats, setGridCats] = useState<CategoriaImport[]>([])
   const [resolucaoContas, setResolucaoContas] = useState<Record<string, ResolucaoConta>>({})
   const [resolucaoCats, setResolucaoCats] = useState<Record<string, ResolucaoCategoria>>({})
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro' | 'aviso'; msg: string }[]>([])
@@ -473,6 +486,12 @@ function SecaoImport() {
   const toggleTodos = (val: boolean) =>
     setGrid(g => g.map(l => l.problema ? l : { ...l, importar: val }))
 
+  const setContaLinha = (idx: number, patch: Partial<ContaImport>) =>
+    setGridContas(g => g.map(l => l.idx === idx ? { ...l, ...patch } : l))
+
+  const setCatLinha = (idx: number, patch: Partial<CategoriaImport>) =>
+    setGridCats(g => g.map(l => l.idx === idx ? { ...l, ...patch } : l))
+
   // ── Parse do arquivo ───────────────────────────────────────────
   const processarArquivo = async (file: File) => {
     try {
@@ -480,6 +499,74 @@ function SecaoImport() {
       const buf  = await file.arrayBuffer()
       const wb   = XLSX.read(buf, { type: 'array', cellDates: true })
 
+      const normalizar = (obj: any): any => {
+        const n: any = {}
+        Object.keys(obj).forEach(k => { n[k.toLowerCase().trim()] = obj[k] })
+        return n
+      }
+
+      // ── MODO CONTAS ─────────────────────────────────────────────
+      if (modo === 'contas') {
+        const abaNome = wb.SheetNames.find((n: string) => n.toLowerCase() === 'contas') ?? wb.SheetNames[0]
+        const ws   = wb.Sheets[abaNome]
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as any[]
+        const tiposValidos = ['CORRENTE','REMUNERACAO','CARTAO','INVESTIMENTO','CARTEIRA']
+        const contasExist  = new Set(contas.map((x: Conta) => normalizarNome(x.nome)))
+
+        const parsed: ContaImport[] = rows.map((row, idx) => {
+          const r    = normalizar(row)
+          const nome = String(r['nome'] ?? r['name'] ?? '').trim()
+          const tipo = String(r['tipo'] ?? r['type'] ?? 'CORRENTE').toUpperCase().trim()
+          const saldo = parseFloat(String(r['saldo inicial'] ?? r['saldo_inicial'] ?? r['saldo'] ?? '0').replace(',','.')) || 0
+          let problema = ''
+          if (!nome) problema = 'Nome obrigatório'
+          else if (!tiposValidos.includes(tipo)) problema = `Tipo inválido: ${tipo}`
+          else if (contasExist.has(normalizarNome(nome))) problema = 'Já existe'
+          return {
+            idx, nome, tipo: tiposValidos.includes(tipo) ? tipo : 'CORRENTE',
+            saldo_inicial: saldo,
+            icone: String(r['ícone'] ?? r['icone'] ?? '').trim(),
+            cor:   String(r['cor'] ?? '').trim(),
+            importar: !problema, problema,
+          }
+        }).filter(l => l.nome)
+
+        parsed.sort((a, b) => (a.problema && !b.problema) ? -1 : (!a.problema && b.problema) ? 1 : 0)
+        setGridContas(parsed)
+        setEtapa('revisando')
+        return
+      }
+
+      // ── MODO CATEGORIAS ─────────────────────────────────────────
+      if (modo === 'categorias') {
+        const abaNome = wb.SheetNames.find((n: string) => n.toLowerCase() === 'categorias') ?? wb.SheetNames[0]
+        const ws   = wb.Sheets[abaNome]
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as any[]
+        const catsExist = new Set(categorias.map((x: CategoriaRaw) => normalizarNome(x.descricao)))
+
+        const parsed: CategoriaImport[] = rows.map((row, idx) => {
+          const r    = normalizar(row)
+          const cat  = String(r['categoria'] ?? '').trim()
+          const sub  = String(r['subcategoria'] ?? '').trim()
+          const nome = sub || cat
+          let problema = ''
+          if (!cat) problema = 'Categoria obrigatória'
+          else if (catsExist.has(normalizarNome(nome))) problema = 'Já existe'
+          return {
+            idx, categoria: cat, subcategoria: sub,
+            icone: String(r['ícone'] ?? r['icone'] ?? '').trim(),
+            cor:   String(r['cor'] ?? '').trim(),
+            importar: !problema, problema,
+          }
+        }).filter(l => l.categoria)
+
+        parsed.sort((a, b) => (a.problema && !b.problema) ? -1 : (!a.problema && b.problema) ? 1 : 0)
+        setGridCats(parsed)
+        setEtapa('revisando')
+        return
+      }
+
+      // ── MODO TRANSAÇÕES (padrão) ────────────────────────────────
       // Prioridade: aba "Transações" > primeira aba que não seja contas/categorias/modelo
       const abaNome = wb.SheetNames.find((n: string) =>
         n.toLowerCase() === 'transações' || n.toLowerCase() === 'transacoes'
@@ -489,12 +576,6 @@ function SecaoImport() {
 
       const ws   = wb.Sheets[abaNome]
       const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as any[]
-
-      const normalizar = (obj: any): any => {
-        const n: any = {}
-        Object.keys(obj).forEach(k => { n[k.toLowerCase().trim()] = obj[k] })
-        return n
-      }
 
       const parsed: LinhaImport[] = rows.map((row, idx) => {
         const r = normalizar(row)
@@ -625,10 +706,69 @@ function SecaoImport() {
     const logs: typeof log = []
     const addLog = (tipo: 'ok' | 'erro' | 'aviso', msg: string) => logs.push({ tipo, msg })
 
-    const contaMap = Object.fromEntries(contas.map((c: Conta) => [normalizarNome(c.nome), c.conta_id]))
-    const catMap   = Object.fromEntries(categorias.map((c: CategoriaRaw) => [normalizarNome(c.descricao), c.id]))
+    // ── MODO CONTAS ────────────────────────────────────────────────
+    if (modo === 'contas') {
+      const paraImportar = gridContas.filter(l => l.importar)
+      let ok = 0, erros = 0
+      for (let i = 0; i < paraImportar.length; i++) {
+        const l = paraImportar[i]
+        const r = await apiMutate('/contas', 'POST', {
+          nome: l.nome, tipo: l.tipo, saldo_inicial: l.saldo_inicial,
+          icone: l.icone || undefined, cor: l.cor || undefined,
+        })
+        if (r.ok) ok++
+        else { addLog('erro', `"${l.nome}": ${r.erro}`); erros++ }
+        setProgresso(Math.round(((i + 1) / paraImportar.length) * 100))
+      }
+      addLog('ok', `Contas: ${ok} importadas, ${erros} erros`)
+      setLog(logs)
+      setEtapa('concluido')
+      return
+    }
+
+    // ── MODO CATEGORIAS ─────────────────────────────────────────────
+    if (modo === 'categorias') {
+      const paraImportar = gridCats.filter(l => l.importar)
+      // Pais primeiro, depois filhos
+      const pais   = paraImportar.filter(l => !l.subcategoria)
+      const filhos = paraImportar.filter(l =>  l.subcategoria)
+      const mapaIdPai: Record<string, string> = {}
+      // Mapear categorias pai já existentes
+      categorias.forEach((c: CategoriaRaw) => { if (!c.id_pai) mapaIdPai[normalizarNome(c.descricao)] = c.id })
+
+      let ok = 0, erros = 0
+      const total = pais.length + filhos.length
+      for (let i = 0; i < pais.length; i++) {
+        const l = pais[i]
+        const r = await apiMutate('/categorias', 'POST', {
+          descricao: l.categoria, icone: l.icone || undefined, cor: l.cor || undefined,
+        })
+        if (r.ok && r.dados?.id) { mapaIdPai[normalizarNome(l.categoria)] = r.dados.id; ok++ }
+        else { addLog('erro', `"${l.categoria}": ${r.erro}`); erros++ }
+        setProgresso(Math.round(((i + 1) / total) * 100))
+      }
+      for (let i = 0; i < filhos.length; i++) {
+        const l = filhos[i]
+        const idPai = mapaIdPai[normalizarNome(l.categoria)]
+        if (!idPai) { addLog('aviso', `"${l.subcategoria}": categoria pai "${l.categoria}" não encontrada`); erros++; continue }
+        const r = await apiMutate('/categorias', 'POST', {
+          descricao: l.subcategoria, id_pai: idPai,
+          icone: l.icone || undefined, cor: l.cor || undefined,
+        })
+        if (r.ok) ok++
+        else { addLog('erro', `"${l.subcategoria}": ${r.erro}`); erros++ }
+        setProgresso(Math.round(((pais.length + i + 1) / total) * 100))
+      }
+      addLog('ok', `Categorias: ${ok} importadas, ${erros} erros`)
+      setLog(logs)
+      setEtapa('concluido')
+      return
+    }
 
     try {
+      const contaMap = Object.fromEntries(contas.map((c: Conta) => [normalizarNome(c.nome), c.conta_id]))
+      const catMap   = Object.fromEntries(categorias.map((c: CategoriaRaw) => [normalizarNome(c.descricao), c.id]))
+
       // 1. Criar/mapear contas desconhecidas
       for (const [nome, res] of Object.entries(resolucaoContas)) {
         if (res.acao === 'criar') {
@@ -696,6 +836,8 @@ function SecaoImport() {
   const resetar = () => {
     setEtapa('idle')
     setGrid([])
+    setGridContas([])
+    setGridCats([])
     setResolucaoContas({})
     setResolucaoCats({})
     setLog([])
@@ -717,6 +859,28 @@ function SecaoImport() {
         {/* ── IDLE ── */}
         {etapa === 'idle' && (
           <div className="space-y-3">
+            {/* Seletor de modo */}
+            <div className="flex rounded-lg overflow-hidden border border-white/10 text-[12px] font-semibold">
+              {([
+                { value: 'transacoes', label: 'Transações' },
+                { value: 'contas',     label: 'Contas'     },
+                { value: 'categorias', label: 'Categorias' },
+              ] as { value: ModoImport; label: string }[]).map((op, i) => (
+                <button
+                  key={op.value}
+                  onClick={() => setModo(op.value)}
+                  className="flex-1 px-3 py-2 transition-colors"
+                  style={{
+                    background: modo === op.value ? 'rgba(167,139,250,0.15)' : 'transparent',
+                    color: modo === op.value ? '#a78bfa' : '#8b92a8',
+                    borderRight: i < 2 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                  }}
+                >
+                  {op.label}
+                </button>
+              ))}
+            </div>
+
             <div
               className="rounded-xl p-8 text-center cursor-pointer transition-all duration-200"
               style={{
@@ -733,7 +897,9 @@ function SecaoImport() {
                 {dragOver ? 'Solte o arquivo aqui' : 'Arraste um arquivo ou clique para selecionar'}
               </p>
               <p className="text-[11px] text-gray-400 mb-4">
-                CSV ou XLSX — use a aba "Modelo Importação" como referência
+                {modo === 'transacoes' && 'CSV ou XLSX — use a aba "Modelo Importação" como referência'}
+                {modo === 'contas' && 'XLSX com colunas: Nome | Tipo | Saldo Inicial (opcional: Ícone, Cor)'}
+                {modo === 'categorias' && 'XLSX com colunas: Categoria | Subcategoria (opcional: Ícone, Cor)'}
               </p>
               <button
                 onClick={e => { e.stopPropagation(); inputRef.current?.click() }}
@@ -745,28 +911,111 @@ function SecaoImport() {
               <input ref={inputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onArquivo} />
             </div>
             <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-              <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas no arquivo:</p>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { col: 'data', obrig: true },
-                  { col: 'descricao', obrig: true },
-                  { col: 'valor', obrig: true },
-                  { col: 'conta', obrig: true },
-                  { col: 'categoria', obrig: true },
-                  { col: 'tipo', obrig: false },
-                  { col: 'observacao', obrig: false },
-                ].map(c => (
-                  <div key={c.col} className="flex items-center gap-1">
-                    <code className="text-[10px] px-1.5 py-0.5 rounded font-mono"
-                      style={{ background: c.obrig ? '#a78bfa20' : '#ffffff10', color: c.obrig ? '#a78bfa' : '#8b92a8' }}>
-                      {c.col}
-                    </code>
-                    {c.obrig && <span className="text-[9px] text-red-400">*</span>}
-                  </div>
-                ))}
-              </div>
-              <p className="text-[10px] text-gray-400 mt-2">* obrigatório — valor negativo = DESPESA, positivo = RECEITA | datas no formato DD/MM/AAAA</p>
+              {modo === 'transacoes' && <>
+                <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {[
+                    { col: 'data', obrig: true },
+                    { col: 'descricao', obrig: true },
+                    { col: 'valor', obrig: true },
+                    { col: 'conta', obrig: true },
+                    { col: 'categoria', obrig: true },
+                    { col: 'tipo', obrig: false },
+                    { col: 'observacao', obrig: false },
+                  ].map(col => (
+                    <div key={col.col} className="flex items-center gap-1">
+                      <code className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                        style={{ background: col.obrig ? '#a78bfa20' : '#ffffff10', color: col.obrig ? '#a78bfa' : '#8b92a8' }}>
+                        {col.col}
+                      </code>
+                      {col.obrig && <span className="text-[9px] text-red-400">*</span>}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-400">* obrigatório — valor negativo = DESPESA, positivo = RECEITA | datas no formato DD/MM/AAAA</p>
+              </>}
+              {modo === 'contas' && <>
+                <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {[
+                    { col: 'nome', obrig: true },
+                    { col: 'tipo', obrig: true },
+                    { col: 'saldo inicial', obrig: false },
+                    { col: 'icone', obrig: false },
+                    { col: 'cor', obrig: false },
+                  ].map(col => (
+                    <div key={col.col} className="flex items-center gap-1">
+                      <code className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                        style={{ background: col.obrig ? '#a78bfa20' : '#ffffff10', color: col.obrig ? '#a78bfa' : '#8b92a8' }}>
+                        {col.col}
+                      </code>
+                      {col.obrig && <span className="text-[9px] text-red-400">*</span>}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-400">Tipos válidos: CORRENTE | REMUNERACAO | CARTAO | INVESTIMENTO | CARTEIRA</p>
+              </>}
+              {modo === 'categorias' && <>
+                <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {[
+                    { col: 'categoria', obrig: true },
+                    { col: 'subcategoria', obrig: false },
+                    { col: 'icone', obrig: false },
+                    { col: 'cor', obrig: false },
+                  ].map(col => (
+                    <div key={col.col} className="flex items-center gap-1">
+                      <code className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                        style={{ background: col.obrig ? '#a78bfa20' : '#ffffff10', color: col.obrig ? '#a78bfa' : '#8b92a8' }}>
+                        {col.col}
+                      </code>
+                      {col.obrig && <span className="text-[9px] text-red-400">*</span>}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-400">Subcategoria vazia = categoria pai | com valor = subcategoria filha</p>
+              </>}
             </div>
+
+            {/* Botão baixar modelo */}
+            <button
+              onClick={async () => {
+                const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs' as any)
+                const wb = XLSX.utils.book_new()
+                if (modo === 'transacoes') {
+                  const ws = XLSX.utils.json_to_sheet([
+                    { data: '15/01/2024', descricao: 'Conta de luz', valor: -150.00, conta: 'Conta Corrente', categoria: 'Moradia', observacao: '' },
+                    { data: '20/01/2024', descricao: 'Salário', valor: 5000.00, conta: 'Conta Corrente', categoria: 'Salário', observacao: 'Pagamento mensal' },
+                  ])
+                  ws['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 12 }, { wch: 20 }, { wch: 22 }, { wch: 30 }]
+                  XLSX.utils.book_append_sheet(wb, ws, 'Transações')
+                } else if (modo === 'contas') {
+                  const ws = XLSX.utils.json_to_sheet([
+                    { nome: 'Conta Corrente', tipo: 'CORRENTE', 'saldo inicial': 1000.00, icone: '🏦', cor: '#4da6ff' },
+                    { nome: 'Cartão Nubank', tipo: 'CARTAO', 'saldo inicial': 0, icone: '💳', cor: '#8b5cf6' },
+                    { nome: 'Carteira', tipo: 'CARTEIRA', 'saldo inicial': 200.00, icone: '👛', cor: '#f0b429' },
+                  ])
+                  ws['!cols'] = [{ wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 10 }]
+                  XLSX.utils.book_append_sheet(wb, ws, 'Contas')
+                } else {
+                  const ws = XLSX.utils.json_to_sheet([
+                    { categoria: 'Moradia', subcategoria: '', icone: '🏠', cor: '' },
+                    { categoria: 'Moradia', subcategoria: 'Aluguel', icone: '', cor: '' },
+                    { categoria: 'Moradia', subcategoria: 'Condomínio', icone: '', cor: '' },
+                    { categoria: 'Alimentação', subcategoria: '', icone: '🍽️', cor: '' },
+                    { categoria: 'Alimentação', subcategoria: 'Supermercado', icone: '', cor: '' },
+                  ])
+                  ws['!cols'] = [{ wch: 22 }, { wch: 22 }, { wch: 8 }, { wch: 10 }]
+                  XLSX.utils.book_append_sheet(wb, ws, 'Categorias')
+                }
+                const nomeArq = `modelo_importacao_${modo}.xlsx`
+                XLSX.writeFile(wb, nomeArq)
+              }}
+              className="flex items-center gap-2 text-[12px] font-semibold px-3 py-2 rounded-lg transition-colors"
+              style={{ background: 'rgba(167,139,250,0.08)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}
+            >
+              <Download size={13} /> Baixar modelo de importação
+            </button>
           </div>
         )}
 
@@ -776,16 +1025,126 @@ function SecaoImport() {
 
             {/* Tags de resumo */}
             <div className="flex items-center gap-2 flex-wrap">
-              <Tag cor="#00c896">{grid.length} lidas</Tag>
-              <Tag cor="#a78bfa">{linhasSelecionadas.length} para importar</Tag>
-              {linhasComProblema.length > 0 && <Tag cor="#ff6b4a">{linhasComProblema.length} com problema</Tag>}
-              {contasDesconhecidas.length > 0 && <Tag cor="#f0b429">{contasDesconhecidas.length} conta(s) nova(s)</Tag>}
-              {catsDesconhecidas.length > 0 && <Tag cor="#a78bfa">{catsDesconhecidas.length} categoria(s) nova(s)</Tag>}
-              {carregandoDedup && <span className="text-[11px] text-gray-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin"/> verificando duplicatas...</span>}
+              {modo === 'transacoes' && <>
+                <Tag cor="#00c896">{grid.length} lidas</Tag>
+                <Tag cor="#a78bfa">{linhasSelecionadas.length} para importar</Tag>
+                {linhasComProblema.length > 0 && <Tag cor="#ff6b4a">{linhasComProblema.length} com problema</Tag>}
+                {contasDesconhecidas.length > 0 && <Tag cor="#f0b429">{contasDesconhecidas.length} conta(s) nova(s)</Tag>}
+                {catsDesconhecidas.length > 0 && <Tag cor="#a78bfa">{catsDesconhecidas.length} categoria(s) nova(s)</Tag>}
+                {carregandoDedup && <span className="text-[11px] text-gray-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin"/> verificando duplicatas...</span>}
+              </>}
+              {modo === 'contas' && <>
+                <Tag cor="#00c896">{gridContas.length} lidas</Tag>
+                <Tag cor="#a78bfa">{gridContas.filter(l => l.importar).length} para importar</Tag>
+                {gridContas.filter(l => l.problema).length > 0 && <Tag cor="#ff6b4a">{gridContas.filter(l => l.problema).length} com problema</Tag>}
+              </>}
+              {modo === 'categorias' && <>
+                <Tag cor="#00c896">{gridCats.length} lidas</Tag>
+                <Tag cor="#a78bfa">{gridCats.filter(l => l.importar).length} para importar</Tag>
+                {gridCats.filter(l => l.problema).length > 0 && <Tag cor="#ff6b4a">{gridCats.filter(l => l.problema).length} com problema</Tag>}
+              </>}
             </div>
 
+            {/* ── Grid de Contas ── */}
+            {modo === 'contas' && (
+              <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 max-h-[350px]">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
+                    <tr>
+                      <th className="px-2 py-2 w-8 text-center">✓</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-500">Situação</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-500">Nome</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-500">Tipo</th>
+                      <th className="px-2 py-2 text-right font-semibold text-gray-500">Saldo Inicial</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gridContas.map(l => (
+                      <tr key={l.idx} className="border-t border-gray-700/50"
+                        style={{ background: l.problema ? 'rgba(255,107,74,0.06)' : 'transparent', opacity: l.importar ? 1 : 0.45 }}>
+                        <td className="px-2 py-1 text-center">
+                          <input type="checkbox" checked={l.importar}
+                            onChange={e => setContaLinha(l.idx, { importar: e.target.checked })}
+                            className="accent-av-green" />
+                        </td>
+                        <td className="px-2 py-1 whitespace-nowrap">
+                          {l.problema
+                            ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-400/10 text-red-400">{l.problema}</span>
+                            : <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-400/10 text-green-400">OK</span>}
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="text" value={l.nome}
+                            onChange={e => setContaLinha(l.idx, { nome: e.target.value })}
+                            className="w-full min-w-[140px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-gray-300 outline-none" />
+                        </td>
+                        <td className="px-1 py-1">
+                          <select value={l.tipo}
+                            onChange={e => setContaLinha(l.idx, { tipo: e.target.value })}
+                            className="bg-transparent border border-transparent hover:border-white/10 rounded px-1 py-0.5 text-[11px] text-gray-300 outline-none"
+                            style={{ background: '#1a1f2e' }}>
+                            {['CORRENTE','REMUNERACAO','CARTAO','INVESTIMENTO','CARTEIRA'].map(t => (
+                              <option key={t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-1 py-1 text-right">
+                          <input type="number" step="0.01" value={l.saldo_inicial}
+                            onChange={e => setContaLinha(l.idx, { saldo_inicial: parseFloat(e.target.value) || 0 })}
+                            className="w-[90px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-right text-gray-300 outline-none" />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* ── Grid de Categorias ── */}
+            {modo === 'categorias' && (
+              <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 max-h-[350px]">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
+                    <tr>
+                      <th className="px-2 py-2 w-8 text-center">✓</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-500">Situação</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-500">Categoria (pai)</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-500">Subcategoria</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gridCats.map(l => (
+                      <tr key={l.idx} className="border-t border-gray-700/50"
+                        style={{ background: l.problema ? 'rgba(255,107,74,0.06)' : 'transparent', opacity: l.importar ? 1 : 0.45 }}>
+                        <td className="px-2 py-1 text-center">
+                          <input type="checkbox" checked={l.importar}
+                            onChange={e => setCatLinha(l.idx, { importar: e.target.checked })}
+                            className="accent-av-green" />
+                        </td>
+                        <td className="px-2 py-1 whitespace-nowrap">
+                          {l.problema
+                            ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-400/10 text-red-400">{l.problema}</span>
+                            : <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-400/10 text-green-400">{l.subcategoria ? 'Subcategoria' : 'Pai'}</span>}
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="text" value={l.categoria}
+                            onChange={e => setCatLinha(l.idx, { categoria: e.target.value })}
+                            className="w-full min-w-[130px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-gray-300 outline-none" />
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="text" value={l.subcategoria}
+                            onChange={e => setCatLinha(l.idx, { subcategoria: e.target.value })}
+                            className="w-full min-w-[130px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-gray-300 outline-none"
+                            placeholder="(vazio = categoria pai)" />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {/* Resolver contas */}
-            {contasDesconhecidas.length > 0 && (
+            {modo === 'transacoes' && contasDesconhecidas.length > 0 && (
               <div>
                 <p className="text-[12px] font-semibold text-gray-700 dark:text-gray-300 mb-2">Contas não encontradas — como proceder?</p>
                 <div className="space-y-2">
@@ -822,7 +1181,7 @@ function SecaoImport() {
             )}
 
             {/* Resolver categorias */}
-            {catsDesconhecidas.length > 0 && (
+            {modo === 'transacoes' && catsDesconhecidas.length > 0 && (
               <div>
                 <p className="text-[12px] font-semibold text-gray-700 dark:text-gray-300 mb-2">Categorias não encontradas — como proceder?</p>
                 <div className="space-y-2">
@@ -863,8 +1222,8 @@ function SecaoImport() {
               </div>
             )}
 
-            {/* Grid editável */}
-            <div>
+            {/* Grid editável — transações */}
+            {modo === 'transacoes' && <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
                   Grid de revisão — edite os dados antes de importar
@@ -992,10 +1351,10 @@ function SecaoImport() {
                   </tbody>
                 </table>
               </div>
-            </div>
+            </div>}
 
             {/* Aviso de pendências */}
-            {temPendenciaMapear && (
+            {modo === 'transacoes' && temPendenciaMapear && (
               <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
                 ⚠️ Selecione o destino para todas as entidades marcadas como "Usar existente"
               </p>
@@ -1006,8 +1365,16 @@ function SecaoImport() {
                 className="px-4 py-2 rounded-lg text-[13px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                 Cancelar
               </button>
-              <Btn onClick={importar} cor="#a78bfa" disabled={temPendenciaMapear || linhasSelecionadas.length === 0}>
-                <Upload size={14} /> Importar {linhasSelecionadas.length} transações
+              <Btn onClick={importar} cor="#a78bfa"
+                disabled={
+                  (modo === 'transacoes' && (temPendenciaMapear || linhasSelecionadas.length === 0)) ||
+                  (modo === 'contas' && gridContas.filter(l => l.importar).length === 0) ||
+                  (modo === 'categorias' && gridCats.filter(l => l.importar).length === 0)
+                }>
+                <Upload size={14} />
+                {modo === 'transacoes' && `Importar ${linhasSelecionadas.length} transações`}
+                {modo === 'contas' && `Importar ${gridContas.filter(l => l.importar).length} contas`}
+                {modo === 'categorias' && `Importar ${gridCats.filter(l => l.importar).length} categorias`}
               </Btn>
             </div>
           </div>

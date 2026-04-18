@@ -680,6 +680,7 @@ export default function DashboardPage() {
           lancamento={lancamentoEditando}
           onFechar={() => setLancamentoEditando(null)}
           onSalvo={() => { setLancamentoEditando(null); refetch() }}
+          onExcluido={() => { setLancamentoEditando(null); refetch() }}
         />
       )}
     </div>
