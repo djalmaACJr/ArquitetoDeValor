@@ -164,6 +164,7 @@ function ModalConfirmacao({ titulo, mensagem, onConfirmar, onCancelar, corBtn = 
 // ══════════════════════════════════════════════════════════════════
 function SecaoLimpeza() {
   const [confirmando, setConfirmando] = useState(false)
+  const [modo, setModo] = useState<'transacoes' | 'tudo'>('tudo')
   const [loading, setLoading] = useState(false)
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro'; msg: string }[]>([])
 
@@ -171,26 +172,23 @@ function SecaoLimpeza() {
     setConfirmando(false)
     setLoading(true)
     setLog([])
-
     const addLog = (tipo: 'ok' | 'erro', msg: string) =>
       setLog(l => [...l, { tipo, msg }])
 
     try {
-      // 1. Transações
-      const resTx = await apiMutate('/limpar?entidade=transacoes', 'DELETE')
-      if (resTx.ok) addLog('ok', 'Transações excluídas com sucesso')
-      else addLog('erro', `Erro ao excluir transações: ${resTx.erro}`)
-
-      // 2. Categorias (não protegidas — o backend ignora as protegidas)
-      const resCat = await apiMutate('/limpar?entidade=categorias', 'DELETE')
-      if (resCat.ok) addLog('ok', 'Categorias excluídas (protegidas mantidas)')
-      else addLog('erro', `Erro ao excluir categorias: ${resCat.erro}`)
-
-      // 3. Contas
-      const resConta = await apiMutate('/limpar?entidade=contas', 'DELETE')
-      if (resConta.ok) addLog('ok', 'Contas excluídas com sucesso')
-      else addLog('erro', `Erro ao excluir contas: ${resConta.erro}`)
-
+      if (modo === 'transacoes') {
+        const res = await apiMutate('/limpar?entidade=transacoes', 'DELETE')
+        if (res.ok) addLog('ok', `Transações excluídas: ${res.excluidos ?? 0}`)
+        else addLog('erro', `Erro: ${res.erro}`)
+      } else {
+        const res = await apiMutate('/limpar', 'DELETE')
+        if (res.ok) {
+          const logs = res.logs as { entidade: string; excluidos: number }[]
+          logs.forEach(l => addLog('ok', `${l.entidade}: ${l.excluidos} excluídos`))
+        } else {
+          addLog('erro', `Erro: ${res.erro}`)
+        }
+      }
     } catch (e) {
       addLog('erro', `Erro inesperado: ${(e as Error).message}`)
     } finally {
@@ -198,28 +196,59 @@ function SecaoLimpeza() {
     }
   }
 
+  const opcoes = [
+    {
+      valor: 'transacoes' as const,
+      titulo: 'Somente transações',
+      descricao: 'Remove todos os lançamentos e transferências. Contas e categorias são mantidas.',
+    },
+    {
+      valor: 'tudo' as const,
+      titulo: 'Limpar tudo',
+      descricao: 'Remove transações, categorias não protegidas e todas as contas.',
+    },
+  ]
+
   return (
     <Section titulo="Limpar dados" subtitulo="Remove transações, categorias e contas do banco" icon={Trash2} cor="#ff6b4a">
       <div className="space-y-3">
-        {/* O que será excluído */}
-        <div className="bg-red-400/5 border border-red-400/20 rounded-lg p-4">
-          <p className="text-[12px] font-semibold text-red-400 mb-2">Será excluído em ordem:</p>
-          <ol className="space-y-1">
-            {[
-              'Todas as transações e transferências',
-              'Categorias não protegidas (Transferências é mantida)',
-              'Todas as contas',
-            ].map((item, i) => (
-              <li key={i} className="flex items-center gap-2 text-[12px] text-gray-500 dark:text-gray-400">
-                <span className="w-4 h-4 rounded-full bg-red-400/20 text-red-400 text-[10px] flex items-center justify-center font-bold flex-shrink-0">{i + 1}</span>
-                {item}
-              </li>
-            ))}
-          </ol>
-          <p className="text-[11px] text-red-400/70 mt-3">⚠️ Esta ação é irreversível.</p>
+
+        {/* Seleção do modo */}
+        <div className="grid grid-cols-2 gap-2">
+          {opcoes.map(op => (
+            <button
+              key={op.valor}
+              onClick={() => setModo(op.valor)}
+              className="text-left p-3 rounded-lg border transition-all"
+              style={{
+                background: modo === op.valor ? '#ff6b4a15' : 'transparent',
+                borderColor: modo === op.valor ? '#ff6b4a60' : 'rgba(255,255,255,0.08)',
+              }}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <div
+                  className="w-3 h-3 rounded-full border-2 flex-shrink-0"
+                  style={{
+                    borderColor: '#ff6b4a',
+                    background: modo === op.valor ? '#ff6b4a' : 'transparent',
+                  }}
+                />
+                <span
+                  className="text-[13px] font-semibold"
+                  style={{ color: modo === op.valor ? '#ff6b4a' : '#8b92a8' }}
+                >
+                  {op.titulo}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-400 pl-5">{op.descricao}</p>
+            </button>
+          ))}
         </div>
 
-        {/* Log de execução */}
+        {/* Aviso */}
+        <p className="text-[11px] text-red-400/70">⚠️ Esta ação é irreversível.</p>
+
+        {/* Log */}
         {log.length > 0 && (
           <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-1.5">
             {log.map((l, i) => (
@@ -234,20 +263,23 @@ function SecaoLimpeza() {
         )}
 
         <Btn onClick={() => setConfirmando(true)} loading={loading} cor="#ff6b4a">
-          <Trash2 size={14} /> Limpar todos os dados
+          <Trash2 size={14} /> {modo === 'transacoes' ? 'Limpar transações' : 'Limpar tudo'}
         </Btn>
       </div>
 
       {confirmando && (
         <ModalConfirmacao
-          titulo="Confirmar limpeza total"
+          titulo={modo === 'transacoes' ? 'Confirmar limpeza de transações' : 'Confirmar limpeza total'}
           mensagem={
             <span>
-              Todos os dados serão excluídos permanentemente.<br />
+              {modo === 'transacoes'
+                ? 'Todos os lançamentos e transferências serão excluídos.'
+                : 'Transações, categorias e contas serão excluídos permanentemente.'}
+              <br />
               <strong className="text-red-400">Esta ação não pode ser desfeita.</strong>
             </span>
           }
-          labelBtn="Sim, limpar tudo"
+          labelBtn={modo === 'transacoes' ? 'Sim, limpar transações' : 'Sim, limpar tudo'}
           onConfirmar={executarLimpeza}
           onCancelar={() => setConfirmando(false)}
         />
@@ -255,6 +287,7 @@ function SecaoLimpeza() {
     </Section>
   )
 }
+
 
 // ══════════════════════════════════════════════════════════════════
 // SEÇÃO 2 — EXPORTAÇÃO
@@ -1433,7 +1466,6 @@ function SecaoBackup() {
   const fazerBackup = async () => {
     setLoading(true)
     setLog([])
-    const logs: typeof log = []
     const addLog = (tipo: 'ok' | 'erro', msg: string) => setLog(l => [...l, { tipo, msg }])
 
     try {
@@ -1443,26 +1475,34 @@ function SecaoBackup() {
       // 2. Categorias
       addLog('ok', `Categorias: ${categorias.length} registros`)
 
-      // 3. Transações — busca mês a mês últimos 60 meses
+      // 3. Transações — 60 meses passados + 24 meses futuros (cobre projeções e parcelas)
       addLog('ok', 'Buscando transações...')
       const hoje = new Date()
       const meses: string[] = []
-      for (let i = 59; i >= 0; i--) {
+      for (let i = 60; i >= -24; i--) {
         const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1)
         meses.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
       }
       const resArr = await Promise.all(
-        meses.map(mes => apiFetch(`/transacoes?mes=${mes}&per_page=1000&saldo=true`))
+        meses.map(mes => apiFetch(`/transacoes?mes=${mes}&per_page=1000`))
       )
       const todasTx = resArr.flatMap(r => extrairLista<any>(r.dados))
-      const transacoes = todasTx.filter(
+      // Deduplica por id (meses podem ter sobreposição nos limites)
+      const txMap = new Map(todasTx.map((t: any) => [t.id, t]))
+      const transacoes = [...txMap.values()].filter(
         (t: any) => !t.id_par_transferencia && !t.descricao?.startsWith('[Transf.')
       )
       addLog('ok', `Transações: ${transacoes.length} registros`)
 
-      // 4. Transferências
-      const resTrf = await apiFetch('/transferencias?per_page=5000')
-      const transferencias = extrairLista<any>(resTrf.dados)
+      // 4. Transferências — busca mês a mês também (sem filtro de período no endpoint)
+      addLog('ok', 'Buscando transferências...')
+      const resTrfArr = await Promise.all(
+        meses.map(mes => apiFetch(`/transferencias?mes=${mes}`))
+      )
+      const todasTrf = resTrfArr.flatMap(r => extrairLista<any>(r))
+      // Deduplica por id_par
+      const trfMap = new Map(todasTrf.map((t: any) => [t.id_par, t]))
+      const transferencias = [...trfMap.values()]
       addLog('ok', `Transferências: ${transferencias.length} registros`)
 
       // Montar payload
@@ -1498,7 +1538,12 @@ function SecaoBackup() {
         <div className="bg-blue-400/5 border border-blue-400/20 rounded-lg p-4">
           <p className="text-[12px] font-semibold text-blue-400 mb-2">O backup inclui:</p>
           <ul className="space-y-1">
-            {['Todas as contas', 'Todas as categorias (com hierarquia)', 'Todas as transações (últimos 60 meses)', 'Todas as transferências'].map((item, i) => (
+            {[
+              'Todas as contas (ativas e inativas)',
+              'Todas as categorias (com hierarquia)',
+              'Transações: 60 meses passados + 24 meses futuros',
+              'Todas as transferências',
+            ].map((item, i) => (
               <li key={i} className="flex items-center gap-2 text-[12px] text-gray-400">
                 <CheckCircle2 size={12} className="text-blue-400 flex-shrink-0" />
                 {item}
@@ -1528,6 +1573,7 @@ function SecaoBackup() {
     </Section>
   )
 }
+
 
 // ══════════════════════════════════════════════════════════════════
 // SEÇÃO 5 — RESTORE COMPLETO

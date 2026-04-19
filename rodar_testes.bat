@@ -9,7 +9,7 @@ echo ================================================
 echo   ARQUITETO DE VALOR - TESTES AUTOMATIZADOS
 echo ================================================
 echo.
-echo   1. Todos os modulos (com backup e restore)
+echo   1. Todos os modulos
 echo   2. Contas
 echo   3. Categorias
 echo   4. Transacoes
@@ -36,10 +36,7 @@ echo Opcao invalida.
 goto MENU
 
 :OPC1
-call backup.bat
-if errorlevel 1 goto PAUSA
 call :RUNTODOS
-call restore.bat
 goto PAUSA
 
 :OPC2

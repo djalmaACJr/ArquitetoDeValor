@@ -1,16 +1,14 @@
 // src/pages/LancamentosPage.tsx
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
+import DrawerLancamento from '../components/ui/DrawerLancamento'
 import { Plus, Pencil, Zap, ChevronDown, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
 import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { formatBRL, mesLabel } from '../lib/utils'
 import { IconeConta } from '../components/ui/IconeConta'
-import {
-  Drawer, Field, Input, SelectDark, Toggle,
-  BtnSalvar, BtnCancelar, Toast, ModalExcluir, Segmented,
-} from '../components/ui/shared'
+import { Toast, ModalExcluir } from '../components/ui/shared'
 import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelect'
 import { MonthPicker } from '../components/ui/MonthPicker'
 
@@ -171,20 +169,41 @@ export default function LancamentosPage() {
   const [filtStatus,  setFiltStatus]  = useState<string[]>([])
   const [comSaldo,    setComSaldo]    = useState(true)
 
+  // Limpar seleção ao trocar de mês
+  useEffect(() => { setSelecionados(new Set()) }, [mes])
+
   const { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus, criarTransferencia, editarTransferencia, excluirTransferencia } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus, com_saldo: comSaldo })
 
   const { contas }     = useContas()
   const { categorias } = useCategorias()
 
-  const [drawerOpen,  setDrawerOpen]  = useState(false)
-  const [editando,    setEditando]    = useState<Lancamento | null>(null)
-  const [excluindo,   setExcluindo]   = useState<Lancamento | null>(null)
-  const [escopoAcao,  setEscopoAcao]  = useState<{ lancamento: Lancamento; acao: 'editar' | 'excluir'; opcoes: ('SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS')[] } | null>(null)
-  const [feedback,    setFeedback]    = useState<string | null>(null)
-  const [form,        setForm]        = useState<FormState>(FORM_VAZIO)
-  const [erro,        setErro]        = useState<string | null>(null)
-  const [salvando,    setSalvando]    = useState(false)
+  const [drawerAberto,       setDrawerAberto]       = useState(false)
+  const [lancamentoEditando, setLancamentoEditando] = useState<Lancamento | null>(null)
+  const [novoLancamento,     setNovoLancamento]     = useState(false)
+  const [feedback,           setFeedback]           = useState<string | null>(null)
+  const [confirmandoExcLote, setConfirmandoExcLote] = useState(false)
+
+  // Navegação por teclado ← → entre meses
+  const navMes = useCallback((delta: number) => {
+    setMes(atual => {
+      const [y, m] = atual.split('-').map(Number)
+      const d = new Date(y, m - 1 + delta, 1)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    })
+  }, [])
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName
+      if (['INPUT','TEXTAREA','SELECT','BUTTON'].includes(tag)) return
+      if (drawerAberto) return
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); navMes(-1) }
+      if (e.key === 'ArrowRight') { e.preventDefault(); navMes(1)  }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [navMes, drawerAberto])
 
   // Status dropdown aberto
   const [statusOpen,  setStatusOpen]  = useState<string | null>(null)
@@ -200,7 +219,6 @@ export default function LancamentosPage() {
     return next
   })
 
-  const set   = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
 
   // Ler state da navegação (vindo do Dashboard)
@@ -208,7 +226,7 @@ export default function LancamentosPage() {
     const state = location.state as any
     if (!state) return
     if (state.novoLancamento) {
-      setEditando(null); setForm(FORM_VAZIO); setErro(null); setDrawerOpen(true)
+      setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
     }
     if (state.filtroStatus) {
       setFiltStatus(state.filtroStatus)
@@ -224,154 +242,19 @@ export default function LancamentosPage() {
     window.history.replaceState({}, '')
   }, [location.state, lancamentos])
 
-  const abrirNovo   = () => { setEditando(null); setForm(FORM_VAZIO); setErro(null); setDrawerOpen(true) }
-  const calcularOpcoesEscopo = (l: Lancamento, acao: 'editar' | 'excluir'): ('SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS')[] => {
-    const opcoes: ('SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS')[] = []
-    const nrAtual   = l.nr_parcela ?? 1
-    const total     = l.total_parcelas ?? 1
-    const ePrimeira = nrAtual === 1
-    const isPago    = l.status === 'PAGO'
-
-    // "Este e os seguintes" — só se houver parcelas futuras
-    const temFuturas = lancamentos.some(
-      x => x.id_recorrencia === l.id_recorrencia &&
-           (x.nr_parcela ?? 0) > nrAtual
-    ) || nrAtual < total
-
-    // "Todos da série" — só se for a 1ª parcela E não estiver paga
-    const podeTodos = ePrimeira && !isPago
-
-    if (temFuturas) opcoes.push('ESTE_E_SEGUINTES')
-    if (podeTodos)  opcoes.push('TODOS')
-
-    // "Somente este" — sempre disponível
-    opcoes.push('SOMENTE_ESTE')
-
-    return opcoes
-  }
+  const abrirNovo = () => { setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true) }
 
   const abrirEditar = (l: Lancamento) => {
-    const isTransf = l.descricao?.startsWith('[Transf')
-    // Recorrente não-transferência: calcular opções disponíveis
-    if (!isTransf && l.id_recorrencia) {
-      const opcoes = calcularOpcoesEscopo(l, 'editar')
-      // Se só restar "Somente este", abre direto sem modal
-      if (opcoes.length === 1 && opcoes[0] === 'SOMENTE_ESTE') {
-        const f = formDeLanc(l)
-        setEditando(l); setForm(f); setErro(null); setDrawerOpen(true)
-        return
-      }
-      setEscopoAcao({ lancamento: l, acao: 'editar', opcoes })
-      return
+    // Para transferência, garantir que editamos pela perna de saída
+    if (l.id_par_transferencia && l.descricao?.includes('entrada')) {
+      const saida = lancamentos.find(x => x.id_par_transferencia === l.id_par_transferencia && x.descricao?.includes('saída'))
+      if (saida) { setLancamentoEditando(saida); setNovoLancamento(false); setDrawerAberto(true); return }
     }
-    const f = formDeLanc(l)
-    // Para transferência de saída, conta_destino_id é a outra perna (não temos diretamente — usuário informa)
-    // Para facilitar, buscamos o par pelo id_recorrencia na lista de lançamentos
-    if (isTransf && l.id_par_transferencia) {
-      const par = lancamentos.find(x => x.id_par_transferencia === l.id_par_transferencia && x.id !== l.id)
-      if (par) {
-        // Garante que estamos editando sempre pela perna de saída
-        const saida   = l.descricao?.includes('saída')  ? l   : par
-        const entrada = l.descricao?.includes('entrada') ? l   : par
-        f.conta_id         = saida.conta_id
-        f.conta_destino_id = entrada.conta_id
-        setEditando(saida)
-        setForm(f); setErro(null); setDrawerOpen(true)
-        return
-      }
-    }
-    setEditando(l); setForm(f); setErro(null); setDrawerOpen(true)
+    setLancamentoEditando(l); setNovoLancamento(false); setDrawerAberto(true)
   }
-  const fechar = () => { setDrawerOpen(false); setEditando(null); setErro(null) }
+  const fecharDrawer = () => { setDrawerAberto(false); setLancamentoEditando(null); setNovoLancamento(false) }
 
-  const salvar = async () => {
-    if (!form.descricao.trim()) { setErro('Descrição é obrigatória.'); return }
-    if (!form.valor || isNaN(parseFloat(form.valor))) { setErro('Valor inválido.'); return }
-    if (!form.conta_id) { setErro('Selecione a conta de origem.'); return }
-    setSalvando(true); setErro(null)
 
-    // ── Transferência ──────────────────────────────────────
-    if (form.tipo === 'TRANSFERENCIA') {
-      if (!form.conta_destino_id) { setSalvando(false); setErro('Selecione a conta de destino.'); return }
-      if (form.conta_id === form.conta_destino_id) { setSalvando(false); setErro('Conta de origem e destino devem ser diferentes.'); return }
-      const payload = {
-        conta_origem_id:  form.conta_id,
-        conta_destino_id: form.conta_destino_id,
-        valor:       parseFloat(form.valor),
-        data:        form.data,
-        descricao:   form.descricao.trim(),
-        status:      form.status,
-        observacao:  form.observacao || undefined,
-      }
-      if (editando) {
-        // A API espera o id_par_transferencia (campo dedicado)
-        const idPar = editando.id_par_transferencia ?? editando.id
-        const { ok, erro: e } = await editarTransferencia(idPar, payload)
-        setSalvando(false)
-        if (ok) { fechar(); toast('Transferência atualizada!') } else { setErro(e ?? 'Erro ao salvar.') }
-      } else {
-        const { ok, erro: e } = await criarTransferencia(payload)
-        setSalvando(false)
-        if (ok) { fechar(); toast('Transferência criada!') } else { setErro(e ?? 'Erro ao salvar.') }
-      }
-      return
-    }
-
-    // ── Receita / Despesa ──────────────────────────────────
-    const payload: Partial<Lancamento> = {
-      tipo: form.tipo as 'RECEITA' | 'DESPESA',
-      data: form.data, descricao: form.descricao.trim(),
-      valor: parseFloat(form.valor), conta_id: form.conta_id,
-      categoria_id: form.categoria_id || undefined,
-      status: form.status,
-      observacao: form.observacao || undefined,
-      ...(form.recorrente && !editando ? {
-        total_parcelas: parseInt(form.total_parcelas) || 2,
-        tipo_recorrencia: form.tipo_recorrencia,
-        intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
-      } : {}),
-    }
-
-    if (editando) {
-      const { ok, erro: e } = await editar(editando.id, payload)
-      setSalvando(false)
-      if (ok) { fechar(); toast('Lançamento atualizado!') } else { setErro(e ?? 'Erro ao salvar.') }
-    } else {
-      const { ok, erro: e } = await criar(payload)
-      setSalvando(false)
-      if (ok) { fechar(); toast('Lançamento criado!') } else { setErro(e ?? 'Erro ao salvar.') }
-    }
-  }
-
-  const handleEscopoConfirmado = async (escopo: 'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS') => {
-    if (!escopoAcao) return
-    const { lancamento, acao } = escopoAcao
-    setEscopoAcao(null)
-    if (acao === 'editar') {
-      setEditando(lancamento); setForm(formDeLanc(lancamento)); setErro(null); setDrawerOpen(true)
-    } else {
-      const { ok, erro: e } = await excluir(lancamento.id, escopo)
-      if (ok) { toast('Lançamento excluído.') } else { toast(e ?? 'Não foi possível excluir.') }
-    }
-  }
-
-  const handleExcluir = async () => {
-    if (!excluindo) return
-    if (excluindo.id_recorrencia) {
-      const opcoes = calcularOpcoesEscopo(excluindo, 'excluir')
-      if (opcoes.length === 1 && opcoes[0] === 'SOMENTE_ESTE') {
-        // Só uma opção, excluir direto
-        const { ok, erro: e } = await excluir(excluindo.id)
-        setExcluindo(null)
-        if (ok) { toast('Lançamento excluído.') } else { toast(e ?? 'Não foi possível excluir.') }
-        return
-      }
-      setExcluindo(null); setEscopoAcao({ lancamento: excluindo, acao: 'excluir', opcoes }); return
-    }
-    const { ok, erro: e } = await excluir(excluindo.id)
-    setExcluindo(null)
-    if (ok) { toast('Lançamento excluído.') } else { toast(e ?? 'Não foi possível excluir.') }
-  }
 
   const handleStatus = async (l: Lancamento, status: StatusTx) => {
     setStatusOpen(null)
@@ -393,6 +276,14 @@ export default function LancamentosPage() {
     await Promise.all(ids.map(id => alterarStatus(id, 'PENDENTE')))
     setSelecionados(new Set())
     toast(`${ids.length} lançamento(s) revertidos para pendente!`)
+  }
+
+  const excluirSelecionados = async () => {
+    const ids = [...selecionados]
+    await Promise.all(ids.map(id => excluir(id)))
+    setSelecionados(new Set())
+    setConfirmandoExcLote(false)
+    toast(`${ids.length} lançamento(s) excluído(s)!`)
   }
 
   // Totais do mês filtrado — exclui transferências
@@ -562,56 +453,7 @@ export default function LancamentosPage() {
         </button>
       </div>
 
-      {/* Barra de ações em lote — sempre visível, fixa no topo quando há selecionados */}
-      <div
-        className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl border transition-all"
-        style={{
-          background: selecionados.size > 0 ? 'rgba(0,200,150,0.06)' : 'rgba(255,255,255,0.02)',
-          borderColor: selecionados.size > 0 ? 'rgba(0,200,150,0.2)' : 'rgba(255,255,255,0.06)',
-        }}
-      >
-        <span className="text-[11px] font-medium flex-1" style={{ color: '#8b92a8' }}>
-          {selecionados.size > 0
-            ? `${selecionados.size} selecionado(s)`
-            : <span style={{ color: '#4a5168' }}>Selecione registros para ações em lote</span>
-          }
-        </span>
-        <button
-          onClick={pagarSelecionados}
-          disabled={selecionados.size === 0}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all"
-          style={{
-            background: selecionados.size > 0 ? '#00c896' : 'rgba(255,255,255,0.05)',
-            color: selecionados.size > 0 ? '#0a0f1a' : '#4a5168',
-            cursor: selecionados.size > 0 ? 'pointer' : 'not-allowed',
-          }}
-        >
-          <Check size={12} /> Pagar
-        </button>
-        <button
-          onClick={cancelarPgtoSelecionados}
-          disabled={selecionados.size === 0}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-all"
-          style={{
-            borderColor: selecionados.size > 0 ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.06)',
-            color: selecionados.size > 0 ? '#8b92a8' : '#4a5168',
-            cursor: selecionados.size > 0 ? 'pointer' : 'not-allowed',
-          }}
-        >
-          Cancelar pgto
-        </button>
-        <button
-          onClick={() => setSelecionados(new Set())}
-          disabled={selecionados.size === 0}
-          className="text-[11px] px-2 py-1 rounded-lg transition-all"
-          style={{
-            color: selecionados.size > 0 ? '#8b92a8' : '#4a5168',
-            cursor: selecionados.size > 0 ? 'pointer' : 'not-allowed',
-          }}
-        >
-          Limpar
-        </button>
-      </div>
+
 
       {/* Cards de resumo */}
       <div className="grid grid-cols-3 gap-3 mb-4">
@@ -816,29 +658,30 @@ export default function LancamentosPage() {
 
                           {/* Ações */}
                           <div className="flex items-center gap-1 justify-end">
-                            {/* Botão pagar — para qualquer não-PAGO */}
-                            {!isTransf && !isPago && (() => {
-                              // Antecipar só aparece se NÃO for a última parcela
-                              const isUltimaParcela = isRecorr &&
-                                l.nr_parcela !== undefined &&
-                                l.total_parcelas !== undefined &&
-                                l.nr_parcela >= l.total_parcelas
-                              const deveAntecipar = isRecorr && !isUltimaParcela
-                              return (
-                                <AcaoBtn onClick={async (e) => {
-                                  e.stopPropagation()
-                                  if (deveAntecipar) {
-                                    setAntecipando(l)
-                                  } else {
-                                    const { ok, erro: e2 } = await alterarStatus(l.id, 'PAGO')
-                                    if (!ok) toast(e2 ?? 'Erro ao pagar.')
-                                    else toast('Pago!')
-                                  }
-                                }} title={deveAntecipar ? "Antecipar parcelas" : "Pagar"} color={deveAntecipar ? "#f0b429" : "#00c896"}>
-                                  {deveAntecipar ? <Zap size={12} /> : <Check size={12} />}
-                                </AcaoBtn>
-                              )
-                            })()}
+                            {/* Antecipar: recorrente + não última parcela */}
+                            {!isTransf && !isPago && isRecorr &&
+                              (l.nr_parcela ?? 0) < (l.total_parcelas ?? 0) && (
+                              <AcaoBtn onClick={e => { e.stopPropagation(); setAntecipando(l) }}
+                                title="Antecipar parcelas" color="#f0b429">
+                                <Zap size={12} />
+                              </AcaoBtn>
+                            )}
+                            {/* Pagar: todo não-PAGO */}
+                            {!isTransf && !isPago && (
+                              <AcaoBtn onClick={async e => {
+                                e.stopPropagation()
+                                if (l.status === 'PROJECAO') {
+                                  setValorConfirmado(l.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                                  setConfirmandoProjecao(l)
+                                } else {
+                                  const { ok, erro: e2 } = await alterarStatus(l.id, 'PAGO')
+                                  if (!ok) toast(e2 ?? 'Erro ao pagar.')
+                                  else toast('Pago!')
+                                }
+                              }} title="Pagar" color="#00c896">
+                                <Check size={12} />
+                              </AcaoBtn>
+                            )}
                             <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
                               <Pencil size={12} />
                             </AcaoBtn>
@@ -971,209 +814,27 @@ export default function LancamentosPage() {
         </>
       )}
 
-      {/* Drawer novo/editar */}
-      <Drawer
-        open={drawerOpen} onClose={fechar}
-        titulo={editando ? 'Editar lançamento' : 'Novo lançamento'}
-        subtitulo={editando?.descricao ?? 'Preencha os dados abaixo'}
-        rodape={
-          <>
-            <BtnCancelar onClick={fechar} />
-            <BtnSalvar editando={!!editando} salvando={salvando} onClick={salvar}
-              labelSalvar="Salvar" labelEditar="Atualizar" />
-          </>
-        }
-      >
-        {/* Tipo */}
-        <Field label="Tipo">
-          <Segmented
-            opcoes={[
-              { value: 'DESPESA',       label: 'Despesa'       },
-              { value: 'RECEITA',       label: 'Receita'       },
-              { value: 'TRANSFERENCIA', label: 'Transferência' },
-            ]}
-            value={form.tipo} onChange={v => set({ tipo: v as TipoTx, categoria_id: '' })} />
-        </Field>
-
-        {/* Data */}
-        <Field label="Data *">
-          <Input type="date" value={form.data} onChange={e => set({ data: e.target.value })} />
-        </Field>
-
-        {/* Descrição */}
-        <Field label="Descrição *">
-          <div className="relative">
-            <Input value={form.descricao} onChange={e => set({ descricao: e.target.value })}
-              placeholder="Ex: Conta de luz, Salário..." maxLength={200} />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px]"
-              style={{ color: '#8b92a8' }}>{form.descricao.length}/200</span>
-          </div>
-        </Field>
-
-        {/* Valor */}
-        <Field label="Valor *">
-          <Input type="number" step="0.01" min="0.01" value={form.valor}
-            onChange={e => set({ valor: e.target.value })} placeholder="0,00" />
-        </Field>
-
-        {/* Conta origem */}
-        <Field label={form.tipo === 'TRANSFERENCIA' ? 'Conta origem *' : 'Conta *'}>
-          <SelectDark value={form.conta_id} onChange={e => set({ conta_id: e.target.value })}>
-            <option value="">Selecione...</option>
-            {contas.filter(c => c.ativa).map(c => (
-              <option key={c.conta_id} value={c.conta_id} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
-                {c.nome}
-              </option>
-            ))}
-          </SelectDark>
-        </Field>
-
-        {/* Conta destino — só para transferência */}
-        {form.tipo === 'TRANSFERENCIA' && (
-          <Field label="Conta destino *">
-            <SelectDark value={form.conta_destino_id} onChange={e => set({ conta_destino_id: e.target.value })}>
-              <option value="">Selecione...</option>
-              {contas.filter(c => c.ativa && c.conta_id !== form.conta_id).map(c => (
-                <option key={c.conta_id} value={c.conta_id} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
-                  {c.nome}
-                </option>
-              ))}
-            </SelectDark>
-          </Field>
-        )}
-
-        {/* Categoria — oculta em transferências */}
-        {form.tipo !== 'TRANSFERENCIA' && <Field label="Categoria">
-          <SelectDark value={form.categoria_id} onChange={e => set({ categoria_id: e.target.value })}>
-            <option value="">Sem categoria</option>
-            {catsPai.map(p => (
-              <optgroup key={p.id} label={`${p.icone ?? ''} ${p.descricao}`}
-                style={{ background: '#1a1f2e', color: '#8b92a8' }}>
-                {catsSub.filter(s => s.id_pai === p.id).map(s => (
-                  <option key={s.id} value={s.id} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
-                    {s.icone ?? ''} {s.descricao}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </SelectDark>
-        </Field>}
-
-        {/* Status */}
-        <Field label="Status">
-          <Segmented
-            opcoes={[
-              { value: 'PAGO',     label: 'Pago'     },
-              { value: 'PENDENTE', label: 'Pendente' },
-              { value: 'PROJECAO', label: 'Projeção' },
-            ]}
-            value={form.status} onChange={v => set({ status: v as StatusTx })} />
-        </Field>
-
-        {/* Recorrência */}
-        {!editando ? (
-          // Criação: toggle completo
-          form.tipo !== 'TRANSFERENCIA' && (
-            <Field label="Recorrência">
-              <Toggle checked={form.recorrente} onChange={v => set({ recorrente: v })}
-                label={form.recorrente ? 'Recorrente' : 'Lançamento único'} />
-              {form.recorrente && (
-                <div className="mt-2 flex gap-2">
-                  {/* A cada N */}
-                  <div className="w-20">
-                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
-                    <Input type="number" min="1" max="99" value={form.intervalo_recorrencia}
-                      onChange={e => set({ intervalo_recorrencia: e.target.value })} />
-                  </div>
-                  {/* Frequência */}
-                  <div className="flex-1">
-                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
-                      {parseInt(form.intervalo_recorrencia) > 1
-                        ? { MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' }[form.tipo_recorrencia] ?? 'períodos'
-                        : 'Frequência'}
-                    </p>
-                    <SelectDark value={form.tipo_recorrencia}
-                      onChange={e => set({ tipo_recorrencia: e.target.value })}>
-                      <option value="MENSAL"  style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Mensal</option>
-                      <option value="SEMANAL" style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Semanal</option>
-                      <option value="ANUAL"   style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Anual</option>
-                      <option value="DIARIA"  style={{ background: '#1a1f2e', color: '#e8eaf0' }}>Diária</option>
-                    </SelectDark>
-                  </div>
-                  {/* Parcelas */}
-                  <div className="w-20">
-                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
-                    <Input type="number" min="2" max="999" value={form.total_parcelas}
-                      onChange={e => set({ total_parcelas: e.target.value })} />
-                  </div>
-                </div>
-              )}
-            </Field>
-          )
-        ) : (
-          // Edição: exibe info de recorrência somente leitura (se recorrente)
-          editando.id_recorrencia && form.tipo !== 'TRANSFERENCIA' && (
-            <Field label="Recorrência">
-              <div className="flex items-center gap-2 bg-[#252d42] border border-white/10 rounded-lg px-3 py-2">
-                <Repeat2 size={14} style={{ color: '#f0b429', flexShrink: 0 }} />
-                <div>
-                  <p className="text-[12px] font-semibold" style={{ color: '#e8eaf0' }}>
-                    Parcela {editando.nr_parcela} de {editando.total_parcelas}
-                  </p>
-                  <p className="text-[10px]" style={{ color: '#8b92a8' }}>
-                    {editando.tipo_recorrencia === 'MENSAL'  ? 'Recorrência mensal'  :
-                     editando.tipo_recorrencia === 'SEMANAL' ? 'Recorrência semanal' :
-                     editando.tipo_recorrencia === 'ANUAL'   ? 'Recorrência anual'   :
-                     editando.tipo_recorrencia === 'DIARIA'  ? 'Recorrência diária'  : 'Recorrente'}
-                  </p>
-                </div>
-              </div>
-            </Field>
-          )
-        )}
-
-        {/* Observação */}
-        <Field label="Observação">
-          <textarea
-            value={form.observacao}
-            onChange={e => set({ observacao: e.target.value })}
-            placeholder="Observação opcional..."
-            rows={2}
-            className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-              text-[13px] outline-none focus:border-av-green transition-colors
-              placeholder:text-white/30 resize-none"
-            style={{ color: '#e8eaf0' }}
-          />
-        </Field>
-
-        {erro && (
-          <p className="text-[12px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
-            style={{ color: '#f87171' }}>{erro}</p>
-        )}
-      </Drawer>
-
-      {/* Modal excluir */}
-      {excluindo && (
+      {/* DrawerLancamento — componente único */}
+      {/* Modal confirmação exclusão em lote */}
+      {confirmandoExcLote && (
         <ModalExcluir
-          nome={excluindo.descricao}
-          mensagem="Esta ação é permanente e não pode ser desfeita."
-          onConfirmar={handleExcluir}
-          onCancelar={() => setExcluindo(null)}
-          salvando={salvando}
+          nome={`${selecionados.size} lançamento(s)`}
+          mensagem="Os lançamentos selecionados serão excluídos permanentemente."
+          onConfirmar={excluirSelecionados}
+          onCancelar={() => setConfirmandoExcLote(false)}
+          salvando={false}
         />
       )}
 
-      {/* Modal escopo recorrência */}
-      {escopoAcao && (
-        <ModalEscopo
-          acao={escopoAcao.acao}
-          opcoes={escopoAcao.opcoes}
-          onConfirmar={handleEscopoConfirmado}
-          onCancelar={() => setEscopoAcao(null)}
-        />
-      )}
+      <DrawerLancamento
+        lancamento={lancamentoEditando}
+        novoLancamento={novoLancamento}
+        onFechar={fecharDrawer}
+        onSalvo={() => { fecharDrawer(); carregar(); toast(lancamentoEditando ? 'Lançamento atualizado!' : 'Lançamento criado!') }}
+        onExcluido={() => { fecharDrawer(); carregar(); toast('Lançamento excluído.') }}
+      />
 
-      {/* Fechar dropdown de status ao clicar fora */}
+            {/* Fechar dropdown de status ao clicar fora */}
       {statusOpen && (
         <div className="fixed inset-0 z-[5]" onClick={() => setStatusOpen(null)} />
       )}
@@ -1185,7 +846,7 @@ export default function LancamentosPage() {
         const corVal = l.tipo === 'RECEITA' ? '#00c896' : '#f87171'
         const sinal  = l.tipo === 'RECEITA' ? '+' : '-'
         const vOrig  = l.valor
-        const vConf  = parseFloat(valorConfirmado.replace(',', '.')) || 0
+        const vConf  = parseFloat(valorConfirmado.replace(/\./g, '').replace(',', '.')) || 0
         const diff   = vConf - vOrig
         const hasDiff = Math.abs(diff) > 0.01
         return (
@@ -1217,11 +878,15 @@ export default function LancamentosPage() {
                   <div className="flex items-center gap-1">
                     <span className="text-[12px]" style={{ color: corVal }}>{sinal}</span>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
                       value={valorConfirmado}
-                      onChange={e => setValorConfirmado(e.target.value)}
+                      onChange={e => {
+                        const nums = e.target.value.replace(/\D/g, '')
+                        if (!nums) { setValorConfirmado(''); return }
+                        const n = parseInt(nums, 10)
+                        setValorConfirmado((n / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                      }}
                       className="w-32 text-right text-[13px] font-bold bg-[#1a1f2e] border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:border-white/30"
                       style={{ color: corVal }}
                       autoFocus
@@ -1251,7 +916,7 @@ export default function LancamentosPage() {
                 </button>
                 <button
                   onClick={async () => {
-                    const valorReal = parseFloat(valorConfirmado.replace(',', '.'))
+                    const valorReal = parseFloat(valorConfirmado.replace(/\./g, '').replace(',', '.'))
                     if (isNaN(valorReal) || valorReal <= 0) { toast('Valor inválido.'); return }
                     setConfirmandoProjecao(null)
                     const { ok, erro: e } = await editar(l.id, {
@@ -1278,7 +943,7 @@ export default function LancamentosPage() {
         const corVal = l.tipo === 'RECEITA' ? '#00c896' : '#f87171'
         const sinal  = l.tipo === 'RECEITA' ? '+' : '-'
         const vOrig  = l.valor
-        const vConf  = parseFloat(valorConfirmado.replace(',', '.')) || 0
+        const vConf  = parseFloat(valorConfirmado.replace(/\./g, '').replace(',', '.')) || 0
         const diff   = vConf - vOrig
         const hasDiff = Math.abs(diff) > 0.01
         return (
@@ -1309,11 +974,15 @@ export default function LancamentosPage() {
                   <div className="flex items-center gap-1">
                     <span className="text-[12px]" style={{ color: corVal }}>{sinal}</span>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="numeric"
                       value={valorConfirmado}
-                      onChange={e => setValorConfirmado(e.target.value)}
+                      onChange={e => {
+                        const nums = e.target.value.replace(/\D/g, '')
+                        if (!nums) { setValorConfirmado(''); return }
+                        const n = parseInt(nums, 10)
+                        setValorConfirmado((n / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                      }}
                       className="w-32 text-right text-[13px] font-bold bg-[#1a1f2e] border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:border-white/30"
                       style={{ color: corVal }}
                       autoFocus
@@ -1341,7 +1010,7 @@ export default function LancamentosPage() {
                 </button>
                 <button
                   onClick={async () => {
-                    const valorReal = parseFloat(valorConfirmado.replace(',', '.'))
+                    const valorReal = parseFloat(valorConfirmado.replace(/\./g, '').replace(',', '.'))
                     if (isNaN(valorReal) || valorReal <= 0) { toast('Valor inválido.'); return }
                     setConfirmandoProjecao(null)
                     const { ok, erro: e } = await editar(l.id, {
@@ -1362,7 +1031,7 @@ export default function LancamentosPage() {
         )
       })()}
 
-      {/* Barra de ações flutuante — fixa no topo quando há selecionados */}
+      {/* Barra flutuante — só aparece com selecionados */}
       {selecionados.size > 0 && (
         <div
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl border shadow-xl"
@@ -1375,7 +1044,7 @@ export default function LancamentosPage() {
             background: '#1a1f2e',
             borderColor: 'rgba(0,200,150,0.35)',
             boxShadow: '0 4px 24px rgba(0,200,150,0.15)',
-            minWidth: 360,
+            minWidth: 400,
           }}
         >
           <span className="text-[11px] font-medium flex-1" style={{ color: '#8b92a8' }}>
@@ -1391,16 +1060,238 @@ export default function LancamentosPage() {
             style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#8b92a8' }}>
             Cancelar pgto
           </button>
+          <button onClick={() => setConfirmandoExcLote(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-all hover:bg-red-400/5"
+            style={{ borderColor: 'rgba(248,113,113,0.3)', color: '#f87171' }}>
+            Excluir
+          </button>
           <button onClick={() => setSelecionados(new Set())}
-            className="text-[11px] px-2 py-1 rounded-lg hover:bg-white/5 transition-all"
+            className="text-[11px] px-2 py-1 rounded-lg transition-all hover:bg-white/5"
             style={{ color: '#8b92a8' }}>
-            ✕ Limpar
+            × Limpar
           </button>
         </div>
       )}
 
+      {/* Modal confirmação exclusão em lote */}
+      {confirmandoExcLote && (
+        <ModalExcluir
+          nome={`${selecionados.size} lançamento(s)`}
+          mensagem="Os lançamentos selecionados serão excluídos permanentemente."
+          onConfirmar={excluirSelecionados}
+          onCancelar={() => setConfirmandoExcLote(false)}
+          salvando={false}
+        />
+      )}
+
+      <DrawerLancamento
+        lancamento={lancamentoEditando}
+        novoLancamento={novoLancamento}
+        onFechar={fecharDrawer}
+        onSalvo={() => { fecharDrawer(); carregar(); toast(lancamentoEditando ? 'Lançamento atualizado!' : 'Lançamento criado!') }}
+        onExcluido={() => { fecharDrawer(); carregar(); toast('Lançamento excluído.') }}
+      />
+
+            {/* Fechar dropdown de status ao clicar fora */}
+      {statusOpen && (
+        <div className="fixed inset-0 z-[5]" onClick={() => setStatusOpen(null)} />
+      )}
+
+      {/* Modal de antecipação */}
+      {/* ── Modal confirmar projeção → pago ─────────────────── */}
+      {confirmandoProjecao && (() => {
+        const l      = confirmandoProjecao
+        const corVal = l.tipo === 'RECEITA' ? '#00c896' : '#f87171'
+        const sinal  = l.tipo === 'RECEITA' ? '+' : '-'
+        const vOrig  = l.valor
+        const vConf  = parseFloat(valorConfirmado.replace(/\./g, '').replace(',', '.')) || 0
+        const diff   = vConf - vOrig
+        const hasDiff = Math.abs(diff) > 0.01
+        return (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60" onClick={() => setConfirmandoProjecao(null)} />
+            <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-green-400/10">
+                  <Check size={16} style={{ color: '#00c896' }} />
+                </div>
+                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar valor real</p>
+              </div>
+
+              <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
+                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{l.descricao}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Conta</span>
+                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{l.conta_nome ?? '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor projetado</span>
+                  <span className="text-[12px]" style={{ color: '#8b92a8' }}>{sinal}{formatBRL(vOrig)}</span>
+                </div>
+                <div className="flex justify-between items-center gap-3">
+                  <span className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Valor real</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[12px]" style={{ color: corVal }}>{sinal}</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={valorConfirmado}
+                      onChange={e => {
+                        const nums = e.target.value.replace(/\D/g, '')
+                        if (!nums) { setValorConfirmado(''); return }
+                        const n = parseInt(nums, 10)
+                        setValorConfirmado((n / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                      }}
+                      className="w-32 text-right text-[13px] font-bold bg-[#1a1f2e] border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:border-white/30"
+                      style={{ color: corVal }}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                {hasDiff && (
+                  <div className="flex justify-between border-t border-white/5 pt-2">
+                    <span className="text-[11px]" style={{ color: '#8b92a8' }}>Diferença</span>
+                    <span className="text-[12px]" style={{ color: diff > 0 ? '#00c896' : '#f87171' }}>
+                      {diff > 0 ? '+' : ''}{formatBRL(diff)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
+                O valor projetado será preservado e o lançamento marcado como{' '}
+                <span style={{ color: '#00c896' }}>PAGO</span>.
+              </p>
+
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmandoProjecao(null)}
+                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20"
+                  style={{ color: '#8b92a8' }}>
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    const valorReal = parseFloat(valorConfirmado.replace(/\./g, '').replace(',', '.'))
+                    if (isNaN(valorReal) || valorReal <= 0) { toast('Valor inválido.'); return }
+                    setConfirmandoProjecao(null)
+                    const { ok, erro: e } = await editar(l.id, {
+                      status: 'PAGO',
+                      valor: valorReal,
+                      valor_projetado: vOrig,  // preserva o valor original como projetado
+                    }, 'SOMENTE_ESTE')
+                    if (ok) toast('Lançamento confirmado como pago!')
+                    else toast(e ?? 'Erro ao confirmar.')
+                  }}
+                  className="flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:bg-green-500/90"
+                  style={{ background: '#00c896', color: '#0a0f1a' }}>
+                  <Check size={12} className="inline mr-1" /> Confirmar pago
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+       {/* ── Modal confirmar projeção → pago ─────────────────── */}
+      {confirmandoProjecao && (() => {
+        const l      = confirmandoProjecao
+        const corVal = l.tipo === 'RECEITA' ? '#00c896' : '#f87171'
+        const sinal  = l.tipo === 'RECEITA' ? '+' : '-'
+        const vOrig  = l.valor
+        const vConf  = parseFloat(valorConfirmado.replace(/\./g, '').replace(',', '.')) || 0
+        const diff   = vConf - vOrig
+        const hasDiff = Math.abs(diff) > 0.01
+        return (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60" onClick={() => setConfirmandoProjecao(null)} />
+            <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-green-400/10">
+                  <Check size={16} style={{ color: '#00c896' }} />
+                </div>
+                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar valor real</p>
+              </div>
+              <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
+                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{l.descricao}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Conta</span>
+                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{l.conta_nome ?? '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor projetado</span>
+                  <span className="text-[12px]" style={{ color: '#8b92a8' }}>{sinal}{formatBRL(vOrig)}</span>
+                </div>
+                <div className="flex justify-between items-center gap-3">
+                  <span className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Valor real</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[12px]" style={{ color: corVal }}>{sinal}</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={valorConfirmado}
+                      onChange={e => {
+                        const nums = e.target.value.replace(/\D/g, '')
+                        if (!nums) { setValorConfirmado(''); return }
+                        const n = parseInt(nums, 10)
+                        setValorConfirmado((n / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                      }}
+                      className="w-32 text-right text-[13px] font-bold bg-[#1a1f2e] border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:border-white/30"
+                      style={{ color: corVal }}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                {hasDiff && (
+                  <div className="flex justify-between border-t border-white/5 pt-2">
+                    <span className="text-[11px]" style={{ color: '#8b92a8' }}>Diferença</span>
+                    <span className="text-[12px]" style={{ color: diff > 0 ? '#00c896' : '#f87171' }}>
+                      {diff > 0 ? '+' : ''}{formatBRL(diff)}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
+                O valor projetado será preservado e o lançamento marcado como{' '}
+                <span style={{ color: '#00c896' }}>PAGO</span>.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmandoProjecao(null)}
+                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20"
+                  style={{ color: '#8b92a8' }}>
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    const valorReal = parseFloat(valorConfirmado.replace(/\./g, '').replace(',', '.'))
+                    if (isNaN(valorReal) || valorReal <= 0) { toast('Valor inválido.'); return }
+                    setConfirmandoProjecao(null)
+                    const { ok, erro: e } = await editar(l.id, {
+                      status: 'PAGO',
+                      valor: valorReal,
+                      valor_projetado: vOrig,
+                    }, 'SOMENTE_ESTE')
+                    if (ok) toast('Lançamento confirmado como pago!')
+                    else toast(e ?? 'Erro ao confirmar.')
+                  }}
+                  className="flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:bg-green-500/90"
+                  style={{ background: '#00c896', color: '#0a0f1a' }}>
+                  <Check size={12} className="inline mr-1" /> Confirmar pago
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+
      {antecipando && (() => {
-        const isRecorrModal  = !!antecipando.id_recorrencia && antecipando.tipo_recorrencia === 'PARCELA'
+        const isRecorrModal  = !!antecipando.id_recorrencia
         const corValor       = antecipando.tipo === 'RECEITA' ? '#00c896' : '#f87171'
         const sinal          = antecipando.tipo === 'RECEITA' ? '+' : '-'
 
@@ -1463,8 +1354,8 @@ export default function LancamentosPage() {
                       <>
                         <div className="flex justify-between">
                           <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcelas a eliminar</span>
-                          <span className="text-[12px]" style={{ color: '#f87171' }}>
-                            {nFuturas}× — {formatBRL(valorFutEst)}
+                          <span className="text-[12px]" style={{ color: corValor }}>
+                            {nFuturas}× — {sinal}{formatBRL(valorFutEst)}
                           </span>
                         </div>
                         <div className="border-t border-white/5 pt-2 flex justify-between">
@@ -1522,7 +1413,7 @@ export default function LancamentosPage() {
                     } else {
                       // Avulso: se for projeção, abre modal de confirmação de valor
                       if (l.status === 'PROJECAO') {
-                        setValorConfirmado(String(l.valor))
+                        setValorConfirmado(l.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
                         setConfirmandoProjecao(l)
                       } else {
                         const { ok, erro: e } = await alterarStatus(l.id, 'PAGO')

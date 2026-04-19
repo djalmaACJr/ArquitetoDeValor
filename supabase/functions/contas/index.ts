@@ -101,7 +101,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   
   logSuccess("Conta criada", { id: data.id, nome: data.nome });
   logResponse(201, data);
-  return json(data, 201);
+  return json({ ...data, conta_id: data.id }, 201);
 }
 
 async function editar(c: ReturnType<typeof db>, id: string, body: Record<string, unknown>) {

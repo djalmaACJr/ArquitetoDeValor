@@ -1,7 +1,7 @@
 // src/components/ui/shared.tsx
 // Para mudar o Drawer (ex: trocar por modal), edite só este arquivo.
 // Todas as páginas que importam daqui refletem automaticamente.
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { X, Check } from 'lucide-react'
 
 const CORES_SM = [
@@ -444,6 +444,130 @@ export function IconPicker({ value, onChange }: { value: string; onChange: (ic: 
   )
 }
 
+
+// ── SearchableSelect ─────────────────────────────────────────
+// Dropdown com campo de busca e navegação por teclado completa.
+// Tab/Enter/Space: abre | Setas: navega | Enter: seleciona | Escape: fecha
+export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selecione...' }: {
+  opcoes: { id: string; label: string; sublabel?: string; icone?: string }[]
+  value: string
+  onChange: (id: string) => void
+  placeholder?: string
+}) {
+  const [busca,    setBusca]    = useState('')
+  const [aberto,   setAberto]   = useState(false)
+  const [focusIdx, setFocusIdx] = useState(-1)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const inputRef     = useRef<HTMLInputElement>(null)
+  const listRef      = useRef<HTMLDivElement>(null)
+
+  const filtradas = busca
+    ? opcoes.filter(o => o.label.toLowerCase().includes(busca.toLowerCase()) ||
+                         (o.sublabel ?? '').toLowerCase().includes(busca.toLowerCase()))
+    : opcoes
+
+  const selecionada = opcoes.find(o => o.id === value)
+
+  // Fecha ao clicar fora
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setAberto(false); setBusca(''); setFocusIdx(-1)
+      }
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [])
+
+  // Scroll automático para item focado
+  useEffect(() => {
+    if (focusIdx >= 0 && listRef.current) {
+      const item = listRef.current.children[focusIdx] as HTMLElement
+      item?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [focusIdx])
+
+  function abrir() { setAberto(true); setBusca(''); setFocusIdx(-1); setTimeout(() => inputRef.current?.focus(), 0) }
+  function fechar() { setAberto(false); setBusca(''); setFocusIdx(-1) }
+  function selecionar(id: string) { onChange(id); fechar() }
+
+  function onKeyDownBotao(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') { e.preventDefault(); abrir() }
+    // Digitar uma letra abre o dropdown e inicia a busca diretamente
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      setAberto(true)
+      setBusca(e.key)
+      setFocusIdx(0)
+      setTimeout(() => { inputRef.current?.focus() }, 0)
+    }
+  }
+
+  function onKeyDownInput(e: React.KeyboardEvent) {
+    if (e.key === 'Escape') { fechar(); return }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setFocusIdx(i => Math.min(i + 1, filtradas.length - 1)) }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); setFocusIdx(i => Math.max(i - 1, 0)) }
+    if (e.key === 'Enter' && focusIdx >= 0) { e.preventDefault(); selecionar(filtradas[focusIdx].id) }
+    if (e.key === 'Tab') fechar()
+  }
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        type="button"
+        tabIndex={0}
+        onClick={() => aberto ? fechar() : abrir()}
+        onKeyDown={onKeyDownBotao}
+        className="w-full flex items-center justify-between bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-av-green transition-colors"
+        style={{ color: selecionada?.id ? '#e8eaf0' : '#ffffff50' }}
+      >
+        <span className="truncate">
+          {selecionada
+            ? `${selecionada.icone ?? ''} ${selecionada.label}`.trim()
+            : placeholder}
+        </span>
+        <span className="ml-2 flex-shrink-0" style={{ color: '#8b92a8', fontSize: 10 }}>{aberto ? '▴' : '▾'}</span>
+      </button>
+
+      {aberto && (
+        <div className="absolute z-50 w-full mt-1 bg-[#1a1f2e] border border-white/10 rounded-lg shadow-xl overflow-hidden">
+          <input
+            ref={inputRef}
+            value={busca}
+            onChange={e => { setBusca(e.target.value); setFocusIdx(0) }}
+            onKeyDown={onKeyDownInput}
+            placeholder="Buscar..."
+            className="w-full bg-[#252d42] border-b border-white/10 px-3 py-2 text-[12px] outline-none placeholder:text-white/30"
+            style={{ color: '#e8eaf0' }}
+          />
+          <div ref={listRef} className="max-h-52 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#2a3045 transparent' }}>
+            {filtradas.map((op, idx) => (
+              <button
+                key={op.id}
+                type="button"
+                onClick={() => selecionar(op.id)}
+                className="w-full text-left px-3 py-2 text-[12px] transition-colors"
+                style={{
+                  color: op.id === value ? '#00c896' : op.id === '' ? '#ffffff50' : '#e8eaf0',
+                  background: idx === focusIdx ? 'rgba(255,255,255,0.07)' : 'transparent',
+                }}
+              >
+                <span>{op.icone ? `${op.icone} ` : ''}{op.label}</span>
+                {op.sublabel && (
+                  <span className="ml-1 text-[10px]" style={{ color: '#8b92a8' }}>{op.sublabel}</span>
+                )}
+              </button>
+            ))}
+            {filtradas.length === 0 && (
+              <p className="px-3 py-2 text-[12px]" style={{ color: '#8b92a8' }}>Nenhum resultado</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Field ─────────────────────────────────────────────────────
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -530,15 +654,31 @@ export function BtnCancelar({ onClick }: { onClick: () => void }) {
 }
 
 // ── Segmented ─────────────────────────────────────────────────
-export function Segmented({ opcoes, value, onChange }: {
+// Navegação: Tab foca o grupo, ← → muda a opção selecionada
+export function Segmented({ opcoes, value, onChange, autoFocus }: {
   opcoes: { value: string; label: string }[]
   value: string
   onChange: (v: string) => void
+  autoFocus?: boolean
 }) {
+  const idx = opcoes.findIndex(o => o.value === value)
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'ArrowRight') { e.preventDefault(); onChange(opcoes[Math.min(idx + 1, opcoes.length - 1)].value) }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); onChange(opcoes[Math.max(idx - 1, 0)].value) }
+  }
+
   return (
-    <div className="flex bg-[#252d42] border border-white/10 rounded-lg overflow-hidden">
+    <div
+      tabIndex={0}
+      autoFocus={autoFocus}
+      onKeyDown={onKeyDown}
+      className="flex bg-[#252d42] border border-white/10 rounded-lg overflow-hidden outline-none focus:ring-1 focus:ring-av-green/50"
+    >
       {opcoes.map(o => (
-        <button key={o.value} onClick={() => onChange(o.value)}
+        <button key={o.value}
+          tabIndex={-1}
+          onClick={() => onChange(o.value)}
           className="flex-1 py-2 text-[11px] font-semibold transition-all"
           style={{
             background: o.value === value ? 'rgba(0,200,150,0.15)' : 'transparent',

@@ -1,6 +1,8 @@
 // supabase/functions/limpar/index.ts
-// Arquiteto de Valor — Edge Function: limpar v5
+// Arquiteto de Valor — Edge Function: limpar v6
+import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, corsPreFlight } from "../_shared/utils.ts";
+import { logError, logInfo, logSuccess } from "../_shared/logger.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return corsPreFlight();
@@ -21,67 +23,110 @@ Deno.serve(async (req: Request) => {
     if (entidade === "contas")     return await limparContas(c, userId);
     return erro("entidade inválida: use transacoes | categorias | contas", 422);
   } catch (e) {
-    console.error("[limpar] Erro:", e);
+    logError("[limpar] Erro inesperado", e);
     return erro("Erro interno", 500);
   }
 });
 
 async function limparTransacoes(c: ReturnType<typeof db>, userId: string) {
-  // Excluir todas as transações direto no banco (bypassa trigger de endpoint /transacoes)
+  logInfo("[limpar] Iniciando limpeza de transacoes", { userId });
+
+  // Desvincular transferências antes de deletar (bypassa trigger EXCLUSAO_AVULSA_TRANSFERENCIA)
+  const { error: eDesvinc } = await c
+    .from("transacoes")
+    .update({ id_par_transferencia: null })
+    .eq("user_id", userId)
+    .not("id_par_transferencia", "is", null);
+  if (eDesvinc) {
+    logError("[limpar] transacoes desvincular", JSON.stringify(eDesvinc));
+    return erro(eDesvinc.message);
+  }
+
   const { count, error } = await c
     .from("transacoes")
     .delete({ count: "exact" })
     .eq("user_id", userId);
-  if (error) { console.error("[limpar] transacoes:", error.message); return erro(error.message); }
+  if (error) {
+    logError("[limpar] transacoes", JSON.stringify(error));
+    return erro(error.message);
+  }
+  logSuccess("[limpar] transacoes", { excluidos: count });
   return json({ ok: true, excluidos: count ?? 0, entidade: "transacoes" });
 }
 
 async function limparCategorias(c: ReturnType<typeof db>, userId: string) {
-  // Subcategorias primeiro (filhas), depois pais — evita FK constraint
-  await c.from("categorias")
+  logInfo("[limpar] Iniciando limpeza de categorias", { userId });
+
+  const { error: e1 } = await c.from("categorias")
     .delete()
     .eq("user_id", userId)
     .eq("protegida", false)
     .not("id_pai", "is", null);
+  if (e1) {
+    logError("[limpar] categorias filhas", JSON.stringify(e1));
+    return erro(e1.message);
+  }
 
   const { count, error } = await c
     .from("categorias")
     .delete({ count: "exact" })
     .eq("user_id", userId)
     .eq("protegida", false);
-  if (error) { console.error("[limpar] categorias:", error.message); return erro(error.message); }
+  if (error) {
+    logError("[limpar] categorias pais", JSON.stringify(error));
+    return erro(error.message);
+  }
+  logSuccess("[limpar] categorias", { excluidos: count });
   return json({ ok: true, excluidos: count ?? 0, entidade: "categorias" });
 }
 
 async function limparContas(c: ReturnType<typeof db>, userId: string) {
+  logInfo("[limpar] Iniciando limpeza de contas", { userId });
   const { count, error } = await c
     .from("contas")
     .delete({ count: "exact" })
     .eq("user_id", userId);
-  if (error) { console.error("[limpar] contas:", error.message); return erro(error.message); }
+  if (error) {
+    logError("[limpar] contas", JSON.stringify(error));
+    return erro(error.message);
+  }
+  logSuccess("[limpar] contas", { excluidos: count });
   return json({ ok: true, excluidos: count ?? 0, entidade: "contas" });
 }
 
 async function limparTudo(c: ReturnType<typeof db>, userId: string) {
+  logInfo("[limpar] Iniciando limpeza total", { userId });
   const logs: { entidade: string; excluidos: number }[] = [];
 
-  // 1. Todas as transações (direto no banco, bypassa trigger de endpoint)
-  const { count: cntTx } = await c
+  // 1. Transações — desvincular transferências antes de deletar
+  const { error: eDesvinc } = await c.from("transacoes")
+    .update({ id_par_transferencia: null })
+    .eq("user_id", userId)
+    .not("id_par_transferencia", "is", null);
+  if (eDesvinc) { logError("[limpar] tudo — desvincular", JSON.stringify(eDesvinc)); return erro(eDesvinc.message); }
+
+  const { count: cntTx, error: eTx } = await c
     .from("transacoes").delete({ count: "exact" }).eq("user_id", userId);
+  if (eTx) { logError("[limpar] tudo — transacoes", JSON.stringify(eTx)); return erro(eTx.message); }
   logs.push({ entidade: "transacoes", excluidos: cntTx ?? 0 });
 
   // 2. Categorias: filhas primeiro, depois pais
-  await c.from("categorias").delete()
+  const { error: eFilhas } = await c.from("categorias").delete()
     .eq("user_id", userId).eq("protegida", false).not("id_pai", "is", null);
-  const { count: cntCat } = await c
+  if (eFilhas) { logError("[limpar] tudo — categorias filhas", JSON.stringify(eFilhas)); return erro(eFilhas.message); }
+
+  const { count: cntCat, error: eCat } = await c
     .from("categorias").delete({ count: "exact" })
     .eq("user_id", userId).eq("protegida", false);
+  if (eCat) { logError("[limpar] tudo — categorias pais", JSON.stringify(eCat)); return erro(eCat.message); }
   logs.push({ entidade: "categorias", excluidos: cntCat ?? 0 });
 
   // 3. Contas
-  const { count: cntConta } = await c
+  const { count: cntConta, error: eConta } = await c
     .from("contas").delete({ count: "exact" }).eq("user_id", userId);
+  if (eConta) { logError("[limpar] tudo — contas", JSON.stringify(eConta)); return erro(eConta.message); }
   logs.push({ entidade: "contas", excluidos: cntConta ?? 0 });
 
+  logSuccess("[limpar] tudo concluído", { logs });
   return json({ ok: true, logs });
 }

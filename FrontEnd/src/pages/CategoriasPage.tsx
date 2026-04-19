@@ -145,7 +145,7 @@ export default function CategoriasPage() {
             return (
               <div key={p.id}>
                 {/* ── Linha pai ── */}
-                <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/10 bg-[#1a1f2e]">
+                <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/10 bg-[#1a1f2e] cursor-pointer select-none" onClick={() => subs.length > 0 && toggleExp(p.id)}>
 
                   {/* Ícone */}
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[17px] flex-shrink-0"
@@ -175,9 +175,9 @@ export default function CategoriasPage() {
                   {/* Botões — sempre visíveis: editar | excluir | expandir */}
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {subs.length > 0 && (
-                      <AcaoBtn onClick={() => toggleExp(p.id)} title={isExp ? 'Recolher' : 'Expandir'}>
+                      <span style={{ color: '#8b92a8' }}>
                         {isExp ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                      </AcaoBtn>
+                      </span>
                     )}
                     {!p.protegida && (
                       <>

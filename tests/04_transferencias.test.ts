@@ -419,4 +419,42 @@ describe("Transferências - Testes Integrados", () => {
     });
   });
 
+  // ── CA-TRF19 — Transferência recorrente ─────────────────────
+  test("CA-TRF19 - Criar transferência recorrente com 3 parcelas mensais", async () => {
+    const dataBase = new Date();
+    dataBase.setMonth(dataBase.getMonth() + 1);
+    const dataStr = dataBase.toISOString().split("T")[0];
+
+    const { status, data } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id:       contaOrigemId,
+        conta_destino_id:      contaDestinoId,
+        valor:                 300,
+        data:                  dataStr,
+        descricao:             "Transferência recorrente teste",
+        status:                "PENDENTE",
+        total_parcelas:        3,
+        tipo_recorrencia:      "MENSAL",
+        intervalo_recorrencia: 1,
+      }),
+    });
+
+    expect(status).toBe(201);
+    expect(data).toHaveProperty("id_recorrencia");
+    expect((data as any).total).toBe(3);
+    expect(Array.isArray((data as any).parcelas)).toBe(true);
+
+    // Todas as parcelas devem ser PENDENTE (datas futuras, status PENDENTE)
+    (data as any).parcelas.forEach((p: any) => {
+      expect(p.status).toBe("PENDENTE");
+    });
+
+    // Limpar — excluir cada par pelo id_par
+    for (const par of (data as any).parcelas) {
+      await api(`/transferencias/${par.id_par}`, { method: "DELETE" }).catch(() => {});
+    }
+  });
+
+
 });
