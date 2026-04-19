@@ -829,6 +829,7 @@ export default function LancamentosPage() {
       <DrawerLancamento
         lancamento={lancamentoEditando}
         novoLancamento={novoLancamento}
+        todasParcelas={lancamentos}
         onFechar={fecharDrawer}
         onSalvo={() => { fecharDrawer(); carregar(); toast(lancamentoEditando ? 'Lançamento atualizado!' : 'Lançamento criado!') }}
         onExcluido={() => { fecharDrawer(); carregar(); toast('Lançamento excluído.') }}
@@ -1087,6 +1088,7 @@ export default function LancamentosPage() {
       <DrawerLancamento
         lancamento={lancamentoEditando}
         novoLancamento={novoLancamento}
+        todasParcelas={lancamentos}
         onFechar={fecharDrawer}
         onSalvo={() => { fecharDrawer(); carregar(); toast(lancamentoEditando ? 'Lançamento atualizado!' : 'Lançamento criado!') }}
         onExcluido={() => { fecharDrawer(); carregar(); toast('Lançamento excluído.') }}

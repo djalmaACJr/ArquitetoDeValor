@@ -44,6 +44,7 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
   const contaId  = params.get("conta_id");
   const catId    = params.get("categoria_id");
   const status   = params.get("status");
+  const idRecorrencia = params.get("id_recorrencia");
   const comSaldo = params.get("saldo") === "true";
   const page     = parseInt(params.get("page") ?? "1");
   const perPage  = comSaldo
@@ -71,6 +72,7 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
   if (contaId) q = q.eq("conta_id", contaId);
   if (catId)   q = q.eq("categoria_id", catId);
   if (status)  q = q.eq("status", status);
+  if (idRecorrencia) q = q.eq("id_recorrencia", idRecorrencia);
 
   const { data, error } = await q;
   if (error) { logError("Listar transações", error); return erro(error.message); }

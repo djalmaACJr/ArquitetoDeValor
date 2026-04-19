@@ -13,6 +13,66 @@ import {
 } from './shared'
 import type { Lancamento } from '../../hooks/useLancamentos'
 
+// Função para inferir parâmetros de recorrência a partir das parcelas
+function inferirParametrosRecorrencia(parcelas: Lancamento[]): {
+  intervalo: number;
+  frequencia: string;
+} {
+  if (parcelas.length < 2) {
+    return { intervalo: 1, frequencia: 'MENSAL' }
+  }
+
+  // Ordenar por data
+  const ordenadas = parcelas.sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime())
+  
+  // Calcular diferenças em dias entre parcelas consecutivas
+  const diferencas: number[] = []
+  for (let i = 1; i < ordenadas.length; i++) {
+    const diff = Math.round(
+      (new Date(ordenadas[i].data).getTime() - new Date(ordenadas[i-1].data).getTime()) 
+      / (1000 * 60 * 60 * 24)
+    )
+    diferencas.push(diff)
+  }
+
+  // Encontrar o padrão mais comum
+  const modo = (arr: number[]) => {
+    const freq: Record<number, number> = {}
+    arr.forEach(val => {
+      freq[val] = (freq[val] || 0) + 1
+    })
+    let maxCount = 0
+    let result = arr[0]
+    for (const val in freq) {
+      if (freq[val] > maxCount) {
+        maxCount = freq[val]
+        result = parseInt(val)
+      }
+    }
+    return result
+  }
+
+  const intervaloDias = modo(diferencas)
+  
+  // Mapear para frequência e intervalo
+  if (intervaloDias === 1) {
+    return { intervalo: 1, frequencia: 'DIARIA' }
+  } else if (intervaloDias === 7) {
+    return { intervalo: 1, frequencia: 'SEMANAL' }
+  } else if (intervaloDias >= 28 && intervaloDias <= 31) {
+    return { intervalo: 1, frequencia: 'MENSAL' }
+  } else if (intervaloDias % 30 === 0) {
+    return { intervalo: intervaloDias / 30, frequencia: 'MENSAL' }
+  } else if (intervaloDias % 7 === 0) {
+    return { intervalo: intervaloDias / 7, frequencia: 'SEMANAL' }
+  } else if (intervaloDias % 365 === 0) {
+    return { intervalo: intervaloDias / 365, frequencia: 'ANUAL' }
+  } else {
+    // Padrão não identificado - usar mensal como padrão
+    return { intervalo: 1, frequencia: 'MENSAL' }
+  }
+}
+
 type TipoTx   = 'RECEITA' | 'DESPESA' | 'TRANSFERENCIA'
 type StatusTx = 'PAGO' | 'PENDENTE' | 'PROJECAO'
 type Escopo   = 'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES'
@@ -44,11 +104,33 @@ const FORM_VAZIO: FormState = {
   recorrente: false, total_parcelas: '2', tipo_recorrencia: 'MENSAL', intervalo_recorrencia: '1',
 }
 
-function formDeLanc(l: Lancamento): FormState {
+function formDeLanc(l: Lancamento, todasParcelas?: Lancamento[]): FormState {
   const isTransf = !!l.id_par_transferencia
   const descricaoLimpa = isTransf
     ? l.descricao.replace(/^\[Transf\. (saída|entrada)\] /, '').replace(/ \d+\/\d+$/, '')
     : l.descricao
+
+  // Para recorrências, usar valores padrão que podem ser editados
+  let frequencia = 'MENSAL'
+  let intervalo = 1
+
+  // Se for recorrente, tentar inferir parâmetros com dados disponíveis
+  if (l.id_recorrencia && l.nr_parcela && l.total_parcelas) {
+    // Usar padrão como fallback
+    frequencia = 'MENSAL'
+    intervalo = 1
+    
+    // Se temos todas as parcelas, inferir parâmetros reais
+    if (todasParcelas && todasParcelas.length > 1) {
+      const parcelasMesmaRecorrencia = todasParcelas.filter(p => p.id_recorrencia === l.id_recorrencia)
+      if (parcelasMesmaRecorrencia.length > 1) {
+        const params = inferirParametrosRecorrencia(parcelasMesmaRecorrencia)
+        frequencia = params.frequencia
+        intervalo = params.intervalo
+      }
+    }
+  }
+
   return {
     tipo: isTransf ? 'TRANSFERENCIA' : l.tipo,
     data: l.data, descricao: descricaoLimpa,
@@ -56,9 +138,10 @@ function formDeLanc(l: Lancamento): FormState {
     conta_destino_id: '',
     categoria_id: l.categoria_id ?? '', status: l.status,
     observacao: l.observacao ?? '',
-    recorrente: !!l.id_recorrencia, total_parcelas: String(l.total_parcelas ?? 2),
-    tipo_recorrencia: l.tipo_recorrencia ?? 'MENSAL',
-    intervalo_recorrencia: String((l as any).intervalo_recorrencia ?? 1),
+    recorrente: !!l.id_recorrencia, 
+    total_parcelas: String(l.total_parcelas ?? 2),
+    tipo_recorrencia: frequencia,
+    intervalo_recorrencia: String(intervalo),
   }
 }
 
@@ -67,6 +150,7 @@ interface DrawerLancamentoProps {
   lancamentoId?:   string | null
   lancamento?:     Lancamento | null
   novoLancamento?: boolean
+  todasParcelas?:  Lancamento[]  // Todas as parcelas para inferir parâmetros de recorrência
   onFechar:        () => void
   onSalvo?:        () => void
   onExcluido?:     () => void
@@ -74,7 +158,7 @@ interface DrawerLancamentoProps {
 
 // ── Componente ─────────────────────────────────────────────────
 export default function DrawerLancamento({
-  lancamentoId, lancamento: lancamentoProp, novoLancamento,
+  lancamentoId, lancamento: lancamentoProp, novoLancamento, todasParcelas,
   onFechar, onSalvo, onExcluido,
 }: DrawerLancamentoProps) {
   const { contas }     = useContas()
@@ -94,16 +178,47 @@ export default function DrawerLancamento({
 
   useEffect(() => {
     if (novoLancamento) { setEditando(null); setForm(FORM_VAZIO); setEscopo('SOMENTE_ESTE'); return }
-    if (lancamentoProp) { setEditando(lancamentoProp); setForm(formDeLanc(lancamentoProp)); setEscopo('SOMENTE_ESTE'); return }
+    if (lancamentoProp) { setEditando(lancamentoProp); setForm(formDeLanc(lancamentoProp, todasParcelas)); setEscopo('SOMENTE_ESTE'); return }
     if (lancamentoId) {
       setCarregando(true)
       fetch(`/functions/v1/transacoes/${lancamentoId}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('sb-token') ?? ''}` }
-      }).then(r => r.json()).catch(() => null).finally(() => setCarregando(false))
+      })
+      .then(r => r.json())
+      .then(async data => {
+        if (data && !data.erro) {
+          let parcelasCompletas = todasParcelas
+          
+          // Se for recorrente, buscar todas as parcelas da recorrência
+          if (data.id_recorrencia) {
+            try {
+              const response = await fetch(`/functions/v1/transacoes?id_recorrencia=${data.id_recorrencia}`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('sb-token') ?? ''}` }
+              })
+              const result = await response.json()
+              if (result.dados && !result.erro) {
+                parcelasCompletas = result.dados
+                console.log('Parcelas completas da recorrência:', parcelasCompletas.length)
+              }
+            } catch (e) {
+              console.error('Erro ao buscar parcelas da recorrência:', e)
+            }
+          }
+          
+          setEditando(data)
+          setForm(formDeLanc(data, parcelasCompletas))
+          setEscopo('SOMENTE_ESTE')
+        }
+      })
+      .catch(() => null)
+      .finally(() => setCarregando(false))
     }
-  }, [lancamentoId, lancamentoProp, novoLancamento])
+  }, [lancamentoId, lancamentoProp, novoLancamento, todasParcelas])
 
-  // ── Opções para SearchableSelect ───────────────────────────
+  // Nota: Busca assíncrona removida - Docker não está rodando localmente
+  // Usando apenas dados disponíveis (padrão mensal)
+
+  // Opções para SearchableSelect ───────────────────────────
   const opcoesContas = contas
     .filter(c => c.ativa)
     .map(c => ({ id: c.conta_id, label: c.nome, icone: '' }))
@@ -149,21 +264,41 @@ export default function DrawerLancamento({
 
     const payload: Partial<Lancamento> = {
       tipo: form.tipo as 'RECEITA' | 'DESPESA',
-      data: form.data, descricao: form.descricao.trim(),
+      descricao: form.descricao.trim(),
       valor: valorNumerico, conta_id: form.conta_id,
       categoria_id: form.categoria_id || undefined,
       status: form.status,
       observacao: form.observacao || undefined,
-      ...(form.recorrente && !editando ? {
+      ...(form.recorrente ? {
         total_parcelas:        parseInt(form.total_parcelas) || 2,
         tipo_recorrencia:      form.tipo_recorrencia,
         intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
       } : {}),
     }
 
+    // Só enviar data se foi alterada (comparar com data original)
+    if (editando && editando.data !== form.data) {
+      payload.data = form.data
+    } else if (!editando) {
+      payload.data = form.data
+    }
+
     const url    = editando ? `/transacoes/${editando.id}?escopo=${escopo}` : '/transacoes'
     const method = editando ? 'PUT' : 'POST'
+    
+    console.log('=== SALVAMENTO ===')
+    console.log('URL:', url)
+    console.log('Método:', method)
+    console.log('Payload:', payload)
+    console.log('Escopo:', escopo)
+    
     const res    = await apiMutate(url, method, payload)
+    
+    console.log('Resposta:', res)
+    console.log('OK:', res.ok)
+    console.log('Dados:', res.dados)
+    console.log('=================')
+    
     setSalvando(false)
     if (res.ok) { onSalvo?.(); onFechar() } else setErro(res.erro ?? 'Erro ao salvar.')
   }
@@ -301,89 +436,146 @@ export default function DrawerLancamento({
         </Field>
 
         {/* Recorrência */}
-        {!editando ? (
-          form.tipo !== 'TRANSFERENCIA' && (
-            <Field label="Recorrência">
-              <Toggle checked={form.recorrente} onChange={v => set({ recorrente: v })}
-                label={form.recorrente ? 'Recorrente' : 'Lançamento único'} />
-              {form.recorrente && (
-                <div className="mt-2 flex gap-2">
-                  <div className="w-20">
-                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
-                    <Input type="number" min="1" max="99" value={form.intervalo_recorrencia}
-                      onChange={e => set({ intervalo_recorrencia: e.target.value })} />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
-                      {parseInt(form.intervalo_recorrencia) > 1
-                        ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as any)[form.tipo_recorrencia] ?? 'períodos'
-                        : 'Frequência'}
-                    </p>
-                    <select
-                      value={form.tipo_recorrencia}
-                      onChange={e => set({ tipo_recorrencia: e.target.value })}
-                      className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-av-green transition-colors"
-                      style={{ color: '#e8eaf0' }}
-                    >
-                      <option value="MENSAL">Mensal</option>
-                      <option value="SEMANAL">Semanal</option>
-                      <option value="ANUAL">Anual</option>
-                      <option value="DIARIA">Diária</option>
-                    </select>
-                  </div>
-                  <div className="w-20">
-                    <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
-                    <Input type="number" min="2" max="999" value={form.total_parcelas}
-                      onChange={e => set({ total_parcelas: e.target.value })} />
-                  </div>
-                </div>
-              )}
-            </Field>
-          )
-        ) : (
-          editando.id_recorrencia && form.tipo !== 'TRANSFERENCIA' && (
-            <Field label="Recorrência">
-              <div className="flex items-center gap-2 bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 mb-2">
-                <Repeat2 size={14} style={{ color: '#f0b429', flexShrink: 0 }} />
-                <div>
-                  <p className="text-[12px] font-semibold" style={{ color: '#e8eaf0' }}>
-                    Parcela {editando.nr_parcela} de {editando.total_parcelas}
-                  </p>
-                  <p className="text-[10px]" style={{ color: '#8b92a8' }}>
-                    {editando.tipo_recorrencia === 'PARCELA' ? 'Parcelado' :
-                     editando.tipo_recorrencia === 'PROJECAO' ? 'Projeção recorrente' : 'Recorrente'}
-                  </p>
-                </div>
-              </div>
-              {editando.status !== 'PAGO' && (
-                <>
-                  <p className="text-[10px] mb-1.5" style={{ color: '#8b92a8' }}>Alterar</p>
-                  <div className="flex flex-col gap-1">
-                    {([
-                      { value: 'SOMENTE_ESTE',    label: 'Somente este lançamento' },
-                      { value: 'ESTE_E_SEGUINTES', label: 'Este e os próximos'      },
-                    ] as const).map(op => (
-                      <label
-                        key={op.value}
-                        className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border transition-colors"
-                        style={{
-                          background:  escopo === op.value ? 'rgba(0,200,150,0.08)' : 'transparent',
-                          borderColor: escopo === op.value ? 'rgba(0,200,150,0.4)'  : 'rgba(255,255,255,0.08)',
-                        }}
+        {form.tipo !== 'TRANSFERENCIA' && (
+          <Field label="Recorrência">
+            {!editando ? (
+              <>
+                <Toggle checked={form.recorrente} onChange={v => set({ recorrente: v })}
+                  label={form.recorrente ? 'Recorrente' : 'Lançamento único'} />
+                {form.recorrente && (
+                  <div className="mt-2 flex gap-2">
+                    <div className="w-20">
+                      <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
+                      <Input type="number" min="1" max="99" value={form.intervalo_recorrencia}
+                        onChange={e => set({ intervalo_recorrencia: e.target.value })} />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
+                        {parseInt(form.intervalo_recorrencia) > 1
+                          ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as any)[form.tipo_recorrencia] ?? 'períodos'
+                          : 'Frequência'}
+                      </p>
+                      <select
+                        value={form.tipo_recorrencia}
+                        onChange={e => set({ tipo_recorrencia: e.target.value })}
+                        className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-av-green transition-colors"
+                        style={{ color: '#e8eaf0' }}
                       >
-                        <input type="radio" name="escopo" value={op.value}
-                          checked={escopo === op.value} onChange={() => setEscopo(op.value)}
-                          className="accent-av-green" />
-                        <span className="text-[12px]" style={{ color: escopo === op.value ? '#e8eaf0' : '#8b92a8' }}>
-                          {op.label}
-                        </span>
-                      </label>
-                    ))}
+                        <option value="MENSAL">Mensal</option>
+                        <option value="SEMANAL">Semanal</option>
+                        <option value="ANUAL">Anual</option>
+                        <option value="DIARIA">Diária</option>
+                      </select>
+                    </div>
+                    <div className="w-20">
+                      <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
+                      <Input type="number" min="2" max="999" value={form.total_parcelas}
+                        onChange={e => set({ total_parcelas: e.target.value })} />
+                    </div>
                   </div>
+                )}
+              </>
+            ) : (
+              editando.id_recorrencia ? (
+                <>
+                  <div className="flex items-center gap-2 bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 mb-2">
+                    <Repeat2 size={14} style={{ color: '#f0b429', flexShrink: 0 }} />
+                    <div>
+                      <p className="text-[12px] font-semibold" style={{ color: '#e8eaf0' }}>
+                        Parcela {editando.nr_parcela} de {editando.total_parcelas}
+                      </p>
+                      <p className="text-[10px]" style={{ color: '#8b92a8' }}>
+                        {editando.tipo_recorrencia === 'PARCELA' ? 'Parcelado' :
+                         editando.tipo_recorrencia === 'PROJECAO' ? 'Projeção recorrente' : 'Recorrente'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {editando.status !== 'PAGO' && (
+                    <>
+                      <p className="text-[10px] mb-1.5" style={{ color: '#8b92a8' }}>Alterar</p>
+                      <div className="flex flex-col gap-1">
+                        {([
+                          { value: 'SOMENTE_ESTE',    label: 'Somente este lançamento' },
+                          { value: 'ESTE_E_SEGUINTES', label: 'Este e os próximos'      },
+                        ] as const).map(op => (
+                          <label
+                            key={op.value}
+                            className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border transition-colors"
+                            style={{
+                              background:  escopo === op.value ? 'rgba(0,200,150,0.08)' : 'transparent',
+                              borderColor: escopo === op.value ? 'rgba(0,200,150,0.4)'  : 'rgba(255,255,255,0.08)',
+                            }}
+                          >
+                            <input 
+                              type="radio" 
+                              name="escopo" 
+                              value={op.value}
+                              checked={escopo === op.value} 
+                              onChange={() => setEscopo(op.value)}
+                              style={{
+                                WebkitAppearance: 'none',
+                                MozAppearance: 'none',
+                                appearance: 'none',
+                                width: '16px',
+                                height: '16px',
+                                border: '2px solid #00c896',
+                                borderRadius: '50%',
+                                backgroundColor: escopo === op.value ? '#00c896' : 'transparent',
+                                cursor: 'pointer',
+                                position: 'relative',
+                                transition: 'all 0.2s ease'
+                              }}
+                            />
+                            <span className="text-[12px]" style={{ color: escopo === op.value ? '#e8eaf0' : '#8b92a8' }}>
+                              {op.label}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+
+                      {/* Campos de edição da recorrência - só aparecem com ESTE_E_SEGUINTES */}
+                      {escopo === 'ESTE_E_SEGUINTES' && (
+                        <div className="mt-2">
+                          <p className="text-[10px] mb-1.5" style={{ color: '#8b92a8' }}>Parâmetros da recorrência</p>
+                          <div className="flex gap-2">
+                            <div className="w-20">
+                              <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
+                              <Input type="number" min="1" max="99" value={form.intervalo_recorrencia}
+                                onChange={e => set({ intervalo_recorrencia: e.target.value })} />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
+                                {parseInt(form.intervalo_recorrencia) > 1
+                                  ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as any)[form.tipo_recorrencia] ?? 'períodos'
+                                  : 'Frequência'}
+                              </p>
+                              <select
+                                value={form.tipo_recorrencia}
+                                onChange={e => set({ tipo_recorrencia: e.target.value })}
+                                className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-av-green transition-colors"
+                                style={{ color: '#e8eaf0' }}
+                              >
+                                <option value="MENSAL">Mensal</option>
+                                <option value="SEMANAL">Semanal</option>
+                                <option value="ANUAL">Anual</option>
+                                <option value="DIARIA">Diária</option>
+                              </select>
+                            </div>
+                            <div className="w-20">
+                              <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
+                              <Input type="number" min="2" max="999" value={form.total_parcelas}
+                                onChange={e => set({ total_parcelas: e.target.value })} />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </>
-              )}
-            </Field>
-          )
+              ) : null
+            )}
+          </Field>
         )}
 
         {/* Observação */}

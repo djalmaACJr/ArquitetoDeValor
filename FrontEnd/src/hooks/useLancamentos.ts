@@ -18,6 +18,7 @@ export interface Lancamento {
   nr_parcela: number | null
   total_parcelas: number | null
   tipo_recorrencia: string | null
+  intervalo_recorrencia: number | null
   observacao: string | null
   // Campos enriquecidos pela view vw_transacoes_com_saldo
   saldo_acumulado?: number

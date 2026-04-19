@@ -678,6 +678,7 @@ export default function DashboardPage() {
       {lancamentoEditando && (
         <DrawerLancamento
           lancamento={lancamentoEditando}
+          todasParcelas={[...(pendentes || []), ...(proximas || [])]}
           onFechar={() => setLancamentoEditando(null)}
           onSalvo={() => { setLancamentoEditando(null); refetch() }}
           onExcluido={() => { setLancamentoEditando(null); refetch() }}
