@@ -219,10 +219,14 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   if (body.status === "PROJECAO" && dataEfetiva <= hoje)
     return erro("RV-008: status PROJECAO só é permitido para datas futuras", 422);
 
-  // Campos permitidos no update — sem tipo_recorrencia, frequencia, intervalo
+  // Campos permitidos no update de dados do lançamento
   const camposPermitidos = ["tipo","data","descricao","valor","conta_id","categoria_id","status","observacao"];
   const dadosUpdate: Record<string, unknown> = {};
   camposPermitidos.forEach(k => { if (body[k] !== undefined) dadosUpdate[k] = body[k]; });
+
+  // Frequência e intervalo enviados pelo frontend (para ESTE_E_SEGUINTES)
+  const novaFrequenciaBody = body.tipo_recorrencia ? String(body.tipo_recorrencia) : null;
+  const novoIntervaloBody  = body.intervalo_recorrencia ? parseInt(String(body.intervalo_recorrencia)) : null;
 
   // ── Escopo único ────────────────────────────────────────────
   if (!atual.id_recorrencia || escopo === "SOMENTE_ESTE") {
@@ -246,42 +250,41 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
 
   logDebug(`Escopo ${escopo}: atualizando ${parcelas.length} transações`);
 
-  // ── Recalcular datas se data foi alterada ────────────────────
-  const dataFoiAlterada = body.data !== undefined && body.data !== atual.data;
-  const novaDataBase    = dataFoiAlterada ? String(body.data) : null;
+  // ── Recalcular datas se data ou frequência foram alteradas ─────
+  const dataFoiAlterada      = body.data !== undefined && body.data !== atual.data;
+  const novaDataBase         = dataFoiAlterada ? String(body.data) : String(atual.data);
 
-  // Determinar frequência e intervalo da série (vem do banco ou do body)
-  // A série pode ter sido criada com MENSAL/SEMANAL/etc — precisamos detectar
-  // o intervalo atual medindo a diferença entre parcelas consecutivas,
-  // ou usar o tipo_recorrencia salvo
-  let frequencia: string | null = null;
-  let intervalo = 1;
+  // Prioridade: frequência/intervalo enviados pelo body (edição explícita)
+  // Fallback: detectar via diferença entre as primeiras parcelas da série
+  let frequencia: string | null = novaFrequenciaBody && FREQUENCIAS.includes(novaFrequenciaBody) ? novaFrequenciaBody : null;
+  let intervalo = novoIntervaloBody && novoIntervaloBody > 0 ? novoIntervaloBody : 1;
 
-  if (dataFoiAlterada && parcelas.length > 1) {
-    // Buscar tipo_recorrencia da série (vem do campo da transação atual)
+  // Se não veio no body, detectar via datas existentes (necessário para recalcular após mudança de data)
+  if (!frequencia && parcelas.length > 1) {
     const { data: meta } = await c.from("transacoes")
-      .select("tipo_recorrencia, data")
+      .select("data")
       .eq("id_recorrencia", atual.id_recorrencia)
       .order("nr_parcela", { ascending: true })
       .limit(2);
 
-    // tipo_recorrencia no banco é PARCELA ou PROJECAO — não guarda frequência diretamente
-    // Detectar intervalo real medindo diferença entre parcelas 1 e 2
     if (meta && meta.length >= 2) {
       const d1 = new Date(meta[0].data);
       const d2 = new Date(meta[1].data);
       const diffDias = Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
 
-      if (diffDias === 1)       { frequencia = "DIARIA";  intervalo = 1; }
-      else if (diffDias === 7)  { frequencia = "SEMANAL"; intervalo = 1; }
-      else if (diffDias % 7 === 0) { frequencia = "SEMANAL"; intervalo = diffDias / 7; }
-      else if (diffDias >= 28 && diffDias <= 31) { frequencia = "MENSAL"; intervalo = 1; }
-      else if (diffDias >= 56 && diffDias <= 62) { frequencia = "MENSAL"; intervalo = 2; }
-      else if (diffDias >= 84 && diffDias <= 93) { frequencia = "MENSAL"; intervalo = 3; }
-      else if (diffDias >= 365 && diffDias <= 366) { frequencia = "ANUAL"; intervalo = 1; }
-      else { frequencia = "MENSAL"; intervalo = 1; } // fallback
+      if (diffDias === 1)                          { frequencia = "DIARIA";  intervalo = 1; }
+      else if (diffDias % 7 === 0)                 { frequencia = "SEMANAL"; intervalo = diffDias / 7; }
+      else if (diffDias >= 28 && diffDias <= 31)   { frequencia = "MENSAL";  intervalo = 1; }
+      else if (diffDias >= 56 && diffDias <= 62)   { frequencia = "MENSAL";  intervalo = 2; }
+      else if (diffDias >= 84 && diffDias <= 93)   { frequencia = "MENSAL";  intervalo = 3; }
+      else if (diffDias >= 365 && diffDias <= 366) { frequencia = "ANUAL";   intervalo = 1; }
+      else                                          { frequencia = "MENSAL";  intervalo = 1; }
     }
   }
+
+  // Recalcular datas se: data base mudou OU frequência/intervalo mudaram
+  const frequenciaFoiAlterada = novaFrequenciaBody !== null;
+  const precisaRecalcularDatas = dataFoiAlterada || frequenciaFoiAlterada;
 
   // ── Atualizar cada parcela individualmente ───────────────────
   const nrAtual = atual.nr_parcela ?? 1;
@@ -291,10 +294,10 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
     const update: Record<string, unknown> = { ...dadosUpdate };
 
     // Recalcular data proporcional ao offset desta parcela na série
-    if (dataFoiAlterada && novaDataBase && frequencia) {
+    if (precisaRecalcularDatas && frequencia) {
       const offset = (parcela.nr_parcela - nrAtual);
       update.data = calcularDataParcela(novaDataBase, frequencia, offset * intervalo);
-    } else if (dataFoiAlterada && novaDataBase) {
+    } else if (dataFoiAlterada) {
       // Sem frequência detectada — manter offset de dias original
       const dataOriginalParcela = new Date(parcela.data);
       const dataOriginalBase    = new Date(atual.data);

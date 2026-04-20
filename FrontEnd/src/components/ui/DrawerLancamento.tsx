@@ -114,21 +114,18 @@ function formDeLanc(l: Lancamento, todasParcelas?: Lancamento[]): FormState {
   let frequencia = 'MENSAL'
   let intervalo = 1
 
-  // Se for recorrente, tentar inferir parâmetros com dados disponíveis
+  // Se for recorrente, inferir parâmetros a partir das parcelas disponíveis
   if (l.id_recorrencia && l.nr_parcela && l.total_parcelas) {
-    // Usar padrão como fallback
-    frequencia = 'MENSAL'
-    intervalo = 1
-    
-    // Se temos todas as parcelas, inferir parâmetros reais
-    if (todasParcelas && todasParcelas.length > 1) {
-      const parcelasMesmaRecorrencia = todasParcelas.filter(p => p.id_recorrencia === l.id_recorrencia)
-      if (parcelasMesmaRecorrencia.length > 1) {
-        const params = inferirParametrosRecorrencia(parcelasMesmaRecorrencia)
-        frequencia = params.frequencia
-        intervalo = params.intervalo
-      }
+    // Filtrar parcelas desta recorrência específica
+    const parcelasMesmaRec = (todasParcelas ?? []).filter(p => p.id_recorrencia === l.id_recorrencia)
+    if (parcelasMesmaRec.length >= 2) {
+      const params = inferirParametrosRecorrencia(parcelasMesmaRec)
+      frequencia = params.frequencia
+      intervalo = params.intervalo
     }
+    // Se temos apenas 1 parcela visível (ex: só o mês atual foi carregado),
+    // inferir comparando a data desta parcela com a data calculada esperada
+    // Mantém MENSAL/1 como fallback seguro — será corrigido pelo usuário se necessário
   }
 
   return {
@@ -269,8 +266,14 @@ export default function DrawerLancamento({
       categoria_id: form.categoria_id || undefined,
       status: form.status,
       observacao: form.observacao || undefined,
-      ...(form.recorrente ? {
+      // Para criação: enviar parâmetros de recorrência
+      ...(form.recorrente && !editando ? {
         total_parcelas:        parseInt(form.total_parcelas) || 2,
+        tipo_recorrencia:      form.tipo_recorrencia,
+        intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
+      } : {}),
+      // Para edição com ESTE_E_SEGUINTES: enviar nova frequência/intervalo
+      ...(editando && escopo === 'ESTE_E_SEGUINTES' ? {
         tipo_recorrencia:      form.tipo_recorrencia,
         intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
       } : {}),
@@ -491,14 +494,13 @@ export default function DrawerLancamento({
                     </div>
                   </div>
                   
-                  {editando.status !== 'PAGO' && (
-                    <>
-                      <p className="text-[10px] mb-1.5" style={{ color: '#8b92a8' }}>Alterar</p>
-                      <div className="flex flex-col gap-1">
-                        {([
-                          { value: 'SOMENTE_ESTE',    label: 'Somente este lançamento' },
-                          { value: 'ESTE_E_SEGUINTES', label: 'Este e os próximos'      },
-                        ] as const).map(op => (
+                  <>
+                    <p className="text-[10px] mb-1.5" style={{ color: '#8b92a8' }}>Alterar</p>
+                    <div className="flex flex-col gap-1">
+                      {([
+                        { value: 'SOMENTE_ESTE',    label: 'Somente este lançamento' },
+                        ...(editando.nr_parcela !== editando.total_parcelas ? [{ value: 'ESTE_E_SEGUINTES', label: 'Este e os próximos' }] : []),
+                      ] as const).map(op => (
                           <label
                             key={op.value}
                             className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border transition-colors"
@@ -532,10 +534,10 @@ export default function DrawerLancamento({
                             </span>
                           </label>
                         ))}
-                      </div>
+                    </div>
 
-                      {/* Campos de edição da recorrência - só aparecem com ESTE_E_SEGUINTES */}
-                      {escopo === 'ESTE_E_SEGUINTES' && (
+                    {/* Campos de edição da recorrência - só aparecem com ESTE_E_SEGUINTES */}
+                    {escopo === 'ESTE_E_SEGUINTES' && (
                         <div className="mt-2">
                           <p className="text-[10px] mb-1.5" style={{ color: '#8b92a8' }}>Parâmetros da recorrência</p>
                           <div className="flex gap-2">
@@ -568,10 +570,9 @@ export default function DrawerLancamento({
                                 onChange={e => set({ total_parcelas: e.target.value })} />
                             </div>
                           </div>
-                        </div>
-                      )}
-                    </>
-                  )}
+                      </div>
+                    )}
+                  </>
                 </>
               ) : null
             )}
