@@ -227,8 +227,91 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   // Frequência e intervalo enviados pelo frontend (para ESTE_E_SEGUINTES)
   const novaFrequenciaBody = body.tipo_recorrencia ? String(body.tipo_recorrencia) : null;
   const novoIntervaloBody  = body.intervalo_recorrencia ? parseInt(String(body.intervalo_recorrencia)) : null;
+  const novoTotalParcelas  = body.total_parcelas ? parseInt(String(body.total_parcelas)) : null;
 
-  // ── Escopo único ────────────────────────────────────────────
+  // Processar alteração de total_parcelas se for recorrência com escopo ESTE_E_SEGUINTES
+  if (atual.id_recorrencia && escopo === "ESTE_E_SEGUINTES" && novoTotalParcelas && atual.total_parcelas !== novoTotalParcelas) {
+    logDebug(`Alterando total_parcelas de ${atual.total_parcelas} para ${novoTotalParcelas}`);
+    
+    if (novoTotalParcelas < atual.total_parcelas) {
+      // REDUÇÃO: Excluir parcelas excedentes
+      const parcelasParaExcluir = await c.from("transacoes")
+        .select("id")
+        .eq("id_recorrencia", atual.id_recorrencia)
+        .gt("nr_parcela", novoTotalParcelas)
+        .gte("nr_parcela", atual.nr_parcela);
+      
+      if (parcelasParaExcluir.data && parcelasParaExcluir.data.length > 0) {
+        const idsParaExcluir = parcelasParaExcluir.data.map((p: { id: string }) => p.id);
+        const { error: eExcluir } = await c.from("transacoes").delete().in("id", idsParaExcluir);
+        if (eExcluir) {
+          logError("Erro ao excluir parcelas excedentes", eExcluir);
+          return erro("Erro ao excluir parcelas excedentes");
+        }
+        logSuccess(`Excluídas ${idsParaExcluir.length} parcelas excedentes`);
+      }
+    } else if (novoTotalParcelas > atual.total_parcelas) {
+      // EXTENSÃO: Criar novas parcelas
+      const ultimaParcelaResult = await c.from("transacoes")
+        .select("nr_parcela, data")
+        .eq("id_recorrencia", atual.id_recorrencia)
+        .order("nr_parcela", { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (ultimaParcelaResult.data) {
+        const ultimaParcela = ultimaParcelaResult.data as { nr_parcela: number; data: string };
+        const frequenciaFinal = novaFrequenciaBody || atual.tipo_recorrencia || 'MENSAL';
+        const intervaloFinal = novoIntervaloBody || 1;
+        
+        // Criar novas parcelas
+        const novasParcelas = [];
+        for (let i = atual.total_parcelas + 1; i <= novoTotalParcelas; i++) {
+          const offset = i - (ultimaParcela.nr_parcela ?? 1);
+          const novaData = calcularDataParcela(ultimaParcela.data, frequenciaFinal, offset * intervaloFinal);
+          
+          novasParcelas.push({
+            user_id: atual.user_id,
+            id_recorrencia: atual.id_recorrencia,
+            nr_parcela: i,
+            total_parcelas: novoTotalParcelas,
+            tipo: atual.tipo,
+            descricao: atual.descricao,
+            valor: atual.valor,
+            conta_id: atual.conta_id,
+            categoria_id: atual.categoria_id,
+            status: atual.status,
+            data: novaData,
+            observacao: atual.observacao,
+            tipo_recorrencia: frequenciaFinal,
+          });
+        }
+        
+        if (novasParcelas.length > 0) {
+          logDebug(`Tentando criar ${novasParcelas.length} novas parcelas:`, novasParcelas);
+          const { error: eCriar } = await c.from("transacoes").insert(novasParcelas);
+          if (eCriar) {
+            logError("Erro ao criar novas parcelas", eCriar);
+            logError("Detalhes do erro:", { 
+              message: eCriar.message,
+              details: eCriar.details,
+              hint: eCriar.hint,
+              code: eCriar.code
+            });
+            return erro(`Erro ao criar novas parcelas: ${eCriar.message}`);
+          }
+          logSuccess(`Criadas ${novasParcelas.length} novas parcelas`);
+        }
+      }
+    }
+    
+    // Atualizar total_parcelas em todas as parcelas da recorrência
+    await c.from("transacoes")
+      .update({ total_parcelas: novoTotalParcelas })
+      .eq("id_recorrencia", atual.id_recorrencia);
+  }
+
+  // Somente recorrências podem ter escopo estendido
   if (!atual.id_recorrencia || escopo === "SOMENTE_ESTE") {
     const { data, error } = await c.from("transacoes").update(dadosUpdate).eq("id", id).select();
     if (error) { logError("Editar transação", error); return erro(error.message); }

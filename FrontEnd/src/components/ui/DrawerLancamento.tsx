@@ -212,8 +212,29 @@ export default function DrawerLancamento({
     }
   }, [lancamentoId, lancamentoProp, novoLancamento, todasParcelas])
 
-  // Nota: Busca assíncrona removida - Docker não está rodando localmente
-  // Usando apenas dados disponíveis (padrão mensal)
+  // Buscar parâmetros reais quando mudar escopo para ESTE_E_SEGUINTES
+  useEffect(() => {
+    if (editando?.id_recorrencia && escopo === 'ESTE_E_SEGUINTES') {
+      // Buscar todas as parcelas da recorrência para inferir parâmetros reais
+      fetch(`/transacoes?id_recorrencia=${editando.id_recorrencia}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('sb-token') ?? ''}` }
+      })
+      .then(r => r.json())
+      .then(result => {
+        if (result.dados && result.dados.length > 1) {
+          const params = inferirParametrosRecorrencia(result.dados)
+          setForm(f => ({ 
+            ...f, 
+            tipo_recorrencia: params.frequencia, 
+            intervalo_recorrencia: String(params.intervalo) 
+          }))
+        }
+      })
+      .catch(() => {
+        // Se falhar, mantém os valores padrão
+      })
+    }
+  }, [escopo, editando?.id_recorrencia])
 
   // Opções para SearchableSelect ───────────────────────────
   const opcoesContas = contas
@@ -240,6 +261,23 @@ export default function DrawerLancamento({
     if (!form.descricao.trim()) { setErro('Descrição é obrigatória.'); return }
     if (!form.valor || parsearValorBR(form.valor) <= 0) { setErro('Valor inválido.'); return }
     if (!form.conta_id) { setErro('Selecione a conta de origem.'); return }
+
+    // Verificar alteração de total_parcelas em recorrências
+    if (editando?.id_recorrencia && escopo === 'ESTE_E_SEGUINTES') {
+      const parcelasAtuais = editando.total_parcelas || 0
+      const parcelasNovas = parseInt(form.total_parcelas) || 0
+      
+      if (parcelasAtuais !== parcelasNovas) {
+        const mensagem = parcelasNovas < parcelasAtuais
+          ? `Atenção: Você está reduzindo o número de parcelas de ${parcelasAtuais} para ${parcelasNovas}. As ${parcelasAtuais - parcelasNovas} últimas parcelas serão EXCLUÍDAS permanentemente. Deseja continuar?`
+          : `Atenção: Você está aumentando o número de parcelas de ${parcelasAtuais} para ${parcelasNovas}. Serão criadas ${parcelasNovas - parcelasAtuais} novas parcelas. Deseja continuar?`
+        
+        if (!confirm(mensagem)) {
+          return
+        }
+      }
+    }
+
     setSalvando(true); setErro(null)
 
     const valorNumerico = parsearValorBR(form.valor)
@@ -272,10 +310,11 @@ export default function DrawerLancamento({
         tipo_recorrencia:      form.tipo_recorrencia,
         intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
       } : {}),
-      // Para edição com ESTE_E_SEGUINTES: enviar nova frequência/intervalo
+      // Para edição com ESTE_E_SEGUINTES: enviar nova frequência/intervalo/parcelas
       ...(editando && escopo === 'ESTE_E_SEGUINTES' ? {
         tipo_recorrencia:      form.tipo_recorrencia,
         intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
+        total_parcelas:        parseInt(form.total_parcelas) || 2,
       } : {}),
     }
 
@@ -303,7 +342,13 @@ export default function DrawerLancamento({
     console.log('=================')
     
     setSalvando(false)
-    if (res.ok) { onSalvo?.(); onFechar() } else setErro(res.erro ?? 'Erro ao salvar.')
+    if (res.ok) { onSalvo?.(); onFechar() } else {
+      setErro(res.erro ?? 'Erro ao salvar.')
+      // Rolar para o topo para mostrar a mensagem de erro
+      setTimeout(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }, 100)
+    }
   }
 
   // ── Excluir ────────────────────────────────────────────────
