@@ -433,10 +433,49 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
       legend: { display: false },
       tooltip: {
         callbacks: {
-          label: (ctx: any) => {
-            const v = ctx.parsed.y
-            if (v === null || v === undefined) return ''
-            return ` ${ctx.dataset.label}: ${formatBRL(v)}`
+          label: () => '',
+          afterBody: (items: any[]) => {
+            if (!items.length) return []
+            const idx = items[0].dataIndex
+
+            const recPagas = pagos[idx]?.receitas   ?? 0
+            const recPend  = pendentes[idx]?.receitas ?? 0
+            const recProj  = projecoes[idx]?.receitas ?? 0
+            const desPagas = pagos[idx]?.despesas   ?? 0
+            const desPend  = pendentes[idx]?.despesas ?? 0
+            const desProj  = projecoes[idx]?.despesas ?? 0
+            const saldo    = historico[idx]?.saldo_mes ?? null
+
+            const linhas: string[] = []
+
+            const temReceita = recPagas > 0 || recPend > 0 || recProj > 0
+            if (temReceita) {
+              linhas.push('  Receitas')
+              if (recPagas > 0) linhas.push(`    ✅ Pagas:      ${formatBRL(recPagas)}`)
+              if (recPend  > 0) linhas.push(`    🟡 Pendentes:  ${formatBRL(recPend)}`)
+              if (recProj  > 0) linhas.push(`    🔵 Projeções:  ${formatBRL(recProj)}`)
+            }
+
+            const temDespesa = desPagas > 0 || desPend > 0 || desProj > 0
+            if (temDespesa) {
+              if (temReceita) linhas.push('')
+              linhas.push('  Despesas')
+              if (desPagas > 0) linhas.push(`    ✅ Pagas:      ${formatBRL(desPagas)}`)
+              if (desPend  > 0) linhas.push(`    🟡 Pendentes:  ${formatBRL(desPend)}`)
+              if (desProj  > 0) linhas.push(`    🔵 Projeções:  ${formatBRL(desProj)}`)
+            }
+
+            if (saldo !== null && !oculto) {
+              if (temReceita || temDespesa) linhas.push('')
+              linhas.push(`  Saldo: ${formatBRL(saldo)}`)
+            }
+
+            return linhas
+          },
+          title: (items: any[]) => {
+            if (!items.length) return ''
+            const h = historico[items[0].dataIndex]
+            return h?.mes ? mesLabel(h.mes) : ''
           },
         },
       },

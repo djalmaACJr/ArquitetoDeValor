@@ -195,7 +195,7 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
       setProjecoes(historicoStatus.map(h => h.projecoes))
 
       // ─ HISTÓRICO 6 MESES ─
-      // saldo_acumulado: pega o maior saldo_acumulado do último lançamento PAGO do mês
+      const contasList = extrairLista<Conta>(contasRes.dados)
       const hist: ResumoMensal[] = meses6.map((mesHist, idx) => {
         const fatia = extrairLista<Transacao>(historicosRes[idx]?.dados)
         const isTransfH = (t: Transacao) =>
@@ -204,13 +204,31 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
           t.categoria_nome === 'Transferências'
         const totalEnt = fatia.filter(t => t.tipo === 'RECEITA' && !isTransfH(t)).reduce((s, t) => s + t.valor, 0)
         const totalSai = fatia.filter(t => t.tipo === 'DESPESA' && !isTransfH(t)).reduce((s, t) => s + t.valor, 0)
-        // Saldo ao final do mês: saldo_acumulado do último lançamento do mês
-        // (global — PARTITION BY user_id na view, já inclui todas as contas)
-        // Usa o último lançamento independente de status (data ASC, criado_em ASC)
-        const comSaldoAcum = fatia.filter(t => t.saldo_acumulado !== undefined)
-        const saldo_mes = comSaldoAcum.length > 0
-          ? comSaldoAcum[comSaldoAcum.length - 1].saldo_acumulado!
-          : 0
+
+        let saldo_mes: number
+        if (contasFiltro.length === 0) {
+          // Sem filtro: usa saldo_acumulado global da view (inclui todas as contas)
+          const comSaldoAcum = fatia.filter(t => t.saldo_acumulado !== undefined)
+          saldo_mes = comSaldoAcum.length > 0
+            ? comSaldoAcum[comSaldoAcum.length - 1].saldo_acumulado!
+            : 0
+        } else {
+          // Com filtro: soma receitas pagas - despesas pagas das contas selecionadas
+          // a partir do saldo inicial dessas contas (saldo_atual já reflete estado atual,
+          // então recalculamos: saldo_base + entradas_pagas_mes - saidas_pagas_mes)
+          const fatiaConta = fatia.filter(t => contasFiltro.includes(t.conta_id) && !isTransfH(t))
+          const entPagas = fatiaConta.filter(t => t.tipo === 'RECEITA' && t.status === 'PAGO').reduce((s, t) => s + t.valor, 0)
+          const saiPagas = fatiaConta.filter(t => t.tipo === 'DESPESA' && t.status === 'PAGO').reduce((s, t) => s + t.valor, 0)
+          // Base: pega saldo_acumulado do último lançamento das contas filtradas
+          const comSaldo = fatiaConta.filter(t => t.saldo_acumulado !== undefined)
+          if (comSaldo.length > 0) {
+            // Se a view disponibilizar saldo por conta, use diretamente
+            saldo_mes = comSaldo[comSaldo.length - 1].saldo_acumulado!
+          } else {
+            // Fallback: calcula resultado líquido do mês para as contas filtradas
+            saldo_mes = entPagas - saiPagas
+          }
+        }
         return { mes: mesHist, total_entradas: totalEnt, total_saidas: totalSai, saldo_mes }
       })
       setHistorico(hist)
