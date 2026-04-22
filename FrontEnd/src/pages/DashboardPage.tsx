@@ -1,7 +1,7 @@
 // src/pages/DashboardPage.tsx
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Eye, EyeOff, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { mesAtual, mesLabel, formatBRL, formatData, GRUPOS_CONTA, CORES_CATEGORIA } from '../lib/utils'
 import { MonthPicker } from '../components/ui/MonthPicker'
@@ -705,6 +705,13 @@ export default function DashboardPage() {
   const [editandoTx, setEditandoTx]         = useState<Transacao | null>(null)
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
   const [contasFiltro, setContasFiltro] = useState<string[]>([])
+  const [refreshing, setRefreshing] = useState(false)
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await refetch()
+    setTimeout(() => setRefreshing(false), 600)
+  }
 
   const abrirEdicao = (tx: Transacao) => {
     setLancamentoEditando(tx)
@@ -752,6 +759,16 @@ export default function DashboardPage() {
               </option>
             ))}
           </select>
+
+          {/* Botao atualizar */}
+          <button
+            onClick={handleRefresh}
+            title="Atualizar dados"
+            disabled={refreshing || loading}
+            className="flex items-center gap-1.5 text-[12px] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''}/>
+          </button>
 
           {/* Botao ocultar valores */}
           <button

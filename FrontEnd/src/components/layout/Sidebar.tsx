@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, List, CreditCard, Tag,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, RefreshCw,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
@@ -85,8 +85,8 @@ interface NavItem {
 }
 
 const navPrincipal: NavItem[] = [
-  { to: '/',            icon: <LayoutDashboard size={15}/>, label: 'Dashboard' },
-  { to: '/lancamentos', icon: <List size={15}/>,            label: 'Extrato' },
+  { to: '/',            icon: <LayoutDashboard size={15}/>, label: 'Painel principal' },
+  { to: '/lancamentos', icon: <List size={15}/>,            label: 'Extratos' },
 ]
 const navCadastros: NavItem[] = [
   { to: '/contas',     icon: <CreditCard size={15}/>, label: 'Contas' },
