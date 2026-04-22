@@ -234,6 +234,9 @@ export default function LancamentosPage() {
     if (state.mes) {
       setMes(state.mes)
     }
+    if (state.contaId) {
+      setFiltContas([state.contaId])
+    }
     if (state.editarId && lancamentos.length > 0) {
       const tx = lancamentos.find(l => l.id === state.editarId)
       if (tx) abrirEditar(tx)

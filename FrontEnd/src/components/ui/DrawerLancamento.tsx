@@ -167,6 +167,7 @@ export default function DrawerLancamento({
   const [salvando,            setSalvando]            = useState(false)
   const [carregando,          setCarregando]          = useState(false)
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false)
+  const drawerRef = useRef<HTMLDivElement>(null)
   const [excluindo,           setExcluindo]           = useState(false)
   const [escopo,              setEscopo]              = useState<'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES'>('SOMENTE_ESTE')
 
@@ -258,9 +259,58 @@ export default function DrawerLancamento({
 
   // ── Salvar ─────────────────────────────────────────────────
   const salvar = async () => {
-    if (!form.descricao.trim()) { setErro('Descrição é obrigatória.'); return }
-    if (!form.valor || parsearValorBR(form.valor) <= 0) { setErro('Valor inválido.'); return }
-    if (!form.conta_id) { setErro('Selecione a conta de origem.'); return }
+    if (!form.descricao.trim()) { 
+      setErro('Descrição é obrigatória.'); 
+      // Rolar para mostrar o erro de validação
+      setTimeout(() => {
+        const errorElement = document.querySelector('[data-error-message]')
+        if (errorElement) {
+          errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        }
+      }, 100)
+      return 
+    }
+    if (!form.valor || Number(form.valor) <= 0) { 
+      setErro('Valor deve ser maior que zero.'); 
+      // Rolar para mostrar o erro de validação
+      setTimeout(() => {
+        const errorElement = document.querySelector('[data-error-message]')
+        if (errorElement) {
+          errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        }
+      }, 100)
+      return 
+    }
+    if (!form.data) { 
+      setErro('Data é obrigatória.'); 
+      // Rolar para mostrar o erro de validação
+      setTimeout(() => {
+        const errorElement = document.querySelector('[data-error-message]')
+        if (errorElement) {
+          errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        }
+      }, 100)
+      return 
+    }
+    if (!form.conta_id) { 
+      setErro('Conta é obrigatória.'); 
+      // Rolar para mostrar o erro de validação
+      setTimeout(() => {
+        const errorElement = document.querySelector('[data-error-message]')
+        if (errorElement) {
+          errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        }
+      }, 100)
+      return 
+    }
 
     // Verificar alteração de total_parcelas em recorrências
     if (editando?.id_recorrencia && escopo === 'ESTE_E_SEGUINTES') {
@@ -339,15 +389,18 @@ export default function DrawerLancamento({
     console.log('Resposta:', res)
     console.log('OK:', res.ok)
     console.log('Dados:', res.dados)
-    console.log('=================')
-    
     setSalvando(false)
     if (res.ok) { onSalvo?.(); onFechar() } else {
       setErro(res.erro ?? 'Erro ao salvar.')
-      // Rolar para o topo para mostrar a mensagem de erro
+      // Rolar para mostrar a mensagem de erro dentro do Drawer
       setTimeout(() => {
-        window.scrollTo({ top: 0, behavior: 'smooth' })
-      }, 100)
+        const errorElement = document.querySelector('[data-error-message]')
+        if (errorElement) {
+          errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' })
+        }
+      }, 500)
     }
   }
 
@@ -639,8 +692,11 @@ export default function DrawerLancamento({
         </Field>
 
         {erro && (
-          <p className="text-[12px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
-            style={{ color: '#f87171' }}>{erro}</p>
+          <p 
+            className="text-[12px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
+            style={{ color: '#f87171' }}
+            data-error-message
+          >{erro}</p>
         )}
       </Drawer>
 

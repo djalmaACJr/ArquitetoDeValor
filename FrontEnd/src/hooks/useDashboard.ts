@@ -48,14 +48,17 @@ function parseMes(mes: string): { ano: number; m: number } | null {
   return { ano, m }
 }
 
-export function useDashboard(mes: string) {
+export function useDashboard(mes: string, contasFiltro: string[] = []) {
   const [contas,      setContas]      = useState<Conta[]>([])
   const [pendentes,   setPendentes]   = useState<Transacao[]>([])
   const [proximas,    setProximas]    = useState<Transacao[]>([])
   const [resumo,      setResumo]      = useState<ResumoMensal | null>(null)
   const [despesasCat, setDespesasCat] = useState<DespesaCategoria[]>([])
   const [receitasCat, setReceitasCat] = useState<DespesaCategoria[]>([])
-  const [historico,   setHistorico]   = useState<ResumoMensal[]>([])
+  const [historico,   setHistorico]   = useState<{ mes: string; saldo_mes?: number }[]>([])
+  const [pagos,       setPagos]       = useState<{ receitas: number; despesas: number }[]>([])
+  const [pendentesStatus, setPendentesStatus] = useState<{ receitas: number; despesas: number }[]>([])
+  const [projecoes,   setProjecoes]   = useState<{ receitas: number; despesas: number }[]>([])
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState<string | null>(null)
 
@@ -82,10 +85,11 @@ export function useDashboard(mes: string) {
         ? `${anoN + 1}-01`
         : `${anoN}-${String(mesN + 1).padStart(2, '0')}`
 
-      const [contasRes, pendentesRes, proximosRes, ...historicosRes] = await Promise.all([
+      const [contasRes, pendentesRes, proximosRes, pagosRes, ...historicosRes] = await Promise.all([
         apiFetch<Conta[]>('/contas', signal),
         apiFetch(`/transacoes?status=PENDENTE&mes=${mes}&per_page=500&saldo=true`, signal),
         apiFetch(`/transacoes?status=PENDENTE&mes=${mesSeguinte}&per_page=500&saldo=true`, signal),
+        apiFetch(`/transacoes?status=PAGO&mes=${mes}&per_page=1000&saldo=true`, signal),
         ...meses6.map(mesHist =>
           apiFetch(`/transacoes?mes=${mesHist}&per_page=1000&saldo=true`, signal)
         ),
@@ -95,11 +99,17 @@ export function useDashboard(mes: string) {
       setContas(extrairLista<Conta>(contasRes.dados))
 
       // ─ PENDENTES / PRÓXIMAS ─
-      // Combina mês atual + mês seguinte para suportar filtro "30 dias"
-      const filtrarTransf = (t: Transacao) =>
-        !t.id_par_transferencia &&
-        !t.descricao?.startsWith('[Transf.') &&
-        t.categoria_nome !== 'Transferências'
+      // Função auxiliar para filtrar transferências E contas
+      const filtrarTransf = (t: Transacao) => {
+        const semTransf = !t.id_par_transferencia ||
+          t.descricao?.startsWith('[Transf.') ||
+          t.categoria_nome === 'Transferências'
+        
+        // Aplicar filtro de contas se houver
+        const comContaFiltro = contasFiltro.length === 0 || contasFiltro.includes(t.conta_id)
+        
+        return semTransf && comContaFiltro
+      }
 
       const pendMes      = extrairLista<Transacao>(pendentesRes.dados).filter(filtrarTransf)
       const pendProximos = extrairLista<Transacao>(proximosRes.dados).filter(filtrarTransf)
@@ -108,10 +118,27 @@ export function useDashboard(mes: string) {
       setPendentes(todasPend.filter(t => t.data <= hoje))
       setProximas(todasPend.filter(t => t.data > hoje))
 
-      // ─ RESUMO DO MÊS ATUAL (último dos 6) ─
-      const doMes = extrairLista<Transacao>(historicosRes[historicosRes.length - 1]?.dados)
+      // Função auxiliar para filtrar transferências E contas
+      const filtrarTransfComStatus = (t: Transacao) => {
+        const semTransf = !t.id_par_transferencia ||
+          t.descricao?.startsWith('[Transf.') ||
+          t.categoria_nome === 'Transferências'
+        
+        // Aplicar filtro de contas se houver
+        const comContaFiltro = contasFiltro.length === 0 || contasFiltro.includes(t.conta_id)
+        
+        return semTransf && comContaFiltro
+      }
 
-      // Exclui transferências — pelo id_par_transferencia, prefixo na descrição OU categoria "Transferências"
+      const doMes = extrairLista<Transacao>(historicosRes[historicosRes.length - 1]?.dados).filter(filtrarTransfComStatus)
+
+      // Função auxiliar para filtrar contas no histórico (para saldo acumulado)
+      const filtrarContas = (t: Transacao) => {
+        // Aplicar filtro de contas se houver
+        return contasFiltro.length === 0 || contasFiltro.includes(t.conta_id)
+      }
+
+      // Exclui transferências pelo id_par_transferencia, prefixo na descrição OU categoria "Transferências"
       const isTransf = (t: Transacao) =>
         !!t.id_par_transferencia ||
         t.descricao?.startsWith('[Transf.') ||
@@ -119,9 +146,53 @@ export function useDashboard(mes: string) {
       const entradas = doMes.filter(t => t.tipo === 'RECEITA' && !isTransf(t)).reduce((s, t) => s + t.valor, 0)
       const saidas   = doMes.filter(t => t.tipo === 'DESPESA' && !isTransf(t)).reduce((s, t) => s + t.valor, 0)
 
+      // Calcular valores por status para cada mês do histórico
+      const historicoStatus = meses6.map((mesHist, idx) => {
+        const fatia = extrairLista<Transacao>(historicosRes[idx]?.dados).filter(filtrarTransfComStatus)
+        
+        const pagosMes = {
+          receitas: fatia.filter(t => t.tipo === 'RECEITA' && t.status === 'PAGO').reduce((s, t) => s + t.valor, 0),
+          despesas: fatia.filter(t => t.tipo === 'DESPESA' && t.status === 'PAGO').reduce((s, t) => s + t.valor, 0)
+        }
+        
+        const pendentesMes = {
+          receitas: fatia.filter(t => t.tipo === 'RECEITA' && t.status === 'PENDENTE').reduce((s, t) => s + t.valor, 0),
+          despesas: fatia.filter(t => t.tipo === 'DESPESA' && t.status === 'PENDENTE').reduce((s, t) => s + t.valor, 0)
+        }
+        
+        const projecoesMes = {
+          receitas: fatia.filter(t => t.tipo === 'RECEITA' && t.status === 'PROJECAO').reduce((s, t) => s + t.valor, 0),
+          despesas: fatia.filter(t => t.tipo === 'DESPESA' && t.status === 'PROJECAO').reduce((s, t) => s + t.valor, 0)
+        }
+        
+        return { pagos: pagosMes, pendentes: pendentesMes, projecoes: projecoesMes }
+      })
+
+      // Valores do mês atual
+      const pagosLista = extrairLista<Transacao>(pagosRes.dados).filter(filtrarTransf)
+      const pagosCalculados = {
+        receitas: pagosLista.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0),
+        despesas: pagosLista.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
+      }
+
+      const pendentesLista = [...pendMes, ...pendProximos].filter(t => t.status === 'PENDENTE')
+      const pendentesCalculados = {
+        receitas: pendentesLista.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0),
+        despesas: pendentesLista.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
+      }
+
+      const projecoesLista = [...pendMes, ...pendProximos].filter(t => t.status === 'PROJECAO')
+      const projecoesCalculados = {
+        receitas: projecoesLista.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0),
+        despesas: projecoesLista.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
+      }
+
       setResumo({ mes, total_entradas: entradas, total_saidas: saidas })
       setDespesasCat(agruparPorCategoria(doMes, 'DESPESA', 5))
       setReceitasCat(agruparPorCategoria(doMes, 'RECEITA', 4))
+      setPagos(historicoStatus.map(h => h.pagos))
+      setPendentesStatus(historicoStatus.map(h => h.pendentes))
+      setProjecoes(historicoStatus.map(h => h.projecoes))
 
       // ─ HISTÓRICO 6 MESES ─
       // saldo_acumulado: pega o maior saldo_acumulado do último lançamento PAGO do mês
@@ -150,7 +221,7 @@ export function useDashboard(mes: string) {
     } finally {
       setLoading(false)
     }
-  }, [mes])
+  }, [mes, contasFiltro])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -158,5 +229,5 @@ export function useDashboard(mes: string) {
     return () => controller.abort()
   }, [carregar])
 
-  return { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading, error, refetch: carregar }
+  return { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, error, refetch: carregar }
 }

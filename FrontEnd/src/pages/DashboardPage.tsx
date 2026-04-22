@@ -332,29 +332,79 @@ function CardAlertas({
 }
 
 // -- Grafico barras + linha de saldo ----------------------
-function GraficoBarras({ historico, oculto }: { historico: { mes: string; total_entradas: number; total_saidas: number; saldo_mes?: number }[]; oculto: boolean }) {
+function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: { 
+  historico: { mes: string; total_entradas: number; total_saidas: number; saldo_mes?: number }[]; 
+  oculto: boolean;
+  pagos: { receitas: number; despesas: number }[];
+  pendentes: { receitas: number; despesas: number }[];
+  projecoes: { receitas: number; despesas: number }[];
+}) {
   const labels = historico.map(h => mesLabel(h.mes))
 
   const data = {
     labels,
     datasets: [
+      // Receitas (stacked)
       {
         type: 'bar' as const,
-        label: 'Receitas',
-        data: historico.map(h => h.total_entradas),
-        backgroundColor: '#00c896',
+        label: 'Receitas Pagas',
+        data: pagos.map(p => p.receitas),
+        backgroundColor: '#10b981',
         borderRadius: 4,
+        stack: 'receitas',
         yAxisID: 'y',
-        order: 2,
+        order: 3,
       },
       {
         type: 'bar' as const,
-        label: 'Despesas',
-        data: historico.map(h => h.total_saidas),
-        backgroundColor: '#ff6b4a',
+        label: 'Receitas Pendentes',
+        data: pendentes.map(p => p.receitas),
+        backgroundColor: '#84cc16',
         borderRadius: 4,
+        stack: 'receitas',
         yAxisID: 'y',
-        order: 2,
+        order: 3,
+      },
+      {
+        type: 'bar' as const,
+        label: 'Receitas Projeções',
+        data: projecoes.map(p => p.receitas),
+        backgroundColor: '#06b6d4',
+        borderRadius: 4,
+        stack: 'receitas',
+        yAxisID: 'y',
+        order: 3,
+      },
+      // Despesas (stacked)
+      {
+        type: 'bar' as const,
+        label: 'Despesas Pagas',
+        data: pagos.map(p => p.despesas),
+        backgroundColor: '#dc2626',
+        borderRadius: 4,
+        stack: 'despesas',
+        yAxisID: 'y',
+        order: 3,
+      },
+      {
+        type: 'bar' as const,
+        label: 'Despesas Pendentes',
+        data: pendentes.map(p => p.despesas),
+        backgroundColor: '#f59e0b',
+        borderRadius: 4,
+        stack: 'despesas',
+        yAxisID: 'y',
+        order: 3,
+      },
+      {
+        type: 'bar' as const,
+        label: 'Despesas Projeções',
+        data: projecoes.map(p => p.despesas),
+        backgroundColor: '#8b5cf6',
+        borderRadius: 4,
+        stack: 'despesas',
+        yAxisID: 'y',
+        order: 3,
       },
       {
         type: 'line' as const,
@@ -425,14 +475,30 @@ function GraficoBarras({ historico, oculto }: { historico: { mes: string; total_
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
       <p className="text-[13px] font-semibold text-gray-700 dark:text-gray-200 mb-0.5">Evolução mensal</p>
       <p className="text-[11px] text-gray-400 mb-3">Receitas, despesas e saldo - últimos 6 meses</p>
-      <div className="flex gap-3 mb-2">
-        {[['#00c896','Receitas'],['#ff6b4a','Despesas'],['#a78bfa','Saldo']].map(([cor,label]) => (
-          <div key={label} className="flex items-center gap-1.5 text-[11px] text-gray-400">
-            <span className="w-2 h-2 rounded-sm" style={{ background: cor }}/>{label}
-          </div>
-        ))}
+      <div className="flex gap-6 mb-3 text-[10px]">
+        <div className="flex items-center gap-2">
+          <span className="text-gray-600 font-semibold">Status:</span>
+          {pagos.some(p => p.receitas > 0 || p.despesas > 0) && (
+            <>
+              <span className="w-2 h-2 rounded-sm bg-green-500"/>
+              <span className="text-gray-600">Pagas</span>
+            </>
+          )}
+          {pendentes.some(p => p.receitas > 0 || p.despesas > 0) && (
+            <>
+              <span className="w-2 h-2 rounded-sm bg-yellow-500"/>
+              <span className="text-gray-600">Pendentes</span>
+            </>
+          )}
+          {projecoes.some(p => p.receitas > 0 || p.despesas > 0) && (
+            <>
+              <span className="w-2 h-2 rounded-sm bg-blue-500"/>
+              <span className="text-gray-600">Projeções</span>
+            </>
+          )}
+        </div>
       </div>
-      <div style={{ position: 'relative', height: '300px', width: '100%' }}>
+            <div style={{ position: 'relative', height: '300px', width: '100%' }}>
         <Chart type="bar" data={data} options={options} />
       </div>
     </div>
@@ -493,9 +559,29 @@ function GraficoDonut({ titulo, subtitulo, total, dados, corCentro }: {
   )
 }
 
-// -- Contas agrupadas -------------------------------------
-function SecaoContas({ contas, oculto }: { contas: Conta[]; oculto: boolean }) {
-  // Agrupamento personalizado para o dashboard
+// -- Card de contas com saldo dinâmico ------------------------------
+function CardContas({ contas, oculto, mes, historico }: { 
+  contas: Conta[]; 
+  oculto: boolean;
+  mes: string;
+  historico: { mes: string; saldo_mes?: number }[];
+}) {
+  const navigate = useNavigate()
+  const mesAtualStr = new Date().toISOString().slice(0, 7)
+  const isMesAtual = mes === mesAtualStr
+  const [modo, setModo] = useState<'hoje' | 'fim'>('hoje')
+
+  // Saldo do mês selecionado: último saldo_acumulado do mês no histórico
+  const entradaMes = historico.find(h => h.mes === mes)
+  const saldoFimMes = entradaMes?.saldo_mes ?? null
+
+  // Lógica de exibição para contas individuais
+  const getSaldoConta = (conta: Conta) => {
+    // Para todos os casos, usar saldo_atual (única propriedade disponível)
+    // Futuramente pode ser expandido para usar saldo_fim_mes quando implementado
+    return conta.saldo_atual
+  }
+
   const gruposDash = [
     {
       label: 'Contas bancárias',
@@ -521,11 +607,22 @@ function SecaoContas({ contas, oculto }: { contas: Conta[]; oculto: boolean }) {
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-      <p className="text-[13px] font-semibold text-gray-700 dark:text-gray-200 mb-3">Minhas contas</p>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[13px] font-semibold text-gray-700 dark:text-gray-200">Minhas contas</p>
+        {isMesAtual && (
+          <select
+            value={modo} onChange={e => setModo(e.target.value as 'hoje' | 'fim')}
+            className="text-[11px] bg-blue-400/10 border border-blue-400/30 rounded-md text-av-blue px-2 py-1 cursor-pointer"
+          >
+            <option value="hoje">Até hoje</option>
+            <option value="fim">Até fim do mês</option>
+          </select>
+        )}
+      </div>
       {gruposDash.map(grupo => {
         const contasGrupo = contas.filter(c => grupo.tipos.includes(c.tipo) && c.ativa)
         if (contasGrupo.length === 0) return null
-        const totalGrupo = contasGrupo.reduce((s, c) => s + c.saldo_atual, 0)
+        const totalGrupo = contasGrupo.reduce((s, c) => s + getSaldoConta(c), 0)
         return (
           <div key={grupo.label} className="mb-4 last:mb-0">
             <div className="flex items-center gap-2 mb-2">
@@ -533,19 +630,26 @@ function SecaoContas({ contas, oculto }: { contas: Conta[]; oculto: boolean }) {
               <span className="text-[11px] font-bold" style={{ color: grupo.cor }}>{oculto ? OCULTO : formatBRL(totalGrupo)}</span>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              {contasGrupo.map(conta => (
-                <div key={conta.conta_id} className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3 flex items-center gap-2">
-                  <IconeConta icone={conta.icone} cor={conta.cor} size="md" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[12px] font-semibold text-gray-700 dark:text-gray-200 truncate">{conta.nome}</p>
-                    <p className="text-[10px] text-gray-400">{conta.tipo}</p>
+              {contasGrupo.map(conta => {
+                const saldoConta = getSaldoConta(conta)
+                return (
+                  <div 
+                    key={conta.conta_id} 
+                    className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3 flex items-center gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                    onClick={() => navigate('/lancamentos', { state: { contaId: conta.conta_id } })}
+                  >
+                    <IconeConta icone={conta.icone} cor={conta.cor} size="md" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-semibold text-gray-700 dark:text-gray-200 truncate">{conta.nome}</p>
+                      <p className="text-[10px] text-gray-400">{conta.tipo}</p>
+                    </div>
+                    <p className="text-[12px] font-bold whitespace-nowrap"
+                      style={{ color: saldoConta >= 0 ? '#00c896' : '#ff6b4a' }}>
+                      {oculto ? OCULTO : formatBRL(saldoConta)}
+                    </p>
                   </div>
-                  <p className="text-[12px] font-bold whitespace-nowrap"
-                    style={{ color: conta.saldo_atual >= 0 ? '#00c896' : '#ff6b4a' }}>
-                    {oculto ? OCULTO : formatBRL(conta.saldo_atual)}
-                  </p>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )
@@ -561,12 +665,13 @@ export default function DashboardPage() {
   const [oculto, setOculto] = useState(false)
   const [editandoTx, setEditandoTx]         = useState<Transacao | null>(null)
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
+  const [contasFiltro, setContasFiltro] = useState<string[]>([])
 
   const abrirEdicao = (tx: Transacao) => {
     setLancamentoEditando(tx)
   }
 
-  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading, error, refetch } = useDashboard(mes)
+  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, error, refetch } = useDashboard(mes, contasFiltro)
 
   // Debug
   useEffect(() => {
@@ -592,6 +697,23 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
         <div className="flex items-center gap-2">
+          {/* Filtro de contas */}
+          <select
+            value={contasFiltro[0] || ''}
+            onChange={(e) => {
+              const value = e.target.value
+              setContasFiltro(value ? [value] : [])
+            }}
+            className="text-[13px] font-normal text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-3 py-1.5 cursor-pointer"
+          >
+            <option value="">Todas as contas</option>
+            {contas.filter(c => c.ativa).map(conta => (
+              <option key={conta.conta_id} value={conta.conta_id}>
+                {conta.nome}
+              </option>
+            ))}
+          </select>
+
           {/* Botao ocultar valores */}
           <button
             onClick={() => setOculto(o => !o)}
@@ -650,7 +772,13 @@ export default function DashboardPage() {
           </div>
 
           {/* Linha 3: grafico de barras */}
-          <GraficoBarras historico={historico} oculto={oculto}/>
+          <GraficoBarras 
+              historico={historico} 
+              oculto={oculto}
+              pagos={pagos}
+              pendentes={pendentesStatus}
+              projecoes={projecoes}
+            />
 
           {/* Linha 4: donuts */}
           <div className="grid grid-cols-2 gap-3">
@@ -671,14 +799,14 @@ export default function DashboardPage() {
           </div>
 
           {/* Linha 5: contas */}
-          <SecaoContas contas={contas} oculto={oculto}/>
+          <CardContas contas={contas} oculto={oculto} mes={mes} historico={historico}/>
         </div>
       )}
       {/* Drawer de edicao de lancamento */}
       {lancamentoEditando && (
         <DrawerLancamento
           lancamento={lancamentoEditando}
-          todasParcelas={[...(pendentes || []), ...(proximas || [])]}
+          todasParcelas={[...(pendentes || []), ...(proximas || [])] as any}
           onFechar={() => setLancamentoEditando(null)}
           onSalvo={() => { setLancamentoEditando(null); refetch() }}
           onExcluido={() => { setLancamentoEditando(null); refetch() }}

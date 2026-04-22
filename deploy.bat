@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo ================================
-echo   DEPLOY - Supabase Functions
+echo   DEPLOY - Supabase Functions v1.0.3
 echo ================================
 echo.
 echo Escolha o modo de deploy:
@@ -12,9 +12,10 @@ echo   2 - contas
 echo   3 - categorias
 echo   4 - transacoes
 echo   5 - transferencias
-echo   6 - limpar
-echo   7 - Configurar nivel de logs
-echo   8 - Deploy com --debug (usar nesta maquina)
+echo   6 - versao
+echo   7 - limpar
+echo   8 - Configurar nivel de logs
+echo   9 - Deploy com --debug (usar nesta maquina)
 echo.
 set /p opcao="Digite a opcao desejada (1-8): "
 
@@ -23,9 +24,10 @@ if "%opcao%"=="2" goto contas
 if "%opcao%"=="3" goto categorias
 if "%opcao%"=="4" goto transacoes
 if "%opcao%"=="5" goto transferencias
-if "%opcao%"=="6" goto limpar
-if "%opcao%"=="7" goto config_log
-if "%opcao%"=="8" goto debug_mode
+if "%opcao%"=="6" goto versao
+if "%opcao%"=="7" goto limpar
+if "%opcao%"=="8" goto config_log
+if "%opcao%"=="9" goto debug_mode
 echo Opcao invalida! & pause & exit /b
 
 :debug_mode
@@ -40,16 +42,18 @@ echo   2 - contas
 echo   3 - categorias
 echo   4 - transacoes
 echo   5 - transferencias
-echo   6 - limpar
+echo   6 - versao
+echo   7 - limpar
 echo.
-set /p mod_debug="Digite o modulo (1-6): "
+set /p mod_debug="Digite o modulo (1-7): "
 
 if "%mod_debug%"=="1" goto debug_todos
 if "%mod_debug%"=="2" goto debug_contas
 if "%mod_debug%"=="3" goto debug_categorias
 if "%mod_debug%"=="4" goto debug_transacoes
 if "%mod_debug%"=="5" goto debug_transferencias
-if "%mod_debug%"=="6" goto debug_limpar
+if "%mod_debug%"=="6" goto debug_versao
+if "%mod_debug%"=="7" goto debug_limpar
 echo Opcao invalida! & pause & exit /b
 
 :debug_contas
@@ -80,6 +84,13 @@ supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo --de
 echo [OK] transferencias deployed
 goto fim
 
+:debug_versao
+echo.
+echo [DEPLOY --debug] versao...
+supabase functions deploy version --project-ref ftpelncgrakpphytfrfo --debug
+echo [OK] versao deployed
+goto fim
+
 :debug_limpar
 echo.
 echo [DEPLOY --debug] limpar...
@@ -100,6 +111,9 @@ supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] transferencias...
 supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo --debug
+echo.
+echo [DEPLOY --debug] versao...
+supabase functions deploy version --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] limpar...
 supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo --debug
@@ -163,6 +177,13 @@ supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo
 echo [OK] transferencias deployed
 goto fim
 
+:versao
+echo.
+echo [DEPLOY] versao...
+supabase functions deploy version --project-ref ftpelncgrakpphytfrfo
+echo [OK] versao deployed
+goto fim
+
 :limpar
 echo.
 echo [DEPLOY] limpar...
@@ -183,6 +204,9 @@ supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] transferencias...
 supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo
+echo.
+echo [DEPLOY] versao...
+supabase functions deploy version --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] limpar...
 supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo

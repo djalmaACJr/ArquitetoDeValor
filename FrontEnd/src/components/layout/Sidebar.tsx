@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
+import AppVersion from '../ui/AppVersion'
 
 const Logo = () => (
   <svg width="36" height="36" viewBox="210 30 260 260" xmlns="http://www.w3.org/2000/svg">
@@ -85,7 +86,7 @@ interface NavItem {
 
 const navPrincipal: NavItem[] = [
   { to: '/',            icon: <LayoutDashboard size={15}/>, label: 'Dashboard' },
-  { to: '/lancamentos', icon: <List size={15}/>,            label: 'Lançamentos' },
+  { to: '/lancamentos', icon: <List size={15}/>,            label: 'Extrato' },
 ]
 const navCadastros: NavItem[] = [
   { to: '/contas',     icon: <CreditCard size={15}/>, label: 'Contas' },
@@ -181,7 +182,7 @@ export default function Sidebar() {
 
       <div className="flex-1" />
 
-      {/* Rodapé — fixo no fundo, sempre visível */}
+      {/* Rodapé - fixo no fundo, sempre visível */}
       <div className={`pt-3 border-t border-blue-400/30 bg-av-dark ${collapsed ? 'flex flex-col items-center gap-2' : ''}`}>
         {!collapsed && (
           <div className="mb-2 px-1 py-1 rounded-lg bg-blue-400/8">
@@ -206,6 +207,11 @@ export default function Sidebar() {
             {!collapsed && <span className="text-[12px] font-medium">Sair</span>}
           </button>
         </div>
+        {!collapsed && (
+          <div className="mt-2 px-1">
+            <AppVersion />
+          </div>
+        )}
       </div>
     </nav>
   )

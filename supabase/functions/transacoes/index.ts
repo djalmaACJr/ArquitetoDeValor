@@ -24,7 +24,7 @@ Deno.serve(async (req: Request) => {
   const escopo = params.get("escopo") ?? "SOMENTE_ESTE";
 
   try {
-    if (m === "GET"    && !id)                       return await listar(c, params);
+        if (m === "GET"    && !id)                       return await listar(c, params);
     if (m === "GET"    &&  id)                       return await buscarPorId(c, id);
     if (m === "POST"   && !id)                       return await criar(c, await req.json(), userId);
     if (m === "POST"   &&  id && acao==="antecipar") return await antecipar(c, id, userId);
@@ -167,6 +167,9 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
     } else {
       statusParcela = "PENDENTE";
     }
+    
+    // Debug para verificar status
+    logDebug(`Parcela ${i+1}: data=${dataParcela}, hoje=${hoje}, status=${statusParcela}`);
 
     parcelas.push({
       user_id:          userId,
@@ -264,11 +267,25 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
         const frequenciaFinal = novaFrequenciaBody || atual.tipo_recorrencia || 'MENSAL';
         const intervaloFinal = novoIntervaloBody || 1;
         
+        // tipo_recorrencia no banco: PROJECAO ou PARCELA
+        const tipoRecBanco = atual.status === "PROJECAO" ? "PROJECAO" : "PARCELA";
+        
         // Criar novas parcelas
         const novasParcelas = [];
         for (let i = atual.total_parcelas + 1; i <= novoTotalParcelas; i++) {
           const offset = i - (ultimaParcela.nr_parcela ?? 1);
           const novaData = calcularDataParcela(ultimaParcela.data, frequenciaFinal, offset * intervaloFinal);
+          
+          // Status da nova parcela baseado na data
+          const hoje = new Date().toISOString().split("T")[0];
+          let statusParcela: string;
+          if (novaData <= hoje) {
+            statusParcela = "PAGO";
+          } else if (atual.status === "PROJECAO") {
+            statusParcela = "PROJECAO";
+          } else {
+            statusParcela = "PENDENTE";
+          }
           
           novasParcelas.push({
             user_id: atual.user_id,
@@ -280,10 +297,10 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
             valor: atual.valor,
             conta_id: atual.conta_id,
             categoria_id: atual.categoria_id,
-            status: atual.status,
+            status: statusParcela,
             data: novaData,
             observacao: atual.observacao,
-            tipo_recorrencia: frequenciaFinal,
+            tipo_recorrencia: tipoRecBanco,
           });
         }
         
@@ -379,7 +396,19 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
     // Recalcular data proporcional ao offset desta parcela na série
     if (precisaRecalcularDatas && frequencia) {
       const offset = (parcela.nr_parcela - nrAtual);
-      update.data = calcularDataParcela(novaDataBase, frequencia, offset * intervalo);
+      const novaData = calcularDataParcela(novaDataBase, frequencia, offset * intervalo);
+      update.data = novaData;
+      
+      // Recalcular status baseado na nova data
+      if (novaData <= hoje) {
+        update.status = "PAGO";
+      } else if (atual.status === "PROJECAO") {
+        update.status = "PROJECAO";
+      } else {
+        update.status = "PENDENTE";
+      }
+      
+      logDebug(`Parcela ${parcela.nr_parcela}: novaData=${novaData}, status=${update.status}`);
     } else if (dataFoiAlterada) {
       // Sem frequência detectada — manter offset de dias original
       const dataOriginalParcela = new Date(parcela.data);
@@ -388,6 +417,21 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
       const diffMs = dataNovaBase.getTime() - dataOriginalBase.getTime();
       const novaData = new Date(dataOriginalParcela.getTime() + diffMs);
       update.data = novaData.toISOString().split("T")[0];
+      
+      // Recalcular status baseado na nova data
+      const dataUpdate = String(update.data);
+      if (dataUpdate <= hoje) {
+        update.status = "PAGO";
+      } else if (atual.status === "PROJECAO") {
+        update.status = "PROJECAO";
+      } else {
+        update.status = "PENDENTE";
+      }
+      
+      logDebug(`Parcela ${parcela.nr_parcela}: novaData=${update.data}, status=${update.status}`);
+    } else {
+      // Se não houve mudança de data, remover status do update para manter o original
+      delete update.status;
     }
 
     const { error: eUp } = await c.from("transacoes").update(update).eq("id", parcela.id);
@@ -459,3 +503,4 @@ async function antecipar(c: ReturnType<typeof db>, id: string, userId: string) {
     return erro("Erro interno ao antecipar parcelas", 500);
   }
 }
+
