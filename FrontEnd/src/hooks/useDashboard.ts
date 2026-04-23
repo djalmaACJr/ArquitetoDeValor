@@ -85,13 +85,16 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
         ? `${anoN + 1}-01`
         : `${anoN}-${String(mesN + 1).padStart(2, '0')}`
 
+      // Sufixo de conta para filtrar queries quando uma conta estiver selecionada
+      const contaParam = contasFiltro.length === 1 ? `&conta_id=${contasFiltro[0]}` : ''
+
       const [contasRes, pendentesRes, proximosRes, pagosRes, ...historicosRes] = await Promise.all([
         apiFetch<Conta[]>('/contas', signal),
-        apiFetch(`/transacoes?status=PENDENTE&mes=${mes}&per_page=500&saldo=true`, signal),
-        apiFetch(`/transacoes?status=PENDENTE&mes=${mesSeguinte}&per_page=500&saldo=true`, signal),
-        apiFetch(`/transacoes?status=PAGO&mes=${mes}&per_page=1000&saldo=true`, signal),
+        apiFetch(`/transacoes?status=PENDENTE&mes=${mes}&per_page=500&saldo=true${contaParam}`, signal),
+        apiFetch(`/transacoes?status=PENDENTE&mes=${mesSeguinte}&per_page=500&saldo=true${contaParam}`, signal),
+        apiFetch(`/transacoes?status=PAGO&mes=${mes}&per_page=1000&saldo=true${contaParam}`, signal),
         ...meses6.map(mesHist =>
-          apiFetch(`/transacoes?mes=${mesHist}&per_page=1000&saldo=true`, signal)
+          apiFetch(`/transacoes?mes=${mesHist}&per_page=1000&saldo=true${contaParam}`, signal)
         ),
       ])
 
@@ -232,6 +235,7 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
         return { mes: mesHist, total_entradas: totalEnt, total_saidas: totalSai, saldo_mes }
       })
       setHistorico(hist)
+
 
     } catch (e) {
       if ((e as Error).name === 'AbortError') return

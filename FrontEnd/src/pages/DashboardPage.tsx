@@ -11,6 +11,7 @@ import {
   ArcElement, Tooltip, Legend, LineElement, PointElement,
 } from 'chart.js'
 import type { Conta, Transacao, DespesaCategoria } from '../types'
+import { supabase } from '../lib/supabase'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, LineElement, PointElement)
@@ -67,16 +68,16 @@ function CardResultados({
 }
 
 // -- Card de saldo acumulado ------------------------------
-function CardSaldo({ contas, oculto, mes, historico }: {
+function CardSaldo({ contas, oculto, mes, historico, modo, setModo }: {
   contas: Conta[]
   oculto: boolean
   mes: string
   historico: { mes: string; saldo_mes?: number }[]
+  modo: 'hoje' | 'fim'
+  setModo: (m: 'hoje' | 'fim') => void
 }) {
   const mesAtualStr = new Date().toISOString().slice(0, 7)
   const isMesAtual  = mes === mesAtualStr
-  const [modo, setModo] = useState<'hoje' | 'fim'>('hoje')
-
   // Saldo ate hoje (soma dos saldos_atual das contas - posicao real agora)
   const saldoHoje = contas.reduce((s, c) => s + c.saldo_atual, 0)
 
@@ -599,27 +600,57 @@ function GraficoDonut({ titulo, subtitulo, total, dados, corCentro }: {
 }
 
 // -- Card de contas com saldo dinâmico ------------------------------
-function CardContas({ contas, oculto, mes, historico }: { 
+function CardContas({ contas, oculto, mes, historico, modo, setModo }: { 
   contas: Conta[]; 
   oculto: boolean;
   mes: string;
   historico: { mes: string; saldo_mes?: number }[];
+  modo: 'hoje' | 'fim';
+  setModo: (m: 'hoje' | 'fim') => void;
 }) {
   const navigate = useNavigate()
   const mesAtualStr = new Date().toISOString().slice(0, 7)
   const isMesAtual = mes === mesAtualStr
-  const [modo, setModo] = useState<'hoje' | 'fim'>('hoje')
 
   // Saldo do mês selecionado: último saldo_acumulado do mês no histórico
   const entradaMes = historico.find(h => h.mes === mes)
   const saldoFimMes = entradaMes?.saldo_mes ?? null
 
   // Lógica de exibição para contas individuais
-  const getSaldoConta = (conta: Conta) => {
-    // Para todos os casos, usar saldo_atual (única propriedade disponível)
-    // Futuramente pode ser expandido para usar saldo_fim_mes quando implementado
-    return conta.saldo_atual
-  }
+  const [saldosPorConta, setSaldosPorConta] = useState<Record<string, number>>({})
+
+  useEffect(() => {
+    const mesAtualStr2 = new Date().toISOString().slice(0, 7)
+    const hoje = new Date().toISOString().split('T')[0]
+    const [anoS, mS] = mes.split('-').map(Number)
+    const ultimoDia = new Date(anoS, mS, 0).toISOString().split('T')[0]
+
+    // Data correta conforme mês e modo
+    let dataAlvo: string
+    if (mes === mesAtualStr2) {
+      dataAlvo = modo === 'hoje' ? hoje : ultimoDia
+    } else {
+      dataAlvo = ultimoDia
+    }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return
+      supabase.rpc('fn_saldos_contas_ate_data', { p_data: dataAlvo })
+        .then(({ data, error }) => {
+          console.log('[saldos RPC]', { dataAlvo, data, error })
+          if (data) {
+            const mapa: Record<string, number> = {}
+            ;(data as { conta_id: string; saldo: number }[]).forEach(r => {
+              mapa[r.conta_id] = r.saldo
+            })
+            setSaldosPorConta(mapa)
+          }
+        })
+    })
+  }, [mes, modo])
+
+  const getSaldoConta = (conta: Conta) =>
+    saldosPorConta[conta.conta_id] ?? conta.saldo_atual
 
   const gruposDash = [
     {
@@ -675,7 +706,7 @@ function CardContas({ contas, oculto, mes, historico }: {
                   <div 
                     key={conta.conta_id} 
                     className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3 flex items-center gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
-                    onClick={() => navigate('/lancamentos', { state: { contaId: conta.conta_id } })}
+                    onClick={() => navigate('/lancamentos', { state: { contaId: conta.conta_id, mes } })}
                   >
                     <IconeConta icone={conta.icone} cor={conta.cor} size="md" />
                     <div className="flex-1 min-w-0">
@@ -705,6 +736,7 @@ export default function DashboardPage() {
   const [editandoTx, setEditandoTx]         = useState<Transacao | null>(null)
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
   const [contasFiltro, setContasFiltro] = useState<string[]>([])
+  const [modo, setModo] = useState<'hoje' | 'fim'>('hoje')
   const [refreshing, setRefreshing] = useState(false)
 
   const handleRefresh = async () => {
@@ -800,7 +832,7 @@ export default function DashboardPage() {
           {/* Linha 1: resultados + saldo */}
           <div className="grid grid-cols-2 gap-3">
             <CardResultados resumo={resumo}/>
-            <CardSaldo contas={contas} oculto={oculto} mes={mes} historico={historico}/>
+            <CardSaldo contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo}/>
           </div>
 
           {/* Linha 2: alertas agrupados por conta */}
@@ -811,7 +843,7 @@ export default function DashboardPage() {
               total={totalPendentes}
               itens={pendentes}
               contas={contas}
-              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: 'PENDENTE' } })}
+              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: 'PENDENTE', mes } })}
               onEditar={abrirEdicao}
             />
             <CardAlertas
@@ -820,7 +852,7 @@ export default function DashboardPage() {
               total={totalProximas}
               itens={proximas}
               contas={contas}
-              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: 'PENDENTE' } })}
+              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: 'PENDENTE', mes } })}
               onEditar={abrirEdicao}
               filtravel
               mes={mes}
@@ -855,7 +887,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Linha 5: contas */}
-          <CardContas contas={contas} oculto={oculto} mes={mes} historico={historico}/>
+          <CardContas contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo}/>
         </div>
       )}
       {/* Drawer de edicao de lancamento */}

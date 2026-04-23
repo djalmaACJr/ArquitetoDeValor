@@ -1,5 +1,5 @@
 // src/pages/LancamentosPage.tsx
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import { Plus, Pencil, Zap, ChevronDown, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
@@ -7,6 +7,7 @@ import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { formatBRL, mesLabel } from '../lib/utils'
+import { supabase } from '../lib/supabase'
 import { IconeConta } from '../components/ui/IconeConta'
 import { Toast, ModalExcluir } from '../components/ui/shared'
 import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelect'
@@ -168,6 +169,7 @@ export default function LancamentosPage() {
   const [filtCats,    setFiltCats]    = useState<string[]>([])
   const [filtStatus,  setFiltStatus]  = useState<string[]>([])
   const [comSaldo,    setComSaldo]    = useState(true)
+  const [saldoBaseConta, setSaldoBaseConta] = useState<Record<string, number>>({})
 
   // Limpar seleção ao trocar de mês
   useEffect(() => { setSelecionados(new Set()) }, [mes])
@@ -176,6 +178,45 @@ export default function LancamentosPage() {
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus, com_saldo: comSaldo })
 
   const { contas }     = useContas()
+
+  // Saldo de cada conta até o último dia do mês anterior (base para recálculo)
+  useEffect(() => {
+    if (filtContas.length !== 1) { setSaldoBaseConta({}); return }
+    const [ano, m] = mes.split('-').map(Number)
+    const ultimoDiaMesAnterior = new Date(ano, m - 1, 0).toISOString().split('T')[0]
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return
+      supabase.rpc('fn_saldos_contas_ate_data', { p_data: ultimoDiaMesAnterior })
+        .then(({ data }) => {
+          if (data) {
+            const mapa: Record<string, number> = {}
+            ;(data as { conta_id: string; saldo: number }[]).forEach(r => { mapa[r.conta_id] = r.saldo })
+            setSaldoBaseConta(mapa)
+          }
+        })
+    })
+  }, [filtContas, mes])
+
+  // Busca o saldo de cada conta até o último dia do mês ANTERIOR
+  // para usar como base no recálculo do saldo_acumulado por conta
+  useEffect(() => {
+    if (filtContas.length !== 1) { setSaldoBaseConta({}); return }
+    const [ano, m] = mes.split('-').map(Number)
+    const ultimoDiaMesAnterior = new Date(ano, m - 1, 0).toISOString().split('T')[0]
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return
+      supabase.rpc('fn_saldos_contas_ate_data', { p_data: ultimoDiaMesAnterior })
+        .then(({ data }) => {
+          if (data) {
+            const mapa: Record<string, number> = {}
+            ;(data as { conta_id: string; saldo: number }[]).forEach(r => {
+              mapa[r.conta_id] = r.saldo
+            })
+            setSaldoBaseConta(mapa)
+          }
+        })
+    })
+  }, [filtContas, mes])
   const { categorias } = useCategorias()
 
   const [drawerAberto,       setDrawerAberto]       = useState(false)
@@ -221,23 +262,21 @@ export default function LancamentosPage() {
 
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
 
-  // Ler state da navegação (vindo do Dashboard)
+  // Ler state da navegação (vindo do Dashboard) — só na montagem / mudança de rota
+  const stateAplicado = useRef(false)
   useEffect(() => {
     const state = location.state as any
     if (!state) return
+    if (stateAplicado.current) return
+    stateAplicado.current = true
     if (state.novoLancamento) {
       setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
     }
-    if (state.filtroStatus) {
-      setFiltStatus(state.filtroStatus)
-    }
-    if (state.mes) {
-      setMes(state.mes)
-    }
-    if (state.contaId) {
-      setFiltContas([state.contaId])
-    }
-    if (state.editarId && lancamentos.length > 0) {
+    if (state.filtroStatus) setFiltStatus(state.filtroStatus)
+    if (state.mes)           setMes(state.mes)
+    if (state.contaId)       setFiltContas([state.contaId])
+    if (state.editarId) {
+      // editarId: tenta abrir drawer — aguarda lançamentos se ainda não carregaram
       const tx = lancamentos.find(l => l.id === state.editarId)
       if (tx) abrirEditar(tx)
     }
@@ -300,53 +339,75 @@ export default function LancamentosPage() {
     return { receitas, despesas, resultado: receitas - despesas }
   }, [lancamentos])
 
-  // Saldo por data calculado no frontend — 2 modos:
-  // comSaldo=false → acumula só movimentações do mês (sem saldo inicial)
-  //                  dia 01: soma dos lançamentos do dia 01
-  //                  dia 03: soma dia01 + dia03, etc.
-  // comSaldo=true  → usa saldo_acumulado da API (inclui saldo histórico real de meses anteriores)
-  const saldoPorData = useMemo(() => {
-    const grupos = agruparPorData(lancamentos)
-    const map = new Map<string, number>()
+  // Recálculo de saldo_acumulado conforme filtros ativos:
+  // - Filtro de UMA conta (sem categoria): usa saldo histórico da conta como base
+  // - Filtro de categoria (com ou sem conta): saldo parcial — acumula só os lançamentos filtrados a partir de zero
+  // - Sem filtro: usa saldo_acumulado global da view
+  const lancamentosComSaldoCorrigido = useMemo(() => {
+    const temConta     = filtContas.length === 1
+    const temCategoria = filtCats.length > 0
 
+    if (!temConta && !temCategoria) return lancamentos
+
+    if (temCategoria) {
+      // Saldo parcial: acumula só os lançamentos filtrados a partir de zero
+      let acum = 0
+      return lancamentos.map(l => {
+        acum += l.tipo === 'RECEITA' ? l.valor : -l.valor
+        return { ...l, saldo_acumulado: acum }
+      })
+    }
+
+    // Só conta filtrada: usa saldo histórico como base
+    const contaId = filtContas[0]
+    const base = saldoBaseConta[contaId] ?? contas.find(ct => ct.conta_id === contaId)?.saldo_inicial ?? 0
+    let acum = base
+    return lancamentos.map(l => {
+      acum += l.tipo === 'RECEITA' ? l.valor : -l.valor
+      return { ...l, saldo_acumulado: acum }
+    })
+  }, [lancamentos, filtContas, filtCats, contas, saldoBaseConta])
+
+  // Saldo por data calculado no frontend — 2 modos:
+  const saldoPorData = useMemo(() => {
+    const grupos = agruparPorData(lancamentosComSaldoCorrigido)
+    const map = new Map<string, number>()
     if (comSaldo) {
-      // Usa saldo_acumulado que vem da API — inclui saldo histórico
       for (const [data, grupo] of grupos) {
         const ultimo = grupo[grupo.length - 1]
         if (ultimo?.saldo_acumulado !== undefined) map.set(data, ultimo.saldo_acumulado)
       }
     } else {
-      // Calcula acumulado só das movimentações do mês atual, sem saldo inicial
       let acumulado = 0
       for (const [data, grupo] of grupos) {
         for (const l of grupo) {
           if (l.tipo === 'RECEITA') acumulado += l.valor
           else if (l.tipo === 'DESPESA') acumulado -= l.valor
-          // transferências: as duas pernas (RECEITA+DESPESA) já se anulam
         }
         map.set(data, acumulado)
       }
     }
     return map
-  }, [lancamentos, comSaldo])
+  }, [lancamentosComSaldoCorrigido, comSaldo])
 
   // Saldo anterior ao mês — exibido só no 1º grupo quando check ativo
   // Usa saldo_acumulado do 1º lançamento menos o impacto desse lançamento
   const saldoAnterior = useMemo(() => {
-    if (!comSaldo || lancamentos.length === 0) return null
-    const grupos = agruparPorData(lancamentos)
+    if (!comSaldo || lancamentosComSaldoCorrigido.length === 0) return null
+    if (filtCats.length > 0) return null // saldo parcial — sem sentido exibir anterior
+    const grupos = agruparPorData(lancamentosComSaldoCorrigido)
     if (grupos.length === 0) return null
     const primeiro = grupos[0][1][0]
     if (primeiro?.saldo_acumulado === undefined) return null
     const delta = primeiro.tipo === 'RECEITA' ? primeiro.valor : -primeiro.valor
     return primeiro.saldo_acumulado - delta
-  }, [lancamentos, comSaldo])
+  }, [lancamentosComSaldoCorrigido, comSaldo])
 
   // Primeira data do mês para exibir o badge de saldo anterior
   const primeiraData = useMemo(() => {
-    const grupos = agruparPorData(lancamentos)
+    const grupos = agruparPorData(lancamentosComSaldoCorrigido)
     return grupos.length > 0 ? grupos[0][0] : null
-  }, [lancamentos])
+  }, [lancamentosComSaldoCorrigido])
 
   // CategoriasCategorias pai para o select (exclui protegidas)
   const catsPai = categorias.filter(c => !c.id_pai && !c.protegida)
@@ -425,35 +486,42 @@ export default function LancamentosPage() {
         />
 
         {/* Toggle moderno — incluir saldo anterior */}
-        <button
-          onClick={() => setComSaldo(v => !v)}
-          className="flex items-center gap-2 flex-shrink-0 px-3 py-1.5 rounded-lg border transition-all"
-          style={{
-            background: comSaldo ? 'rgba(0,200,150,0.1)' : 'transparent',
-            borderColor: comSaldo ? 'rgba(0,200,150,0.4)' : 'rgba(255,255,255,0.1)',
-          }}
-        >
-          {/* mini toggle pill */}
-          <span
-            className="relative flex-shrink-0"
-            style={{ width: 28, height: 16 }}
+        <div className="flex flex-col gap-0.5">
+          <button
+            onClick={() => { if (filtCats.length === 0) setComSaldo(v => !v) }}
+            disabled={filtCats.length > 0}
+            className="flex items-center gap-2 flex-shrink-0 px-3 py-1.5 rounded-lg border transition-all"
+            style={{
+              background: filtCats.length > 0 ? 'transparent' : comSaldo ? 'rgba(0,200,150,0.1)' : 'transparent',
+              borderColor: filtCats.length > 0 ? 'rgba(255,255,255,0.06)' : comSaldo ? 'rgba(0,200,150,0.4)' : 'rgba(255,255,255,0.1)',
+              opacity: filtCats.length > 0 ? 0.4 : 1,
+              cursor: filtCats.length > 0 ? 'not-allowed' : 'pointer',
+            }}
           >
+            {/* mini toggle pill */}
+            <span className="relative flex-shrink-0" style={{ width: 28, height: 16 }}>
+              <span
+                className="absolute inset-0 rounded-full transition-colors"
+                style={{ background: filtCats.length > 0 ? 'rgba(255,255,255,0.12)' : comSaldo ? '#00c896' : 'rgba(255,255,255,0.12)' }}
+              />
+              <span
+                className="absolute top-[2px] w-3 h-3 bg-white rounded-full shadow transition-all"
+                style={{ left: filtCats.length > 0 ? '2px' : comSaldo ? '13px' : '2px' }}
+              />
+            </span>
             <span
-              className="absolute inset-0 rounded-full transition-colors"
-              style={{ background: comSaldo ? '#00c896' : 'rgba(255,255,255,0.12)' }}
-            />
-            <span
-              className="absolute top-[2px] w-3 h-3 bg-white rounded-full shadow transition-all"
-              style={{ left: comSaldo ? '13px' : '2px' }}
-            />
-          </span>
-          <span
-            className="text-[11px] font-medium whitespace-nowrap transition-colors"
-            style={{ color: comSaldo ? '#00c896' : '#8b92a8' }}
-          >
-            Saldo anterior
-          </span>
-        </button>
+              className="text-[11px] font-medium whitespace-nowrap transition-colors"
+              style={{ color: filtCats.length > 0 ? '#8b92a8' : comSaldo ? '#00c896' : '#8b92a8' }}
+            >
+              Saldo anterior
+            </span>
+          </button>
+          {filtCats.length > 0 && (
+            <span className="text-[9px] text-yellow-400/70 px-1">
+              Indisponível com filtro de categoria
+            </span>
+          )}
+        </div>
       </div>
 
 
@@ -488,7 +556,7 @@ export default function LancamentosPage() {
             <>
               {/* ── Tabela desktop ── */}
               <div className="hidden md:block space-y-4">
-                {agruparPorData(lancamentos).map(([data, grupo]) => (
+                {agruparPorData(lancamentosComSaldoCorrigido).map(([data, grupo]) => (
                   <div key={data} className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
                     {/* Cabeçalho do grupo de data */}
                     <div className="flex items-center gap-3 px-4 py-2 border-b border-white/10 bg-white/[0.03]">
@@ -712,7 +780,7 @@ export default function LancamentosPage() {
 
               {/* ── Cards mobile ── */}
               <div className="md:hidden space-y-4">
-                {agruparPorData(lancamentos).map(([data, grupo]) => (
+                {agruparPorData(lancamentosComSaldoCorrigido).map(([data, grupo]) => (
                   <div key={data}>
                     <div className="flex items-center gap-2 px-1 mb-2">
                       <p className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
