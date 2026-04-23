@@ -901,6 +901,8 @@ export default function LancamentosPage() {
         lancamento={lancamentoEditando}
         novoLancamento={novoLancamento}
         todasParcelas={lancamentos}
+        contaIdInicial={novoLancamento && filtContas.length === 1 ? filtContas[0] : null}
+        categoriaIdInicial={novoLancamento && filtCats.length === 1 ? filtCats[0] : null}
         onFechar={fecharDrawer}
         onSalvo={() => { fecharDrawer(); carregar(); toast(lancamentoEditando ? 'Lançamento atualizado!' : 'Lançamento criado!') }}
         onExcluido={() => { fecharDrawer(); carregar(); toast('Lançamento excluído.') }}
@@ -1160,6 +1162,8 @@ export default function LancamentosPage() {
         lancamento={lancamentoEditando}
         novoLancamento={novoLancamento}
         todasParcelas={lancamentos}
+        contaIdInicial={novoLancamento && filtContas.length === 1 ? filtContas[0] : null}
+        categoriaIdInicial={novoLancamento && filtCats.length === 1 ? filtCats[0] : null}
         onFechar={fecharDrawer}
         onSalvo={() => { fecharDrawer(); carregar(); toast(lancamentoEditando ? 'Lançamento atualizado!' : 'Lançamento criado!') }}
         onExcluido={() => { fecharDrawer(); carregar(); toast('Lançamento excluído.') }}

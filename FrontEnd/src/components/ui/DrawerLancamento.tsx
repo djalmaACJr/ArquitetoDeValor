@@ -144,18 +144,21 @@ function formDeLanc(l: Lancamento, todasParcelas?: Lancamento[]): FormState {
 
 // ── Props ──────────────────────────────────────────────────────
 interface DrawerLancamentoProps {
-  lancamentoId?:   string | null
-  lancamento?:     Lancamento | null
-  novoLancamento?: boolean
-  todasParcelas?:  Lancamento[]  // Todas as parcelas para inferir parâmetros de recorrência
-  onFechar:        () => void
-  onSalvo?:        () => void
-  onExcluido?:     () => void
+  lancamentoId?:      string | null
+  lancamento?:        Lancamento | null
+  novoLancamento?:    boolean
+  todasParcelas?:     Lancamento[]  // Todas as parcelas para inferir parâmetros de recorrência
+  contaIdInicial?:    string | null  // Pré-seleciona conta ao criar novo lançamento
+  categoriaIdInicial?: string | null // Pré-seleciona categoria ao criar novo lançamento
+  onFechar:           () => void
+  onSalvo?:           () => void
+  onExcluido?:        () => void
 }
 
 // ── Componente ─────────────────────────────────────────────────
 export default function DrawerLancamento({
   lancamentoId, lancamento: lancamentoProp, novoLancamento, todasParcelas,
+  contaIdInicial, categoriaIdInicial,
   onFechar, onSalvo, onExcluido,
 }: DrawerLancamentoProps) {
   const { contas }     = useContas()
@@ -175,7 +178,7 @@ export default function DrawerLancamento({
   const tipoRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (novoLancamento) { setEditando(null); setForm(FORM_VAZIO); setEscopo('SOMENTE_ESTE'); return }
+    if (novoLancamento) { setEditando(null); setForm({ ...FORM_VAZIO, conta_id: contaIdInicial ?? '', categoria_id: categoriaIdInicial ?? '' }); setEscopo('SOMENTE_ESTE'); return }
     if (lancamentoProp) { setEditando(lancamentoProp); setForm(formDeLanc(lancamentoProp, todasParcelas)); setEscopo('SOMENTE_ESTE'); return }
     if (lancamentoId) {
       setCarregando(true)

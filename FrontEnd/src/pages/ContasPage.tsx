@@ -30,13 +30,17 @@ const GRUPOS_INICIAL: Grupo[] = [
 interface FormState {
   nome: string; tipo: TipoConta; saldo_inicial: string
   icone: string; cor: string; ativa: boolean
+  dia_fechamento: string; dia_pagamento: string
 }
 const FORM_VAZIO: FormState = {
   nome: '', tipo: 'CORRENTE', saldo_inicial: '0', icone: '', cor: '#00c896', ativa: true,
+  dia_fechamento: '', dia_pagamento: '',
 }
 const formDeConta = (c: Conta): FormState => ({
   nome: c.nome, tipo: c.tipo, saldo_inicial: String(c.saldo_inicial),
   icone: c.icone ?? '', cor: c.cor ?? '#00c896', ativa: c.ativa,
+  dia_fechamento: c.dia_fechamento != null ? String(c.dia_fechamento) : '',
+  dia_pagamento:  c.dia_pagamento  != null ? String(c.dia_pagamento)  : '',
 })
 
 function AcaoBtn({ onClick, title, danger = false, children }: {
@@ -130,18 +134,28 @@ export default function ContasPage() {
     if (!form.nome.trim()) { setErro('Nome é obrigatório.'); return }
     setSalvando(true); setErro(null)
     if (contaEditar) {
-      const { ok, erro: e } = await editar(contaEditar.conta_id, {
+      const payload: any = {
         nome: form.nome.trim(), tipo: form.tipo,
         icone: form.icone || undefined, cor: form.cor || undefined, ativa: form.ativa,
-      })
+      }
+      if (form.tipo === 'CARTAO') {
+        payload.dia_fechamento = form.dia_fechamento ? parseInt(form.dia_fechamento) : null
+        payload.dia_pagamento  = form.dia_pagamento  ? parseInt(form.dia_pagamento)  : null
+      }
+      const { ok, erro: e } = await editar(contaEditar.conta_id, payload)
       setSalvando(false)
       if (ok) { fechar(); toast('Conta atualizada!') } else setErro(e ?? 'Erro ao salvar.')
     } else {
-      const { ok, erro: e } = await criar({
+      const payloadNovo: any = {
         nome: form.nome.trim(), tipo: form.tipo,
         saldo_inicial: parseFloat(form.saldo_inicial) || 0,
         icone: form.icone || undefined, cor: form.cor || undefined,
-      })
+      }
+      if (form.tipo === 'CARTAO') {
+        payloadNovo.dia_fechamento = form.dia_fechamento ? parseInt(form.dia_fechamento) : null
+        payloadNovo.dia_pagamento  = form.dia_pagamento  ? parseInt(form.dia_pagamento)  : null
+      }
+      const { ok, erro: e } = await criar(payloadNovo)
       setSalvando(false)
       if (ok) { fechar(); toast('Conta criada com sucesso!') } else setErro(e ?? 'Erro ao salvar.')
     }
@@ -156,10 +170,13 @@ export default function ContasPage() {
     else { setContaExcluir(null); toast(e ?? 'Não foi possível excluir.') }
   }
 
-  // Grupos com contas filtradas, na ordem do usuário
+  // Grupos com contas ATIVAS, na ordem do usuário
   const gruposComContas = ordemGrupos
-    .map((g, idx) => ({ g, idx, lista: contas.filter(c => g.tipos.includes(c.tipo)) }))
+    .map((g, idx) => ({ g, idx, lista: contas.filter(c => g.tipos.includes(c.tipo) && c.ativa) }))
     .filter(({ lista }) => lista.length > 0)
+
+  // Contas inativas (seção separada)
+  const contasInativas = contas.filter(c => !c.ativa)
 
   return (
     <div className="p-5">
@@ -236,6 +253,40 @@ export default function ContasPage() {
         </div>
       )}
 
+      {/* Seção de contas inativas */}
+      {!loading && !error && contasInativas.length > 0 && (
+        <div className="mt-6">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-2 h-2 rounded-full bg-white/20" />
+            <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#8b92a8' }}>
+              Contas inativas
+            </span>
+            <span className="text-[10px]" style={{ color: '#8b92a8' }}>· {contasInativas.length}</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 opacity-50">
+            {contasInativas.map(c => (
+              <div key={c.conta_id}
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/5 bg-[#1a1f2e]/60">
+                <div className="grayscale">
+                  <IconeConta icone={c.icone} cor={c.cor} size="md" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-semibold truncate line-through" style={{ color: '#8b92a8' }}>{c.nome}</p>
+                  <p className="text-[10px]" style={{ color: '#8b92a8' }}>{c.tipo} · inativa</p>
+                </div>
+                <button
+                  onClick={() => abrirEditar(c)}
+                  title="Editar"
+                  className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center flex-shrink-0"
+                  style={{ color: '#8b92a8' }}>
+                  <Pencil size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {!loading && !error && contas.length === 0 && (
         <div className="text-center py-16">
           <p className="text-[13px] mb-3" style={{ color: '#8b92a8' }}>Nenhuma conta cadastrada ainda.</p>
@@ -275,6 +326,35 @@ export default function ContasPage() {
             ))}
           </SelectDark>
         </Field>
+
+        {form.tipo === 'CARTAO' && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Dia de fechamento">
+              <Input
+                type="number" min="1" max="31"
+                value={form.dia_fechamento}
+                onChange={e => {
+                  const v = e.target.value
+                  if (v === '' || (parseInt(v) >= 1 && parseInt(v) <= 31)) set({ dia_fechamento: v })
+                }}
+                placeholder="Ex: 5"
+              />
+              <p className="text-[10px] mt-1" style={{ color: '#8b92a8' }}>Dia 1 a 31</p>
+            </Field>
+            <Field label="Dia de pagamento">
+              <Input
+                type="number" min="1" max="31"
+                value={form.dia_pagamento}
+                onChange={e => {
+                  const v = e.target.value
+                  if (v === '' || (parseInt(v) >= 1 && parseInt(v) <= 31)) set({ dia_pagamento: v })
+                }}
+                placeholder="Ex: 10"
+              />
+              <p className="text-[10px] mt-1" style={{ color: '#8b92a8' }}>Dia 1 a 31</p>
+            </Field>
+          </div>
+        )}
 
         <Field label={contaEditar ? 'Saldo inicial (não editável)' : 'Saldo inicial'}>
           <Input

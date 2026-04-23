@@ -34,6 +34,7 @@ export function useContas() {
   const criar = async (payload: {
     nome: string; tipo: TipoConta; saldo_inicial?: number
     icone?: string; cor?: string
+    dia_fechamento?: number | null; dia_pagamento?: number | null
   }): Promise<OpResult> => {
     const res = await apiMutate('/contas', 'POST', payload)
     if (res.ok) await carregar()
@@ -43,6 +44,7 @@ export function useContas() {
   const editar = async (id: string, payload: Partial<{
     nome: string; tipo: TipoConta; saldo_inicial: number
     icone: string; cor: string; ativa: boolean
+    dia_fechamento: number | null; dia_pagamento: number | null
   }>): Promise<OpResult> => {
     const res = await apiMutate(`/contas/${id}`, 'PUT', payload)
     if (res.ok) await carregar()

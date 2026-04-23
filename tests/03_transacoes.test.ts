@@ -1,6 +1,6 @@
 // ============================================================
 // Arquiteto de Valor — Testes automatizados
-// tests/03_transacoes.test.ts — CA-TX01 a CA-TX21
+// tests/03_transacoes.test.ts — CA-TX01 a CA-TX28
 // ============================================================
 import { api, limparTransacao } from "./setup";
 
@@ -30,7 +30,7 @@ function dataFutura(meses: number): string {
   return d.toISOString().split("T")[0];
 }
 
-describe("Transações — CA-TX01 a CA-TX21", () => {
+describe("Transações — CA-TX01 a CA-TX28", () => {
 
   beforeAll(async () => {
     const { data: contas } = await api("/contas") as { data: { dados: Record<string, unknown>[] } };
@@ -330,4 +330,191 @@ describe("Transações — CA-TX01 a CA-TX21", () => {
     const ids = txs.dados.filter(t => t.id_recorrencia === idRec).map(t => t.id as string);
     for (const id of ids) await limparTransacao(id).catch(() => {});
   });
+
+  // ── CA-TX22 — ESTE_E_SEGUINTES atualiza a partir da parcela selecionada ──
+  test("CA-TX22 — PUT escopo ESTE_E_SEGUINTES atualiza parcela atual e seguintes", async () => {
+    const { status: sRes, data: dRes } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: dataFutura(1),
+      status: "PENDENTE",
+      total_parcelas: 4,
+      tipo_recorrencia: "MENSAL",
+      intervalo_recorrencia: 1,
+    }) as { status: number; data: Record<string, unknown> };
+    expect(sRes).toBe(201);
+    const ids = ((dRes as any).parcelas as any[]).map((p: any) => p.id as string);
+
+    // Atualiza a partir da 2ª parcela
+    const { status, data } = await api(`/transacoes/${ids[1]}?escopo=ESTE_E_SEGUINTES`, "PUT", {
+      observacao: "Atualizado ESTE_E_SEGUINTES",
+    }) as { status: number; data: Record<string, unknown> };
+    expect(status).toBe(200);
+    // Deve ter atualizado parcelas 2, 3 e 4 (3 parcelas)
+    expect((data as any).atualizados).toBe(3);
+
+    for (const id of ids) await limparTransacao(id).catch(() => {});
+  });
+
+  // ── CA-TX23 — Redução de total_parcelas ───────────────────
+  test("CA-TX23 — PUT escopo ESTE_E_SEGUINTES com total_parcelas menor exclui excedentes", async () => {
+    const { data: dRes } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: dataFutura(1),
+      status: "PENDENTE",
+      total_parcelas: 5,
+      tipo_recorrencia: "MENSAL",
+      intervalo_recorrencia: 1,
+    }) as { status: number; data: Record<string, unknown> };
+    const ids = ((dRes as any).parcelas as any[]).map((p: any) => p.id as string);
+    const idRec = (dRes as any).id_recorrencia as string;
+
+    // Reduzir para 3 parcelas a partir da 1ª
+    const { status } = await api(`/transacoes/${ids[0]}?escopo=ESTE_E_SEGUINTES`, "PUT", {
+      total_parcelas: 3,
+    }) as { status: number; data: Record<string, unknown> };
+    expect(status).toBe(200);
+
+    // Verificar que só restam 3 parcelas — buscar com per_page alto para cobrir meses futuros
+    const { data: txs } = await api(`/transacoes?id_recorrencia=${idRec}&per_page=200`) as { data: { dados: Record<string, unknown>[] } };
+    const restantes = txs.dados;
+    expect(restantes.length).toBe(3);
+
+    for (const id of restantes.map(t => t.id as string)) await limparTransacao(id).catch(() => {});
+  });
+
+  // ── CA-TX24 — Extensão de total_parcelas ──────────────────
+  test("CA-TX24 — PUT escopo ESTE_E_SEGUINTES com total_parcelas maior cria novas parcelas", async () => {
+    const { data: dRes } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: dataFutura(1),
+      status: "PENDENTE",
+      total_parcelas: 3,
+      tipo_recorrencia: "MENSAL",
+      intervalo_recorrencia: 1,
+    }) as { status: number; data: Record<string, unknown> };
+    const ids = ((dRes as any).parcelas as any[]).map((p: any) => p.id as string);
+    const idRec = (dRes as any).id_recorrencia as string;
+
+    // Estender para 5 parcelas
+    const { status } = await api(`/transacoes/${ids[0]}?escopo=ESTE_E_SEGUINTES`, "PUT", {
+      total_parcelas: 5,
+    }) as { status: number; data: Record<string, unknown> };
+    expect(status).toBe(200);
+
+    // Verificar que agora existem 5 parcelas — buscar com per_page alto para cobrir meses futuros
+    const { data: txs } = await api(`/transacoes?id_recorrencia=${idRec}&per_page=200`) as { data: { dados: Record<string, unknown>[] } };
+    const restantes = txs.dados;
+    expect(restantes.length).toBe(5);
+
+    for (const id of restantes.map(t => t.id as string)) await limparTransacao(id).catch(() => {});
+  });
+
+
+  // ── CA-TX25 — Filtro por conta_id ────────────────────────
+  test("CA-TX25 — GET /transacoes?conta_id filtra somente lançamentos da conta", async () => {
+    // Criar segunda conta para isolar
+    const { data: conta2 } = await api("/contas", {
+      method: "POST",
+      body: JSON.stringify({ nome: "Jest Conta Filtro TX", tipo: "CORRENTE", saldo_inicial: 0 }),
+    });
+
+    // Criar lançamento na conta2
+    const { data: tx2 } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      conta_id: conta2.id,
+      descricao: "TX da conta2",
+    }) as { data: Record<string, unknown> };
+
+    const { status, data } = await api(`/transacoes?conta_id=${contaId}`) as { status: number; data: Record<string, unknown> };
+    expect(status).toBe(200);
+    const dados = (data as { dados: Record<string, unknown>[] }).dados;
+    // Nenhum lançamento deve ser da conta2
+    expect(dados.filter(t => t.conta_id === conta2.id).length).toBe(0);
+    // Todos devem ser da conta principal
+    dados.forEach(t => expect(t.conta_id).toBe(contaId));
+
+    // Limpeza
+    await api(`/transacoes/${(tx2 as { id: string }).id}`, "DELETE");
+    await api(`/contas/${conta2.id}`, "DELETE");
+  });
+
+  // ── CA-TX26 — Filtro por categoria_id ────────────────────
+  test("CA-TX26 — GET /transacoes?categoria_id filtra somente lançamentos da categoria", async () => {
+    // Criar categoria extra
+    const { data: cat2 } = await api("/categorias", "POST", {
+      descricao: `Jest Cat Filtro TX ${Date.now()}`,
+      cor: "#aabbcc",
+    }) as { data: Record<string, unknown> };
+
+    // Criar lançamento com cat2
+    const { data: txCat } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      categoria_id: cat2.id as string,
+      descricao: "TX cat2",
+    }) as { data: Record<string, unknown> };
+
+    const { status, data } = await api(`/transacoes?categoria_id=${categoriaId}`) as { status: number; data: Record<string, unknown> };
+    expect(status).toBe(200);
+    const dados = (data as { dados: Record<string, unknown>[] }).dados;
+    // Nenhum lançamento deve ser da cat2
+    expect(dados.filter(t => t.categoria_id === cat2.id).length).toBe(0);
+
+    // Limpeza
+    await api(`/transacoes/${(txCat as { id: string }).id}`, "DELETE");
+    await api(`/categorias/${(cat2 as { id: string }).id}`, "DELETE");
+  });
+
+  // ── CA-TX27 — PROJECAO rejeitada em data passada (RV-008) ─
+  test("CA-TX27 — POST rejeita status PROJECAO em data passada ou hoje (RV-008)", async () => {
+    const hoje = new Date().toISOString().split("T")[0];
+    const ontem = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+
+    const { status: s1, data: d1 } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: hoje,
+      status: "PROJECAO",
+    }) as { status: number; data: Record<string, unknown> };
+    expect(s1).toBe(422);
+    expect((d1 as { erro: string }).erro).toMatch(/RV-008/i);
+
+    const { status: s2 } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: ontem,
+      status: "PROJECAO",
+    }) as { status: number; data: Record<string, unknown> };
+    expect(s2).toBe(422);
+  });
+
+  // ── CA-TX28 — Escopo ESTE_E_SEGUINTES com mudança de data ─
+  test("CA-TX28 — PUT escopo ESTE_E_SEGUINTES com nova data recalcula datas das seguintes", async () => {
+    const { data: dRes } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: dataFutura(1),
+      status: "PENDENTE",
+      total_parcelas: 3,
+      tipo_recorrencia: "MENSAL",
+      intervalo_recorrencia: 1,
+    }) as { status: number; data: Record<string, unknown> };
+    const ids = ((dRes as any).parcelas as any[]).map((p: any) => p.id as string);
+    const idRec = (dRes as any).id_recorrencia as string;
+
+    // Mudar data da 2ª parcela — as seguintes devem ser recalculadas
+    const novaData = dataFutura(3);
+    const { status } = await api(`/transacoes/${ids[1]}?escopo=ESTE_E_SEGUINTES`, "PUT", {
+      data: novaData,
+    }) as { status: number; data: Record<string, unknown> };
+    expect(status).toBe(200);
+
+    // Verificar que a 2ª parcela tem a nova data
+    const { data: tx2 } = await api(`/transacoes/${ids[1]}`) as { data: Record<string, unknown> };
+    expect((tx2 as { data: string }).data).toBe(novaData);
+
+    // A 3ª parcela deve ter data posterior à 2ª (recalculada mensalmente)
+    const { data: tx3 } = await api(`/transacoes/${ids[2]}`) as { data: Record<string, unknown> };
+    expect((tx3 as { data: string }).data > novaData).toBe(true);
+
+    const { data: txs } = await api(`/transacoes?id_recorrencia=${idRec}&per_page=200`) as { data: { dados: Record<string, unknown>[] } };
+    for (const id of txs.dados.map(t => t.id as string)) await limparTransacao(id).catch(() => {});
+  });
+
 });
