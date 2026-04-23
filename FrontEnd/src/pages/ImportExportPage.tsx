@@ -183,8 +183,13 @@ function SecaoLimpeza() {
       } else {
         const res = await apiMutate('/limpar', 'DELETE')
         if (res.ok) {
-          const logs = res.logs as { entidade: string; excluidos: number }[]
-          logs.forEach(l => addLog('ok', `${l.entidade}: ${l.excluidos} excluídos`))
+          const dados = res.dados as any
+          const logs = (dados?.logs ?? dados) as { entidade: string; excluidos: number }[]
+          if (Array.isArray(logs)) {
+            logs.forEach(l => addLog('ok', `${l.entidade}: ${l.excluidos} excluídos`))
+          } else {
+            addLog('ok', 'Limpeza concluída')
+          }
         } else {
           addLog('erro', `Erro: ${res.erro}`)
         }

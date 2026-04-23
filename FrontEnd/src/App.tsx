@@ -8,6 +8,7 @@ import ContasPage from './pages/ContasPage'
 import CategoriasPage from './pages/CategoriasPage'
 import LancamentosPage from './pages/LancamentosPage'
 import ImportExportPage from './pages/ImportExportPage'
+import { PageStateProvider } from './context/PageStateContext'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
@@ -22,22 +23,24 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage/>}/>
-        <Route path="/" element={
-          <PrivateRoute>
-            <AppLayout/>
-          </PrivateRoute>
-        }>
-          <Route index              element={<DashboardPage/>}/>
-          <Route path="lancamentos" element={<LancamentosPage/>}/>
-          <Route path="contas"      element={<ContasPage/>}/>
-          <Route path="categorias"  element={<CategoriasPage/>}/>
-          <Route path="relatorios"  element={<RelatoriosPage/>}/>
-          <Route path="importexport" element={<ImportExportPage/>}/>
-        </Route>
-        <Route path="*" element={<Navigate to="/" replace/>}/>
-      </Routes>
+      <PageStateProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage/>}/>
+          <Route path="/" element={
+            <PrivateRoute>
+              <AppLayout/>
+            </PrivateRoute>
+          }>
+            <Route index              element={<DashboardPage/>}/>
+            <Route path="lancamentos" element={<LancamentosPage/>}/>
+            <Route path="contas"      element={<ContasPage/>}/>
+            <Route path="categorias"  element={<CategoriasPage/>}/>
+            <Route path="relatorios"  element={<RelatoriosPage/>}/>
+            <Route path="importexport" element={<ImportExportPage/>}/>
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace/>}/>
+        </Routes>
+      </PageStateProvider>
     </BrowserRouter>
   )
 }

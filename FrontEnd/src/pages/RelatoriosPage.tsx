@@ -5,6 +5,7 @@ import DrawerLancamento from '../components/ui/DrawerLancamento'
 
 import { apiFetch } from '../lib/api'
 import { formatBRL, mesLabel } from '../lib/utils'
+import { usePageState } from '../context/PageStateContext'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { MultiSelect } from '../components/ui/MultiSelect'
@@ -150,26 +151,27 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick }: {
         </tr>
       ))}
 
-      {/* Total do grupo */}
-      <tr className="border-b border-white/10">
-        <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', minWidth: 220 }}>
-          <span className="text-[10px] font-bold uppercase tracking-widest pl-6" style={{ color: cor, opacity: 0.7 }}>
-            Total - {grupo.nome}
-          </span>
-        </td>
-        <td className="px-3 py-2 text-right">
-          <span className="text-[12px] font-bold" style={{ color: cor }}>
-            {oculto ? '????' : formatBRL(grupo.total)}
-          </span>
-        </td>
-        {meses.map(m => (
-          <td key={m} className="px-3 py-2 text-right">
-            <span className="text-[11px] font-bold" style={{ color: grupo.totalPorMes[m] ? cor : '#4a5168' }}>
-              {grupo.totalPorMes[m] ? (oculto ? '????' : formatBRL(grupo.totalPorMes[m])) : '-'}
+      {aberto && (
+        <tr className="border-b border-white/10">
+          <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', minWidth: 220 }}>
+            <span className="text-[10px] font-bold uppercase tracking-widest pl-6" style={{ color: cor, opacity: 0.7 }}>
+              Total - {grupo.nome}
             </span>
           </td>
-        ))}
-      </tr>
+          <td className="px-3 py-2 text-right">
+            <span className="text-[12px] font-bold" style={{ color: cor }}>
+              {oculto ? '????' : formatBRL(grupo.total)}
+            </span>
+          </td>
+          {meses.map(m => (
+            <td key={m} className="px-3 py-2 text-right">
+              <span className="text-[11px] font-bold" style={{ color: grupo.totalPorMes[m] ? cor : '#4a5168' }}>
+                {grupo.totalPorMes[m] ? (oculto ? '????' : formatBRL(grupo.totalPorMes[m])) : '-'}
+              </span>
+            </td>
+          ))}
+        </tr>
+      )}
     </>
   )
 }
@@ -177,15 +179,25 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick }: {
 // -- Pagina principal -------------------------------------------
 export default function RelatoriosPage() {
   const hoje = mesAtual()
-  const [inicio,      setInicio]      = useState(mesAnterior(hoje, 5))
-  const [fim,         setFim]         = useState(hoje)
-  const [filtStatus,  setFiltStatus]  = useState<string[]>(['PAGO'])
-  const [filtContas,  setFiltContas]  = useState<string[]>([])
-  const [incluirTransf, setIncluirTransf] = useState(false)
+  const { relatorios: pgState, setRelatorios: setPgState } = usePageState()
+  const inicio       = pgState.inicio
+  const fim          = pgState.fim
+  const filtStatus   = pgState.filtStatus
+  const filtContas   = pgState.filtContas
+  const incluirTransf = pgState.incluirTransf
+  const setInicio        = (v: string)   => setPgState({ inicio: v })
+  const setFim           = (v: string)   => setPgState({ fim: v })
+  const setFiltStatus    = (v: string[]) => setPgState({ filtStatus: v })
+  const setFiltContas    = (v: string[]) => setPgState({ filtContas: v })
+  const setIncluirTransf = (v: boolean)  => setPgState({ incluirTransf: v })
   const [loading,     setLoading]     = useState(false)
-  const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
-  const [buscado,     setBuscado]     = useState(false)
+  const lancamentos    = pgState.lancamentos as Lancamento[]
+  const buscado        = pgState.buscado
+  const setLancamentos = (v: Lancamento[]) => setPgState({ lancamentos: v })
+  const setBuscado     = (v: boolean)      => setPgState({ buscado: v })
   const [oculto,      setOculto]      = useState(false)
+  const [credAberto,  setCredAberto]  = useState(true)
+  const [debAberto,   setDebAberto]   = useState(true)
   const drillRef    = useRef<HTMLDivElement>(null)
   const [lancamentoEditando, setLancamentoEditando] = useState<any | null>(null)
   const [drillDown,   setDrillDown]   = useState<{
@@ -328,6 +340,57 @@ export default function RelatoriosPage() {
     return { grupos, totaisMes, grandTotalEntradas, grandTotalDespesas }
   }, [lancamentos, buscado, filtStatus, filtContas, incluirTransf, meses])
 
+  const exportarExcel = useCallback(async () => {
+    if (!buscado || grupos.length === 0) return
+
+    // Monta linhas da planilha
+    const header = ['Categoria', 'Total', ...meses.map(m => mesLabel(m))]
+    const rows: (string | number)[][] = [header]
+
+    for (const grupo of grupos) {
+      // Linha do grupo pai
+      rows.push([
+        grupo.nome,
+        grupo.total,
+        ...meses.map(m => grupo.totalPorMes[m] ?? 0),
+      ])
+      if (grupo.aberto !== false) {
+        for (const sub of grupo.subcategorias) {
+          rows.push([
+            `  ${sub.categoria_nome}`,
+            sub.total,
+            ...meses.map(m => sub.porMes[m] ?? 0),
+          ])
+        }
+        // Linha de total do grupo
+        rows.push([
+          `Total - ${grupo.nome}`,
+          grupo.total,
+          ...meses.map(m => grupo.totalPorMes[m] ?? 0),
+        ])
+      }
+      rows.push([]) // linha em branco entre grupos
+    }
+
+    // Linha de totais gerais
+    rows.push(['TOTAL RECEITAS', grandTotalEntradas, ...meses.map(m => totaisMes[m]?.entradas ?? 0)])
+    rows.push(['TOTAL DESPESAS', grandTotalDespesas, ...meses.map(m => totaisMes[m]?.despesas ?? 0)])
+    rows.push(['RESULTADO', grandTotalEntradas - grandTotalDespesas, ...meses.map(m => (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0))])
+
+    // Gerar xlsx via SheetJS (mesmo CDN usado em Ferramentas)
+    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs' as any)
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    ws['!cols'] = [
+      { wch: 35 },
+      { wch: 16 },
+      ...meses.map(() => ({ wch: 14 })),
+    ]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Relatório')
+    XLSX.writeFile(wb, `relatorio_${inicio}_${fim}.xlsx`)
+    }, [buscado, grupos, meses, totaisMes, grandTotalEntradas, grandTotalDespesas, inicio, fim])
+
+
   const resultado = grandTotalEntradas - grandTotalDespesas
 
   // Scroll para o painel ao abrir drill-down
@@ -455,18 +518,30 @@ export default function RelatoriosPage() {
             </button>
           </div>
 
-          {/* Botao buscar */}
-          <button
-            onClick={buscar}
-            disabled={loading || meses.length === 0}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-all hover:opacity-90 ml-auto"
-            style={{ background: '#00c896', color: '#0a0f1a', opacity: loading ? 0.7 : 1 }}
-          >
-            {loading
-              ? <><RefreshCw size={13} className="animate-spin" /> Carregando...</>
-              : <><Filter size={13} /> Gerar relatório</>
-            }
-          </button>
+          {/* Botoes */}
+          <div className="flex items-center gap-2 ml-auto">
+            {buscado && (
+              <button
+                onClick={exportarExcel}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all hover:opacity-90 border border-white/10"
+                style={{ color: '#4da6ff', background: 'rgba(77,166,255,0.08)' }}
+                title="Exportar para Excel (.xlsx)"
+              >
+                <Download size={13} /> Exportar
+              </button>
+            )}
+            <button
+              onClick={buscar}
+              disabled={loading || meses.length === 0}
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-all hover:opacity-90"
+              style={{ background: '#00c896', color: '#0a0f1a', opacity: loading ? 0.7 : 1 }}
+            >
+              {loading
+                ? <><RefreshCw size={13} className="animate-spin" /> Carregando...</>
+                : <><Filter size={13} /> Gerar relatório</>
+              }
+            </button>
+          </div>
         </div>
 
         {/* Info periodo */}
@@ -522,20 +597,26 @@ export default function RelatoriosPage() {
 
                 <tbody>
                   {/* -- CREDITOS -- */}
-                  <tr>
-                    <td colSpan={2 + meses.length} className="px-4 pt-4 pb-1 sticky left-0">
+                  <tr
+                    className="cursor-pointer hover:bg-white/[0.02] transition-colors"
+                    onClick={() => setCredAberto(a => !a)}
+                  >
+                    <td colSpan={2 + meses.length} className="px-4 pt-4 pb-2 sticky left-0">
                       <div className="flex items-center gap-2">
+                        <span style={{ color: '#00c896' }}>
+                          {credAberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+                        </span>
                         <span className="text-[10px] font-bold uppercase tracking-[3px]" style={{ color: '#00c896' }}>Créditos</span>
                         <div className="flex-1 h-px" style={{ background: 'rgba(0,200,150,0.2)' }}/>
                       </div>
                     </td>
                   </tr>
-                  {grupos.filter(g => g.tipo === 'RECEITA').map((g, i) => (
+                  {credAberto && grupos.filter(g => g.tipo === 'RECEITA').map((g, i) => (
                     <LinhaGrupo key={i} grupo={g} meses={meses} oculto={oculto}
                       onCelulaClick={(catId, catNome, mes, titulo) => setDrillDown({ titulo, categoria_id: catId, categoria_nome: catNome, mes })} />
                   ))}
                   {/* Total Creditos */}
-                  <tr style={{ background: 'rgba(0,200,150,0.06)' }}>
+                  {credAberto && <tr style={{ background: 'rgba(0,200,150,0.06)' }}>
                     <td className="px-4 py-2.5 sticky left-0 z-10" style={{ background: 'rgba(0,200,150,0.06)', minWidth: 220 }}>
                       <span className="text-[10px] font-bold uppercase tracking-widest pl-1" style={{ color: '#00c896' }}>Total Créditos</span>
                     </td>
@@ -551,23 +632,29 @@ export default function RelatoriosPage() {
                         </span>
                       </td>
                     ))}
-                  </tr>
+                  </tr>}
 
                   {/* -- DEBITOS -- */}
-                  <tr>
-                    <td colSpan={2 + meses.length} className="px-4 pt-5 pb-1 sticky left-0">
+                  <tr
+                    className="cursor-pointer hover:bg-white/[0.02] transition-colors"
+                    onClick={() => setDebAberto(a => !a)}
+                  >
+                    <td colSpan={2 + meses.length} className="px-4 pt-5 pb-2 sticky left-0">
                       <div className="flex items-center gap-2">
+                        <span style={{ color: '#f87171' }}>
+                          {debAberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+                        </span>
                         <span className="text-[10px] font-bold uppercase tracking-[3px]" style={{ color: '#f87171' }}>Débitos</span>
                         <div className="flex-1 h-px" style={{ background: 'rgba(248,113,113,0.2)' }}/>
                       </div>
                     </td>
                   </tr>
-                  {grupos.filter(g => g.tipo === 'DESPESA').map((g, i) => (
+                  {debAberto && grupos.filter(g => g.tipo === 'DESPESA').map((g, i) => (
                     <LinhaGrupo key={i} grupo={g} meses={meses} oculto={oculto}
                       onCelulaClick={(catId, catNome, mes, titulo) => setDrillDown({ titulo, categoria_id: catId, categoria_nome: catNome, mes })} />
                   ))}
                   {/* Total Debitos */}
-                  <tr style={{ background: 'rgba(248,113,113,0.06)' }}>
+                  {debAberto && <tr style={{ background: 'rgba(248,113,113,0.06)' }}>
                     <td className="px-4 py-2.5 sticky left-0 z-10" style={{ background: 'rgba(248,113,113,0.06)', minWidth: 220 }}>
                       <span className="text-[10px] font-bold uppercase tracking-widest pl-1" style={{ color: '#f87171' }}>Total Débitos</span>
                     </td>
@@ -583,7 +670,7 @@ export default function RelatoriosPage() {
                         </span>
                       </td>
                     ))}
-                  </tr>
+                  </tr>}
 
                   {/* -- RESULTADO -- */}
                   <tr style={{ background: 'rgba(0,200,150,0.04)' }}>

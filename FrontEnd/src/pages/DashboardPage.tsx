@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { mesAtual, mesLabel, formatBRL, formatData, GRUPOS_CONTA, CORES_CATEGORIA } from '../lib/utils'
+import { usePageState } from '../context/PageStateContext'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import { Bar, Doughnut, Chart } from 'react-chartjs-2'
 import {
@@ -731,12 +732,16 @@ function CardContas({ contas, oculto, mes, historico, modo, setModo }: {
 // -- Dashboard Page ----------------------------------------
 export default function DashboardPage() {
   const navigate = useNavigate()
-  const [mes, setMes]       = useState(mesAtual())
+  const { dashboard: pgState, setDashboard: setPgState } = usePageState()
+  const mes          = pgState.mes
+  const contasFiltro = pgState.contasFiltro
+  const modo         = pgState.modo
+  const setMes          = (v: string)         => setPgState({ mes: v })
+  const setContasFiltro = (v: string[])       => setPgState({ contasFiltro: v })
+  const setModo         = (v: 'hoje' | 'fim') => setPgState({ modo: v })
   const [oculto, setOculto] = useState(false)
   const [editandoTx, setEditandoTx]         = useState<Transacao | null>(null)
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
-  const [contasFiltro, setContasFiltro] = useState<string[]>([])
-  const [modo, setModo] = useState<'hoje' | 'fim'>('hoje')
   const [refreshing, setRefreshing] = useState(false)
 
   const handleRefresh = async () => {

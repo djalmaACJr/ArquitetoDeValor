@@ -7,6 +7,7 @@ import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { formatBRL, mesLabel } from '../lib/utils'
+import { usePageState } from '../context/PageStateContext'
 import { supabase } from '../lib/supabase'
 import { IconeConta } from '../components/ui/IconeConta'
 import { Toast, ModalExcluir } from '../components/ui/shared'
@@ -164,11 +165,18 @@ function formDeLanc(l: Lancamento): FormState {
 // ── Página principal ──────────────────────────────────────────
 export default function LancamentosPage() {
   const location = useLocation()
-  const [mes,         setMes]         = useState(mesAtual())
-  const [filtContas,  setFiltContas]  = useState<string[]>([])
-  const [filtCats,    setFiltCats]    = useState<string[]>([])
-  const [filtStatus,  setFiltStatus]  = useState<string[]>([])
-  const [comSaldo,    setComSaldo]    = useState(true)
+  const { lancamentos: pgState, setLancamentos: setPgState } = usePageState()
+  const mes         = pgState.mes
+  const filtContas  = pgState.filtContas
+  const filtCats    = pgState.filtCats
+  const filtStatus  = pgState.filtStatus
+  const comSaldo    = pgState.comSaldo
+  const setMes         = (v: string)   => setPgState({ mes: v })
+  const setFiltContas  = (v: string[]) => setPgState({ filtContas: v })
+  const setFiltCats    = (v: string[]) => setPgState({ filtCats: v })
+  const setFiltStatus  = (v: string[]) => setPgState({ filtStatus: v })
+  const setComSaldo    = (v: boolean | ((prev: boolean) => boolean)) =>
+    setPgState({ comSaldo: typeof v === 'function' ? v(pgState.comSaldo) : v })
   const [saldoBaseConta, setSaldoBaseConta] = useState<Record<string, number>>({})
 
   // Limpar seleção ao trocar de mês
