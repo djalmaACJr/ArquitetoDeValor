@@ -15,18 +15,18 @@ test.describe('Relatórios', () => {
   test('E2E-REL02 — gerar relatório exibe tabela', async ({ page }) => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
 
-    // Aguarda resultado
-    await expect(
-      page.getByText(/créditos|débitos|total receitas/i)
-    ).toBeVisible({ timeout: 15_000 })
+    // Aguarda resultado - usa seletores mais específicos
+    await expect(page.getByText('Total Receitas')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Créditos', { exact: true })).toBeVisible()
+    await expect(page.getByText('Débitos', { exact: true })).toBeVisible()
   })
 
   test('E2E-REL03 — seção Créditos pode ser recolhida', async ({ page }) => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
-    await expect(page.getByText(/créditos/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Créditos', { exact: true })).toBeVisible({ timeout: 15_000 })
 
     // Clicar na seção créditos para recolher
-    await page.getByText(/créditos/i).first().click()
+    await page.getByText('Créditos', { exact: true }).click()
 
     // Total créditos deve sumir
     await expect(page.getByText(/total créditos/i)).not.toBeVisible()
@@ -34,9 +34,11 @@ test.describe('Relatórios', () => {
 
   test('E2E-REL04 — seção Débitos pode ser recolhida', async ({ page }) => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
-    await expect(page.getByText(/débitos/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Débitos', { exact: true })).toBeVisible({ timeout: 15_000 })
 
-    await page.getByText(/débitos/i).first().click()
+    await page.getByText('Débitos', { exact: true }).click()
+
+    // Total débitos deve sumir
     await expect(page.getByText(/total débitos/i)).not.toBeVisible()
   })
 
@@ -45,7 +47,7 @@ test.describe('Relatórios', () => {
     await expect(page.getByRole('button', { name: /exportar/i })).not.toBeVisible()
 
     await page.getByRole('button', { name: /gerar relatório/i }).click()
-    await expect(page.getByText(/créditos|débitos/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Créditos', { exact: true })).toBeVisible()
 
     // Após gerar — deve aparecer
     await expect(page.getByRole('button', { name: /exportar/i })).toBeVisible()
@@ -53,13 +55,13 @@ test.describe('Relatórios', () => {
 
   test('E2E-REL06 — filtros persistem ao navegar entre páginas', async ({ page }) => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
-    await expect(page.getByText(/créditos|débitos/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Créditos', { exact: true })).toBeVisible()
 
     // Navegar para outra página e voltar
-    await page.getByRole('link', { name: /contas/i }).click()
-    await page.getByRole('link', { name: /relatórios/i }).click()
+    await page.goto('/dashboard')
+    await page.goto('/relatorios')
 
-    // Relatório deve continuar exibido (estado persistido)
-    await expect(page.getByText(/créditos|débitos/i)).toBeVisible()
+    // Relatório deve estar gerado ainda
+    await expect(page.getByText('Créditos', { exact: true })).toBeVisible()
   })
 })

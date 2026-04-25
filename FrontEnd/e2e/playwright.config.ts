@@ -5,7 +5,7 @@ import * as dotenv from 'dotenv'
 dotenv.config()
 
 export default defineConfig({
-  testDir: './e2e/tests',
+  testDir: './tests',
   fullyParallel: false,       // Testes sequenciais — base compartilhada
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -37,7 +37,7 @@ export default defineConfig({
       name: 'firefox',
       use: {
         ...devices['Desktop Firefox'],
-        storageState: 'e2e/fixtures/auth.json',
+        storageState: './fixtures/auth.json',
       },
       dependencies: ['setup'],
     },

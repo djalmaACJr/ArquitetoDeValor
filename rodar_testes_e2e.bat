@@ -81,6 +81,13 @@ echo.
 echo Iniciando modo visual (--ui)...
 echo Certifique-se que o frontend esta rodando em http://localhost:5173
 echo.
+echo Verificando dependencias...
+if not exist node_modules\@playwright (
+    echo Instalando Playwright...
+    npm install @playwright/test@^1.50.0 dotenv@^16.4.5
+    npx playwright install
+)
+echo.
 npm run test:e2e:ui
 goto PAUSA
 
@@ -105,7 +112,7 @@ if "%TESTFILE%"=="" (
 ) else (
     npm run test:e2e -- %TESTFILE% 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQ%'"
 )
-goto :eof
+goto PAUSA
 
 :GENTS
 for /f "tokens=1-3 delims=/" %%a in ("%date%") do set TS=%%c-%%b-%%a
