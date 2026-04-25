@@ -29,17 +29,23 @@ export default defineConfig({
   projects: [
     // Setup: faz login uma vez e salva sessão
     {
-      name: 'setup',
-      testMatch: /.*\.setup\.ts/,
+      name: 'auth',
+      testMatch: /auth\.setup\.ts/,
     },
-    // Testes principais usando sessão salva
+    // Setup: cria dados básicos (contas, categorias)
+    {
+      name: 'data',
+      testMatch: /data\.setup\.ts/,
+      dependencies: ['auth'],
+    },
+    // Testes principais usando sessão e dados salvos
     {
       name: 'firefox',
       use: {
         ...devices['Desktop Firefox'],
         storageState: './fixtures/auth.json',
       },
-      dependencies: ['setup'],
+      dependencies: ['data'],
     },
   ],
 })

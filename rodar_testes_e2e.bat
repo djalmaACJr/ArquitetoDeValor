@@ -10,12 +10,12 @@ echo   ARQUITETO DE VALOR - TESTES E2E (PLAYWRIGHT)
 echo ================================================
 echo.
 echo   1. Todos os testes
-echo   2. Dashboard
-echo   3. Extrato (Lancamentos)
-echo   4. Contas
-echo   5. Categorias
-echo   6. Relatorios
-echo   7. Navegacao e Persistencia
+echo   2. Contas
+echo   3. Categorias
+echo   4. Navegacao e Persistencia
+echo   5. Extrato (Lancamentos)
+echo   6. Dashboard
+echo   7. Relatorios
 echo   8. Abrir relatorio HTML do ultimo run
 echo   9. Modo visual (--ui)
 echo   0. Sair
@@ -41,32 +41,32 @@ call :RUNTEST
 goto PAUSA
 
 :OPC2
-set TESTFILE=e2e/tests/01_dashboard.spec.ts
+set TESTFILE=e2e/tests/01_contas.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC3
-set TESTFILE=e2e/tests/02_extrato.spec.ts
+set TESTFILE=e2e/tests/02_categorias.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC4
-set TESTFILE=e2e/tests/03_contas.spec.ts
+set TESTFILE=e2e/tests/03_navegacao.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC5
-set TESTFILE=e2e/tests/04_categorias.spec.ts
+set TESTFILE=e2e/tests/04_extrato.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC6
-set TESTFILE=e2e/tests/05_relatorios.spec.ts
+set TESTFILE=e2e/tests/05_dashboard.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC7
-set TESTFILE=e2e/tests/06_navegacao.spec.ts
+set TESTFILE=e2e/tests/06_relatorios.spec.ts
 call :RUNTEST
 goto PAUSA
 
