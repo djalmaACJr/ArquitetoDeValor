@@ -57,11 +57,13 @@ test.describe('Relatórios', () => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
     await expect(page.getByText('Créditos', { exact: true })).toBeVisible()
 
-    // Navegar para outra página e voltar
-    await page.goto('/dashboard')
-    await page.goto('/relatorios')
+    // Navegar via links da SPA (page.goto remonta o app e reseta o PageStateContext em memória)
+    await page.getByRole('link', { name: /painel/i }).click()
+    await page.waitForLoadState('domcontentloaded')
+    await page.getByRole('link', { name: /relatórios/i }).click()
+    await page.waitForLoadState('domcontentloaded')
 
     // Relatório deve estar gerado ainda
-    await expect(page.getByText('Créditos', { exact: true })).toBeVisible()
+    await expect(page.getByText('Créditos', { exact: true })).toBeVisible({ timeout: 10_000 })
   })
 })

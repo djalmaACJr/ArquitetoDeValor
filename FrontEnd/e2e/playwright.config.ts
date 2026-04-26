@@ -36,6 +36,10 @@ export default defineConfig({
     {
       name: 'data',
       testMatch: /data\.setup\.ts/,
+      use: {
+        ...devices['Desktop Firefox'],
+        storageState: './fixtures/auth.json',
+      },
       dependencies: ['auth'],
     },
     // Testes principais usando sessão e dados salvos

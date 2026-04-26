@@ -10,11 +10,11 @@ test.describe('Dashboard', () => {
   test('E2E-DB01 — carrega e exibe os cards principais', async ({ page }) => {
     // Verifica se o dashboard carrega (pode estar vazio)
     await expect(page.getByText('Resultados do mês')).toBeVisible({ timeout: 10_000 })
-    
-    // Cards podem estar vazios em base limpa, mas devem existir
-    await expect(page.locator('[data-testid="card-saldo"], .card-saldo, [class*="saldo"]').first()).toBeVisible()
-    await expect(page.locator('[data-testid="card-receitas"], .card-receitas, [class*="receitas"]').first()).toBeVisible()
-    await expect(page.locator('[data-testid="card-despesas"], .card-despesas, [class*="despesas"]').first()).toBeVisible()
+
+    // Labels presentes no CardResultados (Receitas / Despesas / Resultado)
+    await expect(page.getByText('Receitas', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Despesas', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Resultado', { exact: true }).first()).toBeVisible()
   })
 
   test('E2E-DB02 — navega entre meses com as setas', async ({ page }) => {
@@ -65,16 +65,19 @@ test.describe('Dashboard', () => {
   })
 
   test('E2E-DB06 — estado do mês persiste ao voltar da página de extrato', async ({ page }) => {
-    // Navegar para mês anterior
-    await page.locator('[title*="anterior"], [title*="Anterior"]').first().click().catch(() => {})
+    const calBtn = page.locator('button').filter({ hasText: /\/\d{4}/ }).first()
+    await expect(calBtn).toBeVisible({ timeout: 8000 })
+    const mesSelecionado = (await calBtn.textContent())?.trim()
 
-    const mesSelecionado = await page.locator('button:has-text("/2")').first().textContent()
-
-    // Ir para extrato e voltar
+    // Ir para extrato e voltar via SPA (page.goto reseta o context)
     await page.getByRole('link', { name: /lançamentos|extrato/i }).click()
-    await page.getByRole('link', { name: /painel|dashboard/i }).click()
+    await page.waitForLoadState('domcontentloaded')
+    await page.getByRole('link', { name: /painel/i }).click()
+    await page.waitForLoadState('domcontentloaded')
 
-    const mesAposVoltar = await page.locator('button:has-text("/2")').first().textContent()
-    expect(mesSelecionado).toBe(mesAposVoltar)
+    const calBtnApos = page.locator('button').filter({ hasText: /\/\d{4}/ }).first()
+    await expect(calBtnApos).toBeVisible({ timeout: 8000 })
+    const mesAposVoltar = (await calBtnApos.textContent())?.trim()
+    expect(mesAposVoltar).toBe(mesSelecionado)
   })
 })

@@ -100,29 +100,35 @@ test.describe('Contas', () => {
     }
   })
 
-  test('E2E-CT05 — desativar conta move para seção inativas', async ({ page }) => {
-    // Tenta criar uma conta primeiro
+  test('E2E-CT05 — excluir conta sem movimento remove da lista', async ({ page }) => {
+    // Cria conta de descarte
     await page.getByRole('button', { name: /nova conta/i }).click()
     const drawer = page.getByRole('dialog')
     await drawer.getByPlaceholder(/nubank|nome/i).fill('E2E Conta Desativar')
     await drawer.getByRole('button', { name: /salvar|criar/i }).click()
-    
+
     await page.waitForTimeout(2000)
     if (await drawer.isVisible()) {
       await page.keyboard.press('Escape')
-      await page.waitForTimeout(1000)
+      await page.waitForTimeout(800)
     }
 
-    // Tenta desativar a conta se foi criada
-    const contaCriada = page.getByText('E2E Conta Desativar')
-    if (await contaCriada.isVisible()) {
-      await contaCriada.hover()
-      await page.getByRole('button', { name: /desativar/i }).click()
-      await page.getByRole('button', { name: /confirmar/i }).click()
-      await expect(page.getByText('E2E Conta Desativar')).not.toBeVisible()
-    } else {
-      console.log('Conta não encontrada para desativar (base limpa)')
+    // ContasPage usa botão title="Excluir" (X) — sem botão "desativar"
+    const linha = page.locator('text=E2E Conta Desativar').first()
+    if (!(await linha.isVisible({ timeout: 3000 }).catch(() => false))) {
+      test.skip()
+      return
     }
+
+    const row = linha.locator('xpath=ancestor::div[contains(@class,"rounded-xl")][1]')
+    await row.locator('button[title="Excluir"]').click()
+
+    // ModalExcluir é um dialog
+    const modal = page.getByRole('dialog').last()
+    await expect(modal).toBeVisible({ timeout: 5000 })
+    await modal.getByRole('button', { name: /confirmar|sim|excluir/i }).click()
+
+    await expect(page.getByText('E2E Conta Desativar')).not.toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-CT06 — limpar contas de teste', async ({ page }) => {

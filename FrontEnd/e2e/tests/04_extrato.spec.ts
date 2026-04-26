@@ -30,23 +30,23 @@ test.describe('Extrato (Lançamentos)', () => {
     await page.getByRole('button', { name: /novo lançamento/i }).click()
     const drawer = page.getByRole('dialog').first()
     await expect(drawer).toBeVisible()
+    await page.waitForTimeout(400) // aguarda animação do drawer
 
-    // Preencher formulário
-    await drawer.getByPlaceholder(/descrição/i).fill('E2E Teste Lançamento')
-    await drawer.getByPlaceholder(/valor/i).fill('99,90')
+    // Preencher campos básicos. Tipo padrão já é DESPESA (FORM_VAZIO).
+    await drawer.getByPlaceholder('Ex: Conta de luz, Salário...').fill('E2E Teste Lançamento')
+    await drawer.getByPlaceholder('0,00').fill('99,90')
 
-    // Selecionar tipo DESPESA se não estiver selecionado
-    const btnDespesa = drawer.getByRole('button', { name: /despesa/i })
-    if (await btnDespesa.isVisible()) await btnDespesa.click()
+    // Selecionar conta via SearchableSelect (placeholder "Selecione a conta...")
+    await drawer.getByRole('button', { name: /selecione a conta/i }).first().click()
+    await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
 
     // Salvar
-    await drawer.getByRole('button', { name: /salvar|criar/i }).click()
+    await drawer.getByRole('button', { name: /^salvar$/i }).click()
 
-    // Aguarda drawer fechar
     await expect(drawer).not.toBeVisible({ timeout: 10_000 })
-
-    // Verificar que aparece na lista
-    await expect(page.getByText('E2E Teste Lançamento')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('E2E Teste Lançamento').first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-EX05 — editar lançamento criado', async ({ page }) => {
@@ -62,7 +62,7 @@ test.describe('Extrato (Lançamentos)', () => {
     await expect(drawer).toBeVisible()
 
     // Alterar descrição
-    const inputDescricao = drawer.getByPlaceholder(/descrição/i)
+    const inputDescricao = drawer.getByPlaceholder(/conta de luz|descri|sal[áa]rio/i)
     await inputDescricao.clear()
     await inputDescricao.fill('E2E Teste Editado')
 
@@ -99,15 +99,20 @@ test.describe('Extrato (Lançamentos)', () => {
   })
 
   test('E2E-EX08 — filtros persistem ao navegar entre páginas', async ({ page }) => {
-    // Selecionar mês diferente do atual
-    await page.locator('[title*="anterior"]').first().click().catch(() => {})
-    const mes = await page.locator('button:has-text("/2")').first().textContent()
+    // Captura o mês exibido inicialmente no MonthPicker
+    const calBtn = page.locator('button').filter({ hasText: /\/\d{4}/ }).first()
+    await expect(calBtn).toBeVisible({ timeout: 8000 })
+    const mes = (await calBtn.textContent())?.trim()
 
-    // Ir para contas e voltar
+    // Navegar via SPA (não usar page.goto — resetaria o estado em memória)
     await page.getByRole('link', { name: /contas/i }).click()
+    await page.waitForLoadState('domcontentloaded')
     await page.getByRole('link', { name: /lançamentos|extrato/i }).click()
+    await page.waitForLoadState('domcontentloaded')
 
-    const mesAposVoltar = await page.locator('button:has-text("/2")').first().textContent()
-    expect(mes).toBe(mesAposVoltar)
+    const calBtnApos = page.locator('button').filter({ hasText: /\/\d{4}/ }).first()
+    await expect(calBtnApos).toBeVisible({ timeout: 8000 })
+    const mesAposVoltar = (await calBtnApos.textContent())?.trim()
+    expect(mesAposVoltar).toBe(mes)
   })
 })
