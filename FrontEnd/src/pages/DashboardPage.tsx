@@ -3,14 +3,15 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
-import { mesAtual, mesLabel, formatBRL, formatData, GRUPOS_CONTA, CORES_CATEGORIA } from '../lib/utils'
+import { mesLabel, formatBRL, formatData, CORES_CATEGORIA } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
 import { MonthPicker } from '../components/ui/MonthPicker'
-import { Bar, Doughnut, Chart } from 'react-chartjs-2'
+import { Doughnut, Chart } from 'react-chartjs-2'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement,
   ArcElement, Tooltip, Legend, LineElement, PointElement,
 } from 'chart.js'
+import type { TooltipItem } from 'chart.js'
 import type { Conta, Transacao, DespesaCategoria } from '../types'
 import { supabase } from '../lib/supabase'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
@@ -436,7 +437,7 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
       tooltip: {
         callbacks: {
           label: () => '',
-          afterBody: (items: any[]) => {
+          afterBody: (items: TooltipItem<'bar'>[]) => {
             if (!items.length) return []
             const idx = items[0].dataIndex
 
@@ -474,7 +475,7 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
 
             return linhas
           },
-          title: (items: any[]) => {
+          title: (items: TooltipItem<'bar'>[]) => {
             if (!items.length) return ''
             const h = historico[items[0].dataIndex]
             return h?.mes ? mesLabel(h.mes) : ''
@@ -493,7 +494,7 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
         ticks: {
           color: '#9ca3af',
           font: { size: 10 },
-          callback: (v: any) => `R$${(Number(v)/1000).toFixed(0)}k`,
+          callback: (v: number | string) => `R$${(Number(v)/1000).toFixed(0)}k`,
         },
         grid: { color: 'rgba(128,128,128,0.1)' },
         border: { display: false },
@@ -504,7 +505,7 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
         ticks: {
           color: '#a78bfa',
           font: { size: 10 },
-          callback: (v: any) => `R$${(Number(v)/1000).toFixed(0)}k`,
+          callback: (v: number | string) => `R$${(Number(v)/1000).toFixed(0)}k`,
         },
         grid: { display: false },
         border: { display: false },
@@ -612,10 +613,6 @@ function CardContas({ contas, oculto, mes, historico, modo, setModo }: {
   const navigate = useNavigate()
   const mesAtualStr = new Date().toISOString().slice(0, 7)
   const isMesAtual = mes === mesAtualStr
-
-  // Saldo do mês selecionado: último saldo_acumulado do mês no histórico
-  const entradaMes = historico.find(h => h.mes === mes)
-  const saldoFimMes = entradaMes?.saldo_mes ?? null
 
   // Lógica de exibição para contas individuais
   const [saldosPorConta, setSaldosPorConta] = useState<Record<string, number>>({})
@@ -740,7 +737,6 @@ export default function DashboardPage() {
   const setContasFiltro = (v: string[])       => setPgState({ contasFiltro: v })
   const setModo         = (v: 'hoje' | 'fim') => setPgState({ modo: v })
   const [oculto, setOculto] = useState(false)
-  const [editandoTx, setEditandoTx]         = useState<Transacao | null>(null)
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -899,7 +895,7 @@ export default function DashboardPage() {
       {lancamentoEditando && (
         <DrawerLancamento
           lancamento={lancamentoEditando}
-          todasParcelas={[...(pendentes || []), ...(proximas || [])] as any}
+          todasParcelas={[...(pendentes || []), ...(proximas || [])] as Transacao[]}
           onFechar={() => setLancamentoEditando(null)}
           onSalvo={() => { setLancamentoEditando(null); refetch() }}
           onExcluido={() => { setLancamentoEditando(null); refetch() }}

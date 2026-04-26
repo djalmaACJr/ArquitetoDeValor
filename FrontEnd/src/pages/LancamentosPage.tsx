@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
-import { Plus, Pencil, Zap, ChevronDown, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
+import { Plus, Pencil, Zap, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
 import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
@@ -11,18 +11,10 @@ import { usePageState } from '../context/PageStateContext'
 import { supabase } from '../lib/supabase'
 import { IconeConta } from '../components/ui/IconeConta'
 import { Toast, ModalExcluir } from '../components/ui/shared'
-import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelect'
+import { MultiSelect } from '../components/ui/MultiSelect'
 import { MonthPicker } from '../components/ui/MonthPicker'
 
 // ── Helpers de data ───────────────────────────────────────────
-function mesAtual() {
-  return new Date().toISOString().slice(0, 7)
-}
-
-function fmtData(iso: string) {
-  const [y, m, d] = iso.split('-')
-  return `${d}/${m}/${y}`
-}
 function fmtDataLabel(iso: string) {
   const d = new Date(iso + 'T12:00:00')
   const label = d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -91,7 +83,7 @@ function AcaoBtn({ onClick, title, color = '#8b92a8', children }: {
 }
 
 // ── Modal de escopo de recorrência ────────────────────────────
-function ModalEscopo({ onConfirmar, onCancelar, acao, opcoes }: {
+function _ModalEscopo({ onConfirmar, onCancelar, acao, opcoes }: {
   onConfirmar: (escopo: 'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS') => void
   onCancelar: () => void
   acao: 'editar' | 'excluir'
@@ -138,12 +130,12 @@ interface FormState {
   status: StatusTx; observacao: string
   recorrente: boolean; total_parcelas: string; tipo_recorrencia: string; intervalo_recorrencia: string
 }
-const FORM_VAZIO: FormState = {
+const _FORM_VAZIO: FormState = {
   tipo: 'DESPESA', data: hoje(), descricao: '', valor: '',
   conta_id: '', conta_destino_id: '', categoria_id: '', status: 'PAGO', observacao: '',
   recorrente: false, total_parcelas: '2', tipo_recorrencia: 'MENSAL', intervalo_recorrencia: '1',
 }
-function formDeLanc(l: Lancamento): FormState {
+function _formDeLanc(l: Lancamento): FormState {
   // Identificação de transferência pelo campo dedicado id_par_transferencia
   const isTransf = !!l.id_par_transferencia
   const descricaoLimpa = isTransf
@@ -158,7 +150,7 @@ function formDeLanc(l: Lancamento): FormState {
     observacao: l.observacao ?? '',
     recorrente: !!l.id_recorrencia, total_parcelas: String(l.total_parcelas ?? 2),
     tipo_recorrencia: l.tipo_recorrencia ?? 'MENSAL',
-    intervalo_recorrencia: String((l as any).intervalo_recorrencia ?? 1),
+    intervalo_recorrencia: String((l as Lancamento & { intervalo_recorrencia?: number }).intervalo_recorrencia ?? 1),
   }
 }
 
@@ -178,9 +170,6 @@ export default function LancamentosPage() {
   const setComSaldo    = (v: boolean | ((prev: boolean) => boolean)) =>
     setPgState({ comSaldo: typeof v === 'function' ? v(pgState.comSaldo) : v })
   const [saldoBaseConta, setSaldoBaseConta] = useState<Record<string, number>>({})
-
-  // Limpar seleção ao trocar de mês
-  useEffect(() => { setSelecionados(new Set()) }, [mes])
 
   const { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus, criarTransferencia, editarTransferencia, excluirTransferencia } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus, com_saldo: comSaldo })
@@ -268,12 +257,14 @@ export default function LancamentosPage() {
     return next
   })
 
+  // Limpar seleção ao trocar de mês
+  useEffect(() => { setSelecionados(new Set()) }, [mes])
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
 
   // Ler state da navegação (vindo do Dashboard) — só na montagem / mudança de rota
   const stateAplicado = useRef(false)
   useEffect(() => {
-    const state = location.state as any
+    const state = location.state as { novoLancamento?: boolean; [key: string]: unknown } | null
     if (!state) return
     if (stateAplicado.current) return
     stateAplicado.current = true

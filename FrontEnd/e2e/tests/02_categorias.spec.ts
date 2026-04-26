@@ -17,7 +17,9 @@ test.describe('Categorias', () => {
     const drawer = page.getByRole('dialog').first()
     await expect(drawer).toBeVisible({ timeout: 5000 })
 
-    await drawer.getByPlaceholder(/nome|descrição/i).fill('E2E Categoria Teste')
+    // Drawer tem dois inputs: descrição (Ex: Alimentação) e busca de ícones.
+    // Usar exact match para evitar strict mode violation.
+    await drawer.getByPlaceholder('Ex: Alimentação').fill('E2E Categoria Teste')
     await drawer.getByRole('button', { name: /salvar|criar/i }).click()
 
     await expect(drawer).not.toBeVisible({ timeout: 10_000 })

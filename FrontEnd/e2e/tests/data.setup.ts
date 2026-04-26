@@ -1,6 +1,6 @@
 // e2e/tests/data.setup.ts
 // Setup com limpeza completa para isolar testes entre execuções
-import { test as setup, expect } from '@playwright/test'
+import { test as setup } from '@playwright/test'
 
 setup('criar dados basicos', async ({ page }) => {
   // Já está autenticado pelo auth.setup.ts
@@ -98,7 +98,7 @@ setup('criar dados basicos', async ({ page }) => {
     }
     
     console.log('✅ Limpeza de dados E2E concluída')
-  } catch (error) {
+  } catch {
     console.log('⚠️ Erro na limpeza (pode já estar limpo)')
   }
   
@@ -151,14 +151,15 @@ setup('criar dados basicos', async ({ page }) => {
     if (!(await btnNovaCategoria.isVisible({ timeout: 2000 }))) {
       btnNovaCategoria = page.locator('button:has-text("Nova")')
     }
-    
+
     await btnNovaCategoria.click({ timeout: 5000 })
-    
+
     const drawer = page.getByRole('dialog').first()
     await drawer.waitFor({ state: 'visible', timeout: 5000 })
-    
-    await drawer.getByPlaceholder(/nome/i).fill('E2E Salário')
-    await drawer.getByRole('combobox').selectOption('RECEITA')
+
+    // CategoriasPage não tem select de tipo. Há também o input de busca do IconPicker,
+    // por isso usamos placeholder exato.
+    await drawer.getByPlaceholder('Ex: Alimentação').fill('E2E Salário')
     await drawer.getByRole('button', { name: /salvar|criar/i }).click()
     
     await page.waitForTimeout(3000) // Esperar salvar

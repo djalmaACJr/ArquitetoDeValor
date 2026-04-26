@@ -311,3 +311,6 @@ FrontEnd/dist/
 # Dependências
 node_modules/
 ```
+# dica para claude vs code
+inicie com 
+Use CLAUDE.md, ARCHITECTURE.md e BUSINESS_RULES.md como contexto.

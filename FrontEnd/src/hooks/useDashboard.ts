@@ -135,12 +135,6 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
 
       const doMes = extrairLista<Transacao>(historicosRes[historicosRes.length - 1]?.dados).filter(filtrarTransfComStatus)
 
-      // Função auxiliar para filtrar contas no histórico (para saldo acumulado)
-      const filtrarContas = (t: Transacao) => {
-        // Aplicar filtro de contas se houver
-        return contasFiltro.length === 0 || contasFiltro.includes(t.conta_id)
-      }
-
       // Exclui transferências pelo id_par_transferencia, prefixo na descrição OU categoria "Transferências"
       const isTransf = (t: Transacao) =>
         !!t.id_par_transferencia ||
@@ -172,24 +166,6 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
       })
 
       // Valores do mês atual
-      const pagosLista = extrairLista<Transacao>(pagosRes.dados).filter(filtrarTransf)
-      const pagosCalculados = {
-        receitas: pagosLista.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0),
-        despesas: pagosLista.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
-      }
-
-      const pendentesLista = [...pendMes, ...pendProximos].filter(t => t.status === 'PENDENTE')
-      const pendentesCalculados = {
-        receitas: pendentesLista.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0),
-        despesas: pendentesLista.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
-      }
-
-      const projecoesLista = [...pendMes, ...pendProximos].filter(t => t.status === 'PROJECAO')
-      const projecoesCalculados = {
-        receitas: projecoesLista.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0),
-        despesas: projecoesLista.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
-      }
-
       setResumo({ mes, total_entradas: entradas, total_saidas: saidas })
       setDespesasCat(agruparPorCategoria(doMes, 'DESPESA', 5))
       setReceitasCat(agruparPorCategoria(doMes, 'RECEITA', 4))
@@ -198,7 +174,6 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
       setProjecoes(historicoStatus.map(h => h.projecoes))
 
       // ─ HISTÓRICO 6 MESES ─
-      const contasList = extrairLista<Conta>(contasRes.dados)
       const hist: ResumoMensal[] = meses6.map((mesHist, idx) => {
         const fatia = extrairLista<Transacao>(historicosRes[idx]?.dados)
         const isTransfH = (t: Transacao) =>

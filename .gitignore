@@ -2,6 +2,7 @@
 
 # Variáveis de ambiente
 .env
+.env.local
 
 # Resultados de testes
 test-results/
@@ -14,10 +15,13 @@ node_modules/
 
 #arquivos do vistual studio
 .vs/
-
+#arquivos do vs code
+.vscode
 
 #backups feitos durante teste de deploy
 tests/backup_data/
 
 #reports dos testes automatizados
-FrontEnd/e2e/e2e/report/data
+FrontEnd/e2e/fixtures/auth.json
+FrontEnd/e2e/report/
+FrontEnd/e2e/test-results/

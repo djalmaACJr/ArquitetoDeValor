@@ -23,6 +23,7 @@ interface Lancamento {
   categoria_nome: string | null
   categoria_pai_nome: string | null
   conta_id: string
+  conta_nome?: string
   id_par_transferencia: string | null
 }
 
@@ -61,7 +62,7 @@ function gerarMeses(inicio: string, fim: string): string[] {
 
 function mesAtual() { return new Date().toISOString().slice(0, 7) }
 
-function mesAnterior(m: string, n: number) {
+function _mesAnterior(m: string, n: number) {
   const [a, mes] = m.split('-').map(Number)
   let a2 = a, m2 = mes - n
   while (m2 <= 0) { m2 += 12; a2-- }
@@ -178,7 +179,6 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick }: {
 
 // -- Pagina principal -------------------------------------------
 export default function RelatoriosPage() {
-  const hoje = mesAtual()
   const { relatorios: pgState, setRelatorios: setPgState } = usePageState()
   const inicio       = pgState.inicio
   const fim          = pgState.fim
@@ -208,7 +208,7 @@ export default function RelatoriosPage() {
   } | null>(null)
 
   const { contas }     = useContas()
-  const { categorias } = useCategorias()
+  void useCategorias() // mantido para futuro uso de filtro por categoria
 
   const meses = useMemo(() => gerarMeses(inicio, fim), [inicio, fim])
 
@@ -378,7 +378,7 @@ export default function RelatoriosPage() {
     rows.push(['RESULTADO', grandTotalEntradas - grandTotalDespesas, ...meses.map(m => (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0))])
 
     // Gerar xlsx via SheetJS (mesmo CDN usado em Ferramentas)
-    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs' as any)
+    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
     const ws = XLSX.utils.aoa_to_sheet(rows)
     ws['!cols'] = [
       { wch: 35 },
@@ -764,7 +764,7 @@ export default function RelatoriosPage() {
                         </span>
                       </td>
                       <td className="px-4 py-2.5">
-                        <span className="text-[11px]" style={{ color: '#c5cad8' }}>{(l as any).conta_nome ?? '-'}</span>
+                        <span className="text-[11px]" style={{ color: '#c5cad8' }}>{l.conta_nome ?? '-'}</span>
                       </td>
                       <td className="px-4 py-2.5">
                         <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap"

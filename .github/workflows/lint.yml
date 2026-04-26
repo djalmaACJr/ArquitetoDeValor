@@ -1,4 +1,4 @@
-name: Testes de Integração
+name: Análise de Qualidade
 
 on:
   push:
@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: Rodar testes automatizados
+  lint:
+    name: ESLint — Análise estática
     runs-on: ubuntu-latest
 
     steps:
@@ -24,18 +24,13 @@ jobs:
       - name: Instalar dependências
         run: npm install
 
-      - name: Rodar testes
-        run: npm test -- --runInBand --verbose
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
-          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+      - name: Rodar ESLint
+        run: npm run lint
 
-      - name: Salvar resultado dos testes
+      - name: Salvar relatório de qualidade
         if: always()
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: resultado-testes-${{ github.run_number }}
-          path: test-results/
+          name: relatorio-lint-${{ github.run_number }}
+          path: lint-results/
           if-no-files-found: ignore

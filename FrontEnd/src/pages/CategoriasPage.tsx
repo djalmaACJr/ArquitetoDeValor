@@ -101,7 +101,11 @@ export default function CategoriasPage() {
   }
 
   const toggleExp = (id: string) =>
-    setExpandidos(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+    setExpandidos(prev => {
+      const s = new Set(prev)
+      if (s.has(id)) { s.delete(id) } else { s.add(id) }
+      return s
+    })
 
   const q = busca.toLowerCase()
   const paisFiltrados = pais.filter(p =>
