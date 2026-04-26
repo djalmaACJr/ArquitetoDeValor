@@ -1,6 +1,6 @@
 // ============================================================
 // Suite de Testes: transferencias.test.ts
-// CA-TRF01 a CA-TRF18
+// CA-TRF01 a CA-TRF22
 // ============================================================
 
 import { api, limparConta } from "./setup";
@@ -57,7 +57,7 @@ async function limparContasDeTeste(): Promise<void> {
   }
 }
 
-describe("Transferências - Testes Integrados", () => {
+describe("Transferências — CA-TRF01 a CA-TRF22", () => {
 
   beforeAll(async () => {
     // Limpar resíduos de execuções anteriores antes de criar
@@ -417,6 +417,89 @@ describe("Transferências - Testes Integrados", () => {
       method: "PUT",
       body: JSON.stringify({ cor: "#9333EA" }),
     });
+  });
+
+  // ── CA-TRF19 — Transferência recorrente ─────────────────────
+  test("CA-TRF19 - Criar transferência recorrente com 3 parcelas mensais", async () => {
+    const dataBase = new Date();
+    dataBase.setMonth(dataBase.getMonth() + 1);
+    const dataStr = dataBase.toISOString().split("T")[0];
+
+    const { status, data } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id:       contaOrigemId,
+        conta_destino_id:      contaDestinoId,
+        valor:                 300,
+        data:                  dataStr,
+        descricao:             "Transferência recorrente teste",
+        status:                "PENDENTE",
+        total_parcelas:        3,
+        tipo_recorrencia:      "MENSAL",
+        intervalo_recorrencia: 1,
+      }),
+    });
+
+    expect(status).toBe(201);
+    expect(data).toHaveProperty("id_recorrencia");
+    expect((data as any).total).toBe(3);
+    expect(Array.isArray((data as any).parcelas)).toBe(true);
+
+    // Todas as parcelas devem ser PENDENTE (datas futuras, status PENDENTE)
+    (data as any).parcelas.forEach((p: any) => {
+      expect(p.status).toBe("PENDENTE");
+    });
+
+    // Limpar — excluir cada par pelo id_par
+    for (const par of (data as any).parcelas) {
+      await api(`/transferencias/${par.id_par}`, { method: "DELETE" }).catch(() => {});
+    }
+  });
+
+
+
+  // ── CA-TRF20 — Filtro por conta ──────────────────────────
+  test("CA-TRF20 — GET /transferencias?conta_id filtra por conta de origem ou destino", async () => {
+    // Criar transferência envolvendo contaOrigemId
+    const { data: trf } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id: contaOrigemId,
+        conta_destino_id: contaDestinoId,
+        valor: 100,
+        data: new Date().toISOString().split("T")[0],
+        descricao: "TRF filtro conta",
+        status: "PAGO",
+      }),
+    });
+    const trfData = trf as Transferencia;
+
+    const { data } = await api(`/transferencias?conta_id=${contaOrigemId}`);
+    const lista = data as Transferencia[];
+    expect(Array.isArray(lista)).toBe(true);
+    // Deve conter a transferência criada
+    const encontrada = lista.find(t => t.id_par === trfData.id_par);
+    expect(encontrada).toBeTruthy();
+
+    await api(`/transferencias/${trfData.id_par}`, { method: "DELETE" });
+  });
+
+  // ── CA-TRF21 — RLS isolamento transações ──────────────────
+  test("CA-TRF21 — GET /transacoes não expõe lançamentos de outro usuário", async () => {
+    const idForaEscopo = "00000000-0000-0000-0000-000000000002";
+    const { status, data } = await api(`/transacoes?conta_id=${idForaEscopo}`);
+    expect(status).toBe(200);
+    // RLS filtra silenciosamente — retorna array vazio, não 403
+    const dados = (data as { dados: unknown[] }).dados;
+    expect(Array.isArray(dados)).toBe(true);
+    expect(dados.length).toBe(0);
+  });
+
+  // ── CA-TRF22 — RLS isolamento categorias ──────────────────
+  test("CA-TRF22 — GET /categorias/:id não expõe categoria de outro usuário", async () => {
+    const idForaEscopo = "00000000-0000-0000-0000-000000000003";
+    const { status } = await api(`/categorias/${idForaEscopo}`);
+    expect(status).toBe(404);
   });
 
 });

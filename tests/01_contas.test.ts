@@ -2,7 +2,7 @@
 // Arquiteto de Valor — Testes automatizados
 // tests/contas.test.ts
 //
-// Cobre critérios de aceite: CA-CONTA01 a CA-CONTA13
+// Cobre critérios de aceite: CA-CONTA01 a CA-CONTA19
 // ============================================================
 
 import { api, apiSemAuth, limparConta } from "./setup";
@@ -26,7 +26,7 @@ async function limparContasDeTeste(): Promise<void> {
   }
 }
 
-describe("Contas — CA-CONTA01 a CA-CONTA13", () => {
+describe("Contas — CA-CONTA01 a CA-CONTA19", () => {
   let contaId: string;
 
   beforeAll(async () => {
@@ -260,6 +260,111 @@ describe("Contas — CA-CONTA01 a CA-CONTA13", () => {
     expect(encontrada.ativa).toBe(false);
 
     await limparConta(criada.id);
+  });
+
+
+  // ── CA-CONTA16 ──────────────────────────────────────────
+  // Contas do tipo CARTAO aceitam dia_fechamento e dia_pagamento (1–31)
+  test("CA-CONTA16 — Cartão aceita dia_fechamento e dia_pagamento válidos", async () => {
+    const { status, data } = await api("/contas", {
+      method: "POST",
+      body: JSON.stringify({
+        nome: "Jest Cartao Dias",
+        tipo: "CARTAO",
+        saldo_inicial: 0,
+        dia_fechamento: 5,
+        dia_pagamento: 10,
+      }),
+    });
+    expect(status).toBe(201);
+    expect(data).toHaveProperty("id");
+
+    // Verificar que os campos foram salvos
+    const { data: conta } = await api(`/contas/${data.id}`);
+    expect(conta.dia_fechamento).toBe(5);
+    expect(conta.dia_pagamento).toBe(10);
+
+    await limparConta(data.id);
+  });
+
+  // ── CA-CONTA17 ──────────────────────────────────────────
+  // dia_fechamento e dia_pagamento fora do range 1–31 devem ser rejeitados
+  test("CA-CONTA17 — Cartão rejeita dia_fechamento/dia_pagamento fora do range", async () => {
+    const { status: s1 } = await api("/contas", {
+      method: "POST",
+      body: JSON.stringify({
+        nome: "Jest Cartao Dia Invalido",
+        tipo: "CARTAO",
+        saldo_inicial: 0,
+        dia_fechamento: 0,
+      }),
+    });
+    expect(s1).toBe(400);
+
+    const { status: s2 } = await api("/contas", {
+      method: "POST",
+      body: JSON.stringify({
+        nome: "Jest Cartao Dia Invalido",
+        tipo: "CARTAO",
+        saldo_inicial: 0,
+        dia_fechamento: 32,
+      }),
+    });
+    expect(s2).toBe(400);
+
+    const { status: s3 } = await api("/contas", {
+      method: "POST",
+      body: JSON.stringify({
+        nome: "Jest Cartao Dia Invalido",
+        tipo: "CARTAO",
+        saldo_inicial: 0,
+        dia_pagamento: 32,
+      }),
+    });
+    expect(s3).toBe(400);
+  });
+
+
+  // ── CA-CONTA18 ──────────────────────────────────────────
+  // PUT em cartão deve salvar/atualizar dia_fechamento e dia_pagamento
+  test("CA-CONTA18 — PUT /contas/:id atualiza dia_fechamento e dia_pagamento em cartão", async () => {
+    const { data: criada } = await api("/contas", {
+      method: "POST",
+      body: JSON.stringify({ nome: "Jest Cartao Editar Dias", tipo: "CARTAO", saldo_inicial: 0 }),
+    });
+    expect(criada).toHaveProperty("id");
+
+    const { status, data } = await api(`/contas/${criada.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ dia_fechamento: 15, dia_pagamento: 20 }),
+    });
+    expect(status).toBe(200);
+
+    // Verificar persistência
+    const { data: conta } = await api(`/contas/${criada.id}`);
+    expect(conta.dia_fechamento).toBe(15);
+    expect(conta.dia_pagamento).toBe(20);
+
+    await limparConta(criada.id);
+  });
+
+  // ── CA-CONTA19 ──────────────────────────────────────────
+  // Campos de cartão devem ser ignorados (null) em contas de outros tipos
+  test("CA-CONTA19 — dia_fechamento e dia_pagamento são nulos em contas não-cartão", async () => {
+    const tipos = ["CORRENTE", "INVESTIMENTO", "CARTEIRA"];
+    for (const tipo of tipos) {
+      const { data: criada } = await api("/contas", {
+        method: "POST",
+        body: JSON.stringify({ nome: `Jest ${tipo} Sem Dias`, tipo, saldo_inicial: 0 }),
+      });
+      expect(criada).toHaveProperty("id");
+
+      const { data: conta } = await api(`/contas/${criada.id}`);
+      expect(conta.dia_fechamento).toBeNull();
+      expect(conta.dia_pagamento).toBeNull();
+
+      await limparConta(criada.id);
+    }
   });
 
   // ── CA-CONTA14 ──────────────────────────────────────────

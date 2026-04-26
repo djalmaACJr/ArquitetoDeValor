@@ -3,12 +3,13 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId,
-         verificarExistencia, validarCor, camposParaAtualizar } from "../_shared/utils.ts";
+         verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWarn } from "../_shared/logger.ts";
 
 const TIPOS_CONTA = ["CORRENTE","REMUNERACAO","CARTAO","INVESTIMENTO","CARTEIRA"];
 
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return corsPreFlight();
   const auth = autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;
@@ -83,10 +84,26 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   const corInvalida = validarCor(body.cor);
   if (corInvalida) return corInvalida;
 
+  // Validar dia_fechamento e dia_pagamento (só para CARTAO)
+  if (body.tipo === "CARTAO") {
+    if (body.dia_fechamento !== undefined && body.dia_fechamento !== null) {
+      const d = Number(body.dia_fechamento)
+      if (!Number.isInteger(d) || d < 1 || d > 31)
+        return erro("dia_fechamento deve ser um número entre 1 e 31")
+    }
+    if (body.dia_pagamento !== undefined && body.dia_pagamento !== null) {
+      const d = Number(body.dia_pagamento)
+      if (!Number.isInteger(d) || d < 1 || d > 31)
+        return erro("dia_pagamento deve ser um número entre 1 e 31")
+    }
+  }
+
   const { data, error } = await c.from("contas").insert({
     user_id: userId, nome: body.nome, tipo: body.tipo,
     saldo_inicial: body.saldo_inicial ?? 0,
     icone: body.icone ?? null, cor: body.cor ?? null, ativa: true,
+    dia_fechamento: body.tipo === "CARTAO" ? (body.dia_fechamento ?? null) : null,
+    dia_pagamento:  body.tipo === "CARTAO" ? (body.dia_pagamento  ?? null) : null,
   }).select().single();
 
   if (error) {
@@ -100,7 +117,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   
   logSuccess("Conta criada", { id: data.id, nome: data.nome });
   logResponse(201, data);
-  return json(data, 201);
+  return json({ ...data, conta_id: data.id }, 201);
 }
 
 async function editar(c: ReturnType<typeof db>, id: string, body: Record<string, unknown>) {
@@ -122,7 +139,19 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   const corInvalida = validarCor(body.cor);
   if (corInvalida) return corInvalida;
 
-  const campos = camposParaAtualizar(body, ["nome","tipo","saldo_inicial","icone","cor","ativa"]);
+  // Validar dia_fechamento e dia_pagamento se enviados
+  if (body.dia_fechamento !== undefined && body.dia_fechamento !== null) {
+    const d = Number(body.dia_fechamento)
+    if (!Number.isInteger(d) || d < 1 || d > 31)
+      return erro("dia_fechamento deve ser um número entre 1 e 31")
+  }
+  if (body.dia_pagamento !== undefined && body.dia_pagamento !== null) {
+    const d = Number(body.dia_pagamento)
+    if (!Number.isInteger(d) || d < 1 || d > 31)
+      return erro("dia_pagamento deve ser um número entre 1 e 31")
+  }
+
+  const campos = camposParaAtualizar(body, ["nome","tipo","saldo_inicial","icone","cor","ativa","dia_fechamento","dia_pagamento"]);
   const { data, error } = await c.from("contas").update(campos).eq("id", id).select().single();
   
   if (error) {

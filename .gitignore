@@ -11,3 +11,13 @@ dist/
 
 # Dependências
 node_modules/
+
+#arquivos do vistual studio
+.vs/
+
+
+#backups feitos durante teste de deploy
+tests/backup_data/
+
+#reports dos testes automatizados
+FrontEnd/e2e/e2e/report/data

@@ -1,14 +1,32 @@
 // ============================================================
-// Arquiteto de Valor — Módulo compartilhado v4
+// Arquiteto de Valor — Módulo compartilhado v6
 // supabase/functions/_shared/utils.ts
+// Alteração: CORS com origem configurável via ALLOWED_ORIGIN
 // ============================================================
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// ── CORS — origem restrita em produção ────────────────────────────────────────
+// Em produção, defina a variável de ambiente:
+//   supabase secrets set ALLOWED_ORIGIN=https://seu-dominio.com
+// Em desenvolvimento local, deixe em branco para usar "*".
+const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
+
+export const CORS_HEADERS = {
+  "Access-Control-Allow-Origin":  ALLOWED_ORIGIN,
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type",
+};
+
+// ── Resposta para preflight OPTIONS ──────────────────────────
+export function corsPreFlight(): Response {
+  return new Response(null, { status: 200, headers: CORS_HEADERS });
+}
 
 // ── Resposta JSON padronizada ─────────────────────────────────
 export function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
   });
 }
 
@@ -30,8 +48,6 @@ export function db(req: Request): SupabaseClient {
 }
 
 // ── Cliente Supabase com service_role (bypassa RLS) ───────────
-// Usar apenas para operações que precisam de acesso irrestrito
-// (ex: criação de pares de transferência, operações em auth.users)
 export function dbAdmin(): SupabaseClient {
   return createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -58,7 +74,6 @@ export function autenticar(req: Request): string | Response {
 }
 
 // ── Extrai UUID do path ───────────────────────────────────────
-// extrairId(req, "contas") em /functions/v1/contas/uuid → "uuid"
 export function extrairId(req: Request, recurso: string): string | null {
   const partes = new URL(req.url).pathname.split("/").filter(Boolean);
   const idx = partes.indexOf(recurso);
@@ -69,7 +84,6 @@ export function extrairId(req: Request, recurso: string): string | null {
 }
 
 // ── Extrai ação do path ───────────────────────────────────────
-// extrairAcao(req, "transacoes") em /transacoes/uuid/antecipar → "antecipar"
 export function extrairAcao(req: Request, recurso: string): string | null {
   const partes = new URL(req.url).pathname.split("/").filter(Boolean);
   const idx = partes.indexOf(recurso);
@@ -78,15 +92,12 @@ export function extrairAcao(req: Request, recurso: string): string | null {
 }
 
 // ── Verifica existência e posse do registro ───────────────────
-// Retorna Response 404 se não encontrado, null se ok
-// Uso: const naoEncontrado = await verificarExistencia(c, "contas", id, "Conta não encontrada");
-//      if (naoEncontrado) return naoEncontrado;
 export async function verificarExistencia(
   c: SupabaseClient,
   tabela: string,
   id: string,
   mensagem: string,
-  userId?: string  // quando informado, filtra também por user_id
+  userId?: string
 ): Promise<Response | null> {
   let q = c.from(tabela).select("id").eq("id", id);
   if (userId) q = q.eq("user_id", userId);
@@ -95,9 +106,7 @@ export async function verificarExistencia(
   return null;
 }
 
-// ── Valida formato de cor hex — retorna Response ou null ───────
-// Uso: const corInvalida = validarCor(body.cor);
-//      if (corInvalida) return corInvalida;
+// ── Valida formato de cor hex ─────────────────────────────────
 export function validarCor(cor: unknown): Response | null {
   if (cor != null && !/^#[0-9A-Fa-f]{6}$/.test(String(cor)))
     return erro("cor deve estar no formato hex: #RRGGBB");
@@ -105,7 +114,6 @@ export function validarCor(cor: unknown): Response | null {
 }
 
 // ── Valida status de transação/transferência ──────────────────
-// Retorna mensagem de erro ou null se válido
 export function validarStatus(status: unknown): string | null {
   if (status !== undefined && !["PAGO", "PENDENTE", "PROJECAO"].includes(status as string))
     return "status inválido: use PAGO | PENDENTE | PROJECAO";
@@ -113,7 +121,6 @@ export function validarStatus(status: unknown): string | null {
 }
 
 // ── Valida frequência de recorrência ──────────────────────────
-// Retorna mensagem de erro ou null se válido
 export function validarFrequencia(frequencia: unknown): string | null {
   if (!["DIARIA", "SEMANAL", "MENSAL", "ANUAL"].includes(frequencia as string))
     return "frequencia inválida: use DIARIA | SEMANAL | MENSAL | ANUAL";
@@ -121,7 +128,6 @@ export function validarFrequencia(frequencia: unknown): string | null {
 }
 
 // ── Calcula data de parcela com base na frequência e offset ───
-// Uso: calcularDataParcela("2026-04-01", "MENSAL", 2) → "2026-06-01"
 export function calcularDataParcela(base: string, frequencia: string, offset: number): string {
   const d = new Date(base + "T12:00:00Z");
   switch (frequencia) {
@@ -134,7 +140,6 @@ export function calcularDataParcela(base: string, frequencia: string, offset: nu
 }
 
 // ── Monta objeto de atualização com campos presentes no body ───
-// Uso: const campos = camposParaAtualizar(body, ["nome","tipo","cor"]);
 export function camposParaAtualizar(
   body: Record<string, unknown>,
   campos: string[]

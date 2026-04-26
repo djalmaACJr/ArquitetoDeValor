@@ -1,67 +1,53 @@
-// ============================================================
-// Edge Function: transferencias v5
-// Projeto: Arquiteto de Valor
-// CORRIGIDO - Remove campos que não existem no banco 
-// ============================================================
+// supabase/functions/transferencias/index.ts
+// Arquiteto de Valor — Edge Function: transferencias v2
+// Suporta recorrência: total_parcelas + tipo_recorrencia (frequência) + intervalo_recorrencia
 
 import "@supabase/functions-js/edge-runtime.d.ts";
 import {
-  json,
-  erro,
-  db,
-  autenticar,
-  extrairId,
-  validarStatus,
+  json, erro, db, autenticar, extrairId,
+  validarStatus, calcularDataParcela, corsPreFlight
 } from "../_shared/utils.ts";
+import { logError, logSuccess, logRequest, logResponse } from "../_shared/logger.ts";
 
-/** Busca o id da categoria protegida de Transferências do usuário */
-async function idCategoriaTransferencias(
-  c: ReturnType<typeof db>,
-  userId: string
-): Promise<string | null> {
-  const { data } = await c
-    .from("categorias")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("descricao", "Transferências")
-    .eq("protegida", true)
-    .is("id_pai", null)
-    .single();
+const FREQUENCIAS = ["DIARIA","SEMANAL","MENSAL","ANUAL"];
+
+interface Transacao {
+  id: string; user_id: string; conta_id: string; categoria_id: string
+  tipo: 'RECEITA' | 'DESPESA'; valor: number; data: string; descricao: string
+  status: string; id_recorrencia: string | null; id_par_transferencia: string | null
+  nr_parcela: number | null; total_parcelas: number | null; tipo_recorrencia: string | null
+  criado_em: string; atualizado_em: string; [key: string]: unknown
+}
+
+async function idCategoriaTransferencias(c: ReturnType<typeof db>, userId: string): Promise<string | null> {
+  const { data } = await c.from("categorias").select("id")
+    .eq("user_id", userId).eq("descricao", "Transferências").eq("protegida", true).is("id_pai", null).single();
   return data?.id ?? null;
 }
 
-/** Retorna o par de transações (débito + crédito) pelo id_recorrencia */
-async function buscarPar(c: ReturnType<typeof db>, idRecorrencia: string, userId: string) {
-  const { data, error } = await c
-    .from("transacoes")
-    .select("*")
-    .eq("id_recorrencia", idRecorrencia)
-    .eq("user_id", userId)
-    .order("tipo");
-
+async function buscarPar(c: ReturnType<typeof db>, idPar: string, userId: string): Promise<{ debito: Transacao; credito: Transacao } | null> {
+  const { data, error } = await c.from("transacoes").select("*")
+    .eq("id_par_transferencia", idPar).eq("user_id", userId).order("tipo");
   if (error || !data || data.length !== 2) return null;
-  return {
-    debito:  data.find((t) => t.tipo === "DESPESA"),
-    credito: data.find((t) => t.tipo === "RECEITA"),
-  };
+  const debito  = data.find((t: Transacao) => t.tipo === "DESPESA") as Transacao | undefined;
+  const credito = data.find((t: Transacao) => t.tipo === "RECEITA") as Transacao | undefined;
+  if (!debito || !credito) return null;
+  return { debito, credito };
 }
 
-/** Monta o objeto de resposta consolidado do par */
-function montarTransferencia(
-  debito:  Record<string, unknown>,
-  credito: Record<string, unknown>
-) {
+function montarTransferencia(debito: Transacao, credito: Transacao) {
   return {
-    id_par:           debito.id_recorrencia,
+    id_par:           debito.id_par_transferencia,
     conta_origem_id:  debito.conta_id,
     conta_destino_id: credito.conta_id,
     valor:            debito.valor,
     data:             debito.data,
-    descricao:        (debito.descricao as string)?.replace(/^\[Transf\. saída\] ?/, "") || null,
+    descricao:        debito.descricao?.replace(/^\[Transf\. saída\] ?/, "") || null,
     status:           debito.status,
-    recorrente:       (debito.tipo_recorrencia === "PARCELA"),
+    id_recorrencia:   debito.id_recorrencia,
     total_parcelas:   debito.total_parcelas ?? null,
     parcela_atual:    debito.nr_parcela ?? null,
+    tipo_recorrencia: debito.tipo_recorrencia ?? null,
     id_debito:        debito.id,
     id_credito:       credito.id,
     criado_em:        debito.criado_em,
@@ -69,19 +55,10 @@ function montarTransferencia(
   };
 }
 
-async function verificarContaAtiva(
-  c: ReturnType<typeof db>,
-  contaId: string,
-  label: string
-): Promise<Response | null> {
-  const { data, error } = await c
-    .from("contas")
-    .select("id, ativa")
-    .eq("id", contaId)
-    .maybeSingle();
-
+async function verificarContaAtiva(c: ReturnType<typeof db>, contaId: string, label: string): Promise<Response | null> {
+  const { data, error } = await c.from("contas").select("id, ativa").eq("id", contaId).maybeSingle();
   if (error) return erro(`Erro ao verificar ${label.toLowerCase()}: ` + error.message, 500);
-  if (!data)      return erro(`${label} não encontrada`, 404);
+  if (!data)       return erro(`${label} não encontrada`, 404);
   if (!data.ativa) return erro(`${label} está inativa`, 422);
   return null;
 }
@@ -93,46 +70,41 @@ function validarPayload(body: Record<string, unknown>, modoEdicao = false): stri
     if (!body.valor)            return "valor é obrigatório";
     if (!body.data)             return "data é obrigatória";
   }
-
-  if (body.conta_origem_id && body.conta_destino_id &&
-      body.conta_origem_id === body.conta_destino_id)
+  if (body.conta_origem_id && body.conta_destino_id && body.conta_origem_id === body.conta_destino_id)
     return "conta_origem_id e conta_destino_id devem ser diferentes";
-
   if (body.valor !== undefined) {
     const v = Number(body.valor);
     if (isNaN(v) || v <= 0) return "valor deve ser maior que zero";
   }
-
   const erroStatus = validarStatus(body.status);
   if (erroStatus) return erroStatus;
-
   const descricao = body.descricao as string | undefined;
   if (descricao != null && (descricao.length < 2 || descricao.length > 200))
     return "descricao deve ter entre 2 e 200 caracteres";
-
   return null;
 }
 
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return corsPreFlight();
   const auth = autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;
 
-  const id = extrairId(req, "transferencias");
-  const m  = req.method;
-  const c  = db(req);
+  const id  = extrairId(req, "transferencias");
+  const m   = req.method;
+  const c   = db(req);
   const url = new URL(req.url);
 
   try {
-    if (m === "GET" && id)  return await buscarPorId(c, id, userId);
-    if (m === "GET" && !id) return await listar(c, userId, url.searchParams);
-    if (m === "POST" && !id) return await criar(c, await req.json(), userId);
-    if (m === "PUT" && id)  return await editar(c, id, await req.json(), userId);
-    if (m === "DELETE" && id) return await excluir(c, id, userId);
+    if (m === "GET"    && id)  return await buscarPorId(c, id, userId);
+    if (m === "GET"    && !id) return await listar(c, userId, url.searchParams);
+    if (m === "POST"   && !id) return await criar(c, await req.json(), userId);
+    if (m === "PUT"    && id)  return await editar(c, id, await req.json(), userId);
+    if (m === "DELETE" && id)  return await excluir(c, id, userId);
     return erro("Rota não encontrada", 404);
-  } catch (e) { 
-    console.error("Erro no handler:", e);
-    return erro("Erro interno: " + (e as Error).message, 500); 
+  } catch (e) {
+    logError("Handler principal", e);
+    return erro("Erro interno: " + (e as Error).message, 500);
   }
 });
 
@@ -142,195 +114,201 @@ async function buscarPorId(c: ReturnType<typeof db>, idPar: string, userId: stri
   return json(montarTransferencia(par.debito, par.credito));
 }
 
-async function listar(
-  c: ReturnType<typeof db>,
-  userId: string,
-  params: URLSearchParams
-) {
+async function listar(c: ReturnType<typeof db>, userId: string, params: URLSearchParams) {
   const catId = await idCategoriaTransferencias(c, userId);
   if (!catId) return erro("Categoria Transferências não encontrada", 500);
 
-  let query = c
-    .from("transacoes")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("categoria_id", catId)
-    .eq("tipo", "DESPESA")
-    .not("id_recorrencia", "is", null)
-    .order("data", { ascending: false });
+  let query = c.from("transacoes").select("*")
+    .eq("user_id", userId).eq("categoria_id", catId).eq("tipo", "DESPESA")
+    .not("id_par_transferencia", "is", null).order("data", { ascending: false });
 
   const mes = params.get("mes");
   if (mes) {
-    const [ano, mesNum] = mes.split("-");
-    query = query.eq("ano_tx", Number(ano)).eq("mes_tx", Number(mesNum));
+    const [anoStr, mesNumStr] = mes.split("-");
+    const ano = parseInt(anoStr, 10), mesNum = parseInt(mesNumStr, 10);
+    if (!isNaN(ano) && !isNaN(mesNum)) query = query.eq("ano_tx", ano).eq("mes_tx", mesNum);
   }
   const statusParam = params.get("status");
   if (statusParam) query = query.eq("status", statusParam);
 
   const { data: debitos, error: err } = await query;
   if (err) return erro(err.message, 500);
+  if (!debitos || debitos.length === 0) return json([]);
 
-  const transferencias = await Promise.all(
-    (debitos ?? []).map(async (debito) => {
-      const { data: credito } = await c
-        .from("transacoes")
-        .select("*")
-        .eq("id_recorrencia", debito.id_recorrencia)
-        .eq("tipo", "RECEITA")
-        .single();
-      if (!credito) return null;
-      return montarTransferencia(debito, credito);
-    })
-  );
+  const idsPar = debitos.map((d: Transacao) => d.id_par_transferencia).filter(Boolean);
+  const { data: creditos, error: errCred } = await c.from("transacoes").select("*")
+    .in("id_par_transferencia", idsPar).eq("tipo", "RECEITA");
+  if (errCred) return erro(errCred.message, 500);
 
-  return json(transferencias.filter(Boolean));
+  const creditoMap = new Map<string, Transacao>();
+  (creditos ?? []).forEach((cr: Transacao) => {
+    if (cr.id_par_transferencia) creditoMap.set(cr.id_par_transferencia, cr);
+  });
+
+  return json(debitos.map((debito: Transacao) => {
+    const credito = creditoMap.get(debito.id_par_transferencia!);
+    if (!credito) return null;
+    return montarTransferencia(debito, credito);
+  }).filter(Boolean));
 }
 
-async function criar(
-  c: ReturnType<typeof db>,
-  body: Record<string, unknown>,
-  userId: string
-) {
+async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string) {
+  logRequest("POST", "/transferencias", body);
+
   const erroVal = validarPayload(body);
   if (erroVal) return erro(erroVal, 422);
 
-  const semOrigem  = await verificarContaAtiva(c, body.conta_origem_id  as string, "Conta de origem");
-  const semDestino = await verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino");
+  const [semOrigem, semDestino] = await Promise.all([
+    verificarContaAtiva(c, body.conta_origem_id as string, "Conta de origem"),
+    verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino"),
+  ]);
   if (semOrigem)  return semOrigem;
   if (semDestino) return semDestino;
 
   const catId = await idCategoriaTransferencias(c, userId);
   if (!catId) return erro("Categoria Transferências não encontrada", 500);
 
-  const status = (body.status as string) ?? "PAGO";
-  const valor  = Number(body.valor);
-  const desc   = (body.descricao as string) ?? "";
-  const idGrupoPar = crypto.randomUUID();
+  const statusOriginal = String(body.status ?? "PAGO");
+  const dataBase       = String(body.data);
+  const hoje           = new Date().toISOString().split("T")[0];
+  const valor          = Number(body.valor);
+  const desc           = String(body.descricao ?? "");
 
-  // 🔥 CORRIGIDO: Removido 'recorrente' e 'frequencia' - NÃO EXISTEM NO BANCO
-  const { data: debito, error: e1 } = await c
-    .from("transacoes")
-    .insert({
-      user_id: userId, 
-      conta_id: body.conta_origem_id, 
-      categoria_id: catId,
-      tipo: "DESPESA", 
-      valor, 
-      data: body.data,
-      descricao: `[Transf. saída] ${desc}`.trim(), 
-      status,
-      id_recorrencia: idGrupoPar,
-      nr_parcela: 1,
-      total_parcelas: 1,
-      tipo_recorrencia: null,
-    })
-    .select().single();
+  // Validação: PROJECAO só para datas futuras
+  if (statusOriginal === "PROJECAO" && dataBase <= hoje)
+    return erro("RV-008: status PROJECAO só é permitido para datas futuras", 422);
 
-  if (e1 || !debito) {
-    console.error("Erro débito:", e1);
-    return erro("Erro ao criar lançamento de saída: " + (e1?.message || "erro desconhecido"), 500);
+  const totalParcelas = body.total_parcelas ? parseInt(String(body.total_parcelas)) : 1;
+  const frequencia    = body.tipo_recorrencia ? String(body.tipo_recorrencia) : null;
+  const intervalo     = body.intervalo_recorrencia ? parseInt(String(body.intervalo_recorrencia)) : 1;
+  const isRecorrente  = totalParcelas > 1 && frequencia && FREQUENCIAS.includes(frequencia);
+
+  // ── Transferência simples ───────────────────────────────────
+  if (!isRecorrente) {
+    const idPar = crypto.randomUUID();
+    const base = {
+      user_id: userId, categoria_id: catId, valor, data: dataBase,
+      status: statusOriginal, id_par_transferencia: idPar,
+      id_recorrencia: null, nr_parcela: null, total_parcelas: null, tipo_recorrencia: null,
+    };
+    const { data: debito, error: e1 } = await c.from("transacoes").insert({
+      ...base, conta_id: body.conta_origem_id, tipo: "DESPESA",
+      descricao: `[Transf. saída] ${desc}`.trim(),
+    }).select().single();
+    if (e1 || !debito) { logError("Criar transferência — débito", e1); return erro("Erro ao criar lançamento de saída", 500); }
+
+    const { data: credito, error: e2 } = await c.from("transacoes").insert({
+      ...base, conta_id: body.conta_destino_id, tipo: "RECEITA",
+      descricao: `[Transf. entrada] ${desc}`.trim(),
+    }).select().single();
+    if (e2 || !credito) {
+      await c.from("transacoes").delete().eq("id", debito.id);
+      logError("Criar transferência — crédito", e2);
+      return erro("Erro ao criar lançamento de entrada", 500);
+    }
+    return json(montarTransferencia(debito as Transacao, credito as Transacao), 201);
   }
 
-  const { data: credito, error: e2 } = await c
-    .from("transacoes")
-    .insert({
-      user_id: userId, 
-      conta_id: body.conta_destino_id, 
-      categoria_id: catId,
-      tipo: "RECEITA", 
-      valor, 
-      data: body.data,
-      descricao: `[Transf. entrada] ${desc}`.trim(), 
-      status,
-      id_recorrencia: idGrupoPar,
-      nr_parcela: 1,
-      total_parcelas: 1,
-      tipo_recorrencia: null,
-    })
-    .select().single();
+  // ── Transferência recorrente — criar N pares ────────────────
+  const idRecorrencia  = crypto.randomUUID();
+  const tipoRecBanco   = statusOriginal === "PROJECAO" ? "PROJECAO" : "PARCELA";
+  const resultado: ReturnType<typeof montarTransferencia>[] = [];
 
-  if (e2 || !credito) {
-    await c.from("transacoes").delete().eq("id", debito.id);
-    console.error("Erro crédito:", e2);
-    return erro("Erro ao criar lançamento de entrada: " + (e2?.message || "erro desconhecido"), 500);
+  for (let i = 0; i < totalParcelas; i++) {
+    const dataParcela = calcularDataParcela(dataBase, frequencia!, i * intervalo);
+    let statusParcela: string;
+    if (dataParcela <= hoje)             statusParcela = "PAGO";
+    else if (statusOriginal === "PROJECAO") statusParcela = "PROJECAO";
+    else                                 statusParcela = "PENDENTE";
+
+    const idPar = crypto.randomUUID();
+    const base = {
+      user_id: userId, categoria_id: catId, valor, data: dataParcela,
+      status: statusParcela, id_par_transferencia: idPar,
+      id_recorrencia: idRecorrencia, nr_parcela: i + 1,
+      total_parcelas: totalParcelas, tipo_recorrencia: tipoRecBanco,
+    };
+
+    const { data: debito, error: e1 } = await c.from("transacoes").insert({
+      ...base, conta_id: body.conta_origem_id, tipo: "DESPESA",
+      descricao: `[Transf. saída] ${desc}`.trim(),
+    }).select().single();
+    if (e1 || !debito) { logError(`Criar par ${i+1} — débito`, e1); return erro(`Erro ao criar parcela ${i+1}`, 500); }
+
+    const { data: credito, error: e2 } = await c.from("transacoes").insert({
+      ...base, conta_id: body.conta_destino_id, tipo: "RECEITA",
+      descricao: `[Transf. entrada] ${desc}`.trim(),
+    }).select().single();
+    if (e2 || !credito) {
+      await c.from("transacoes").delete().eq("id", debito.id);
+      logError(`Criar par ${i+1} — crédito`, e2);
+      return erro(`Erro ao criar parcela ${i+1}`, 500);
+    }
+    resultado.push(montarTransferencia(debito as Transacao, credito as Transacao));
   }
 
-  return json(montarTransferencia(debito, credito), 201);
+  logSuccess("Transferência recorrente criada", { id_recorrencia: idRecorrencia, parcelas: totalParcelas });
+  return json({ id_recorrencia: idRecorrencia, total: resultado.length, parcelas: resultado }, 201);
 }
 
-async function editar(
-  c: ReturnType<typeof db>,
-  idPar: string,
-  body: Record<string, unknown>,
-  userId: string
-) {
+async function editar(c: ReturnType<typeof db>, idPar: string, body: Record<string, unknown>, userId: string) {
   const erroVal = validarPayload(body, true);
   if (erroVal) return erro(erroVal, 422);
 
   const par = await buscarPar(c, idPar, userId);
   if (!par) return erro("Transferência não encontrada", 404);
 
-  if (body.conta_origem_id && body.conta_origem_id !== par.debito.conta_id) {
-    const r = await verificarContaAtiva(c, body.conta_origem_id as string, "Conta de origem");
-    if (r) return r;
-  }
-  if (body.conta_destino_id && body.conta_destino_id !== par.credito.conta_id) {
-    const r = await verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino");
-    if (r) return r;
-  }
+  const verificacoes = await Promise.all([
+    body.conta_origem_id && body.conta_origem_id !== par.debito.conta_id
+      ? verificarContaAtiva(c, body.conta_origem_id as string, "Conta de origem") : Promise.resolve(null),
+    body.conta_destino_id && body.conta_destino_id !== par.credito.conta_id
+      ? verificarContaAtiva(c, body.conta_destino_id as string, "Conta de destino") : Promise.resolve(null),
+  ]);
+  if (verificacoes[0]) return verificacoes[0];
+  if (verificacoes[1]) return verificacoes[1];
 
   const novaOrigem  = body.conta_origem_id  ?? par.debito.conta_id;
   const novaDestino = body.conta_destino_id ?? par.credito.conta_id;
-  if (novaOrigem === novaDestino)
-    return erro("conta_origem_id e conta_destino_id devem ser diferentes", 422);
+  if (novaOrigem === novaDestino) return erro("conta_origem_id e conta_destino_id devem ser diferentes", 422);
+
+  // Validação PROJECAO só para datas futuras
+  const hoje = new Date().toISOString().split("T")[0];
+  const dataEfetiva = String(body.data ?? par.debito.data);
+  if (body.status === "PROJECAO" && dataEfetiva <= hoje)
+    return erro("RV-008: status PROJECAO só é permitido para datas futuras", 422);
 
   const desc = body.descricao !== undefined ? (body.descricao as string) : null;
-  
   const camposComuns: Record<string, unknown> = {};
   if (body.valor  !== undefined) camposComuns.valor  = Number(body.valor);
   if (body.data   !== undefined) camposComuns.data   = body.data;
   if (body.status !== undefined) camposComuns.status = body.status;
 
-  // Atualizar débito
   const { error: eu1 } = await c.from("transacoes").update({
-    ...camposComuns,
-    conta_id: novaOrigem,
+    ...camposComuns, conta_id: novaOrigem,
     ...(desc !== null ? { descricao: `[Transf. saída] ${desc}`.trim() } : {}),
-  }).eq("id", par.debito.id as string);
-  
+  }).eq("id", par.debito.id);
   if (eu1) return erro("Erro ao atualizar débito: " + eu1.message, 500);
 
-  // Atualizar crédito
   const { error: eu2 } = await c.from("transacoes").update({
-    ...camposComuns,
-    conta_id: novaDestino,
+    ...camposComuns, conta_id: novaDestino,
     ...(desc !== null ? { descricao: `[Transf. entrada] ${desc}`.trim() } : {}),
-  }).eq("id", par.credito.id as string);
-  
+  }).eq("id", par.credito.id);
   if (eu2) return erro("Erro ao atualizar crédito: " + eu2.message, 500);
 
   const parAtualizado = await buscarPar(c, idPar, userId);
   if (!parAtualizado) return erro("Erro ao recuperar transferência atualizada", 500);
-
   return json(montarTransferencia(parAtualizado.debito, parAtualizado.credito));
 }
 
-async function excluir(
-  c: ReturnType<typeof db>,
-  idPar: string,
-  userId: string
-) {
+async function excluir(c: ReturnType<typeof db>, idPar: string, userId: string) {
   const par = await buscarPar(c, idPar, userId);
   if (!par) return erro("Transferência não encontrada", 404);
 
   const { error: eu1 } = await c.from("transacoes")
-    .update({ id_recorrencia: null })
-    .in("id", [par.debito.id as string, par.credito.id as string]);
+    .update({ id_par_transferencia: null }).in("id", [par.debito.id, par.credito.id]);
   if (eu1) return erro("Erro ao preparar exclusão: " + eu1.message, 500);
 
-  const { error: eu2 } = await c.from("transacoes")
-    .delete()
-    .in("id", [par.debito.id as string, par.credito.id as string]);
+  const { error: eu2 } = await c.from("transacoes").delete().in("id", [par.debito.id, par.credito.id]);
   if (eu2) return erro("Erro ao excluir: " + eu2.message, 500);
 
   return json({ mensagem: "Transferência excluída com sucesso" });

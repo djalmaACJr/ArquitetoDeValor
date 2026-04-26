@@ -3,10 +3,11 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId,
-         verificarExistencia, validarCor, camposParaAtualizar } from "../_shared/utils.ts";
+         verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWarn } from "../_shared/logger.ts";
 
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return corsPreFlight();
   const auth = autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;

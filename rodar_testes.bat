@@ -1,156 +1,138 @@
 @echo off
+chcp 65001 >nul
 setlocal enabledelayedexpansion
-
 cd /d C:\Pessoal\ArquitetoDeValor
 
+:MENU
 echo.
 echo ================================================
 echo   ARQUITETO DE VALOR - TESTES AUTOMATIZADOS
 echo ================================================
-echo.
-echo Escolha o modulo a testar:
 echo.
 echo   1. Todos os modulos
 echo   2. Contas
 echo   3. Categorias
 echo   4. Transacoes
 echo   5. Transferencias
-echo   6. Configurar nivel de logs
-echo   7. Sair
+echo   6. Limpar (com backup e restore)
+echo   7. Backup manual
+echo   8. Restore manual
+echo   9. Configurar nivel de logs
+echo   0. Sair
 echo.
-set /p opcao="Digite a opcao (1-7): "
+set /p OPC="Digite a opcao (0-9): "
 
-if "%opcao%"=="1" goto TODOS
-if "%opcao%"=="2" goto CONTAS
-if "%opcao%"=="3" goto CATEGORIAS
-if "%opcao%"=="4" goto TRANSACOES
-if "%opcao%"=="5" goto TRANSFERENCIAS
-if "%opcao%"=="6" goto CONFIG_LOG
-if "%opcao%"=="7" goto FIM
+if "%OPC%"=="0" goto FIM
+if "%OPC%"=="1" goto OPC1
+if "%OPC%"=="2" goto OPC2
+if "%OPC%"=="3" goto OPC3
+if "%OPC%"=="4" goto OPC4
+if "%OPC%"=="5" goto OPC5
+if "%OPC%"=="6" goto OPC6
+if "%OPC%"=="7" goto OPC7
+if "%OPC%"=="8" goto OPC8
+if "%OPC%"=="9" goto OPC9
 echo Opcao invalida.
-goto FIM
+goto MENU
 
-:CONFIG_LOG
-echo.
-echo ================================================
-echo   Configurar Nivel de Logs nas Edge Functions
-echo ================================================
-echo.
-echo Niveis disponiveis:
-echo   1 - DEBUG (detalhado - desenvolvimento)
-echo   2 - INFO (importante - homologacao)
-echo   3 - ERROR (apenas erros - producao)
-echo   4 - NONE (sem logs)
-echo.
-set /p nivel_log="Digite o nivel (1-4): "
+:OPC1
+call :RUNTODOS
+goto PAUSA
 
-if "%nivel_log%"=="1" set LOG_LEVEL=debug
-if "%nivel_log%"=="2" set LOG_LEVEL=info
-if "%nivel_log%"=="3" set LOG_LEVEL=error
-if "%nivel_log%"=="4" set LOG_LEVEL=none
+:OPC2
+set TESTFILE=tests/01_contas.test.ts
+call :RUNMOD
+goto PAUSA
 
+:OPC3
+set TESTFILE=tests/02_categorias.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC4
+set TESTFILE=tests/03_transacoes.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC5
+set TESTFILE=tests/04_transferencias.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC6
 echo.
-echo Aplicando configuracao no Supabase...
-supabase secrets set --project-ref ftpelncgrakpphytfrfo LOG_LEVEL=%LOG_LEVEL% ENVIRONMENT=test
+echo ATENCAO: Este teste apagara todos os dados.
+echo Um backup sera feito antes e restore depois.
 echo.
-echo Configuracao aplicada! Aguardando propagacao (5 segundos)...
+set /p CONF="Tem certeza? (S/N): "
+if /i "%CONF%"=="S" goto CONF6
+goto MENU
+:CONF6
+call backup.bat
+if errorlevel 1 goto PAUSA
+call limpar_test.bat
+call restore.bat
+goto PAUSA
+
+:OPC7
+echo.
+echo Fazendo backup manual...
+call backup.bat
+goto PAUSA
+
+:OPC8
+echo.
+echo ATENCAO: Vai recriar dados a partir do ultimo backup.
+set /p CONF="Tem certeza? (S/N): "
+if /i "%CONF%"=="S" goto CONF8
+goto MENU
+:CONF8
+call restore.bat
+goto PAUSA
+
+:OPC9
+echo.
+echo   1 - DEBUG    2 - INFO    3 - ERROR    4 - NONE
+set /p NL="Nivel (1-4): "
+if "%NL%"=="1" set LL=debug
+if "%NL%"=="2" set LL=info
+if "%NL%"=="3" set LL=error
+if "%NL%"=="4" set LL=none
+echo Aplicando...
+supabase secrets set --project-ref ftpelncgrakpphytfrfo LOG_LEVEL=%LL% ENVIRONMENT=test
 timeout /t 5 /nobreak >nul
-echo.
-echo Logs configurados com sucesso!
+echo Configurado: %LL%
+goto PAUSA
+
+:RUNTODOS
+if not exist test-results mkdir test-results
+call :GENTS
+set ARQ=test-results\resultado_%TS%.txt
+echo Salvando em: %ARQ%
+npx jest --runInBand --verbose 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQ%'"
+goto :eof
+
+:RUNMOD
+if not exist test-results mkdir test-results
+call :GENTS
+set ARQ=test-results\resultado_%TS%.txt
+echo Salvando em: %ARQ%
+npx jest %TESTFILE% --runInBand --verbose 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQ%'"
+goto :eof
+
+:GENTS
+for /f "tokens=1-3 delims=/" %%a in ("%date%") do set TS=%%c-%%b-%%a
+for /f "tokens=1-2 delims=:." %%a in ("%time%") do set TS=%TS%_%%a-%%b
+set TS=%TS: =0%
+goto :eof
+
+:PAUSA
 echo.
 pause
-goto MENU_PRINCIPAL
-
-:TODOS
-set MODULO=
-set LABEL=Todos os modulos
-goto RODAR
-
-:CONTAS
-set MODULO=tests/contas.test.ts
-set LABEL=Modulo: Contas
-goto RODAR
-
-:CATEGORIAS
-set MODULO=tests/categorias.test.ts
-set LABEL=Modulo: Categorias
-goto RODAR
-
-:TRANSACOES
-set MODULO=tests/transacoes.test.ts
-set LABEL=Modulo: Transacoes
-goto RODAR
-
-:TRANSFERENCIAS
-set MODULO=tests/transferencias.test.ts
-set LABEL=Modulo: Transferencias
-goto RODAR
-
-:MENU_PRINCIPAL
-echo.
-echo ================================================
-echo   ARQUITETO DE VALOR - TESTES AUTOMATIZADOS
-echo ================================================
-echo.
-echo Escolha o modulo a testar:
-echo.
-echo   1. Todos os modulos
-echo   2. Contas
-echo   3. Categorias
-echo   4. Transacoes
-echo   5. Transferencias
-echo   6. Configurar nivel de logs
-echo   7. Sair
-echo.
-set /p opcao="Digite a opcao (1-7): "
-
-if "%opcao%"=="1" goto TODOS
-if "%opcao%"=="2" goto CONTAS
-if "%opcao%"=="3" goto CATEGORIAS
-if "%opcao%"=="4" goto TRANSACOES
-if "%opcao%"=="5" goto TRANSFERENCIAS
-if "%opcao%"=="6" goto CONFIG_LOG
-if "%opcao%"=="7" goto FIM
-echo Opcao invalida.
-goto MENU_PRINCIPAL
-
-:RODAR
-if not exist test-results mkdir test-results
-
-for /f "tokens=1-3 delims=/" %%a in ("%date%") do (
-  set DIA=%%a
-  set MES=%%b
-  set ANO=%%c
-)
-for /f "tokens=1-2 delims=:." %%a in ("%time%") do (
-  set HH=%%a
-  set MM=%%b
-)
-set HH=%HH: =0%
-set ARQUIVO=test-results\resultado_%ANO%-%MES%-%DIA%_%HH%-%MM%.txt
-
-echo.
-echo ================================================
-echo   Executando: %LABEL%
-echo ================================================
-echo.
-echo Resultado sera salvo em: %ARQUIVO%
-echo.
-
-if "%MODULO%"=="" (
-  npx jest --runInBand --verbose 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQUIVO%'"
-) else (
-  npx jest %MODULO% --runInBand --verbose 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQUIVO%'"
-)
-
-echo.
-echo ================================================
-echo   Resultado salvo em: %ARQUIVO%
-echo ================================================
-echo.
+goto MENU
 
 :FIM
 echo.
-echo Pressione qualquer tecla para sair...
+echo Ate logo!
 pause >nul
 endlocal

@@ -1,0 +1,53 @@
+name: Frontend — Qualidade de Código
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'FrontEnd/**'
+      - '.github/workflows/frontend-quality.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'FrontEnd/**'
+      - '.github/workflows/frontend-quality.yml'
+
+jobs:
+  quality:
+    name: ESLint + TypeScript + Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: FrontEnd
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: FrontEnd/package-lock.json
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: ESLint — Análise estática
+        run: npm run lint
+
+      - name: TypeScript + Build — Verificação de tipos e compilação
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Salvar artefato do build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-${{ github.run_number }}
+          path: FrontEnd/dist/
+          if-no-files-found: ignore
+          retention-days: 7
