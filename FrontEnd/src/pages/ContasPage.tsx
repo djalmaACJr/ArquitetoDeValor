@@ -10,6 +10,17 @@ import {
 } from '../components/ui/shared'
 import type { Conta, TipoConta } from '../types'
 
+interface PayloadEditarConta {
+  nome: string; tipo: TipoConta
+  icone?: string; cor?: string; ativa: boolean
+  dia_fechamento?: number | null; dia_pagamento?: number | null
+}
+interface PayloadNovaConta {
+  nome: string; tipo: TipoConta; saldo_inicial: number
+  icone?: string; cor?: string
+  dia_fechamento?: number | null; dia_pagamento?: number | null
+}
+
 const TIPOS: { value: TipoConta; label: string }[] = [
   { value: 'CORRENTE',     label: 'Corrente'    },
   { value: 'REMUNERACAO',  label: 'Remunerada'  },
@@ -134,7 +145,7 @@ export default function ContasPage() {
     if (!form.nome.trim()) { setErro('Nome é obrigatório.'); return }
     setSalvando(true); setErro(null)
     if (contaEditar) {
-      const payload: any = {
+      const payload: PayloadEditarConta = {
         nome: form.nome.trim(), tipo: form.tipo,
         icone: form.icone || undefined, cor: form.cor || undefined, ativa: form.ativa,
       }
@@ -146,7 +157,7 @@ export default function ContasPage() {
       setSalvando(false)
       if (ok) { fechar(); toast('Conta atualizada!') } else setErro(e ?? 'Erro ao salvar.')
     } else {
-      const payloadNovo: any = {
+      const payloadNovo: PayloadNovaConta = {
         nome: form.nome.trim(), tipo: form.tipo,
         saldo_inicial: parseFloat(form.saldo_inicial) || 0,
         icone: form.icone || undefined, cor: form.cor || undefined,

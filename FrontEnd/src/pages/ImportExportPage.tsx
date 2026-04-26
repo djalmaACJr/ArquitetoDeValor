@@ -22,6 +22,55 @@ interface CategoriaRaw {
   cor?: string | null
 }
 
+interface TransacaoRaw {
+  id?: string
+  id_par?: string
+  id_par_transferencia?: string
+  data: string
+  descricao?: string
+  valor: number
+  tipo: string
+  status?: string
+  conta_id?: string
+  categoria_id?: string
+  [key: string]: unknown
+}
+
+interface ContaBackup {
+  nome: string
+  tipo: string
+  saldo_inicial?: number
+  icone?: string
+  cor?: string
+  [key: string]: unknown
+}
+
+interface CategoriaBackup {
+  descricao: string
+  protegida?: boolean
+  id_pai?: string | null
+  icone?: string
+  cor?: string
+  [key: string]: unknown
+}
+
+type XlsxRow = Record<string, unknown>
+
+interface BackupPayload {
+  gerado_em: string
+  contas: ContaBackup[]
+  categorias: CategoriaBackup[]
+  transacoes: TransacaoRaw[]
+  transferencias?: TransacaoRaw[]
+}
+
+interface LinhaExportCategoria {
+  Categoria: string
+  Subcategoria: string
+  Ícone: string
+  Cor: string
+}
+
 interface LinhaImport {
   idx: number
   data: string
@@ -76,7 +125,7 @@ function parseValor(s: string): number {
 
 // ── Componentes auxiliares ──────────────────────────────────────
 function Section({ titulo, subtitulo, icon: Icon, cor, children, defaultOpen = true }: {
-  titulo: string; subtitulo: string; icon: any; cor: string
+  titulo: string; subtitulo: string; icon: React.ElementType; cor: string
   children: React.ReactNode; defaultOpen?: boolean
 }) {
   const [aberto, setAberto] = useState(defaultOpen)
@@ -183,8 +232,8 @@ function SecaoLimpeza() {
       } else {
         const res = await apiMutate('/limpar', 'DELETE')
         if (res.ok) {
-          const dados = res.dados as any
-          const logs = (dados?.logs ?? dados) as { entidade: string; excluidos: number }[]
+          const dados = res.dados as { logs?: { entidade: string; excluidos: number }[] } | { entidade: string; excluidos: number }[]
+          const logs = (dados && 'logs' in dados ? dados.logs : dados) as { entidade: string; excluidos: number }[]
           if (Array.isArray(logs)) {
             logs.forEach(l => addLog('ok', `${l.entidade}: ${l.excluidos} excluídos`))
           } else {
@@ -312,7 +361,7 @@ function SecaoExport() {
     setLoading(true)
     try {
       // Importar SheetJS dinamicamente
-      const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs' as any)
+      const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
       const wb = XLSX.utils.book_new()
 
       // Aba: Contas
@@ -334,7 +383,7 @@ function SecaoExport() {
       // Aba: Categorias (com hierarquia)
       if (exportarCategorias) {
         const pais = categorias.filter(c => !c.id_pai)
-        const linhas: any[] = []
+        const linhas: LinhaExportCategoria[] = []
         pais.forEach(p => {
           linhas.push({
             Categoria: p.descricao,
@@ -373,11 +422,11 @@ function SecaoExport() {
         const resArr = await Promise.all(
           meses.map(mes => apiFetch(`/transacoes?mes=${mes}&per_page=1000&saldo=true`))
         )
-        const txs = resArr.flatMap(r => extrairLista<any>(r.dados))
+        const txs = resArr.flatMap(r => extrairLista<TransacaoRaw>(r.dados))
         const contaMap = Object.fromEntries(contas.map(c => [c.conta_id, c.nome]))
         const linhas = txs
-          .filter((t: any) => !t.id_par_transferencia && !t.descricao?.startsWith('[Transf.'))
-          .map((t: any) => {
+          .filter((t: TransacaoRaw) => !t.id_par_transferencia && !t.descricao?.startsWith('[Transf.'))
+          .map((t: TransacaoRaw) => {
             const [a, m, d] = t.data.split('-')
             return {
               Data: `${d}/${m}/${a}`,
@@ -501,8 +550,8 @@ interface CategoriaImport {
 type ModoImport = 'transacoes' | 'contas' | 'categorias'
 
 function SecaoImport() {
-  const { contas, recarregar: recarregarContas } = useContas() as any
-  const { categorias, recarregar: recarregarCats } = useCategorias() as any
+  const { contas } = useContas()
+  const { categorias } = useCategorias()
 
   const inputRef = useRef<HTMLInputElement>(null)
   const [modo, setModo] = useState<ModoImport>('transacoes')
@@ -535,12 +584,12 @@ function SecaoImport() {
   // ── Parse do arquivo ───────────────────────────────────────────
   const processarArquivo = async (file: File) => {
     try {
-      const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs' as any)
+      const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
       const buf  = await file.arrayBuffer()
       const wb   = XLSX.read(buf, { type: 'array', cellDates: true })
 
-      const normalizar = (obj: any): any => {
-        const n: any = {}
+      const normalizar = (obj: XlsxRow): XlsxRow => {
+        const n: XlsxRow = {}
         Object.keys(obj).forEach(k => { n[k.toLowerCase().trim()] = obj[k] })
         return n
       }
@@ -549,7 +598,7 @@ function SecaoImport() {
       if (modo === 'contas') {
         const abaNome = wb.SheetNames.find((n: string) => n.toLowerCase() === 'contas') ?? wb.SheetNames[0]
         const ws   = wb.Sheets[abaNome]
-        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as any[]
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as XlsxRow[]
         const tiposValidos = ['CORRENTE','REMUNERACAO','CARTAO','INVESTIMENTO','CARTEIRA']
         const contasExist  = new Set(contas.map((x: Conta) => normalizarNome(x.nome)))
 
@@ -581,7 +630,7 @@ function SecaoImport() {
       if (modo === 'categorias') {
         const abaNome = wb.SheetNames.find((n: string) => n.toLowerCase() === 'categorias') ?? wb.SheetNames[0]
         const ws   = wb.Sheets[abaNome]
-        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as any[]
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as XlsxRow[]
         const catsExist = new Set(categorias.map((x: CategoriaRaw) => normalizarNome(x.descricao)))
 
         const parsed: CategoriaImport[] = rows.map((row, idx) => {
@@ -615,7 +664,7 @@ function SecaoImport() {
       ) ?? wb.SheetNames[0]
 
       const ws   = wb.Sheets[abaNome]
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as any[]
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as XlsxRow[]
 
       console.log('[Import] Abas disponíveis:', wb.SheetNames)
       console.log('[Import] Aba selecionada:', abaNome)
@@ -691,7 +740,7 @@ function SecaoImport() {
 
       // ── Verificar duplicatas no banco ───────────────────────────
       setCarregandoDedup(true)
-      let txExistentes: any[] = []
+      let txExistentes: TransacaoRaw[] = []
       try {
         const { apiFetch: apiFetchDyn, extrairLista: extrairListaDyn } = await import('../lib/api')
         // Buscar transações dos meses do arquivo para comparar
@@ -1053,7 +1102,7 @@ function SecaoImport() {
             {/* Botão baixar modelo */}
             <button
               onClick={async () => {
-                const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs' as any)
+                const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
                 const wb = XLSX.utils.book_new()
                 if (modo === 'transacoes') {
                   const ws = XLSX.utils.json_to_sheet([
@@ -1584,11 +1633,11 @@ function SecaoBackup() {
       const resArr = await Promise.all(
         meses.map(mes => apiFetch(`/transacoes?mes=${mes}&per_page=1000`))
       )
-      const todasTx = resArr.flatMap(r => extrairLista<any>(r.dados))
+      const todasTx = resArr.flatMap(r => extrairLista<TransacaoRaw>(r.dados))
       // Deduplica por id (meses podem ter sobreposição nos limites)
-      const txMap = new Map(todasTx.map((t: any) => [t.id, t]))
+      const txMap = new Map(todasTx.map((t: TransacaoRaw) => [t.id, t]))
       const transacoes = [...txMap.values()].filter(
-        (t: any) => !t.id_par_transferencia && !t.descricao?.startsWith('[Transf.')
+        (t: TransacaoRaw) => !t.id_par_transferencia && !t.descricao?.startsWith('[Transf.')
       )
       addLog('ok', `Transações: ${transacoes.length} registros`)
 
@@ -1597,9 +1646,9 @@ function SecaoBackup() {
       const resTrfArr = await Promise.all(
         meses.map(mes => apiFetch(`/transferencias?mes=${mes}`))
       )
-      const todasTrf = resTrfArr.flatMap(r => extrairLista<any>(r))
+      const todasTrf = resTrfArr.flatMap(r => extrairLista<TransacaoRaw>(r))
       // Deduplica por id_par
-      const trfMap = new Map(todasTrf.map((t: any) => [t.id_par, t]))
+      const trfMap = new Map(todasTrf.map((t: TransacaoRaw) => [t.id_par, t]))
       const transferencias = [...trfMap.values()]
       addLog('ok', `Transferências: ${transferencias.length} registros`)
 
@@ -1677,12 +1726,12 @@ function SecaoBackup() {
 // SEÇÃO 5 — RESTORE COMPLETO
 // ══════════════════════════════════════════════════════════════════
 function SecaoRestore() {
-  const { contas, recarregar: recarregarContas } = useContas() as any
+  const { contas } = useContas()
   const { categorias } = useCategorias()
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [etapa, setEtapa] = useState<'idle' | 'confirmando' | 'restaurando' | 'concluido'>('idle')
-  const [payload, setPayload] = useState<any>(null)
+  const [payload, setPayload] = useState<BackupPayload | null>(null)
   const [progresso, setProgresso] = useState(0)
   const [progressoLabel, setProgressoLabel] = useState('')
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro' | 'aviso'; msg: string }[]>([])
@@ -1737,7 +1786,7 @@ function SecaoRestore() {
     try {
       const { contas: cntBackup, categorias: catBackup, transacoes: txBackup, transferencias: trfBackup } = payload
 
-      const totalPassos = cntBackup.length + catBackup.filter((c: any) => !c.protegida).length + txBackup.length + (trfBackup?.length ?? 0)
+      const totalPassos = cntBackup.length + catBackup.filter((c: CategoriaBackup) => !c.protegida).length + txBackup.length + (trfBackup?.length ?? 0)
       let passo = 0
       const avanco = () => { passo++; setProgresso(Math.round((passo / totalPassos) * 100)) }
 
@@ -1746,7 +1795,7 @@ function SecaoRestore() {
       let okCnt = 0
       for (const c of cntBackup) {
         // Verificar se já existe
-        const existente = contas.find((x: any) => normNome(x.nome) === normNome(c.nome) && x.tipo === c.tipo)
+        const existente = contas.find((x: ContaBackup) => normNome(String(x.nome)) === normNome(c.nome) && x.tipo === c.tipo)
         if (existente) {
           mapaContas[c.conta_id] = existente.conta_id
         } else {
@@ -1760,8 +1809,8 @@ function SecaoRestore() {
             okCnt++
           } else if (r.erro?.includes('409') || r.erro?.includes('duplicat')) {
             const lista = await apiFetch('/contas')
-            const ex = extrairLista<any>(lista.dados).find(
-              (x: any) => normNome(x.nome) === normNome(c.nome) && x.tipo === c.tipo
+            const ex = extrairLista<ContaBackup>(lista.dados).find(
+              (x: ContaBackup) => normNome(String(x.nome)) === normNome(c.nome) && x.tipo === c.tipo
             )
             if (ex) mapaContas[c.conta_id] = ex.conta_id
           } else {
@@ -1775,16 +1824,16 @@ function SecaoRestore() {
       // ── 2. Categorias (protegidas: só mapear) ───────────────────
       setProgressoLabel('Recriando categorias...')
       // Mapear protegidas
-      for (const c of catBackup.filter((x: any) => x.protegida)) {
-        const ex = categorias.find((x: any) => normNome(x.descricao) === normNome(c.descricao) && x.protegida)
+      for (const c of catBackup.filter((x: CategoriaBackup) => x.protegida)) {
+        const ex = categorias.find((x: CategoriaRaw) => normNome(x.descricao) === normNome(c.descricao) && x.protegida)
         if (ex) mapaCategorias[c.id] = ex.id
       }
       // Pais não protegidos
       let okCat = 0
-      const pais   = catBackup.filter((c: any) => !c.id_pai && !c.protegida)
-      const filhos = catBackup.filter((c: any) =>  c.id_pai && !c.protegida)
+      const pais   = catBackup.filter((c: CategoriaBackup) => !c.id_pai && !c.protegida)
+      const filhos = catBackup.filter((c: CategoriaBackup) => !!c.id_pai && !c.protegida)
       for (const c of pais) {
-        const ex = categorias.find((x: any) => normNome(x.descricao) === normNome(c.descricao) && !x.id_pai)
+        const ex = categorias.find((x: CategoriaRaw) => normNome(x.descricao) === normNome(c.descricao) && !x.id_pai)
         if (ex) { mapaCategorias[c.id] = ex.id }
         else {
           const r = await apiMutate('/categorias', 'POST', { descricao: c.descricao, tipo: c.tipo, icone: c.icone, cor: c.cor })
@@ -1797,7 +1846,7 @@ function SecaoRestore() {
       for (const c of filhos) {
         const novoIdPai = mapaCategorias[c.id_pai]
         if (!novoIdPai) { addLog('aviso', `Subcategoria "${c.descricao}": pai não encontrado`); avanco(); continue }
-        const ex = categorias.find((x: any) => normNome(x.descricao) === normNome(c.descricao) && x.id_pai === novoIdPai)
+        const ex = categorias.find((x: CategoriaRaw) => normNome(x.descricao) === normNome(c.descricao) && x.id_pai === novoIdPai)
         if (ex) { mapaCategorias[c.id] = ex.id }
         else {
           const r = await apiMutate('/categorias', 'POST', { descricao: c.descricao, tipo: c.tipo, icone: c.icone, cor: c.cor, id_pai: novoIdPai })
@@ -1811,7 +1860,7 @@ function SecaoRestore() {
       // ── 3. Transações ────────────────────────────────────────────
       setProgressoLabel('Recriando transações...')
       let okTx = 0, errTx = 0
-      const txOrdenadas = [...txBackup].sort((a: any, b: any) => a.data.localeCompare(b.data))
+      const txOrdenadas = [...txBackup].sort((a: TransacaoRaw, b: TransacaoRaw) => a.data.localeCompare(b.data))
       for (const t of txOrdenadas) {
         const conta_id    = mapaContas[t.conta_id]
         const categoria_id = t.categoria_id ? mapaCategorias[t.categoria_id] : undefined
