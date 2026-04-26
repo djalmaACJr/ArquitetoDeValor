@@ -30,12 +30,12 @@ test.describe('Categorias', () => {
     const catTransfer = page.locator('text=Transferências').first()
     await expect(catTransfer).toBeVisible()
 
-    // Botão excluir deve estar desabilitado ou ausente
-    const row = catTransfer.locator('../..')
-    const btnExcluir = row.locator('button[title*="xcluir"]')
-    const isDisabled = await btnExcluir.isDisabled().catch(() => true)
-    const isHidden   = !(await btnExcluir.isVisible().catch(() => false))
-    expect(isDisabled || isHidden).toBe(true)
+    // Categoria protegida: linha não renderiza botão excluir.
+    // Subimos até a linha-pai (rounded-xl) e contamos os botões — count() é instantâneo
+    // (isDisabled() esperaria o elemento por 30s antes do timeout).
+    const linhaPai = catTransfer.locator('xpath=ancestor::div[contains(@class,"rounded-xl")][1]')
+    const btnExcluir = linhaPai.locator('button[title*="xcluir"]')
+    expect(await btnExcluir.count()).toBe(0)
   })
 
   test('E2E-CAT04 — excluir categoria de teste', async ({ page }) => {

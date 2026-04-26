@@ -708,7 +708,8 @@ export function ModalExcluir({ nome, mensagem, onConfirmar, onCancelar, salvando
   onConfirmar: () => void; onCancelar: () => void; salvando: boolean
 }) {
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+    <div role="dialog" aria-modal="true" aria-label={`Excluir "${nome}"`}
+      className="fixed inset-0 z-[200] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onCancelar} />
       <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
         <p className="text-[14px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>Excluir "{nome}"?</p>
