@@ -1,6 +1,6 @@
 // e2e/tests/data.setup.ts
 // Setup com limpeza completa para isolar testes entre execuções
-import { test as setup, expect } from '@playwright/test'
+import { test as setup } from '@playwright/test'
 
 setup('criar dados basicos', async ({ page }) => {
   // Já está autenticado pelo auth.setup.ts
@@ -98,7 +98,7 @@ setup('criar dados basicos', async ({ page }) => {
     }
     
     console.log('✅ Limpeza de dados E2E concluída')
-  } catch (error) {
+  } catch {
     console.log('⚠️ Erro na limpeza (pode já estar limpo)')
   }
   

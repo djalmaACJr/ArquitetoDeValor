@@ -25,8 +25,7 @@ test.describe('Dashboard', () => {
     const monthSelector = page.locator('button:has-text("/")').first()
     await expect(monthSelector).toBeVisible({ timeout: 10_000 })
     
-    const mesInicial = await monthSelector.textContent()
-    
+        
     // Tenta navegar para o mês anterior
     const prevButton = page.locator('button[title*="anterior"], button:has-text("<"), [data-testid="prev-month"]').first()
     if (await prevButton.isVisible()) {
@@ -67,7 +66,6 @@ test.describe('Dashboard', () => {
 
   test('E2E-DB06 — estado do mês persiste ao voltar da página de extrato', async ({ page }) => {
     // Navegar para mês anterior
-    const btnAnterior = page.locator('button').filter({ has: page.locator('svg') }).nth(0)
     await page.locator('[title*="anterior"], [title*="Anterior"]').first().click().catch(() => {})
 
     const mesSelecionado = await page.locator('button:has-text("/2")').first().textContent()
