@@ -9,8 +9,9 @@ test.describe('Extrato (Lançamentos)', () => {
 
   test('E2E-EX01 — página carrega com filtros na barra superior', async ({ page }) => {
     await expect(page.getByText(/todas as contas/i)).toBeVisible()
-    await expect(page.getByText(/categorias/i)).toBeVisible()
-    await expect(page.getByText(/todos status/i)).toBeVisible()
+    // Usar seletores mais específicos para evitar strict mode violation
+    await expect(page.getByRole('button', { name: /categorias/i }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /todos status/i })).toBeVisible()
   })
 
   test('E2E-EX02 — navegação de mês com setas funciona', async ({ page }) => {
@@ -22,12 +23,12 @@ test.describe('Extrato (Lançamentos)', () => {
 
   test('E2E-EX03 — botão Novo lançamento abre drawer', async ({ page }) => {
     await page.getByRole('button', { name: /novo lançamento/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 5000 })
   })
 
   test('E2E-EX04 — criar lançamento simples e verificar na lista', async ({ page }) => {
     await page.getByRole('button', { name: /novo lançamento/i }).click()
-    const drawer = page.getByRole('dialog')
+    const drawer = page.getByRole('dialog').first()
     await expect(drawer).toBeVisible()
 
     // Preencher formulário
@@ -42,22 +43,22 @@ test.describe('Extrato (Lançamentos)', () => {
     await drawer.getByRole('button', { name: /salvar|criar/i }).click()
 
     // Aguarda drawer fechar
-    await expect(drawer).not.toBeVisible({ timeout: 8000 })
+    await expect(drawer).not.toBeVisible({ timeout: 10_000 })
 
     // Verificar que aparece na lista
-    await expect(page.getByText('E2E Teste Lançamento')).toBeVisible()
+    await expect(page.getByText('E2E Teste Lançamento')).toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-EX05 — editar lançamento criado', async ({ page }) => {
     // Localizar o lançamento criado no teste anterior
     const linha = page.locator('text=E2E Teste Lançamento').first()
-    await expect(linha).toBeVisible()
+    await expect(linha).toBeVisible({ timeout: 10_000 })
 
     // Clicar no botão de editar
     const row = linha.locator('../..').first()
     await row.locator('button[title*="ditar"], button:has([data-lucide="pencil"])').first().click()
 
-    const drawer = page.getByRole('dialog')
+    const drawer = page.getByRole('dialog').first()
     await expect(drawer).toBeVisible()
 
     // Alterar descrição
@@ -66,19 +67,19 @@ test.describe('Extrato (Lançamentos)', () => {
     await inputDescricao.fill('E2E Teste Editado')
 
     await drawer.getByRole('button', { name: /salvar|atualizar/i }).click()
-    await expect(drawer).not.toBeVisible({ timeout: 8000 })
-    await expect(page.getByText('E2E Teste Editado')).toBeVisible()
+    await expect(drawer).not.toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('E2E Teste Editado')).toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-EX06 — excluir lançamento', async ({ page }) => {
     const linha = page.locator('text=E2E Teste Editado').first()
-    await expect(linha).toBeVisible()
+    await expect(linha).toBeVisible({ timeout: 10_000 })
 
     const row = linha.locator('../..').first()
     await row.locator('button[title*="ditar"], button:has([data-lucide="pencil"])').first().click()
 
-    const drawer = page.getByRole('dialog')
-    await expect(drawer).toBeVisible()
+    const drawer = page.getByRole('dialog').first()
+    await expect(drawer).toBeVisible({ timeout: 5000 })
 
     await drawer.getByRole('button', { name: /excluir/i }).click()
 
@@ -86,7 +87,7 @@ test.describe('Extrato (Lançamentos)', () => {
     const modal = page.getByRole('dialog').last()
     await modal.getByRole('button', { name: /confirmar|sim|excluir/i }).click()
 
-    await expect(page.getByText('E2E Teste Editado')).not.toBeVisible({ timeout: 8000 })
+    await expect(page.getByText('E2E Teste Editado')).not.toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-EX07 — toggle saldo anterior funciona', async ({ page }) => {

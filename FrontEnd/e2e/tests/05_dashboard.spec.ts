@@ -62,7 +62,7 @@ test.describe('Dashboard', () => {
 
   test('E2E-DB05 — botão Novo lançamento abre o drawer', async ({ page }) => {
     await page.getByRole('button', { name: /novo lançamento/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 5000 })
   })
 
   test('E2E-DB06 — estado do mês persiste ao voltar da página de extrato', async ({ page }) => {

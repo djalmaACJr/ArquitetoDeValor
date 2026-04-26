@@ -514,7 +514,9 @@ function SecaoImport() {
   const [resolucaoContas, setResolucaoContas] = useState<Record<string, ResolucaoConta>>({})
   const [resolucaoCats, setResolucaoCats] = useState<Record<string, ResolucaoCategoria>>({})
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro' | 'aviso'; msg: string }[]>([])
-  const [progresso, setProgresso] = useState(0)
+  const [progresso,      setProgresso]      = useState(0)
+  const [progressoInfo,  setProgressoInfo]  = useState({ atual: 0, total: 0, ok: 0, erros: 0, eta: '', velocidade: '' })
+  const [logTempoReal,   setLogTempoReal]   = useState<typeof log>([])
   const [carregandoDedup, setCarregandoDedup] = useState(false)
 
   // ── Helpers de edição do grid ──────────────────────────────────
@@ -615,6 +617,11 @@ function SecaoImport() {
       const ws   = wb.Sheets[abaNome]
       const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as any[]
 
+      console.log('[Import] Abas disponíveis:', wb.SheetNames)
+      console.log('[Import] Aba selecionada:', abaNome)
+      console.log('[Import] Total de linhas lidas:', rows.length)
+      if (rows.length > 0) console.log('[Import] Primeira linha (keys):', Object.keys(rows[0]))
+
       const parsed: LinhaImport[] = rows.map((row, idx) => {
         const r = normalizar(row)
         const dataRaw = r['data'] ?? r['date'] ?? ''
@@ -646,15 +653,22 @@ function SecaoImport() {
         return {
           idx,
           data:           dataFmt,
-          descricao:      String(r['descricao'] ?? r['description'] ?? '').trim(),
+          descricao:      String(r['descrição'] ?? r['descricao'] ?? r['description'] ?? '').trim(),
           valor,
           tipo,
           conta_nome:     String(r['conta'] ?? r['account'] ?? '').trim(),
           categoria_nome: String(r['categoria'] ?? r['category'] ?? '').trim(),
           status,
-          observacao:     String(r['observacao'] ?? r['observation'] ?? '').trim(),
+          observacao:     String(r['observação'] ?? r['observacao'] ?? r['observation'] ?? '').trim(),
         }
       }).filter(l => l.descricao && l.valor > 0 && l.conta_nome && l.categoria_nome)
+
+      console.log('[Import] Linhas após filtro:', parsed.length)
+      if (parsed.length === 0 && rows.length > 0) {
+        console.log('[Import] DEBUG primeira linha normalizada:', Object.fromEntries(
+          Object.keys(rows[0]).map(k => [k.toLowerCase().trim(), rows[0][k]])
+        ))
+      }
 
       // ── Detectar contas e categorias desconhecidas ──────────────
       const contaMap = Object.fromEntries(contas.map((c: Conta) => [normalizarNome(c.nome), c.conta_id]))
@@ -741,8 +755,13 @@ function SecaoImport() {
   const importar = async () => {
     setEtapa('importando')
     setProgresso(0)
+    setProgressoInfo({ atual: 0, total: 0, ok: 0, erros: 0, eta: '', velocidade: '' })
+    setLogTempoReal([])
     const logs: typeof log = []
-    const addLog = (tipo: 'ok' | 'erro' | 'aviso', msg: string) => logs.push({ tipo, msg })
+    const addLog = (tipo: 'ok' | 'erro' | 'aviso', msg: string) => {
+      logs.push({ tipo, msg })
+      setLogTempoReal(prev => [...prev.slice(-49), { tipo, msg }])
+    }
 
     // ── MODO CONTAS ────────────────────────────────────────────────
     if (modo === 'contas') {
@@ -835,9 +854,11 @@ function SecaoImport() {
 
       // 3. Importar apenas linhas marcadas para importar
       const linhasParaImportar = grid.filter(l => l.importar)
+      const total = linhasParaImportar.length
       let ok = 0, erros = 0
+      const tInicio = Date.now()
 
-      for (let i = 0; i < linhasParaImportar.length; i++) {
+      for (let i = 0; i < total; i++) {
         const l = linhasParaImportar[i]
         const conta_id     = contaMap[normalizarNome(l.conta_nome)]
         const categoria_id = catMap[normalizarNome(l.categoria_nome)]
@@ -845,20 +866,34 @@ function SecaoImport() {
         if (!conta_id || !categoria_id) {
           addLog('erro', `"${l.descricao}" ignorada: conta ou categoria não resolvida`)
           erros++
-          setProgresso(Math.round(((i + 1) / linhasParaImportar.length) * 100))
-          continue
+        } else {
+          const r = await apiMutate('/transacoes', 'POST', {
+            tipo: l.tipo, data: l.data, descricao: l.descricao,
+            valor: l.valor, conta_id, categoria_id,
+            status: l.status,
+            observacao: l.observacao || undefined,
+          })
+          if (r.ok) ok++
+          else { addLog('erro', `"${l.descricao}" (${l.data}): ${r.erro}`); erros++ }
         }
 
-        const r = await apiMutate('/transacoes', 'POST', {
-          tipo: l.tipo, data: l.data, descricao: l.descricao,
-          valor: l.valor, conta_id, categoria_id,
-          status: l.status,
-          observacao: l.observacao || undefined,
-        })
-
-        if (r.ok) ok++
-        else { addLog('erro', `"${l.descricao}" (${l.data}): ${r.erro}`); erros++ }
-        setProgresso(Math.round(((i + 1) / linhasParaImportar.length) * 100))
+        // Atualizar progresso e liberar event loop a cada 5 registros
+        if (i % 5 === 0 || i === total - 1) {
+          const pct      = Math.round(((i + 1) / total) * 100)
+          const elapsed  = (Date.now() - tInicio) / 1000
+          const velocidade = elapsed > 0 ? ((i + 1) / elapsed).toFixed(1) : '...'
+          const restantes = total - (i + 1)
+          const etaSeg   = elapsed > 0 && i > 0 ? Math.round(restantes / ((i + 1) / elapsed)) : null
+          const eta      = etaSeg !== null
+            ? etaSeg > 60
+              ? `${Math.floor(etaSeg / 60)}m ${etaSeg % 60}s`
+              : `${etaSeg}s`
+            : '...'
+          setProgresso(pct)
+          setProgressoInfo({ atual: i + 1, total, ok, erros, eta, velocidade: `${velocidade}/s` })
+          // Yield para o React atualizar o DOM
+          await new Promise(r => setTimeout(r, 0))
+        }
       }
 
       const ignoradas = grid.filter(l => !l.importar).length
@@ -1420,14 +1455,72 @@ function SecaoImport() {
 
         {/* ── IMPORTANDO ── */}
         {etapa === 'importando' && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <Loader2 size={18} className="animate-spin text-purple-400" />
-              <p className="text-[13px] text-gray-600 dark:text-gray-300">Importando... {progresso}%</p>
+          <div className="space-y-4">
+            {/* Cabeçalho */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Loader2 size={16} className="animate-spin text-purple-400" />
+                <span className="text-[13px] font-semibold" style={{ color: '#a78bfa' }}>
+                  Importando lançamentos...
+                </span>
+              </div>
+              <span className="text-[12px] font-bold" style={{ color: '#a78bfa' }}>
+                {progresso}%
+              </span>
             </div>
-            <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-              <div className="h-full bg-purple-400 rounded-full transition-all duration-300" style={{ width: `${progresso}%` }} />
+
+            {/* Barra de progresso */}
+            <div className="h-3 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-200"
+                style={{
+                  width: `${progresso}%`,
+                  background: progresso < 30
+                    ? '#a78bfa'
+                    : progresso < 70
+                    ? '#8b5cf6'
+                    : '#7c3aed',
+                }}
+              />
             </div>
+
+            {/* Métricas */}
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { label: 'Processados', value: `${progressoInfo.atual} / ${progressoInfo.total}`, color: '#e8eaf0' },
+                { label: 'Importados', value: progressoInfo.ok, color: '#00c896' },
+                { label: 'Erros', value: progressoInfo.erros, color: progressoInfo.erros > 0 ? '#f87171' : '#8b92a8' },
+                { label: 'Velocidade', value: progressoInfo.velocidade || '...', color: '#4da6ff' },
+              ].map((m, i) => (
+                <div key={i} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 text-center">
+                  <p className="text-[10px] uppercase tracking-wide mb-0.5" style={{ color: '#8b92a8' }}>{m.label}</p>
+                  <p className="text-[13px] font-bold" style={{ color: m.color }}>{m.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* ETA */}
+            {progressoInfo.eta && progressoInfo.eta !== '...' && (
+              <p className="text-[11px] text-center" style={{ color: '#8b92a8' }}>
+                Tempo restante estimado: <span style={{ color: '#e8eaf0' }}>{progressoInfo.eta}</span>
+              </p>
+            )}
+
+            {/* Log em tempo real */}
+            {logTempoReal.length > 0 && (
+              <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-2.5 max-h-[140px] overflow-y-auto space-y-1">
+                {logTempoReal.slice().reverse().map((l, i) => (
+                  <div key={i} className="flex items-start gap-1.5 text-[11px]">
+                    <span style={{ color: l.tipo === 'ok' ? '#00c896' : l.tipo === 'aviso' ? '#f0b429' : '#f87171', flexShrink: 0 }}>
+                      {l.tipo === 'ok' ? '✓' : l.tipo === 'aviso' ? '⚠' : '✗'}
+                    </span>
+                    <span style={{ color: l.tipo === 'ok' ? '#8b92a8' : l.tipo === 'aviso' ? '#f0b429' : '#f87171' }}>
+                      {l.msg}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

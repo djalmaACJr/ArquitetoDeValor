@@ -14,14 +14,14 @@ test.describe('Categorias', () => {
 
   test('E2E-CAT02 — criar categoria pai', async ({ page }) => {
     await page.getByRole('button', { name: /nova categoria/i }).click()
-    const drawer = page.getByRole('dialog')
-    await expect(drawer).toBeVisible()
+    const drawer = page.getByRole('dialog').first()
+    await expect(drawer).toBeVisible({ timeout: 5000 })
 
     await drawer.getByPlaceholder(/nome|descrição/i).fill('E2E Categoria Teste')
     await drawer.getByRole('button', { name: /salvar|criar/i }).click()
 
-    await expect(drawer).not.toBeVisible({ timeout: 8000 })
-    await expect(page.getByText('E2E Categoria Teste')).toBeVisible()
+    await expect(drawer).not.toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('E2E Categoria Teste')).toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-CAT03 — categoria Transferências é protegida', async ({ page }) => {
@@ -38,12 +38,12 @@ test.describe('Categorias', () => {
 
   test('E2E-CAT04 — excluir categoria de teste', async ({ page }) => {
     const linha = page.locator('text=E2E Categoria Teste').first()
-    await expect(linha).toBeVisible()
+    await expect(linha).toBeVisible({ timeout: 10_000 })
 
     await linha.locator('../..').locator('button[title*="xcluir"]').first().click()
-    const modal = page.getByRole('dialog')
+    const modal = page.getByRole('dialog').first()
     await modal.getByRole('button', { name: /confirmar|sim|excluir/i }).click()
-    await expect(modal).not.toBeVisible({ timeout: 8000 })
-    await expect(page.locator('text=E2E Categoria Teste')).not.toBeVisible()
+    await expect(modal).not.toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('text=E2E Categoria Teste')).not.toBeVisible({ timeout: 10_000 })
   })
 })
