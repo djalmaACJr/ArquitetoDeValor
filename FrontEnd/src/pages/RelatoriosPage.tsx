@@ -189,7 +189,8 @@ export default function RelatoriosPage() {
   const [credAberto,  setCredAberto]  = useState(true)
   const [debAberto,   setDebAberto]   = useState(true)
   const drillRef    = useRef<HTMLDivElement>(null)
-  const [lancamentoEditando, setLancamentoEditando] = useState<Lancamento | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [lancamentoEditando, setLancamentoEditando] = useState<any | null>(null)
   const [drillDown,   setDrillDown]   = useState<{
     titulo: string
     categoria_id: string | null

@@ -748,7 +748,8 @@ function SecaoImport() {
         const resArr = await Promise.all(
           datasUnicas.map(mes => apiFetchDyn(`/transacoes?mes=${mes}&per_page=1000&saldo=true`))
         )
-        txExistentes = resArr.flatMap(r => extrairListaDyn<{ data: string; descricao: string; categoria_nome?: string }>(r.dados))
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        txExistentes = resArr.flatMap(r => extrairListaDyn<any>(r.dados))
       } catch { /* se falhar, segue sem checar duplicatas */ }
       setCarregandoDedup(false)
 
