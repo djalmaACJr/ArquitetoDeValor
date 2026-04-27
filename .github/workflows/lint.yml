@@ -10,6 +10,9 @@ jobs:
   lint:
     name: ESLint — Análise estática
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: FrontEnd
 
     steps:
       - name: Checkout do repositório
@@ -20,6 +23,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+          cache-dependency-path: FrontEnd/package-lock.json
 
       - name: Instalar dependências
         run: npm install
@@ -32,5 +36,5 @@ jobs:
         uses: actions/upload-artifact@v4.6.2
         with:
           name: relatorio-lint-${{ github.run_number }}
-          path: lint-results/
+          path: FrontEnd/lint-results/
           if-no-files-found: ignore
