@@ -68,7 +68,8 @@ test.describe('Extrato (Lançamentos)', () => {
 
     await drawer.getByRole('button', { name: /salvar|atualizar/i }).click()
     await expect(drawer).not.toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText('E2E Teste Editado')).toBeVisible({ timeout: 10_000 })
+    // .first() para evitar strict-mode (LancamentosPage renderiza desktop + mobile views simultâneas)
+    await expect(page.getByText('E2E Teste Editado').first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-EX06 — excluir lançamento', async ({ page }) => {
@@ -85,9 +86,13 @@ test.describe('Extrato (Lançamentos)', () => {
 
     // Modal de confirmação
     const modal = page.getByRole('dialog').last()
+    await expect(modal).toBeVisible({ timeout: 5000 })
     await modal.getByRole('button', { name: /confirmar|sim|excluir/i }).click()
 
-    await expect(page.getByText('E2E Teste Editado')).not.toBeVisible({ timeout: 10_000 })
+    // Aguarda modal e drawer fecharem; usa exact + first para evitar strict-mode com múltiplas
+    // ocorrências do texto (linha + título do modal).
+    await expect(modal).not.toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('E2E Teste Editado', { exact: true }).first()).not.toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-EX07 — toggle saldo anterior funciona', async ({ page }) => {

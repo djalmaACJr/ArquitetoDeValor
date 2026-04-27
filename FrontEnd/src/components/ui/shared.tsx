@@ -80,6 +80,8 @@ export function Drawer({
         style={{
           left: open ? '220px' : '-600px',
           width: 'min(460px, calc(100vw - 220px))',
+          visibility: open ? 'visible' : 'hidden',
+          pointerEvents: open ? 'auto' : 'none',
         }}
         className="fixed top-0 h-full z-[101]
           bg-[#1a1f2e] border-r border-white/10 flex flex-col transition-all duration-300">

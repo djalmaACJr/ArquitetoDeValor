@@ -23,7 +23,8 @@ test.describe('Categorias', () => {
     await drawer.getByRole('button', { name: /salvar|criar/i }).click()
 
     await expect(drawer).not.toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText('E2E Categoria Teste')).toBeVisible({ timeout: 10_000 })
+    // .first() para evitar strict-mode com PreviewBadge no drawer (que segue no DOM oculto)
+    await expect(page.getByText('E2E Categoria Teste').first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-CAT03 — categoria Transferências é protegida', async ({ page }) => {
@@ -42,8 +43,12 @@ test.describe('Categorias', () => {
     const linha = page.locator('text=E2E Categoria Teste').first()
     await expect(linha).toBeVisible({ timeout: 10_000 })
 
-    await linha.locator('../..').locator('button[title*="xcluir"]').first().click()
-    const modal = page.getByRole('dialog').first()
+    // Sobe até a linha-pai (rounded-xl) para alcançar o botão de excluir
+    const row = linha.locator('xpath=ancestor::div[contains(@class,"rounded-xl")][1]')
+    await row.locator('button[title*="xcluir"]').first().click()
+
+    const modal = page.getByRole('dialog').last()
+    await expect(modal).toBeVisible({ timeout: 5000 })
     await modal.getByRole('button', { name: /confirmar|sim|excluir/i }).click()
     await expect(modal).not.toBeVisible({ timeout: 10_000 })
     await expect(page.locator('text=E2E Categoria Teste')).not.toBeVisible({ timeout: 10_000 })

@@ -128,7 +128,9 @@ test.describe('Contas', () => {
     await expect(modal).toBeVisible({ timeout: 5000 })
     await modal.getByRole('button', { name: /confirmar|sim|excluir/i }).click()
 
-    await expect(page.getByText('E2E Conta Desativar')).not.toBeVisible({ timeout: 10_000 })
+    // Aguarda o modal fechar antes de verificar (evita strict-mode violation com o título "Excluir "...")
+    await expect(modal).not.toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('E2E Conta Desativar', { exact: true })).not.toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-CT06 — limpar contas de teste', async ({ page }) => {
