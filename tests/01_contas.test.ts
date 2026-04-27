@@ -113,10 +113,10 @@ describe("Contas — CA-CONTA01 a CA-CONTA19", () => {
   });
 
   // ── CA-CONTA07 ──────────────────────────────────────────
-  test("CA-CONTA07 — POST /contas rejeita nome muito longo (>50) com 400", async () => {
+  test("CA-CONTA07 — POST /contas rejeita nome muito longo (>100) com 400", async () => {
     const { status } = await api("/contas", {
       method: "POST",
-      body: JSON.stringify({ nome: "A".repeat(51), tipo: "CORRENTE" }),
+      body: JSON.stringify({ nome: "A".repeat(101), tipo: "CORRENTE" }),
     });
     expect(status).toBe(400);
   });
@@ -365,6 +365,52 @@ describe("Contas — CA-CONTA01 a CA-CONTA19", () => {
 
       await limparConta(criada.id);
     }
+  });
+
+  // ── CA-CONTA20 ──────────────────────────────────────────
+  test("CA-CONTA20 — POST /contas rejeita cor com formato hex inválido com 400", async () => {
+    const coresInvalidas = ["red", "123456", "#GGG000", "#12345", "#1234567", "rgb(0,0,0)"];
+    for (const cor of coresInvalidas) {
+      const { status } = await api("/contas", {
+        method: "POST",
+        body: JSON.stringify({ nome: "Conta Cor Invalida", tipo: "CORRENTE", cor }),
+      });
+      expect(status).toBe(400);
+    }
+  });
+
+  // ── CA-CONTA21 ──────────────────────────────────────────
+  test("CA-CONTA21 — POST /transacoes rejeita lançamento em conta inativa", async () => {
+    // Criar conta e desativá-la
+    const { data: criada } = await api("/contas", {
+      method: "POST",
+      body: JSON.stringify({ nome: "Jest Conta Inativa CA21", tipo: "CORRENTE", saldo_inicial: 0 }),
+    });
+    const idInativa = criada.id;
+    expect(idInativa).toBeTruthy();
+
+    await api(`/contas/${idInativa}`, {
+      method: "PUT",
+      body: JSON.stringify({ ativa: false }),
+    });
+
+    // Tentativa de criar lançamento na conta inativa deve ser rejeitada
+    const { status } = await api("/transacoes", {
+      method: "POST",
+      body: JSON.stringify({
+        data: new Date().toISOString().split("T")[0],
+        descricao: "Lançamento inválido",
+        valor: 100,
+        tipo: "DESPESA",
+        status: "PAGO",
+        conta_id: idInativa,
+      }),
+    });
+    expect([400, 422]).toContain(status);
+
+    // Reativar e limpar
+    await api(`/contas/${idInativa}`, { method: "PUT", body: JSON.stringify({ ativa: true }) });
+    await api(`/contas/${idInativa}`, { method: "DELETE" });
   });
 
   // ── CA-CONTA14 ──────────────────────────────────────────

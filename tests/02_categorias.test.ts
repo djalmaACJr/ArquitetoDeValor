@@ -114,9 +114,9 @@ beforeAll(async () => {
   });
 
   // ── CA-CAT09 ─────────────────────────────────────────────
-  test("CA-CAT09 — POST /categorias rejeita descrição > 50 chars com 400", async () => {
+  test("CA-CAT09 — POST /categorias rejeita descrição > 20 chars com 400", async () => {
     const { status } = await api("/categorias", "POST", {
-      descricao: "A".repeat(51),
+      descricao: "A".repeat(21),
     });
     expect(status).toBe(400);
   });
@@ -159,5 +159,31 @@ beforeAll(async () => {
       "DELETE"
     );
     expect(status).toBe(404);
+  });
+
+  // ── CA-CAT14 ─────────────────────────────────────────────
+  test("CA-CAT14 — PUT /categorias/:id em categoria protegida deve retornar 4xx", async () => {
+    const { data: lista } = await api("/categorias") as { data: { dados: Record<string, unknown>[] } };
+    const protegida = lista.dados.find((c) => c.protegida === true);
+    if (!protegida) {
+      console.warn("CA-CAT14: pulado — nenhuma categoria protegida encontrada.");
+      return;
+    }
+    const { status } = await api(`/categorias/${protegida.id}`, "PUT", {
+      descricao: "Tentativa de edição",
+    });
+    expect(status).toBeGreaterThanOrEqual(400);
+  });
+
+  // ── CA-CAT15 ─────────────────────────────────────────────
+  test("CA-CAT15 — DELETE /categorias/:id em categoria protegida deve retornar 4xx", async () => {
+    const { data: lista } = await api("/categorias") as { data: { dados: Record<string, unknown>[] } };
+    const protegida = lista.dados.find((c) => c.protegida === true);
+    if (!protegida) {
+      console.warn("CA-CAT15: pulado — nenhuma categoria protegida encontrada.");
+      return;
+    }
+    const { status } = await api(`/categorias/${protegida.id}`, "DELETE");
+    expect(status).toBeGreaterThanOrEqual(400);
   });
 });

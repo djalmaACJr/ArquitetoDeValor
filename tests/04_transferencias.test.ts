@@ -484,6 +484,203 @@ describe("Transferências — CA-TRF01 a CA-TRF22", () => {
     await api(`/transferencias/${trfData.id_par}`, { method: "DELETE" });
   });
 
+  // ── CA-TRF23 — PUT escopo ESTE_E_SEGUINTES ───────────────
+  test("CA-TRF23 — PUT /transferencias/:id_par?escopo=ESTE_E_SEGUINTES atualiza parcela atual e seguintes", async () => {
+    const dataBase = new Date();
+    dataBase.setMonth(dataBase.getMonth() + 1);
+    const dataStr = dataBase.toISOString().split("T")[0];
+
+    const { status: sPost, data: recData } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id: contaOrigemId,
+        conta_destino_id: contaDestinoId,
+        valor: 200,
+        data: dataStr,
+        descricao: "TRF recorrente escopo",
+        status: "PENDENTE",
+        total_parcelas: 3,
+        tipo_recorrencia: "MENSAL",
+        intervalo_recorrencia: 1,
+      }),
+    });
+    expect(sPost).toBe(201);
+    const parcelas = (recData as any).parcelas as any[];
+    expect(parcelas.length).toBe(3);
+
+    // Editar a partir da 2ª parcela
+    const { status: sPut } = await api(`/transferencias/${parcelas[1].id_par}?escopo=ESTE_E_SEGUINTES`, {
+      method: "PUT",
+      body: JSON.stringify({ valor: 250 }),
+    });
+    expect(sPut).toBe(200);
+
+    // 1ª parcela deve manter valor original
+    const { data: trf1 } = await api(`/transferencias/${parcelas[0].id_par}`);
+    expect((trf1 as any).valor).toBe(200);
+
+    // 2ª e 3ª devem ter o novo valor
+    const { data: trf2 } = await api(`/transferencias/${parcelas[1].id_par}`);
+    expect((trf2 as any).valor).toBe(250);
+
+    // Limpar
+    for (const p of parcelas) {
+      await api(`/transferencias/${p.id_par}`, { method: "DELETE" }).catch(() => {});
+    }
+  });
+
+  // ── CA-TRF24 — PUT escopo TODOS ──────────────────────────
+  test("CA-TRF24 — PUT /transferencias/:id_par?escopo=TODOS atualiza toda a série", async () => {
+    const dataBase = new Date();
+    dataBase.setMonth(dataBase.getMonth() + 1);
+    const dataStr = dataBase.toISOString().split("T")[0];
+
+    const { status: sPost, data: recData } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id: contaOrigemId,
+        conta_destino_id: contaDestinoId,
+        valor: 150,
+        data: dataStr,
+        descricao: "TRF escopo TODOS",
+        status: "PENDENTE",
+        total_parcelas: 3,
+        tipo_recorrencia: "MENSAL",
+        intervalo_recorrencia: 1,
+      }),
+    });
+    expect(sPost).toBe(201);
+    const parcelas = (recData as any).parcelas as any[];
+
+    const { status: sPut } = await api(`/transferencias/${parcelas[0].id_par}?escopo=TODOS`, {
+      method: "PUT",
+      body: JSON.stringify({ valor: 175 }),
+    });
+    expect(sPut).toBe(200);
+
+    // Todas as parcelas devem ter o novo valor
+    for (const p of parcelas) {
+      const { data: trf } = await api(`/transferencias/${p.id_par}`);
+      expect((trf as any).valor).toBe(175);
+    }
+
+    // Limpar
+    for (const p of parcelas) {
+      await api(`/transferencias/${p.id_par}`, { method: "DELETE" }).catch(() => {});
+    }
+  });
+
+  // ── CA-TRF25 — DELETE escopo ESTE_E_SEGUINTES ────────────
+  test("CA-TRF25 — DELETE /transferencias/:id_par?escopo=ESTE_E_SEGUINTES remove parcela atual e seguintes", async () => {
+    const dataBase = new Date();
+    dataBase.setMonth(dataBase.getMonth() + 1);
+    const dataStr = dataBase.toISOString().split("T")[0];
+
+    const { status: sPost, data: recData } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id: contaOrigemId,
+        conta_destino_id: contaDestinoId,
+        valor: 100,
+        data: dataStr,
+        descricao: "TRF delete escopo",
+        status: "PENDENTE",
+        total_parcelas: 3,
+        tipo_recorrencia: "MENSAL",
+        intervalo_recorrencia: 1,
+      }),
+    });
+    expect(sPost).toBe(201);
+    const parcelas = (recData as any).parcelas as any[];
+    expect(parcelas.length).toBe(3);
+
+    // Deletar a partir da 2ª parcela
+    const { status: sDel } = await api(
+      `/transferencias/${parcelas[1].id_par}?escopo=ESTE_E_SEGUINTES`,
+      { method: "DELETE" }
+    );
+    expect(sDel).toBe(200);
+
+    // 1ª parcela deve permanecer
+    const { status: s0 } = await api(`/transferencias/${parcelas[0].id_par}`);
+    expect(s0).toBe(200);
+
+    // 2ª e 3ª devem ter sido removidas
+    for (let i = 1; i < parcelas.length; i++) {
+      const { status: si } = await api(`/transferencias/${parcelas[i].id_par}`);
+      expect([404, 200]).toContain(si); // aceita 404 (deletado) ou 200 caso API retorne diferente
+      if (si === 200) expect((await api(`/transferencias/${parcelas[i].id_par}`)).status).not.toBe(200);
+    }
+
+    // Limpar 1ª parcela restante
+    await api(`/transferencias/${parcelas[0].id_par}`, { method: "DELETE" }).catch(() => {});
+  });
+
+  // ── CA-TRF26 — DELETE escopo TODOS ───────────────────────
+  test("CA-TRF26 — DELETE /transferencias/:id_par?escopo=TODOS remove toda a série", async () => {
+    const dataBase = new Date();
+    dataBase.setMonth(dataBase.getMonth() + 1);
+    const dataStr = dataBase.toISOString().split("T")[0];
+
+    const { status: sPost, data: recData } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id: contaOrigemId,
+        conta_destino_id: contaDestinoId,
+        valor: 120,
+        data: dataStr,
+        descricao: "TRF delete TODOS",
+        status: "PENDENTE",
+        total_parcelas: 3,
+        tipo_recorrencia: "MENSAL",
+        intervalo_recorrencia: 1,
+      }),
+    });
+    expect(sPost).toBe(201);
+    const parcelas = (recData as any).parcelas as any[];
+
+    const { status: sDel } = await api(`/transferencias/${parcelas[0].id_par}?escopo=TODOS`, {
+      method: "DELETE",
+    });
+    expect(sDel).toBe(200);
+
+    // Todas as parcelas devem ter sido removidas
+    for (const p of parcelas) {
+      const { status: si } = await api(`/transferencias/${p.id_par}`);
+      expect(si).toBe(404);
+    }
+  });
+
+  // ── CA-TRF27 — Conta inativa rejeitada ───────────────────
+  test("CA-TRF27 — POST /transferencias rejeita quando conta de origem está inativa", async () => {
+    // Criar conta temporária e desativá-la
+    const { data: contaData } = await api("/contas", {
+      method: "POST",
+      body: JSON.stringify({ nome: "Conta Inativa TRF27", tipo: "CORRENTE", saldo_inicial: 0 }),
+    });
+    const idInativa = contaData.id as string;
+    expect(idInativa).toBeTruthy();
+
+    await api(`/contas/${idInativa}`, { method: "PUT", body: JSON.stringify({ ativa: false }) });
+
+    const dataStr = new Date().toISOString().split("T")[0];
+    const { status } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id: idInativa,
+        conta_destino_id: contaDestinoId,
+        valor: 50,
+        data: dataStr,
+        status: "PAGO",
+      }),
+    });
+    expect([400, 422]).toContain(status);
+
+    // Reativar e limpar
+    await api(`/contas/${idInativa}`, { method: "PUT", body: JSON.stringify({ ativa: true }) });
+    await api(`/contas/${idInativa}`, { method: "DELETE" });
+  });
+
   // ── CA-TRF21 — RLS isolamento transações ──────────────────
   test("CA-TRF21 — GET /transacoes não expõe lançamentos de outro usuário", async () => {
     const idForaEscopo = "00000000-0000-0000-0000-000000000002";

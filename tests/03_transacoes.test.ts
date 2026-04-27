@@ -485,6 +485,145 @@ describe("Transações — CA-TX01 a CA-TX28", () => {
     expect(s2).toBe(422);
   });
 
+  // ── CA-TX29 — descricao curta demais ────────────────────
+  test("CA-TX29 — POST /transacoes rejeita descricao com menos de 2 caracteres", async () => {
+    const { status } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      descricao: "x",
+    }) as { status: number };
+    expect(status).toBe(400);
+  });
+
+  // ── CA-TX30 — descricao longa demais ─────────────────────
+  test("CA-TX30 — POST /transacoes rejeita descricao com mais de 200 caracteres", async () => {
+    const { status } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      descricao: "A".repeat(201),
+    }) as { status: number };
+    expect(status).toBe(400);
+  });
+
+  // ── CA-TX31 — constraint tudo-ou-nada da recorrência ─────
+  test("CA-TX31 — POST /transacoes rejeita recorrência com campos incompletos", async () => {
+    const casosInvalidos = [
+      { total_parcelas: 3 },
+      { tipo_recorrencia: "MENSAL" },
+      { total_parcelas: 3, tipo_recorrencia: "MENSAL" },
+      { intervalo_recorrencia: 1 },
+    ];
+    for (const extra of casosInvalidos) {
+      const { status } = await api("/transacoes", "POST", {
+        ...TX_VALIDA(),
+        ...extra,
+      }) as { status: number };
+      expect([400, 422]).toContain(status);
+    }
+  });
+
+  // ── CA-TX32 — DELETE escopo ESTE_E_SEGUINTES ─────────────
+  test("CA-TX32 — DELETE com escopo ESTE_E_SEGUINTES remove parcela atual e seguintes", async () => {
+    const { data } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: dataFutura(1),
+      status: "PENDENTE",
+      total_parcelas: 4,
+      tipo_recorrencia: "MENSAL",
+      intervalo_recorrencia: 1,
+    }) as { status: number; data: Record<string, unknown> };
+    const ids = ((data as any).parcelas as any[]).map((p: any) => p.id as string);
+    expect(ids.length).toBe(4);
+
+    // Deletar a partir da 2ª parcela
+    const { status } = await api(`/transacoes/${ids[1]}?escopo=ESTE_E_SEGUINTES`, "DELETE") as { status: number };
+    expect(status).toBe(200);
+
+    // 1ª parcela deve permanecer
+    const { status: s0 } = await api(`/transacoes/${ids[0]}`) as { status: number };
+    expect(s0).toBe(200);
+
+    // 2ª e seguintes devem ter sido removidas
+    for (let i = 1; i < ids.length; i++) {
+      const { status: si } = await api(`/transacoes/${ids[i]}`) as { status: number };
+      expect(si).toBe(404);
+    }
+
+    await limparTransacao(ids[0]);
+  });
+
+  // ── CA-TX33 — DELETE escopo TODOS ────────────────────────
+  test("CA-TX33 — DELETE com escopo TODOS remove toda a série de recorrência", async () => {
+    const { data } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: dataFutura(1),
+      status: "PENDENTE",
+      total_parcelas: 3,
+      tipo_recorrencia: "MENSAL",
+      intervalo_recorrencia: 1,
+    }) as { status: number; data: Record<string, unknown> };
+    const ids = ((data as any).parcelas as any[]).map((p: any) => p.id as string);
+    expect(ids.length).toBe(3);
+
+    const { status } = await api(`/transacoes/${ids[0]}?escopo=TODOS`, "DELETE") as { status: number };
+    expect(status).toBe(200);
+
+    for (const id of ids) {
+      const { status: si } = await api(`/transacoes/${id}`) as { status: number };
+      expect(si).toBe(404);
+    }
+  });
+
+  // ── CA-TX34 — Recorrência DIARIA ─────────────────────────
+  test("CA-TX34 — POST com tipo_recorrencia=DIARIA cria parcelas em dias consecutivos", async () => {
+    const hoje = new Date().toISOString().split("T")[0];
+    const { status, data } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: hoje,
+      status: "PAGO",
+      total_parcelas: 3,
+      tipo_recorrencia: "DIARIA",
+      intervalo_recorrencia: 1,
+    }) as { status: number; data: Record<string, unknown> };
+    expect(status).toBe(201);
+
+    const parcelas = ((data as any).parcelas as any[]);
+    expect(parcelas.length).toBe(3);
+
+    // Verificar que os intervalos são de 1 dia
+    const datas = parcelas
+      .map((p: any) => new Date(p.data + "T12:00:00Z").getTime())
+      .sort((a, b) => a - b);
+    const diff1 = Math.round((datas[1] - datas[0]) / (1000 * 60 * 60 * 24));
+    const diff2 = Math.round((datas[2] - datas[1]) / (1000 * 60 * 60 * 24));
+    expect(diff1).toBe(1);
+    expect(diff2).toBe(1);
+
+    const ids = parcelas.map((p: any) => p.id as string);
+    for (const id of ids) await limparTransacao(id).catch(() => {});
+  });
+
+  // ── CA-TX35 — Lançamento em conta inativa ────────────────
+  test("CA-TX35 — POST /transacoes rejeita lançamento em conta inativa", async () => {
+    const { data: criada } = await api("/contas", "POST", {
+      nome: "Jest Inativa TX35",
+      tipo: "CORRENTE",
+      saldo_inicial: 0,
+    }) as { data: Record<string, unknown> };
+    const idInativa = criada.id as string;
+    expect(idInativa).toBeTruthy();
+
+    await api(`/contas/${idInativa}`, "PUT", { ativa: false });
+
+    const { status } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      conta_id: idInativa,
+    }) as { status: number };
+    expect([400, 422]).toContain(status);
+
+    // Reativar e limpar
+    await api(`/contas/${idInativa}`, "PUT", { ativa: true });
+    await api(`/contas/${idInativa}`, "DELETE");
+  });
+
   // ── CA-TX28 — Escopo ESTE_E_SEGUINTES com mudança de data ─
   test("CA-TX28 — PUT escopo ESTE_E_SEGUINTES com nova data recalcula datas das seguintes", async () => {
     const { data: dRes } = await api("/transacoes", "POST", {
