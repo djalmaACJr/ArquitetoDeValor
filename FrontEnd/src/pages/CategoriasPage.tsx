@@ -164,7 +164,7 @@ export default function CategoriasPage() {
                         {p.descricao}
                       </span>
                       {p.protegida && (
-                        <Shield size={11} style={{ color: '#7F77DD' }} className="flex-shrink-0" title="Protegida" />
+                        <Shield size={11} style={{ color: '#7F77DD' }} className="flex-shrink-0" />
                       )}
                       {!p.ativa && (
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/5"

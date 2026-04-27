@@ -189,9 +189,9 @@ export default function LancamentosPage() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
     }
-    if (state.filtroStatus) setFiltStatus(state.filtroStatus)
-    if (state.mes)           setMes(state.mes)
-    if (state.contaId)       setFiltContas([state.contaId])
+    if (state.filtroStatus) setFiltStatus(state.filtroStatus as string[])
+    if (state.mes)           setMes(state.mes as string)
+    if (state.contaId)       setFiltContas([state.contaId as string])
     if (state.editarId) {
       // editarId: tenta abrir drawer — aguarda lançamentos se ainda não carregaram
       const tx = lancamentos.find(l => l.id === state.editarId)
@@ -557,7 +557,7 @@ export default function LancamentosPage() {
                             {isTransf ? (
                               <ArrowLeftRight size={13} style={{ color: '#818cf8' }} />
                             ) : isRecorr ? (
-                              <Repeat2 size={13} style={{ color: '#f0b429' }} title="Recorrente" />
+                              <Repeat2 size={13} style={{ color: '#f0b429' }} />
                             ) : (
                               <span className="w-1.5 h-1.5 rounded-full bg-white/20 inline-block" />
                             )}
@@ -709,7 +709,7 @@ export default function LancamentosPage() {
                         const isTransf  = !!l.id_par_transferencia
                         const isRecorr  = !!l.id_recorrencia && !isTransf
                         const isPago    = l.status === 'PAGO'
-                        const podeEditar = !(isRecorr && isPago && l.nr_parcela !== undefined && l.total_parcelas !== undefined && l.nr_parcela < l.total_parcelas)
+                        const podeEditar = !(isRecorr && isPago && l.nr_parcela != null && l.total_parcelas != null && l.nr_parcela < l.total_parcelas)
                         return (
                           <div key={l.id}
                             className="bg-[#1a1f2e] border border-white/10 rounded-xl p-3">

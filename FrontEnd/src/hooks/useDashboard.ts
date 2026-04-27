@@ -55,7 +55,7 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
   const [resumo,      setResumo]      = useState<ResumoMensal | null>(null)
   const [despesasCat, setDespesasCat] = useState<DespesaCategoria[]>([])
   const [receitasCat, setReceitasCat] = useState<DespesaCategoria[]>([])
-  const [historico,   setHistorico]   = useState<{ mes: string; saldo_mes?: number }[]>([])
+  const [historico,   setHistorico]   = useState<ResumoMensal[]>([])
   const [pagos,       setPagos]       = useState<{ receitas: number; despesas: number }[]>([])
   const [pendentesStatus, setPendentesStatus] = useState<{ receitas: number; despesas: number }[]>([])
   const [projecoes,   setProjecoes]   = useState<{ receitas: number; despesas: number }[]>([])
@@ -144,7 +144,7 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
       const saidas   = doMes.filter(t => t.tipo === 'DESPESA' && !isTransf(t)).reduce((s, t) => s + t.valor, 0)
 
       // Calcular valores por status para cada mês do histórico
-      const historicoStatus = meses6.map((mesHist, idx) => {
+      const historicoStatus = meses6.map((_, idx) => {
         const fatia = extrairLista<Transacao>(historicosRes[idx]?.dados).filter(filtrarTransfComStatus)
         
         const pagosMes = {

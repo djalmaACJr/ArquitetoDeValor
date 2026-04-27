@@ -13,6 +13,7 @@ import {
 } from 'chart.js'
 import type { TooltipItem } from 'chart.js'
 import type { Conta, Transacao, DespesaCategoria } from '../types'
+import type { Lancamento } from '../hooks/useLancamentos'
 import { supabase } from '../lib/supabase'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 
@@ -541,7 +542,8 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
         </div>
       </div>
             <div style={{ position: 'relative', height: '300px', width: '100%' }}>
-        <Chart type="bar" data={data} options={options} />
+        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+        <Chart type="bar" data={data} options={options as any} />
       </div>
     </div>
   )
@@ -895,7 +897,7 @@ export default function DashboardPage() {
       {lancamentoEditando && (
         <DrawerLancamento
           lancamento={lancamentoEditando}
-          todasParcelas={[...(pendentes || []), ...(proximas || [])] as Transacao[]}
+          todasParcelas={[...(pendentes || []), ...(proximas || [])] as Transacao[] as unknown as Lancamento[]}
           onFechar={() => setLancamentoEditando(null)}
           onSalvo={() => { setLancamentoEditando(null); refetch() }}
           onExcluido={() => { setLancamentoEditando(null); refetch() }}

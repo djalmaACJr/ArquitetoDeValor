@@ -204,12 +204,12 @@ const ICONE_NOME: Record<string, string> = {
   '👠':'Salto alto','🛍':'Compras/shopping','🎩':'Chapéu','🧢':'Boné',
   '👶':'Bebê/filho','🧒':'Criança','👧':'Filha','👦':'Filho','🐶':'Cachorro/pet',
   '🐱':'Gato/pet','🐾':'Pet/veterinário','🌱':'Jardim/planta','🌻':'Flores',
-  '🌿':'Natureza','🏡':'Sítio/chácara','👨':'Adulto','👩':'Adulta',
+  '🌿':'Natureza','👨':'Adulto','👩':'Adulta',
   '👴':'Idoso','👵':'Idosa','🤝':'Acordos/parcerias',
   '🔔':'Assinatura/alerta','📧':'E-mail/serviço','📮':'Correios','🗓':'Agenda/mensalidade',
   '📅':'Data/vencimento','⏰':'Prazo/alarme','🔄':'Recorrente/transferência',
   '📋':'Fatura/lista','📌':'Fixo/importante','🏷':'Etiqueta/preço',
-  '🔏':'Seguro/privado','📑':'Contrato','🗃':'Arquivo','📣':'Comunicação',
+  '🔏':'Seguro/privado','🗃':'Arquivo','📣':'Comunicação',
   '🔁':'Repetição/recorrente','💬':'Comunicação',
 }
 

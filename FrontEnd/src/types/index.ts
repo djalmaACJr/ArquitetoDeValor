@@ -19,6 +19,8 @@ export interface Conta {
   saldo_inicial: number
   movimentacao:  number
   saldo_atual:   number
+  dia_fechamento?: number | null
+  dia_pagamento?:  number | null
 }
 
 // ── Categorias ────────────────────────────────────────────
@@ -55,8 +57,9 @@ export interface Transacao {
   id_par_transferencia: string | null   // identifica o par débito+crédito de uma transferência
   nr_parcela:           number | null
   total_parcelas:   number | null
-  tipo_recorrencia: string | null
-  observacao:       string | null
+  tipo_recorrencia:      string | null
+  intervalo_recorrencia: number | null
+  observacao:            string | null
   criado_em:        string
   atualizado_em:    string
   // campos da view com saldo

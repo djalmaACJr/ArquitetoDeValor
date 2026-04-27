@@ -212,7 +212,7 @@ export default function RelatoriosPage() {
         const params = new URLSearchParams({ mes: m, per_page: '1000', saldo: 'true' })
         if (filtContas.length === 1) params.set('conta_id', filtContas[0])
         const res = await apiFetch<{ dados: Lancamento[] }>(`/transacoes?${params}`)
-        const lista = res.dados?.dados ?? res.dados ?? []
+        const lista = (res.dados?.dados ?? res.dados ?? []) as Lancamento[]
         todos.push(...lista)
       }))
       setPgState({ lancamentos: todos, buscado: true })
@@ -368,6 +368,7 @@ export default function RelatoriosPage() {
     rows.push(['RESULTADO', grandTotalEntradas - grandTotalDespesas, ...meses.map(m => (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0))])
 
     // Gerar xlsx via SheetJS (mesmo CDN usado em Ferramentas)
+    // @ts-expect-error dynamic CDN import
     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
     const ws = XLSX.utils.aoa_to_sheet(rows)
     ws['!cols'] = [
@@ -487,7 +488,7 @@ export default function RelatoriosPage() {
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Transferências</p>
             <button
-              onClick={() => setIncluirTransf(v => !v)}
+              onClick={() => setIncluirTransf(!incluirTransf)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[11px] transition-all"
               style={{
                 borderColor: incluirTransf ? 'rgba(0,200,150,0.4)' : 'rgba(255,255,255,0.1)',

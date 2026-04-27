@@ -18,17 +18,17 @@ export interface Lancamento {
   nr_parcela: number | null
   total_parcelas: number | null
   tipo_recorrencia: string | null
-  intervalo_recorrencia: number | null
+  intervalo_recorrencia?: number | null
   observacao: string | null
   // Campos enriquecidos pela view vw_transacoes_com_saldo
   saldo_acumulado?: number
-  conta_nome?: string
-  conta_icone?: string
-  conta_cor?: string
-  categoria_nome?: string
-  categoria_icone?: string
-  categoria_cor?: string
-  categoria_pai_nome?: string
+  conta_nome?: string | null
+  conta_icone?: string | null
+  conta_cor?: string | null
+  categoria_nome?: string | null
+  categoria_icone?: string | null
+  categoria_cor?: string | null
+  categoria_pai_nome?: string | null
 }
 
 export interface FiltrosLancamento {

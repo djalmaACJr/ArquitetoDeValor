@@ -198,7 +198,7 @@ export default function DrawerLancamento({
               const result = await response.json()
               if (result.dados && !result.erro) {
                 parcelasCompletas = result.dados
-                console.log('Parcelas completas da recorrência:', parcelasCompletas.length)
+                console.log('Parcelas completas da recorrência:', parcelasCompletas?.length)
               }
             } catch (e) {
               console.error('Erro ao buscar parcelas da recorrência:', e)
@@ -614,7 +614,7 @@ export default function DrawerLancamento({
                               name="escopo" 
                               value={op.value}
                               checked={escopo === op.value} 
-                              onChange={() => setEscopo(op.value)}
+                              onChange={() => setEscopo(op.value as 'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES')}
                               style={{
                                 WebkitAppearance: 'none',
                                 MozAppearance: 'none',
