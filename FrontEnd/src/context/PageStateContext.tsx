@@ -26,7 +26,7 @@ interface RelatoriosState {
   filtStatus:    string[]
   filtContas:    string[]
   incluirTransf: boolean
-  lancamentos:   any[]
+  lancamentos:   unknown[]
   buscado:       boolean
 }
 
@@ -73,6 +73,7 @@ const RELATORIOS_INICIAL: RelatoriosState = {
 // ── Context ──────────────────────────────────────────────────
 const PageStateContext = createContext<PageStateContextValue | null>(null)
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function usePageState() {
   const ctx = useContext(PageStateContext)
   if (!ctx) throw new Error('usePageState deve ser usado dentro de PageStateProvider')

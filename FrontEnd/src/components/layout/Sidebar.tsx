@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, List, CreditCard, Tag,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
-  ChevronLeft, ChevronRight, RefreshCw,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'

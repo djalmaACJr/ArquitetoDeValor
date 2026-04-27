@@ -548,7 +548,7 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
 }
 
 // -- Grafico donut de categoria ---------------------------
-function GraficoDonut({ titulo, subtitulo, total, dados, corCentro }: {
+function GraficoDonut({ titulo, subtitulo, total, dados }: {
   titulo: string; subtitulo: string; total: number
   dados: DespesaCategoria[]; corCentro: string
 }) {
@@ -602,8 +602,8 @@ function GraficoDonut({ titulo, subtitulo, total, dados, corCentro }: {
 }
 
 // -- Card de contas com saldo dinâmico ------------------------------
-function CardContas({ contas, oculto, mes, historico, modo, setModo }: { 
-  contas: Conta[]; 
+function CardContas({ contas, oculto, mes, modo, setModo }: {
+  contas: Conta[];
   oculto: boolean;
   mes: string;
   historico: { mes: string; saldo_mes?: number }[];

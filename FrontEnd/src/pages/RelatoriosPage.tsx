@@ -60,14 +60,6 @@ function gerarMeses(inicio: string, fim: string): string[] {
   return meses
 }
 
-function mesAtual() { return new Date().toISOString().slice(0, 7) }
-
-function _mesAnterior(m: string, n: number) {
-  const [a, mes] = m.split('-').map(Number)
-  let a2 = a, m2 = mes - n
-  while (m2 <= 0) { m2 += 12; a2-- }
-  return `${a2}-${String(m2).padStart(2, '0')}`
-}
 
 // -- Linha expansivel -------------------------------------------
 function LinhaGrupo({ grupo, meses, oculto, onCelulaClick }: {
@@ -193,13 +185,11 @@ export default function RelatoriosPage() {
   const [loading,     setLoading]     = useState(false)
   const lancamentos    = pgState.lancamentos as Lancamento[]
   const buscado        = pgState.buscado
-  const setLancamentos = (v: Lancamento[]) => setPgState({ lancamentos: v })
-  const setBuscado     = (v: boolean)      => setPgState({ buscado: v })
   const [oculto,      setOculto]      = useState(false)
   const [credAberto,  setCredAberto]  = useState(true)
   const [debAberto,   setDebAberto]   = useState(true)
   const drillRef    = useRef<HTMLDivElement>(null)
-  const [lancamentoEditando, setLancamentoEditando] = useState<any | null>(null)
+  const [lancamentoEditando, setLancamentoEditando] = useState<Lancamento | null>(null)
   const [drillDown,   setDrillDown]   = useState<{
     titulo: string
     categoria_id: string | null
@@ -224,8 +214,7 @@ export default function RelatoriosPage() {
         const lista = res.dados?.dados ?? res.dados ?? []
         todos.push(...lista)
       }))
-      setLancamentos(todos)
-      setBuscado(true)
+      setPgState({ lancamentos: todos, buscado: true })
       // Debug: ver estrutura dos dados
       if (todos.length > 0) {
         const ex = todos.find(l => l.categoria_id)
@@ -237,7 +226,7 @@ export default function RelatoriosPage() {
     } finally {
       setLoading(false)
     }
-  }, [meses, filtContas])
+  }, [meses, filtContas, setPgState])
 
   // -- Processar dados ------------------------------------------
   const { grupos, totaisMes, grandTotalEntradas, grandTotalDespesas } = useMemo(() => {

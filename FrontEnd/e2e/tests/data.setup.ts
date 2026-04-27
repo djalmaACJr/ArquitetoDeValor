@@ -45,10 +45,10 @@ setup('criar dados basicos', async ({ page, request }) => {
   const api = (p: string) => `${SUPABASE_URL}/functions/v1${p}`
 
   // ── Helper: lista, filtra por nome contendo "E2E", deleta cada um ─
-  async function limparE2E<T>(
+  async function limparE2E(
     recurso: string,
-    pegarNome: (item: any) => string | undefined,
-    pegarId:   (item: any) => string | undefined,
+    pegarNome: (item: Record<string, unknown>) => string | undefined,
+    pegarId:   (item: Record<string, unknown>) => string | undefined,
     queryDelete = '',
   ): Promise<number> {
     const res = await request.get(api(`/${recurso}`), { headers })
@@ -58,7 +58,7 @@ setup('criar dados basicos', async ({ page, request }) => {
     }
     const body = await res.json().catch(() => ({}))
     const lista = Array.isArray(body) ? body : (body.dados ?? [])
-    const alvos = lista.filter((it: any) => (pegarNome(it) ?? '').includes('E2E'))
+    const alvos = lista.filter((it: Record<string, unknown>) => (pegarNome(it) ?? '').includes('E2E'))
     let n = 0
     for (const it of alvos) {
       const id = pegarId(it)

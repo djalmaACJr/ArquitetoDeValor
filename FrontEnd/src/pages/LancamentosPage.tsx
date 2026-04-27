@@ -29,10 +29,6 @@ function agruparPorData<T extends { data: string }>(items: T[]): [string, T[]][]
   }
   return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
 }
-function hoje() {
-  return new Date().toISOString().slice(0, 10)
-}
-
 // ── Badge de status ───────────────────────────────────────────
 function StatusBadge({ status, onClick }: { status: string; onClick?: () => void }) {
   const cfg: Record<string, { label: string; bg: string; color: string }> = {
@@ -82,77 +78,7 @@ function AcaoBtn({ onClick, title, color = '#8b92a8', children }: {
   )
 }
 
-// ── Modal de escopo de recorrência ────────────────────────────
-function _ModalEscopo({ onConfirmar, onCancelar, acao, opcoes }: {
-  onConfirmar: (escopo: 'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS') => void
-  onCancelar: () => void
-  acao: 'editar' | 'excluir'
-  opcoes: ('SOMENTE_ESTE' | 'ESTE_E_SEGUINTES' | 'TODOS')[]
-}) {
-  const labels: Record<string, string> = {
-    SOMENTE_ESTE:     'Somente este lançamento',
-    ESTE_E_SEGUINTES: 'Este e os seguintes',
-    TODOS:            'Todos da série',
-  }
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60" onClick={onCancelar} />
-      <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
-        <p className="text-[14px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>
-          {acao === 'editar' ? 'Editar' : 'Excluir'} lançamento recorrente
-        </p>
-        <p className="text-[12px] mb-5" style={{ color: '#8b92a8' }}>
-          Este lançamento faz parte de uma série. O que deseja {acao === 'editar' ? 'editar' : 'excluir'}?
-        </p>
-        <div className="flex flex-col gap-2">
-          {opcoes.map(val => (
-            <button key={val}
-              onClick={() => onConfirmar(val)}
-              className="w-full py-2.5 px-4 rounded-lg border text-[13px] text-left transition-all border-white/10 hover:border-av-green hover:bg-av-green/5 cursor-pointer"
-              style={{ color: '#e8eaf0' }}>
-              {labels[val]}
-            </button>
-          ))}
-        </div>
-        <button onClick={onCancelar} className="mt-3 text-[11px] w-full text-center"
-          style={{ color: '#8b92a8' }}>Cancelar</button>
-      </div>
-    </div>
-  )
-}
-
-// ── Formulário de lançamento ──────────────────────────────────
-type TipoTx = 'RECEITA' | 'DESPESA' | 'TRANSFERENCIA'
 type StatusTx = 'PAGO' | 'PENDENTE' | 'PROJECAO'
-interface FormState {
-  tipo: TipoTx; data: string; descricao: string; valor: string
-  conta_id: string; conta_destino_id: string; categoria_id: string
-  status: StatusTx; observacao: string
-  recorrente: boolean; total_parcelas: string; tipo_recorrencia: string; intervalo_recorrencia: string
-}
-const _FORM_VAZIO: FormState = {
-  tipo: 'DESPESA', data: hoje(), descricao: '', valor: '',
-  conta_id: '', conta_destino_id: '', categoria_id: '', status: 'PAGO', observacao: '',
-  recorrente: false, total_parcelas: '2', tipo_recorrencia: 'MENSAL', intervalo_recorrencia: '1',
-}
-function _formDeLanc(l: Lancamento): FormState {
-  // Identificação de transferência pelo campo dedicado id_par_transferencia
-  const isTransf = !!l.id_par_transferencia
-  const descricaoLimpa = isTransf
-    ? l.descricao.replace(/^\[Transf\. (saída|entrada)\] /, '').replace(/ \d+\/\d+$/, '')
-    : l.descricao
-  return {
-    tipo: isTransf ? 'TRANSFERENCIA' : l.tipo,
-    data: l.data, descricao: descricaoLimpa,
-    valor: String(l.valor), conta_id: l.conta_id,
-    conta_destino_id: '', // preenchido dinamicamente no abrirEditar para transferências
-    categoria_id: l.categoria_id ?? '', status: l.status,
-    observacao: l.observacao ?? '',
-    recorrente: !!l.id_recorrencia, total_parcelas: String(l.total_parcelas ?? 2),
-    tipo_recorrencia: l.tipo_recorrencia ?? 'MENSAL',
-    intervalo_recorrencia: String((l as Lancamento & { intervalo_recorrencia?: number }).intervalo_recorrencia ?? 1),
-  }
-}
 
 // ── Página principal ──────────────────────────────────────────
 export default function LancamentosPage() {
@@ -171,32 +97,15 @@ export default function LancamentosPage() {
     setPgState({ comSaldo: typeof v === 'function' ? v(pgState.comSaldo) : v })
   const [saldoBaseConta, setSaldoBaseConta] = useState<Record<string, number>>({})
 
-  const { lancamentos, loading, error, carregar, criar, editar, excluir, antecipar, alterarStatus, criarTransferencia, editarTransferencia, excluirTransferencia } =
+  const { lancamentos, loading, error, carregar, editar, excluir, antecipar, alterarStatus } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus, com_saldo: comSaldo })
 
   const { contas }     = useContas()
 
-  // Saldo de cada conta até o último dia do mês anterior (base para recálculo)
-  useEffect(() => {
-    if (filtContas.length !== 1) { setSaldoBaseConta({}); return }
-    const [ano, m] = mes.split('-').map(Number)
-    const ultimoDiaMesAnterior = new Date(ano, m - 1, 0).toISOString().split('T')[0]
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) return
-      supabase.rpc('fn_saldos_contas_ate_data', { p_data: ultimoDiaMesAnterior })
-        .then(({ data }) => {
-          if (data) {
-            const mapa: Record<string, number> = {}
-            ;(data as { conta_id: string; saldo: number }[]).forEach(r => { mapa[r.conta_id] = r.saldo })
-            setSaldoBaseConta(mapa)
-          }
-        })
-    })
-  }, [filtContas, mes])
-
   // Busca o saldo de cada conta até o último dia do mês ANTERIOR
   // para usar como base no recálculo do saldo_acumulado por conta
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (filtContas.length !== 1) { setSaldoBaseConta({}); return }
     const [ano, m] = mes.split('-').map(Number)
     const ultimoDiaMesAnterior = new Date(ano, m - 1, 0).toISOString().split('T')[0]
@@ -224,12 +133,10 @@ export default function LancamentosPage() {
 
   // Navegação por teclado ← → entre meses
   const navMes = useCallback((delta: number) => {
-    setMes(atual => {
-      const [y, m] = atual.split('-').map(Number)
-      const d = new Date(y, m - 1 + delta, 1)
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    })
-  }, [])
+    const [y, m] = mes.split('-').map(Number)
+    const d = new Date(y, m - 1 + delta, 1)
+    setPgState({ mes: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })
+  }, [mes, setPgState])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -253,13 +160,23 @@ export default function LancamentosPage() {
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const toggleSelecionado = (id: string) => setSelecionados(prev => {
     const next = new Set(prev)
-    next.has(id) ? next.delete(id) : next.add(id)
+    if (next.has(id)) next.delete(id); else next.add(id)
     return next
   })
 
   // Limpar seleção ao trocar de mês
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setSelecionados(new Set()) }, [mes])
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
+
+  const abrirEditar = (l: Lancamento) => {
+    // Para transferência, garantir que editamos pela perna de saída
+    if (l.id_par_transferencia && l.descricao?.includes('entrada')) {
+      const saida = lancamentos.find(x => x.id_par_transferencia === l.id_par_transferencia && x.descricao?.includes('saída'))
+      if (saida) { setLancamentoEditando(saida); setNovoLancamento(false); setDrawerAberto(true); return }
+    }
+    setLancamentoEditando(l); setNovoLancamento(false); setDrawerAberto(true)
+  }
 
   // Ler state da navegação (vindo do Dashboard) — só na montagem / mudança de rota
   const stateAplicado = useRef(false)
@@ -269,6 +186,7 @@ export default function LancamentosPage() {
     if (stateAplicado.current) return
     stateAplicado.current = true
     if (state.novoLancamento) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
     }
     if (state.filtroStatus) setFiltStatus(state.filtroStatus)
@@ -284,15 +202,6 @@ export default function LancamentosPage() {
   }, [location.state, lancamentos])
 
   const abrirNovo = () => { setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true) }
-
-  const abrirEditar = (l: Lancamento) => {
-    // Para transferência, garantir que editamos pela perna de saída
-    if (l.id_par_transferencia && l.descricao?.includes('entrada')) {
-      const saida = lancamentos.find(x => x.id_par_transferencia === l.id_par_transferencia && x.descricao?.includes('saída'))
-      if (saida) { setLancamentoEditando(saida); setNovoLancamento(false); setDrawerAberto(true); return }
-    }
-    setLancamentoEditando(l); setNovoLancamento(false); setDrawerAberto(true)
-  }
   const fecharDrawer = () => { setDrawerAberto(false); setLancamentoEditando(null); setNovoLancamento(false) }
 
 
@@ -620,7 +529,6 @@ export default function LancamentosPage() {
                       const isTransf  = !!l.id_par_transferencia
                       const isRecorr  = !!l.id_recorrencia && !isTransf
                       const isPago    = l.status === 'PAGO'
-                      const podeEditar = !(isRecorr && isPago && l.nr_parcela !== undefined && l.total_parcelas !== undefined && l.nr_parcela < l.total_parcelas)
                       return (
                         <div key={l.id}
                           className="grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center"
@@ -1062,16 +970,7 @@ export default function LancamentosPage() {
         const nFuturas       = Math.max(0, totalParc - nrAtual)
         const temFuturas     = isRecorrModal && nFuturas > 0
 
-        // Parcelas visíveis no mês atual (para exibir valor estimado se disponível)
-        const futurasVisiveis = isRecorrModal
-          ? lancamentos.filter(x =>
-              x.id_recorrencia === antecipando.id_recorrencia &&
-              x.id !== antecipando.id &&
-              x.status !== 'PAGO' &&
-              (x.nr_parcela ?? 0) > nrAtual
-            )
-          : []
-        // Valor estimado: usa as visíveis * valor unitário para as demais
+        // Valor estimado: usa valor unitário para as parcelas futuras
         const valorUnitario  = antecipando.valor
         const valorFutEst    = nFuturas * valorUnitario
         const valorTotal     = antecipando.valor + valorFutEst

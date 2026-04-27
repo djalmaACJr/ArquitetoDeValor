@@ -88,7 +88,7 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
       // Sufixo de conta para filtrar queries quando uma conta estiver selecionada
       const contaParam = contasFiltro.length === 1 ? `&conta_id=${contasFiltro[0]}` : ''
 
-      const [contasRes, pendentesRes, proximosRes, pagosRes, ...historicosRes] = await Promise.all([
+      const [contasRes, pendentesRes, proximosRes, , ...historicosRes] = await Promise.all([
         apiFetch<Conta[]>('/contas', signal),
         apiFetch(`/transacoes?status=PENDENTE&mes=${mes}&per_page=500&saldo=true${contaParam}`, signal),
         apiFetch(`/transacoes?status=PENDENTE&mes=${mesSeguinte}&per_page=500&saldo=true${contaParam}`, signal),

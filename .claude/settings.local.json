@@ -4,7 +4,8 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173 --max-time 3)",
       "Bash(npx tsc *)",
       "Bash(echo \"exit=$?)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(npm run *)"
     ]
   }
 }

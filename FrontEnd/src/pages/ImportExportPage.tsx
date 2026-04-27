@@ -1,5 +1,5 @@
 // src/pages/ImportExportPage.tsx
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef } from 'react'
 import {
   Trash2, Download, Upload, AlertTriangle, CheckCircle2,
   FileSpreadsheet, ChevronDown, ChevronUp, X, Loader2, RefreshCw,
@@ -748,7 +748,7 @@ function SecaoImport() {
         const resArr = await Promise.all(
           datasUnicas.map(mes => apiFetchDyn(`/transacoes?mes=${mes}&per_page=1000&saldo=true`))
         )
-        txExistentes = resArr.flatMap(r => extrairListaDyn<any>(r.dados))
+        txExistentes = resArr.flatMap(r => extrairListaDyn<{ data: string; descricao: string; categoria_nome?: string }>(r.dados))
       } catch { /* se falhar, segue sem checar duplicatas */ }
       setCarregandoDedup(false)
 
@@ -1880,6 +1880,7 @@ function SecaoRestore() {
       if (trfBackup?.length > 0) {
         setProgressoLabel('Recriando transferências...')
         let okTrf = 0, errTrf = 0
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const parsUnicos = new Map<string, any>()
         for (const t of trfBackup) {
           const parId = t.id_par ?? t.id_recorrencia

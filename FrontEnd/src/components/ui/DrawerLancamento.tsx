@@ -75,7 +75,6 @@ function inferirParametrosRecorrencia(parcelas: Lancamento[]): {
 
 type TipoTx   = 'RECEITA' | 'DESPESA' | 'TRANSFERENCIA'
 type StatusTx = 'PAGO' | 'PENDENTE' | 'PROJECAO'
-type Escopo   = 'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES'
 
 interface FormState {
   tipo: TipoTx; data: string; descricao: string; valor: string
@@ -170,7 +169,6 @@ export default function DrawerLancamento({
   const [salvando,            setSalvando]            = useState(false)
   const [carregando,          setCarregando]          = useState(false)
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false)
-  const drawerRef = useRef<HTMLDivElement>(null)
   const [excluindo,           setExcluindo]           = useState(false)
   const [escopo,              setEscopo]              = useState<'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES'>('SOMENTE_ESTE')
 
@@ -178,6 +176,7 @@ export default function DrawerLancamento({
   const tipoRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (novoLancamento) { setEditando(null); setForm({ ...FORM_VAZIO, conta_id: contaIdInicial ?? '', categoria_id: categoriaIdInicial ?? '' }); setEscopo('SOMENTE_ESTE'); return }
     if (lancamentoProp) { setEditando(lancamentoProp); setForm(formDeLanc(lancamentoProp, todasParcelas)); setEscopo('SOMENTE_ESTE'); return }
     if (lancamentoId) {
@@ -556,7 +555,7 @@ export default function DrawerLancamento({
                     <div className="flex-1">
                       <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
                         {parseInt(form.intervalo_recorrencia) > 1
-                          ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as any)[form.tipo_recorrencia] ?? 'períodos'
+                          ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as Record<string, string>)[form.tipo_recorrencia] ?? 'períodos'
                           : 'Frequência'}
                       </p>
                       <select
@@ -650,7 +649,7 @@ export default function DrawerLancamento({
                             <div className="flex-1">
                               <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
                                 {parseInt(form.intervalo_recorrencia) > 1
-                                  ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as any)[form.tipo_recorrencia] ?? 'períodos'
+                                  ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as Record<string, string>)[form.tipo_recorrencia] ?? 'períodos'
                                   : 'Frequência'}
                               </p>
                               <select
