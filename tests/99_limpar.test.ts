@@ -24,7 +24,7 @@ async function criarContaTeste(sufixo = ""): Promise<string> {
 
 async function criarCategoriaTeste(sufixo = ""): Promise<string> {
   const { data } = await api("/categorias", "POST", {
-    descricao: `Categoria Teste Limpar${sufixo}`,
+    descricao: `CatLimp${sufixo}`,
     tipo:      "DESPESA",
   }) as { data: Record<string, unknown> };
   return data.id as string;

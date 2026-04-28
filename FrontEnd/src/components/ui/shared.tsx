@@ -604,14 +604,21 @@ export function SelectDark(props: React.SelectHTMLAttributes<HTMLSelectElement>)
 
 // ── Toggle ────────────────────────────────────────────────────
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: string }) {
+  const toggle = () => onChange(!checked)
   return (
     <div className="flex items-center gap-2.5">
-      <button onClick={() => onChange(!checked)}
+      <button onClick={toggle}
         className={`w-11 h-6 rounded-full relative transition-colors flex-shrink-0 ${checked ? 'bg-av-green' : 'bg-white/10'}`}>
         <span className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all"
           style={{ left: checked ? '22px' : '2px' }} />
       </button>
-      {label && <span className="text-[12px]" style={{ color: '#8b92a8' }}>{label}</span>}
+      {label && (
+        <button type="button" onClick={toggle}
+          className="text-[12px] cursor-pointer bg-transparent border-0 p-0 text-left"
+          style={{ color: '#8b92a8' }}>
+          {label}
+        </button>
+      )}
     </div>
   )
 }

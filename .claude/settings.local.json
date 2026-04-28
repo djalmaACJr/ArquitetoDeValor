@@ -5,7 +5,10 @@
       "Bash(npx tsc *)",
       "Bash(echo \"exit=$?)",
       "Bash(echo \"exit=$?\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npx jest *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
+      "Bash(npx playwright *)"
     ]
   }
 }

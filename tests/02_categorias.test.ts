@@ -9,7 +9,7 @@ import { api, limparCategoria } from "./setup";
 const TS = Date.now();
 
 const CAT_PAI_VALIDA = {
-  descricao: `Teste Jest Pai ${TS}`,
+  descricao: `tPai${TS}`,
   icone: "🧪",
   cor: "#123456",
 };
@@ -23,7 +23,7 @@ beforeAll(async () => {
   catPaiId = data.id as string;
 
   const { data: filha } = await api("/categorias", "POST", {
-    descricao: `Teste Jest Filha ${TS}`,
+    descricao: `tFil${TS}`,
     id_pai: catPaiId,
     cor: "#654321",
   }) as { data: Record<string, unknown> };
@@ -76,7 +76,7 @@ beforeAll(async () => {
   // ── CA-CAT05 ─────────────────────────────────────────────
   test("CA-CAT05 — POST /categorias cria categoria pai e retorna 201", async () => {
     const { status, data } = await api("/categorias", "POST", {
-      descricao: `Categoria CA-CAT05 ${TS}`,
+      descricao: `tC5_${TS}`,
       cor: "#aabbcc",
     }) as { status: number; data: Record<string, unknown> };
     expect(status).toBe(201);
@@ -88,7 +88,7 @@ beforeAll(async () => {
   // ── CA-CAT06 ─────────────────────────────────────────────
   test("CA-CAT06 — POST /categorias cria subcategoria com id_pai válido", async () => {
     const { status, data } = await api("/categorias", "POST", {
-      descricao: `Subcategoria CA-CAT06 ${TS}`,
+      descricao: `tS6_${TS}`,
       id_pai: catPaiId,
     }) as { status: number; data: Record<string, unknown> };
     expect(status).toBe(201);

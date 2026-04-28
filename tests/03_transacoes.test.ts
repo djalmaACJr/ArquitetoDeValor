@@ -442,7 +442,7 @@ describe("Transações — CA-TX01 a CA-TX28", () => {
   test("CA-TX26 — GET /transacoes?categoria_id filtra somente lançamentos da categoria", async () => {
     // Criar categoria extra
     const { data: cat2 } = await api("/categorias", "POST", {
-      descricao: `Jest Cat Filtro TX ${Date.now()}`,
+      descricao: `tFTx${Date.now()}`,
       cor: "#aabbcc",
     }) as { data: Record<string, unknown> };
 

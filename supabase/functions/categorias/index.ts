@@ -86,12 +86,12 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   logRequest("POST", "/categorias", body);
   
   if (!body.descricao || String(body.descricao).length < 1) {
-    logResponse(422, { erro: "descricao é obrigatória" });
-    return erro("descricao é obrigatória");
+    logResponse(400, { erro: "descricao é obrigatória" });
+    return erro("descricao é obrigatória", 400);
   }
-  if (String(body.descricao).length > 50) {
-    logResponse(422, { erro: "descricao deve ter no máximo 50 caracteres" });
-    return erro("descricao deve ter no máximo 50 caracteres");
+  if (String(body.descricao).length > 20) {
+    logResponse(400, { erro: "descricao deve ter no máximo 20 caracteres" });
+    return erro("descricao deve ter no máximo 20 caracteres", 400);
   }
   
   const corInvalida = validarCor(body.cor);
@@ -138,9 +138,9 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   if (naoEncontrada) return naoEncontrada;
 
   if (body.descricao !== undefined &&
-     (String(body.descricao).length < 1 || String(body.descricao).length > 50)) {
-    logResponse(422, { erro: "descricao deve ter entre 1 e 50 caracteres" });
-    return erro("descricao deve ter entre 1 e 50 caracteres");
+     (String(body.descricao).length < 1 || String(body.descricao).length > 20)) {
+    logResponse(400, { erro: "descricao deve ter entre 1 e 20 caracteres" });
+    return erro("descricao deve ter entre 1 e 20 caracteres", 400);
   }
   
   const corInvalida = validarCor(body.cor);

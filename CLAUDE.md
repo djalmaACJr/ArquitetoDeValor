@@ -4,6 +4,15 @@
 
 ---
 
+## 📥 Carregamento de contexto
+
+- **`CLAUDE.md`** é o contexto base padrão e é suficiente para a maioria das tarefas (UI, hooks, refactors localizados, bugs pontuais, testes, CI).
+- **`BUSINESS_RULES.md`** deve ser lido **sob demanda** quando a tarefa envolver: recorrência de transações, antecipação de parcelas, par débito+crédito de transferências, escopo de edição (`SOMENTE_ESTE` / `ESTE_E_SEGUINTES` / `TODOS`), categorias protegidas ou cálculo de saldo.
+- **`ARCHITECTURE.md`** deve ser lido **sob demanda** quando a tarefa envolver: criar novo módulo/endpoint, mexer em RLS/migrations, alterar contrato da API ou integrações entre camadas.
+- Quando precisar ler um desses arquivos extras, avise antes de agir.
+
+---
+
 ## 📌 Sobre o projeto
 
 **Arquiteto de Valor** é uma aplicação web de gestão financeira pessoal.

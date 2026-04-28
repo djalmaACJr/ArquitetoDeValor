@@ -116,9 +116,28 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   if (statusOriginal === "PROJECAO" && dataBase <= hoje)
     return erro("RV-008: status PROJECAO só é permitido para datas futuras", 422);
 
-  const totalParcelas    = body.total_parcelas ? parseInt(String(body.total_parcelas)) : 1;
-  const frequencia       = body.tipo_recorrencia ? String(body.tipo_recorrencia) : null;
-  const intervalo        = body.intervalo_recorrencia ? parseInt(String(body.intervalo_recorrencia)) : 1;
+  // ── Validação: recorrência é "tudo-ou-nada" ─────────────────
+  // Se qualquer campo de recorrência for enviado, todos devem estar presentes.
+  const temTotal = body.total_parcelas !== undefined && body.total_parcelas !== null;
+  const temFreq  = body.tipo_recorrencia !== undefined && body.tipo_recorrencia !== null;
+  const temInt   = body.intervalo_recorrencia !== undefined && body.intervalo_recorrencia !== null;
+  if ((temTotal || temFreq || temInt) && !(temTotal && temFreq && temInt))
+    return erro("RV-009: recorrência requer total_parcelas, tipo_recorrencia e intervalo_recorrencia juntos", 400);
+
+  const totalParcelas    = temTotal ? parseInt(String(body.total_parcelas)) : 1;
+  const frequencia       = temFreq ? String(body.tipo_recorrencia) : null;
+  const intervalo        = temInt ? parseInt(String(body.intervalo_recorrencia)) : 1;
+
+  // Se trio enviado, validar conteúdo
+  if (temTotal && temFreq && temInt) {
+    if (isNaN(totalParcelas) || totalParcelas < 1)
+      return erro("RV-009: total_parcelas deve ser inteiro >= 1", 400);
+    if (!FREQUENCIAS.includes(frequencia!))
+      return erro("RV-009: tipo_recorrencia inválido (use DIARIA | SEMANAL | MENSAL | ANUAL)", 400);
+    if (isNaN(intervalo) || intervalo < 1)
+      return erro("RV-009: intervalo_recorrencia deve ser inteiro >= 1", 400);
+  }
+
   const isRecorrente     = totalParcelas > 1 && frequencia && FREQUENCIAS.includes(frequencia);
 
   // ── Lançamento simples (sem recorrência) ────────────────────

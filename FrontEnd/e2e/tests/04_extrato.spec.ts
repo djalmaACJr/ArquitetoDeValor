@@ -96,7 +96,7 @@ test.describe('Extrato (Lançamentos)', () => {
   })
 
   test('E2E-EX07 — toggle saldo anterior funciona', async ({ page }) => {
-    const toggle = page.getByText(/saldo anterior/i)
+    const toggle = page.getByRole('button', { name: 'Saldo anterior' })
     await expect(toggle).toBeVisible()
     await toggle.click()
     // Não deve mostrar erro

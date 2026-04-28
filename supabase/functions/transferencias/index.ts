@@ -10,6 +10,7 @@ import {
 import { logError, logSuccess, logRequest, logResponse } from "../_shared/logger.ts";
 
 const FREQUENCIAS = ["DIARIA","SEMANAL","MENSAL","ANUAL"];
+const ESCOPOS     = ["SOMENTE_ESTE","ESTE_E_SEGUINTES","TODOS"];
 
 interface Transacao {
   id: string; user_id: string; conta_id: string; categoria_id: string
@@ -95,12 +96,14 @@ Deno.serve(async (req: Request) => {
   const c   = db(req);
   const url = new URL(req.url);
 
+  const escopo = url.searchParams.get("escopo") ?? "SOMENTE_ESTE";
+
   try {
     if (m === "GET"    && id)  return await buscarPorId(c, id, userId);
     if (m === "GET"    && !id) return await listar(c, userId, url.searchParams);
     if (m === "POST"   && !id) return await criar(c, await req.json(), userId);
-    if (m === "PUT"    && id)  return await editar(c, id, await req.json(), userId);
-    if (m === "DELETE" && id)  return await excluir(c, id, userId);
+    if (m === "PUT"    && id)  return await editar(c, id, await req.json(), userId, escopo);
+    if (m === "DELETE" && id)  return await excluir(c, id, userId, escopo);
     return erro("Rota não encontrada", 404);
   } catch (e) {
     logError("Handler principal", e);
@@ -251,7 +254,10 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   return json({ id_recorrencia: idRecorrencia, total: resultado.length, parcelas: resultado }, 201);
 }
 
-async function editar(c: ReturnType<typeof db>, idPar: string, body: Record<string, unknown>, userId: string) {
+async function editar(c: ReturnType<typeof db>, idPar: string, body: Record<string, unknown>, userId: string, escopo: string) {
+  if (!ESCOPOS.includes(escopo))
+    return erro("escopo inválido: use SOMENTE_ESTE | ESTE_E_SEGUINTES | TODOS", 400);
+
   const erroVal = validarPayload(body, true);
   if (erroVal) return erro(erroVal, 422);
 
@@ -283,33 +289,111 @@ async function editar(c: ReturnType<typeof db>, idPar: string, body: Record<stri
   if (body.data   !== undefined) camposComuns.data   = body.data;
   if (body.status !== undefined) camposComuns.status = body.status;
 
-  const { error: eu1 } = await c.from("transacoes").update({
-    ...camposComuns, conta_id: novaOrigem,
-    ...(desc !== null ? { descricao: `[Transf. saída] ${desc}`.trim() } : {}),
-  }).eq("id", par.debito.id);
-  if (eu1) return erro("Erro ao atualizar débito: " + eu1.message, 500);
+  // ── Escopo SOMENTE_ESTE (ou par sem recorrência) ─────────────
+  if (escopo === "SOMENTE_ESTE" || !par.debito.id_recorrencia) {
+    const { error: eu1 } = await c.from("transacoes").update({
+      ...camposComuns, conta_id: novaOrigem,
+      ...(desc !== null ? { descricao: `[Transf. saída] ${desc}`.trim() } : {}),
+    }).eq("id", par.debito.id);
+    if (eu1) return erro("Erro ao atualizar débito: " + eu1.message, 500);
 
-  const { error: eu2 } = await c.from("transacoes").update({
-    ...camposComuns, conta_id: novaDestino,
-    ...(desc !== null ? { descricao: `[Transf. entrada] ${desc}`.trim() } : {}),
-  }).eq("id", par.credito.id);
-  if (eu2) return erro("Erro ao atualizar crédito: " + eu2.message, 500);
+    const { error: eu2 } = await c.from("transacoes").update({
+      ...camposComuns, conta_id: novaDestino,
+      ...(desc !== null ? { descricao: `[Transf. entrada] ${desc}`.trim() } : {}),
+    }).eq("id", par.credito.id);
+    if (eu2) return erro("Erro ao atualizar crédito: " + eu2.message, 500);
 
-  const parAtualizado = await buscarPar(c, idPar, userId);
-  if (!parAtualizado) return erro("Erro ao recuperar transferência atualizada", 500);
-  return json(montarTransferencia(parAtualizado.debito, parAtualizado.credito));
+    const parAtualizado = await buscarPar(c, idPar, userId);
+    if (!parAtualizado) return erro("Erro ao recuperar transferência atualizada", 500);
+    return json(montarTransferencia(parAtualizado.debito, parAtualizado.credito));
+  }
+
+  // ── Escopo TODOS ou ESTE_E_SEGUINTES ─────────────────────────
+  // Apenas valor/status/descricao são propagados (data e contas continuam por par).
+  let qDebitos = c.from("transacoes").select("id, id_par_transferencia, nr_parcela")
+    .eq("user_id", userId)
+    .eq("id_recorrencia", par.debito.id_recorrencia)
+    .eq("tipo", "DESPESA");
+  if (escopo === "ESTE_E_SEGUINTES" && par.debito.nr_parcela != null)
+    qDebitos = qDebitos.gte("nr_parcela", par.debito.nr_parcela);
+
+  const { data: debitos, error: eDeb } = await qDebitos;
+  if (eDeb || !debitos) return erro("Erro ao buscar parcelas da série: " + (eDeb?.message ?? "")  , 500);
+
+  const idsPar = debitos.map((d: { id_par_transferencia: string }) => d.id_par_transferencia).filter(Boolean);
+  if (idsPar.length === 0) return erro("Nenhuma parcela encontrada para o escopo informado", 404);
+
+  const updateDebito: Record<string, unknown> = { ...camposComuns };
+  const updateCredito: Record<string, unknown> = { ...camposComuns };
+  if (desc !== null) {
+    updateDebito.descricao  = `[Transf. saída] ${desc}`.trim();
+    updateCredito.descricao = `[Transf. entrada] ${desc}`.trim();
+  }
+
+  const { error: eUpDeb } = await c.from("transacoes")
+    .update(updateDebito)
+    .in("id_par_transferencia", idsPar)
+    .eq("tipo", "DESPESA");
+  if (eUpDeb) return erro("Erro ao atualizar débitos da série: " + eUpDeb.message, 500);
+
+  const { error: eUpCred } = await c.from("transacoes")
+    .update(updateCredito)
+    .in("id_par_transferencia", idsPar)
+    .eq("tipo", "RECEITA");
+  if (eUpCred) return erro("Erro ao atualizar créditos da série: " + eUpCred.message, 500);
+
+  logSuccess("Série de transferências atualizada", { escopo, atualizados: idsPar.length });
+  return json({ atualizados: idsPar.length, escopo });
 }
 
-async function excluir(c: ReturnType<typeof db>, idPar: string, userId: string) {
+async function excluir(c: ReturnType<typeof db>, idPar: string, userId: string, escopo: string) {
+  if (!ESCOPOS.includes(escopo))
+    return erro("escopo inválido: use SOMENTE_ESTE | ESTE_E_SEGUINTES | TODOS", 400);
+
   const par = await buscarPar(c, idPar, userId);
   if (!par) return erro("Transferência não encontrada", 404);
 
-  const { error: eu1 } = await c.from("transacoes")
-    .update({ id_par_transferencia: null }).in("id", [par.debito.id, par.credito.id]);
-  if (eu1) return erro("Erro ao preparar exclusão: " + eu1.message, 500);
+  // ── Escopo SOMENTE_ESTE (ou par sem recorrência) ─────────────
+  if (escopo === "SOMENTE_ESTE" || !par.debito.id_recorrencia) {
+    const { error: eu1 } = await c.from("transacoes")
+      .update({ id_par_transferencia: null }).in("id", [par.debito.id, par.credito.id]);
+    if (eu1) return erro("Erro ao preparar exclusão: " + eu1.message, 500);
 
-  const { error: eu2 } = await c.from("transacoes").delete().in("id", [par.debito.id, par.credito.id]);
-  if (eu2) return erro("Erro ao excluir: " + eu2.message, 500);
+    const { error: eu2 } = await c.from("transacoes").delete().in("id", [par.debito.id, par.credito.id]);
+    if (eu2) return erro("Erro ao excluir: " + eu2.message, 500);
 
-  return json({ mensagem: "Transferência excluída com sucesso" });
+    return json({ mensagem: "Transferência excluída com sucesso", excluidos: 1 });
+  }
+
+  // ── Escopo TODOS ou ESTE_E_SEGUINTES ─────────────────────────
+  let qDebitos = c.from("transacoes").select("id, id_par_transferencia, nr_parcela")
+    .eq("user_id", userId)
+    .eq("id_recorrencia", par.debito.id_recorrencia)
+    .eq("tipo", "DESPESA");
+  if (escopo === "ESTE_E_SEGUINTES" && par.debito.nr_parcela != null)
+    qDebitos = qDebitos.gte("nr_parcela", par.debito.nr_parcela);
+
+  const { data: debitos, error: eDeb } = await qDebitos;
+  if (eDeb || !debitos) return erro("Erro ao buscar parcelas da série: " + (eDeb?.message ?? ""), 500);
+
+  const idsPar = debitos.map((d: { id_par_transferencia: string }) => d.id_par_transferencia).filter(Boolean);
+  if (idsPar.length === 0) return erro("Nenhuma parcela encontrada para o escopo informado", 404);
+
+  // Buscar todos os IDs de transação (débito + crédito) dos pares filtrados
+  const { data: todasTx, error: eTx } = await c.from("transacoes").select("id")
+    .in("id_par_transferencia", idsPar);
+  if (eTx || !todasTx) return erro("Erro ao buscar transações da série: " + (eTx?.message ?? ""), 500);
+
+  const idsTx = todasTx.map((t: { id: string }) => t.id);
+
+  // Limpar id_par_transferencia para destravar trigger de bloqueio
+  const { error: eUp } = await c.from("transacoes")
+    .update({ id_par_transferencia: null }).in("id", idsTx);
+  if (eUp) return erro("Erro ao preparar exclusão da série: " + eUp.message, 500);
+
+  const { error: eDel } = await c.from("transacoes").delete().in("id", idsTx);
+  if (eDel) return erro("Erro ao excluir série: " + eDel.message, 500);
+
+  logSuccess("Série de transferências excluída", { escopo, excluidos: idsPar.length });
+  return json({ mensagem: "Série de transferências excluída com sucesso", excluidos: idsPar.length, escopo });
 }
