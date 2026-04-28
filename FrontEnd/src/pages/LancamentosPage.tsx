@@ -1,5 +1,6 @@
 // src/pages/LancamentosPage.tsx
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+
 import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
@@ -77,6 +78,102 @@ function AcaoBtn({ onClick, title, color = '#8b92a8', children }: {
     >
       {children}
     </button>
+  )
+}
+
+// ── Calendário de dias ────────────────────────────────────────
+const DIAS_ABR = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
+
+function CalendarioStrip({ mes, diasComMovimento, hoje }: {
+  mes: string
+  diasComMovimento: Set<string>
+  hoje: string
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const hojeRef      = useRef<HTMLButtonElement>(null)
+  const [ano, m]     = mes.split('-').map(Number)
+  const totalDias    = new Date(ano, m, 0).getDate()
+  const isMesCorrente = mes === hoje.slice(0, 7)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    if (hojeRef.current) {
+      const el = hojeRef.current
+      const offset = el.offsetLeft - container.clientWidth / 2 + el.offsetWidth / 2
+      container.scrollTo({ left: Math.max(0, offset), behavior: 'instant' })
+    } else {
+      container.scrollTo({ left: 0, behavior: 'instant' })
+    }
+  }, [mes])
+
+  function scrollParaDia(data: string) {
+    const els = document.querySelectorAll<HTMLElement>(`[data-date="${data}"]`)
+    for (const el of els) {
+      if (el.offsetParent !== null) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return }
+    }
+    els[0]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex gap-1 overflow-x-auto mb-4"
+      style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' } as React.CSSProperties}
+    >
+      {Array.from({ length: totalDias }, (_, i) => {
+        const d         = i + 1
+        const data      = `${mes}-${String(d).padStart(2, '0')}`
+        const dow       = new Date(`${data}T12:00:00`).getDay()
+        const temMov    = diasComMovimento.has(data)
+        const ehHoje    = isMesCorrente && data === hoje
+        const fimSemana = dow === 0 || dow === 6
+
+        const bg = ehHoje
+          ? 'rgba(0,200,150,0.1)'
+          : fimSemana && temMov  ? 'rgba(248,113,113,0.1)'
+          : fimSemana            ? 'rgba(248,113,113,0.04)'
+          : temMov               ? 'rgba(255,255,255,0.04)'
+          : 'transparent'
+
+        const border = ehHoje
+          ? '1px solid rgba(0,200,150,0.45)'
+          : fimSemana && temMov ? '1px solid rgba(248,113,113,0.25)'
+          : '1px solid transparent'
+
+        const opacity = ehHoje || temMov ? 1 : fimSemana ? 0.55 : 0.28
+
+        const corDow = ehHoje ? '#00c896' : fimSemana ? 'rgba(248,113,113,0.7)' : '#4a5168'
+        const corNum = ehHoje ? '#00c896'
+          : fimSemana && temMov  ? '#fca5a5'
+          : fimSemana && !temMov ? '#f87171'
+          : temMov               ? '#e8eaf0'
+          : '#4a5168'
+        const corDot = !temMov ? 'transparent' : ehHoje ? '#00c896' : fimSemana ? '#f87171' : '#4da6ff'
+
+        return (
+          <button
+            key={data}
+            ref={ehHoje ? hojeRef : undefined}
+            onClick={() => temMov && scrollParaDia(data)}
+            style={{
+              minWidth: 42, flexShrink: 0, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', gap: 3, padding: '6px 4px', borderRadius: 10,
+              border, background: bg, cursor: temMov ? 'pointer' : 'default',
+              opacity, transition: 'background 0.15s',
+            }}
+          >
+            <span style={{ fontSize: 9, fontWeight: 600, color: corDow, letterSpacing: '0.5px' }}>
+              {DIAS_ABR[dow]}
+            </span>
+            <span style={{ fontSize: 13, lineHeight: 1, fontWeight: ehHoje ? 700 : temMov ? 600 : 400, color: corNum }}>
+              {d}
+            </span>
+            <span style={{ width: 4, height: 4, borderRadius: '50%', flexShrink: 0, background: corDot }} />
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -325,6 +422,12 @@ export default function LancamentosPage() {
     return grupos.length > 0 ? grupos[0][0] : null
   }, [lancamentosComSaldoCorrigido])
 
+  // Dias do mês com pelo menos um lançamento (para destacar no calendário)
+  const diasComMovimento = useMemo(
+    () => new Set(lancamentosComSaldoCorrigido.map(l => l.data)),
+    [lancamentosComSaldoCorrigido]
+  )
+
   // CategoriasCategorias pai para o select (exclui protegidas)
   const catsPai = categorias.filter(c => !c.id_pai && !c.protegida)
   const catsSub = categorias.filter(c => !!c.id_pai)
@@ -452,6 +555,14 @@ export default function LancamentosPage() {
         ))}
       </div>
 
+      {/* Calendário de dias do mês — sticky */}
+      <div
+        className="sticky top-0 z-20 -mx-5 px-5 pb-2 pt-1"
+        style={{ background: '#0d1220', borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} />
+      </div>
+
       {loading && <p className="text-[13px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>}
       {error   && <p className="text-[13px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
 
@@ -469,7 +580,7 @@ export default function LancamentosPage() {
               {/* ── Tabela desktop ── */}
               <div className="hidden md:block space-y-4">
                 {agruparPorData(lancamentosComSaldoCorrigido).map(([data, grupo]) => (
-                  <div key={data} className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
+                  <div key={data} data-date={data} style={{ scrollMarginTop: 8 }} className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
                     {/* Cabeçalho do grupo de data */}
                     <div className="flex items-center gap-3 px-4 py-2 border-b border-white/10 bg-white/[0.03]">
                       {/* Check selecionar todos do dia */}
@@ -699,7 +810,7 @@ export default function LancamentosPage() {
               {/* ── Cards mobile ── */}
               <div className="md:hidden space-y-4">
                 {agruparPorData(lancamentosComSaldoCorrigido).map(([data, grupo]) => (
-                  <div key={data}>
+                  <div key={data} data-date={data} style={{ scrollMarginTop: 8 }}>
                     <div className="flex items-center gap-2 px-1 mb-2">
                       <p className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
                         {fmtDataLabel(data)}

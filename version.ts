@@ -5,18 +5,18 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.1, 1.0.2, 1.0.3) 
 // 3º nível (Z): Tentativas (ex: 1.0.1.1, 1.0.1.2)
 
-export const APP_VERSION = "1.0.3"
+export const APP_VERSION = "1.9.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
   levels: {
     major: "Novas features",
-    minor: "Correções/Hotfixes", 
+    minor: "Correções/Hotfixes",
     patch: "Tentativas"
   },
   current: {
-    level: "minor",
-    description: "Correções em edição de recorrências e rolagem automática"
+    level: "major",
+    description: "Calendário de dias, relatórios com detalhamento, dashboard responsivo e melhorias no extrato"
   }
 })
 
