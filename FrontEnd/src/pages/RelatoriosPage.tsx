@@ -62,21 +62,23 @@ function gerarMeses(inicio: string, fim: string): string[] {
 
 
 // -- Linha expansivel -------------------------------------------
-function LinhaGrupo({ grupo, meses, oculto, onCelulaClick }: {
+function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
   grupo: GrupoPai
   meses: string[]
   oculto: boolean
+  nivel?: number
   onCelulaClick: (catId: string | null, catNome: string, mes: string | null, titulo: string) => void
 }) {
-  const [aberto, setAberto] = useState(true)
+  const [aberto, setAberto] = useState(nivel === 3)
   const cor = grupo.tipo === 'RECEITA' ? '#00c896' : '#f87171'
+  const mostrarSubs = aberto
 
   return (
     <>
       {/* Linha pai */}
       <tr
         onClick={() => setAberto(a => !a)}
-        className="cursor-pointer border-b border-white/5 hover:bg-white/[0.03] transition-colors"
+        className="border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-pointer"
         style={{ background: 'rgba(255,255,255,0.02)' }}
       >
         <td className="px-4 py-2.5 sticky left-0 z-10" style={{ background: 'inherit', minWidth: 220 }}>
@@ -111,8 +113,8 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick }: {
         ))}
       </tr>
 
-      {/* Subcategorias */}
-      {aberto && grupo.subcategorias.map(sub => (
+      {/* Subcategorias — só no nível 3 */}
+      {mostrarSubs && grupo.subcategorias.map(sub => (
         <tr key={sub.categoria_id ?? sub.categoria_nome}
           className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
           <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', minWidth: 220 }}>
@@ -144,7 +146,7 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick }: {
         </tr>
       ))}
 
-      {aberto && (
+      {mostrarSubs && (
         <tr className="border-b border-white/10">
           <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', minWidth: 220 }}>
             <span className="text-[10px] font-bold uppercase tracking-widest pl-6" style={{ color: cor, opacity: 0.7 }}>
@@ -188,6 +190,7 @@ export default function RelatoriosPage() {
   const [oculto,      setOculto]      = useState(false)
   const [credAberto,  setCredAberto]  = useState(true)
   const [debAberto,   setDebAberto]   = useState(true)
+  const [nivel,       setNivel]       = useState<1|2|3>(3)
   const drillRef    = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [lancamentoEditando, setLancamentoEditando] = useState<any | null>(null)
@@ -560,6 +563,30 @@ export default function RelatoriosPage() {
             ))}
           </div>
 
+          {/* Controle de detalhamento */}
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Detalhamento</span>
+            {([
+              { n: 1 as const, label: 'Resumo',     title: 'Só Crédito / Débito / Resultado' },
+              { n: 2 as const, label: 'Categorias', title: 'Categorias pai sem subcategorias' },
+              { n: 3 as const, label: 'Completo',   title: 'Tudo, incluindo subcategorias'    },
+            ]).map(({ n, label, title }) => (
+              <button
+                key={n}
+                title={title}
+                onClick={() => { setNivel(n); setCredAberto(n > 1); setDebAberto(n > 1) }}
+                className="px-3 py-1 rounded-lg text-[11px] font-semibold transition-all border"
+                style={{
+                  background:   nivel === n ? 'rgba(0,200,150,0.12)' : 'transparent',
+                  borderColor:  nivel === n ? 'rgba(0,200,150,0.4)'  : 'rgba(255,255,255,0.08)',
+                  color:        nivel === n ? '#00c896'               : '#8b92a8',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {/* Tabela principal */}
           <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden">
             <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
@@ -603,27 +630,35 @@ export default function RelatoriosPage() {
                     </td>
                   </tr>
                   {credAberto && grupos.filter(g => g.tipo === 'RECEITA').map((g, i) => (
-                    <LinhaGrupo key={i} grupo={g} meses={meses} oculto={oculto}
+                    <LinhaGrupo key={`${i}-${nivel}`} grupo={g} meses={meses} oculto={oculto} nivel={nivel}
                       onCelulaClick={(catId, catNome, mes, titulo) => setDrillDown({ titulo, categoria_id: catId, categoria_nome: catNome, mes })} />
                   ))}
-                  {/* Total Creditos */}
-                  {credAberto && <tr style={{ background: 'rgba(0,200,150,0.06)' }}>
-                    <td className="px-4 py-2.5 sticky left-0 z-10" style={{ background: 'rgba(0,200,150,0.06)', minWidth: 220 }}>
-                      <span className="text-[10px] font-bold uppercase tracking-widest pl-1" style={{ color: '#00c896' }}>Total Créditos</span>
+                  {/* Total Créditos — sempre visível */}
+                  <tr style={{ background: nivel === 1 ? 'rgba(0,200,150,0.1)' : 'rgba(0,200,150,0.06)' }}>
+                    <td className="px-4 sticky left-0 z-10"
+                      style={{ background: nivel === 1 ? 'rgba(0,200,150,0.1)' : 'rgba(0,200,150,0.06)', minWidth: 220,
+                               paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
+                      <span className={`font-bold uppercase tracking-widest pl-1 ${nivel === 1 ? 'text-[12px]' : 'text-[10px]'}`}
+                        style={{ color: '#00c896' }}>
+                        {nivel === 1 ? 'Créditos' : 'Total Créditos'}
+                      </span>
                     </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <span className="text-[12px] font-bold" style={{ color: '#00c896' }}>
+                    <td className="px-3 text-right"
+                      style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
+                      <span className={`font-bold ${nivel === 1 ? 'text-[14px]' : 'text-[12px]'}`} style={{ color: '#00c896' }}>
                         {oculto ? '????' : formatBRL(grandTotalEntradas)}
                       </span>
                     </td>
                     {meses.map(m => (
-                      <td key={m} className="px-3 py-2.5 text-right">
-                        <span className="text-[11px] font-bold" style={{ color: totaisMes[m]?.entradas ? '#00c896' : '#4a5168' }}>
+                      <td key={m} className="px-3 text-right"
+                        style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
+                        <span className={`font-bold ${nivel === 1 ? 'text-[12px]' : 'text-[11px]'}`}
+                          style={{ color: totaisMes[m]?.entradas ? '#00c896' : '#4a5168' }}>
                           {totaisMes[m]?.entradas ? (oculto ? '????' : formatBRL(totaisMes[m].entradas)) : '-'}
                         </span>
                       </td>
                     ))}
-                  </tr>}
+                  </tr>
 
                   {/* -- DEBITOS -- */}
                   <tr
@@ -641,27 +676,35 @@ export default function RelatoriosPage() {
                     </td>
                   </tr>
                   {debAberto && grupos.filter(g => g.tipo === 'DESPESA').map((g, i) => (
-                    <LinhaGrupo key={i} grupo={g} meses={meses} oculto={oculto}
+                    <LinhaGrupo key={`${i}-${nivel}`} grupo={g} meses={meses} oculto={oculto} nivel={nivel}
                       onCelulaClick={(catId, catNome, mes, titulo) => setDrillDown({ titulo, categoria_id: catId, categoria_nome: catNome, mes })} />
                   ))}
-                  {/* Total Debitos */}
-                  {debAberto && <tr style={{ background: 'rgba(248,113,113,0.06)' }}>
-                    <td className="px-4 py-2.5 sticky left-0 z-10" style={{ background: 'rgba(248,113,113,0.06)', minWidth: 220 }}>
-                      <span className="text-[10px] font-bold uppercase tracking-widest pl-1" style={{ color: '#f87171' }}>Total Débitos</span>
+                  {/* Total Débitos — sempre visível */}
+                  <tr style={{ background: nivel === 1 ? 'rgba(248,113,113,0.1)' : 'rgba(248,113,113,0.06)' }}>
+                    <td className="px-4 sticky left-0 z-10"
+                      style={{ background: nivel === 1 ? 'rgba(248,113,113,0.1)' : 'rgba(248,113,113,0.06)', minWidth: 220,
+                               paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
+                      <span className={`font-bold uppercase tracking-widest pl-1 ${nivel === 1 ? 'text-[12px]' : 'text-[10px]'}`}
+                        style={{ color: '#f87171' }}>
+                        {nivel === 1 ? 'Débitos' : 'Total Débitos'}
+                      </span>
                     </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <span className="text-[12px] font-bold" style={{ color: '#f87171' }}>
+                    <td className="px-3 text-right"
+                      style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
+                      <span className={`font-bold ${nivel === 1 ? 'text-[14px]' : 'text-[12px]'}`} style={{ color: '#f87171' }}>
                         {oculto ? '????' : formatBRL(grandTotalDespesas)}
                       </span>
                     </td>
                     {meses.map(m => (
-                      <td key={m} className="px-3 py-2.5 text-right">
-                        <span className="text-[11px] font-bold" style={{ color: totaisMes[m]?.despesas ? '#f87171' : '#4a5168' }}>
+                      <td key={m} className="px-3 text-right"
+                        style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
+                        <span className={`font-bold ${nivel === 1 ? 'text-[12px]' : 'text-[11px]'}`}
+                          style={{ color: totaisMes[m]?.despesas ? '#f87171' : '#4a5168' }}>
                           {totaisMes[m]?.despesas ? (oculto ? '????' : formatBRL(totaisMes[m].despesas)) : '-'}
                         </span>
                       </td>
                     ))}
-                  </tr>}
+                  </tr>
 
                   {/* -- RESULTADO -- */}
                   <tr style={{ background: 'rgba(0,200,150,0.04)' }}>

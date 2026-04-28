@@ -2,11 +2,13 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
-import { Plus, Pencil, Zap, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
+import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
+import { Pencil, Zap, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
 import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { formatBRL, mesLabel } from '../lib/utils'
+import { apiMutate } from '../lib/api'
 import { usePageState } from '../context/PageStateContext'
 import { supabase } from '../lib/supabase'
 import { IconeConta } from '../components/ui/IconeConta'
@@ -128,6 +130,7 @@ export default function LancamentosPage() {
   const [drawerAberto,       setDrawerAberto]       = useState(false)
   const [lancamentoEditando, setLancamentoEditando] = useState<Lancamento | null>(null)
   const [novoLancamento,     setNovoLancamento]     = useState(false)
+  const [tipoNovo,           setTipoNovo]           = useState<'DESPESA' | 'RECEITA' | 'TRANSFERENCIA'>('DESPESA')
   const [feedback,           setFeedback]           = useState<string | null>(null)
   const [confirmandoExcLote, setConfirmandoExcLote] = useState(false)
 
@@ -181,13 +184,14 @@ export default function LancamentosPage() {
   // Ler state da navegação (vindo do Dashboard) — só na montagem / mudança de rota
   const stateAplicado = useRef(false)
   useEffect(() => {
-    const state = location.state as { novoLancamento?: boolean; [key: string]: unknown } | null
+    const state = location.state as { novoLancamento?: boolean; tipoInicial?: 'DESPESA' | 'RECEITA' | 'TRANSFERENCIA'; [key: string]: unknown } | null
     if (!state) return
     if (stateAplicado.current) return
     stateAplicado.current = true
     if (state.novoLancamento) {
+      const tipo = state.tipoInicial ?? 'DESPESA'
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
+      setTipoNovo(tipo); setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
     }
     if (state.filtroStatus) setFiltStatus(state.filtroStatus as string[])
     if (state.mes)           setMes(state.mes as string)
@@ -201,7 +205,11 @@ export default function LancamentosPage() {
     window.history.replaceState({}, '')
   }, [location.state, lancamentos])
 
-  const abrirNovo = () => { setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true) }
+  const hoje = useMemo(() => new Date().toISOString().split('T')[0], [])
+
+  const abrirNovo = (tipo: 'DESPESA' | 'RECEITA' | 'TRANSFERENCIA' = 'DESPESA') => {
+    setTipoNovo(tipo); setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
+  }
   const fecharDrawer = () => { setDrawerAberto(false); setLancamentoEditando(null); setNovoLancamento(false) }
 
 
@@ -326,11 +334,7 @@ export default function LancamentosPage() {
       {/* Topbar */}
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>Lançamentos</h1>
-        <button onClick={abrirNovo}
-          className="flex items-center gap-1.5 bg-av-green text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
-          style={{ color: '#0a0f1a' }}>
-          <Plus size={14} /> Novo lançamento
-        </button>
+        <BotaoNovoLancamento onSelect={abrirNovo} />
       </div>
 
       <Toast msg={feedback} />
@@ -456,7 +460,7 @@ export default function LancamentosPage() {
           {lancamentos.length === 0 ? (
             <div className="text-center py-16">
               <p className="text-[13px] mb-3" style={{ color: '#8b92a8' }}>Nenhum lançamento em {mesLabel(mes)}.</p>
-              <button onClick={abrirNovo} className="text-[12px] underline underline-offset-2" style={{ color: '#00c896' }}>
+              <button onClick={() => abrirNovo()} className="text-[12px] underline underline-offset-2" style={{ color: '#00c896' }}>
                 Criar primeiro lançamento
               </button>
             </div>
@@ -529,10 +533,17 @@ export default function LancamentosPage() {
                       const isTransf  = !!l.id_par_transferencia
                       const isRecorr  = !!l.id_recorrencia && !isTransf
                       const isPago    = l.status === 'PAGO'
+                      const isAtrasado = !isPago && l.data <= hoje
                       return (
                         <div key={l.id}
                           className="grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center"
-                          style={{ gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px' }}>
+                          style={{
+                            gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px',
+                            ...(isAtrasado && {
+                              boxShadow: 'inset 4px 0 0 rgba(248,113,113,0.9)',
+                              background: 'rgba(248,113,113,0.08)',
+                            }),
+                          }}>
 
                           {/* Checkbox seleção */}
                           <div className="flex items-center justify-center">
@@ -709,10 +720,18 @@ export default function LancamentosPage() {
                         const isTransf  = !!l.id_par_transferencia
                         const isRecorr  = !!l.id_recorrencia && !isTransf
                         const isPago    = l.status === 'PAGO'
+                        const isAtrasado = !isPago && l.data <= hoje
                         const podeEditar = !(isRecorr && isPago && l.nr_parcela != null && l.total_parcelas != null && l.nr_parcela < l.total_parcelas)
                         return (
                           <div key={l.id}
-                            className="bg-[#1a1f2e] border border-white/10 rounded-xl p-3">
+                            className="bg-[#1a1f2e] rounded-xl p-3"
+                            style={{
+                              border: isAtrasado ? '1px solid rgba(248,113,113,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                              ...(isAtrasado && {
+                                boxShadow: 'inset 4px 0 0 rgba(248,113,113,0.9)',
+                                background: 'rgba(248,113,113,0.07)',
+                              }),
+                            }}>
                             <div className="flex items-start justify-between gap-2 mb-2">
                               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                                 {isTransf ? (
@@ -806,6 +825,7 @@ export default function LancamentosPage() {
       <DrawerLancamento
         lancamento={lancamentoEditando}
         novoLancamento={novoLancamento}
+        tipoInicial={tipoNovo}
         todasParcelas={lancamentos}
         contaIdInicial={novoLancamento && filtContas.length === 1 ? filtContas[0] : null}
         categoriaIdInicial={novoLancamento && filtCats.length === 1 ? filtCats[0] : null}
@@ -1065,11 +1085,18 @@ export default function LancamentosPage() {
                     const l = antecipando
                     setAntecipando(null)
                     if (isRecorrModal) {
-                      // Sempre usa o endpoint do banco — consolida parcelas futuras
-                      // independente de estarem ou não visíveis no mês atual
                       const { ok, erro: e } = await antecipar(l.id)
-                      if (ok) toast('Antecipado! Parcelas futuras consolidadas.')
-                      else toast(e ?? 'Erro ao antecipar.')
+                      if (ok) {
+                        // Registrar detalhes da antecipação na observação
+                        if (nFuturas > 0) {
+                          const dataHoje = new Date().toLocaleDateString('pt-BR')
+                          const totalParcs = nFuturas + 1
+                          const nota = `[Antecip. ${dataHoje}: ${totalParcs} parc. (${nrAtual}–${totalParc}/${totalParc}) · ${formatBRL(valorUnitario)}/un · Total ${formatBRL(valorTotal)}]`
+                          const obsAtualizada = l.observacao ? `${l.observacao}\n${nota}` : nota
+                          await apiMutate(`/transacoes/${l.id}?escopo=SOMENTE_ESTE`, 'PUT', { observacao: obsAtualizada })
+                        }
+                        toast('Antecipado! Parcelas futuras consolidadas.')
+                      } else toast(e ?? 'Erro ao antecipar.')
                     } else {
                       // Avulso: se for projeção, abre modal de confirmação de valor
                       if (l.status === 'PROJECAO') {

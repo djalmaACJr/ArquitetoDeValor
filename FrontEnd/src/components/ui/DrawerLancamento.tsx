@@ -11,6 +11,7 @@ import {
   Drawer, Field, Input, SearchableSelect, Toggle,
   BtnSalvar, BtnCancelar, Segmented, ModalExcluir,
 } from './shared'
+import Calculadora from './Calculadora'
 import type { Lancamento } from '../../hooks/useLancamentos'
 
 // Função para inferir parâmetros de recorrência a partir das parcelas
@@ -84,11 +85,6 @@ interface FormState {
 }
 
 // ── Máscara BR ─────────────────────────────────────────────────
-function formatarValorBR(input: string): string {
-  const nums = input.replace(/\D/g, '')
-  if (!nums) return ''
-  return (parseInt(nums, 10) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
 function parsearValorBR(v: string): number {
   return parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0
 }
@@ -143,21 +139,22 @@ function formDeLanc(l: Lancamento, todasParcelas?: Lancamento[]): FormState {
 
 // ── Props ──────────────────────────────────────────────────────
 interface DrawerLancamentoProps {
-  lancamentoId?:      string | null
-  lancamento?:        Lancamento | null
-  novoLancamento?:    boolean
-  todasParcelas?:     Lancamento[]  // Todas as parcelas para inferir parâmetros de recorrência
-  contaIdInicial?:    string | null  // Pré-seleciona conta ao criar novo lançamento
-  categoriaIdInicial?: string | null // Pré-seleciona categoria ao criar novo lançamento
-  onFechar:           () => void
-  onSalvo?:           () => void
-  onExcluido?:        () => void
+  lancamentoId?:       string | null
+  lancamento?:         Lancamento | null
+  novoLancamento?:     boolean
+  tipoInicial?:        TipoTx
+  todasParcelas?:      Lancamento[]
+  contaIdInicial?:     string | null
+  categoriaIdInicial?: string | null
+  onFechar:            () => void
+  onSalvo?:            () => void
+  onExcluido?:         () => void
 }
 
 // ── Componente ─────────────────────────────────────────────────
 export default function DrawerLancamento({
-  lancamentoId, lancamento: lancamentoProp, novoLancamento, todasParcelas,
-  contaIdInicial, categoriaIdInicial,
+  lancamentoId, lancamento: lancamentoProp, novoLancamento, tipoInicial,
+  todasParcelas, contaIdInicial, categoriaIdInicial,
   onFechar, onSalvo, onExcluido,
 }: DrawerLancamentoProps) {
   const { contas }     = useContas()
@@ -171,14 +168,37 @@ export default function DrawerLancamento({
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false)
   const [excluindo,           setExcluindo]           = useState(false)
   const [escopo,              setEscopo]              = useState<'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES'>('SOMENTE_ESTE')
+  const [calcAberta,          setCalcAberta]          = useState(false)
+  const [expandindo,          setExpandindo]          = useState(false)
+  const [qtdAdicional,        setQtdAdicional]        = useState('3')
 
   const set = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
-  const tipoRef = useRef<HTMLDivElement>(null)
+  const tipoRef      = useRef<HTMLDivElement>(null)
+  const valorBtnRef  = useRef<HTMLButtonElement>(null)
+  const descricaoRef = useRef<HTMLInputElement>(null)
+  const ignorarFoco  = useRef(false)
+
+  function abrirCalc() { setCalcAberta(true) }
+
+  function fecharCalc() {
+    setCalcAberta(false)
+    ignorarFoco.current = true
+    valorBtnRef.current?.focus()
+    setTimeout(() => { ignorarFoco.current = false }, 150)
+  }
+
+  function confirmarCalc(v: number) {
+    set({ valor: valorParaMascara(v) })
+    setCalcAberta(false)
+    ignorarFoco.current = true
+    valorBtnRef.current?.focus()
+    setTimeout(() => { ignorarFoco.current = false }, 150)
+  }
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (novoLancamento) { setEditando(null); setForm({ ...FORM_VAZIO, conta_id: contaIdInicial ?? '', categoria_id: categoriaIdInicial ?? '' }); setEscopo('SOMENTE_ESTE'); return }
-    if (lancamentoProp) { setEditando(lancamentoProp); setForm(formDeLanc(lancamentoProp, todasParcelas)); setEscopo('SOMENTE_ESTE'); return }
+    if (novoLancamento) { setEditando(null); setForm({ ...FORM_VAZIO, tipo: tipoInicial ?? 'DESPESA', conta_id: contaIdInicial ?? '', categoria_id: categoriaIdInicial ?? '' }); setEscopo('SOMENTE_ESTE'); setExpandindo(false); setQtdAdicional('3'); setTimeout(() => descricaoRef.current?.focus(), 320); return }
+    if (lancamentoProp) { setEditando(lancamentoProp); setForm(formDeLanc(lancamentoProp, todasParcelas)); setEscopo('SOMENTE_ESTE'); setExpandindo(false); setQtdAdicional('3'); setTimeout(() => descricaoRef.current?.focus(), 320); return }
     if (lancamentoId) {
       setCarregando(true)
       fetch(`/functions/v1/transacoes/${lancamentoId}`, {
@@ -213,7 +233,7 @@ export default function DrawerLancamento({
       .catch(() => null)
       .finally(() => setCarregando(false))
     }
-  }, [lancamentoId, lancamentoProp, novoLancamento, todasParcelas])
+  }, [lancamentoId, lancamentoProp, novoLancamento, tipoInicial, todasParcelas])
 
   // Buscar parâmetros reais quando mudar escopo para ESTE_E_SEGUINTES
   useEffect(() => {
@@ -362,11 +382,13 @@ export default function DrawerLancamento({
         tipo_recorrencia:      form.tipo_recorrencia,
         intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
       } : {}),
-      // Para edição com ESTE_E_SEGUINTES: enviar nova frequência/intervalo/parcelas
-      ...(editando && escopo === 'ESTE_E_SEGUINTES' ? {
+      // Para edição com ESTE_E_SEGUINTES (incluindo expansão): enviar nova frequência/intervalo/parcelas
+      ...(editando && (escopo === 'ESTE_E_SEGUINTES' || expandindo) ? {
         tipo_recorrencia:      form.tipo_recorrencia,
         intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
-        total_parcelas:        parseInt(form.total_parcelas) || 2,
+        total_parcelas:        expandindo
+          ? (editando.total_parcelas ?? 0) + (parseInt(qtdAdicional) || 1)
+          : parseInt(form.total_parcelas) || 2,
       } : {}),
     }
 
@@ -377,7 +399,8 @@ export default function DrawerLancamento({
       payload.data = form.data
     }
 
-    const url    = editando ? `/transacoes/${editando.id}?escopo=${escopo}` : '/transacoes'
+    const escopoEfetivo = expandindo ? 'ESTE_E_SEGUINTES' : escopo
+    const url    = editando ? `/transacoes/${editando.id}?escopo=${escopoEfetivo}` : '/transacoes'
     const method = editando ? 'PUT' : 'POST'
     
     console.log('=== SALVAMENTO ===')
@@ -476,7 +499,7 @@ export default function DrawerLancamento({
         {/* Descrição */}
         <Field label="Descrição *">
           <div className="relative">
-            <Input value={form.descricao} onChange={e => set({ descricao: e.target.value })}
+            <Input ref={descricaoRef} value={form.descricao} onChange={e => set({ descricao: e.target.value })}
               placeholder="Ex: Conta de luz, Salário..." maxLength={200} />
             <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px]"
               style={{ color: '#8b92a8' }}>{form.descricao.length}/200</span>
@@ -485,12 +508,27 @@ export default function DrawerLancamento({
 
         {/* Valor */}
         <Field label="Valor *">
-          <Input
-            value={form.valor}
-            onChange={e => set({ valor: formatarValorBR(e.target.value) })}
-            placeholder="0,00"
-            inputMode="numeric"
-          />
+          <button
+            ref={valorBtnRef}
+            type="button"
+            onClick={abrirCalc}
+            onFocus={() => { if (!ignorarFoco.current) abrirCalc() }}
+            className="w-full text-left px-3 py-2 rounded-lg border transition-colors text-[13px]"
+            style={{
+              background: '#252d42',
+              borderColor: calcAberta ? '#00c896' : 'rgba(255,255,255,0.1)',
+              color: form.valor ? '#e8eaf0' : 'rgba(255,255,255,0.3)',
+            }}
+          >
+            {form.valor || '0,00'}
+          </button>
+          {calcAberta && (
+            <Calculadora
+              valorInicial={parsearValorBR(form.valor)}
+              onConfirmar={confirmarCalc}
+              onFechar={fecharCalc}
+            />
+          )}
         </Field>
 
         {/* Conta origem */}
@@ -533,7 +571,7 @@ export default function DrawerLancamento({
             opcoes={[
               { value: 'PAGO',     label: 'Pago'     },
               { value: 'PENDENTE', label: 'Pendente' },
-              ...(!editando ? [{ value: 'PROJECAO', label: 'Projeção' }] : []),
+              { value: 'PROJECAO', label: 'Projeção' },
             ]}
             value={form.status} onChange={v => set({ status: v as StatusTx })} />
         </Field>
@@ -600,7 +638,7 @@ export default function DrawerLancamento({
                       {([
                         { value: 'SOMENTE_ESTE',    label: 'Somente este lançamento' },
                         ...(editando.nr_parcela !== editando.total_parcelas ? [{ value: 'ESTE_E_SEGUINTES', label: 'Este e os próximos' }] : []),
-                      ] as const).map(op => (
+                      ] as const).filter(() => !expandindo).map(op => (
                           <label
                             key={op.value}
                             className="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border transition-colors"
@@ -637,7 +675,7 @@ export default function DrawerLancamento({
                     </div>
 
                     {/* Campos de edição da recorrência - só aparecem com ESTE_E_SEGUINTES */}
-                    {escopo === 'ESTE_E_SEGUINTES' && (
+                    {escopo === 'ESTE_E_SEGUINTES' && !expandindo && (
                         <div className="mt-2">
                           <p className="text-[10px] mb-1.5" style={{ color: '#8b92a8' }}>Parâmetros da recorrência</p>
                           <div className="flex gap-2">
@@ -670,6 +708,87 @@ export default function DrawerLancamento({
                                 onChange={e => set({ total_parcelas: e.target.value })} />
                             </div>
                           </div>
+                      </div>
+                    )}
+
+                    {/* Expandir recorrência — disponível apenas na última parcela */}
+                    {editando.nr_parcela === editando.total_parcelas && (
+                      <div className="mt-2">
+                        {!expandindo ? (
+                          <button
+                            type="button"
+                            onClick={() => { setExpandindo(true); setEscopo('SOMENTE_ESTE') }}
+                            className="w-full flex items-center justify-center gap-1.5 rounded-lg border py-2 text-[12px] font-medium transition-colors hover:bg-white/5"
+                            style={{ borderColor: 'rgba(96,165,250,0.3)', color: '#60a5fa' }}
+                          >
+                            <Repeat2 size={13} /> Expandir recorrência
+                          </button>
+                        ) : (
+                          <div
+                            className="rounded-lg border p-3"
+                            style={{ borderColor: 'rgba(96,165,250,0.3)', background: 'rgba(96,165,250,0.06)' }}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-[11px] font-semibold" style={{ color: '#60a5fa' }}>
+                                Expandir recorrência
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setExpandindo(false)}
+                                className="text-[10px] hover:underline"
+                                style={{ color: '#8b92a8' }}
+                              >
+                                cancelar
+                              </button>
+                            </div>
+
+                            {/* Resumo da série atual (somente leitura) */}
+                            <p className="text-[10px] mb-2" style={{ color: '#8b92a8' }}>
+                              Frequência: <span style={{ color: '#e8eaf0' }}>
+                                {({ MENSAL: 'Mensal', SEMANAL: 'Semanal', ANUAL: 'Anual', DIARIA: 'Diária' } as Record<string, string>)[form.tipo_recorrencia] ?? form.tipo_recorrencia}
+                                {parseInt(form.intervalo_recorrencia) > 1 ? ` · a cada ${form.intervalo_recorrencia}` : ''}
+                              </span>
+                            </p>
+
+                            {/* Atalhos rápidos */}
+                            <div className="flex gap-1.5 mb-2">
+                              {['3','6','12'].map(n => (
+                                <button
+                                  key={n}
+                                  type="button"
+                                  onClick={() => setQtdAdicional(n)}
+                                  className="flex-1 rounded-lg py-1.5 text-[12px] font-semibold transition-colors"
+                                  style={{
+                                    background: qtdAdicional === n ? 'rgba(96,165,250,0.2)' : '#252d42',
+                                    borderWidth: 1,
+                                    borderStyle: 'solid',
+                                    borderColor: qtdAdicional === n ? 'rgba(96,165,250,0.5)' : 'transparent',
+                                    color: qtdAdicional === n ? '#60a5fa' : '#8b92a8',
+                                  }}
+                                >
+                                  +{n}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Input manual */}
+                            <div className="flex items-center gap-2">
+                              <p className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Adicionar</p>
+                              <Input
+                                type="number" min="1" max="999"
+                                value={qtdAdicional}
+                                onChange={e => setQtdAdicional(e.target.value)}
+                                className="w-20"
+                              />
+                              <p className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>
+                                parcelas →&nbsp;
+                                <span style={{ color: '#e8eaf0', fontWeight: 600 }}>
+                                  total {(editando.total_parcelas ?? 0) + (parseInt(qtdAdicional) || 0)}
+                                </span>
+                              </p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </>

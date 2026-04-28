@@ -1,7 +1,7 @@
 // src/pages/DashboardPage.tsx
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
+import { Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { mesLabel, formatBRL, formatData, CORES_CATEGORIA } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
@@ -16,6 +16,7 @@ import type { Conta, Transacao, DespesaCategoria } from '../types'
 import type { Lancamento } from '../hooks/useLancamentos'
 import { supabase } from '../lib/supabase'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
+import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, LineElement, PointElement)
 
@@ -52,7 +53,7 @@ function CardResultados({
         <span className="w-2 h-2 rounded-full bg-av-green"/>
         <span className="text-[12px] font-semibold text-gray-500 dark:text-gray-400">Resultados do mês</span>
       </div>
-      <div className="grid grid-cols-3 gap-0 divide-x divide-gray-200 dark:divide-gray-700">
+      <div className="grid grid-cols-3 gap-0 divide-x divide-gray-200 dark:divide-gray-700 min-w-0">
         {[
           { label: 'Receitas',  value: resumo?.total_entradas ?? 0, cor: 'text-av-green' },
           { label: 'Despesas',  value: resumo?.total_saidas   ?? 0, cor: 'text-red-400'  },
@@ -699,7 +700,7 @@ function CardContas({ contas, oculto, mes, modo, setModo }: {
               <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">{grupo.label}</span>
               <span className="text-[11px] font-bold" style={{ color: grupo.cor }}>{oculto ? OCULTO : formatBRL(totalGrupo)}</span>
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
               {contasGrupo.map(conta => {
                 const saldoConta = getSaldoConta(conta)
                 return (
@@ -773,11 +774,11 @@ export default function DashboardPage() {
   const totalProximas  = proximas.reduce((s, t)  => s + (t.tipo === 'DESPESA' ? -t.valor : t.valor), 0)
 
   return (
-    <div className="p-5 max-w-[1400px]">
+    <div className="p-4 md:p-5 max-w-[1400px] mx-auto">
       {/* Topbar */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h1 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Filtro de contas */}
           <select
             value={contasFiltro[0] || ''}
@@ -817,12 +818,9 @@ export default function DashboardPage() {
 
           <MonthPicker value={mes} onChange={setMes} />
 
-          <button
-            onClick={() => navigate('/lancamentos', { state: { novoLancamento: true } })}
-            className="flex items-center gap-1.5 bg-av-green text-av-dark text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
-          >
-            <Plus size={14}/> Novo lançamento
-          </button>
+          <BotaoNovoLancamento
+            onSelect={tipo => navigate('/lancamentos', { state: { novoLancamento: true, tipoInicial: tipo } })}
+          />
         </div>
       </div>
 
@@ -833,13 +831,13 @@ export default function DashboardPage() {
       ) : (
         <div className="space-y-3">
           {/* Linha 1: resultados + saldo */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <CardResultados resumo={resumo}/>
             <CardSaldo contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo}/>
           </div>
 
           {/* Linha 2: alertas agrupados por conta */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <CardAlertas
               titulo="Vencidos não pagos"
               cor="#ff6b4a"
@@ -872,7 +870,7 @@ export default function DashboardPage() {
             />
 
           {/* Linha 4: donuts */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <GraficoDonut
               titulo="Despesas por categoria"
               subtitulo={mesLabel(mes)}

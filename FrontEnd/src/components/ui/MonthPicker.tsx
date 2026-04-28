@@ -27,6 +27,20 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
   const anoAtual = parseInt(value.split('-')[0])
   const mesAtual = parseInt(value.split('-')[1])
 
+  const hoje     = new Date()
+  const anoHoje  = hoje.getFullYear()
+  const mesHoje  = hoje.getMonth() + 1
+  const ymHoje   = `${anoHoje}-${String(mesHoje).padStart(2, '0')}`
+  const estaHoje = value === ymHoje
+
+  function irParaHoje() {
+    if (!estaHoje) { onChange(ymHoje); setOpen(false) }
+  }
+
+  function isHoje(mesIdx: number) {
+    return anoGrid === anoHoje && mesIdx + 1 === mesHoje
+  }
+
   useEffect(() => {
     function handle(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
@@ -127,6 +141,7 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
             {MESES_ABREV.map((abrev, idx) => {
               const selecionado  = isSelecionado(idx)
               const desabilitado = isDesabilitado(idx)
+              const ehHoje       = isHoje(idx)
               return (
                 <button
                   key={abrev}
@@ -138,13 +153,29 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
                       ? 'bg-blue-500 text-white'
                       : desabilitado
                         ? 'text-white/20 cursor-not-allowed'
-                        : 'text-blue-200 hover:bg-blue-400/20'}
+                        : ehHoje
+                          ? 'text-blue-200 hover:bg-blue-400/20 ring-1 ring-blue-400/60'
+                          : 'text-blue-200 hover:bg-blue-400/20'}
                   `}
                 >
                   {abrev}
                 </button>
               )
             })}
+          </div>
+
+          {/* Atalho mês atual */}
+          <div className="mt-2 pt-2 border-t border-white/10">
+            <button
+              onClick={irParaHoje}
+              className="w-full py-1.5 rounded-lg text-[11px] font-semibold transition-colors"
+              style={estaHoje
+                ? { background: 'rgba(0,200,150,0.12)', color: '#00c896', cursor: 'default' }
+                : { background: 'rgba(96,165,250,0.1)', color: '#93c5fd' }
+              }
+            >
+              {estaHoje ? '• Mês atual' : '→ Ir para mês atual'}
+            </button>
           </div>
         </div>
       )}

@@ -1,7 +1,7 @@
 // src/components/ui/shared.tsx
 // Para mudar o Drawer (ex: trocar por modal), edite só este arquivo.
 // Todas as páginas que importam daqui refletem automaticamente.
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { X, Check } from 'lucide-react'
 
 const CORES_SM = [
@@ -581,15 +581,17 @@ export function Field({ label, children }: { label: string; children: React.Reac
 }
 
 // ── Input ─────────────────────────────────────────────────────
-export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input {...props}
-      style={{ color: '#e8eaf0', ...props.style }}
-      className={`w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-        text-[13px] outline-none focus:border-av-green transition-colors
-        placeholder:text-white/30 ${props.className ?? ''}`} />
-  )
-}
+export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  function Input(props, ref) {
+    return (
+      <input {...props} ref={ref}
+        style={{ color: '#e8eaf0', ...props.style }}
+        className={`w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
+          text-[13px] outline-none focus:border-av-green transition-colors
+          placeholder:text-white/30 ${props.className ?? ''}`} />
+    )
+  }
+)
 
 // ── SelectDark ────────────────────────────────────────────────
 export function SelectDark(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
