@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
 import AppLayout from './components/layout/AppLayout'
 import LoginPage from './pages/LoginPage'
+import CadastroPage from './pages/CadastroPage'
 import DashboardPage from './pages/DashboardPage'
 import RelatoriosPage from './pages/RelatoriosPage'
 import ContasPage from './pages/ContasPage'
@@ -25,7 +26,8 @@ export default function App() {
     <BrowserRouter>
       <PageStateProvider>
         <Routes>
-          <Route path="/login" element={<LoginPage/>}/>
+          <Route path="/login"    element={<LoginPage/>}/>
+          <Route path="/cadastro" element={<CadastroPage/>}/>
           <Route path="/" element={
             <PrivateRoute>
               <AppLayout/>

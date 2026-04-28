@@ -10,28 +10,30 @@ echo   ARQUITETO DE VALOR - TESTES E2E (PLAYWRIGHT)
 echo ================================================
 echo.
 echo   1. Todos os testes
-echo   2. Contas
-echo   3. Categorias
-echo   4. Navegacao e Persistencia
-echo   5. Extrato (Lancamentos)
-echo   6. Dashboard
-echo   7. Relatorios
-echo   8. Abrir relatorio HTML do ultimo run
-echo   9. Modo visual (--ui)
+echo   2. Cadastro
+echo   3. Contas
+echo   4. Categorias
+echo   5. Navegacao e Persistencia
+echo   6. Extrato (Lancamentos)
+echo   7. Dashboard
+echo   8. Relatorios
+echo   9. Abrir relatorio HTML do ultimo run
+echo  10. Modo visual (--ui)
 echo   0. Sair
 echo.
-set /p OPC="Digite a opcao (0-9): "
+set /p OPC="Digite a opcao (0-10): "
 
-if "%OPC%"=="0" goto FIM
-if "%OPC%"=="1" goto OPC1
-if "%OPC%"=="2" goto OPC2
-if "%OPC%"=="3" goto OPC3
-if "%OPC%"=="4" goto OPC4
-if "%OPC%"=="5" goto OPC5
-if "%OPC%"=="6" goto OPC6
-if "%OPC%"=="7" goto OPC7
-if "%OPC%"=="8" goto OPC8
-if "%OPC%"=="9" goto OPC9
+if "%OPC%"=="0"  goto FIM
+if "%OPC%"=="1"  goto OPC1
+if "%OPC%"=="2"  goto OPC2
+if "%OPC%"=="3"  goto OPC3
+if "%OPC%"=="4"  goto OPC4
+if "%OPC%"=="5"  goto OPC5
+if "%OPC%"=="6"  goto OPC6
+if "%OPC%"=="7"  goto OPC7
+if "%OPC%"=="8"  goto OPC8
+if "%OPC%"=="9"  goto OPC9
+if "%OPC%"=="10" goto OPC10
 echo Opcao invalida.
 goto MENU
 
@@ -41,42 +43,47 @@ call :RUNTEST
 goto PAUSA
 
 :OPC2
-set TESTFILE=e2e/tests/01_contas.spec.ts
+set TESTFILE=e2e/tests/00_cadastro.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC3
-set TESTFILE=e2e/tests/02_categorias.spec.ts
+set TESTFILE=e2e/tests/01_contas.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC4
-set TESTFILE=e2e/tests/03_navegacao.spec.ts
+set TESTFILE=e2e/tests/02_categorias.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC5
-set TESTFILE=e2e/tests/04_extrato.spec.ts
+set TESTFILE=e2e/tests/03_navegacao.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC6
-set TESTFILE=e2e/tests/05_dashboard.spec.ts
+set TESTFILE=e2e/tests/04_extrato.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC7
-set TESTFILE=e2e/tests/06_relatorios.spec.ts
+set TESTFILE=e2e/tests/05_dashboard.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC8
+set TESTFILE=e2e/tests/06_relatorios.spec.ts
+call :RUNTEST
+goto PAUSA
+
+:OPC9
 echo.
 echo Abrindo relatorio HTML...
 npm run test:e2e:report
 goto PAUSA
 
-:OPC9
+:OPC10
 echo.
 echo Iniciando modo visual (--ui)...
 echo Certifique-se que o frontend esta rodando em http://localhost:5173

@@ -434,16 +434,15 @@ export default function LancamentosPage() {
 
   return (
     <div className="p-5">
-      {/* Topbar */}
-      <div className="flex items-center justify-between mb-5">
-        <h1 className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>Lançamentos</h1>
-        <BotaoNovoLancamento onSelect={abrirNovo} />
-      </div>
-
-      <Toast msg={feedback} />
-
-      {/* Filtros — tudo em uma linha */}
-      <div className="flex flex-wrap gap-2 mb-4 items-center">
+      {/* ── Sticky: topbar + filtros + calendário ── */}
+      <div className="sticky top-0 z-20 -mx-5 px-5 pt-4 pb-2" style={{ background: '#0d1220', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+        {/* Topbar */}
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>Lançamentos</h1>
+          <BotaoNovoLancamento onSelect={abrirNovo} />
+        </div>
+        {/* Filtros — tudo em uma linha */}
+        <div className="flex flex-wrap gap-2 mb-2 items-center">
         {/* Mês */}
         <MonthPicker value={mes} onChange={setMes} />
 
@@ -537,12 +536,15 @@ export default function LancamentosPage() {
             </span>
           )}
         </div>
+        </div>
+        {/* Calendário */}
+        <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} />
       </div>
 
-
+      <Toast msg={feedback} />
 
       {/* Cards de resumo */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-3 gap-3 mt-4 mb-4">
         {[
           { label: 'Receitas',  valor: totais.receitas,  color: '#00c896' },
           { label: 'Despesas',  valor: totais.despesas,  color: '#f87171' },
@@ -553,14 +555,6 @@ export default function LancamentosPage() {
             <p className="text-[16px] font-bold" style={{ color: c.color }}>{formatBRL(c.valor)}</p>
           </div>
         ))}
-      </div>
-
-      {/* Calendário de dias do mês — sticky */}
-      <div
-        className="sticky top-0 z-20 -mx-5 px-5 pb-2 pt-1"
-        style={{ background: '#0d1220', borderBottom: '1px solid rgba(255,255,255,0.08)' }}
-      >
-        <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} />
       </div>
 
       {loading && <p className="text-[13px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>}

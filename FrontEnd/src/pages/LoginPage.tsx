@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
 export default function LoginPage() {
@@ -97,6 +97,13 @@ export default function LoginPage() {
               {loading ? 'Entrando...' : 'Entrar'}
             </button>
           </form>
+
+          <div className="mt-4 pt-4 border-t border-white/8 text-center">
+            <span className="text-[12px] text-white/30">Não tem uma conta? </span>
+            <Link to="/cadastro" className="text-[12px] text-av-green hover:text-av-green/80 transition-colors">
+              Criar conta
+            </Link>
+          </div>
         </div>
         <p className="text-center text-[11px] text-white/20 mt-4">
           Arquiteto de Valor · BLUEPRINT
