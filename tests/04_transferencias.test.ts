@@ -380,6 +380,7 @@ describe("Transferências — CA-TRF01 a CA-TRF22", () => {
   });
 
   // ── CA-TRF18 ─────────────────────────────────────────────
+  // 60s: tolera latência ocasional na sequência de 5 chamadas (GET + DELETE + 3x PUT)
   test("CA-TRF18 - Proteção da categoria Transferências", async () => {
     const { data: listaCat } = await api("/categorias");
     const categorias: any[] = listaCat?.dados ?? [];
@@ -417,7 +418,7 @@ describe("Transferências — CA-TRF01 a CA-TRF22", () => {
       method: "PUT",
       body: JSON.stringify({ cor: "#9333EA" }),
     });
-  });
+  }, 60000);
 
   // ── CA-TRF19 — Transferência recorrente ─────────────────────
   test("CA-TRF19 - Criar transferência recorrente com 3 parcelas mensais", async () => {

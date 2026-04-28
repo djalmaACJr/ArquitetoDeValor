@@ -133,16 +133,31 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
 
 async function editar(c: ReturnType<typeof db>, id: string, body: Record<string, unknown>) {
   logRequest("PUT", `/categorias/${id}`, body);
-  
-  const naoEncontrada = await verificarExistencia(c, "categorias", id, "Categoria não encontrada");
-  if (naoEncontrada) return naoEncontrada;
+
+  // Buscar a categoria atual para checar `protegida`
+  const { data: atual, error: eAtual } = await c.from("categorias")
+    .select("protegida").eq("id", id).single();
+  if (eAtual || !atual) {
+    logResponse(404, { erro: "Categoria não encontrada" });
+    return erro("Categoria não encontrada", 404);
+  }
+
+  // Categoria protegida: somente `cor` e `icone` podem ser alterados.
+  if (atual.protegida === true) {
+    const camposBloqueados = ["descricao", "ativa", "id_pai"];
+    const tentaAlterarBloqueado = camposBloqueados.some(k => body[k] !== undefined);
+    if (tentaAlterarBloqueado) {
+      logResponse(400, { erro: "Categoria protegida: apenas cor e ícone podem ser alterados" });
+      return erro("Categoria protegida: apenas cor e ícone podem ser alterados", 400);
+    }
+  }
 
   if (body.descricao !== undefined &&
      (String(body.descricao).length < 1 || String(body.descricao).length > 20)) {
     logResponse(400, { erro: "descricao deve ter entre 1 e 20 caracteres" });
     return erro("descricao deve ter entre 1 e 20 caracteres", 400);
   }
-  
+
   const corInvalida = validarCor(body.cor);
   if (corInvalida) return corInvalida;
 
@@ -165,9 +180,19 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
 
 async function excluir(c: ReturnType<typeof db>, id: string) {
   logRequest("DELETE", `/categorias/${id}`);
-  
-  const naoEncontrada = await verificarExistencia(c, "categorias", id, "Categoria não encontrada");
-  if (naoEncontrada) return naoEncontrada;
+
+  // Buscar a categoria atual para checar `protegida` e existência
+  const { data: atual, error: eAtual } = await c.from("categorias")
+    .select("protegida").eq("id", id).single();
+  if (eAtual || !atual) {
+    logResponse(404, { erro: "Categoria não encontrada" });
+    return erro("Categoria não encontrada", 404);
+  }
+
+  if (atual.protegida === true) {
+    logResponse(400, { erro: "Categoria protegida não pode ser excluída" });
+    return erro("Categoria protegida não pode ser excluída", 400);
+  }
 
   const { error } = await c.from("categorias").delete().eq("id", id);
   if (error) {
