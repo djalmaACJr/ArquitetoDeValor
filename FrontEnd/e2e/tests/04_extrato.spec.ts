@@ -1,5 +1,6 @@
 // e2e/tests/02_extrato.spec.ts
 import { test, expect } from '@playwright/test'
+import { abrirNovoLancamento, preencherValor } from './helpers'
 
 test.describe('Extrato (Lançamentos)', () => {
 
@@ -16,25 +17,25 @@ test.describe('Extrato (Lançamentos)', () => {
 
   test('E2E-EX02 — navegação de mês com setas funciona', async ({ page }) => {
     const mesInicial = await page.locator('button:has-text("/2")').first().textContent()
-    await page.locator('[title*="Próximo"], button:nth-child(3)').first().click()
+    await page.getByRole('button', { name: /próximo mês/i }).first().click()
     const mesDepois = await page.locator('button:has-text("/2")').first().textContent()
     expect(mesInicial).not.toBe(mesDepois)
   })
 
   test('E2E-EX03 — botão Novo lançamento abre drawer', async ({ page }) => {
-    await page.getByRole('button', { name: /novo lançamento/i }).click()
+    await abrirNovoLancamento(page)
     await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 5000 })
   })
 
   test('E2E-EX04 — criar lançamento simples e verificar na lista', async ({ page }) => {
-    await page.getByRole('button', { name: /novo lançamento/i }).click()
+    await abrirNovoLancamento(page)
     const drawer = page.getByRole('dialog').first()
     await expect(drawer).toBeVisible()
     await page.waitForTimeout(400) // aguarda animação do drawer
 
     // Preencher campos básicos. Tipo padrão já é DESPESA (FORM_VAZIO).
     await drawer.getByPlaceholder('Ex: Conta de luz, Salário...').fill('E2E Teste Lançamento')
-    await drawer.getByPlaceholder('0,00').fill('99,90')
+    await preencherValor(page, drawer, '99,90')
 
     // Selecionar conta via SearchableSelect (placeholder "Selecione a conta...")
     await drawer.getByRole('button', { name: /selecione a conta/i }).first().click()
@@ -123,14 +124,14 @@ test.describe('Extrato (Lançamentos)', () => {
 
   // ── E2E-EX09 ─────────────────────────────────────────────────
   test('E2E-EX09 — criar lançamento recorrente e verificar indicador de parcela', async ({ page }) => {
-    await page.getByRole('button', { name: /novo lançamento/i }).click()
+    await abrirNovoLancamento(page)
     const drawer = page.getByRole('dialog').first()
     await expect(drawer).toBeVisible({ timeout: 5000 })
     await page.waitForTimeout(400)
 
     // Preencher campos básicos (DESPESA é padrão)
     await drawer.getByPlaceholder(/conta de luz|sal[áa]rio/i).fill('E2E Recorrente Mensal')
-    await drawer.getByPlaceholder('0,00').fill('7500')
+    await preencherValor(page, drawer, '7500')
 
     // Conta
     await drawer.getByRole('button', { name: /selecione a conta/i }).first().click()

@@ -23,23 +23,36 @@ test.describe('Relatórios', () => {
 
   test('E2E-REL03 — seção Créditos pode ser recolhida', async ({ page }) => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
-    await expect(page.getByText('Créditos', { exact: true })).toBeVisible({ timeout: 15_000 })
+    // Nível 2 (Categorias) garante que o cabeçalho com chevron expandido seja renderizado
+    await page.getByRole('button', { name: /^categorias$/i }).click()
 
-    // Clicar na seção créditos para recolher
-    await page.getByText('Créditos', { exact: true }).click()
+    // O cabeçalho da seção Créditos é a 1ª ocorrência do texto (a 2ª é o totalizador).
+    const headerCred = page.getByText('Créditos', { exact: true }).first()
+    await expect(headerCred).toBeVisible({ timeout: 15_000 })
 
-    // Total créditos deve sumir
-    await expect(page.getByText(/total créditos/i)).not.toBeVisible()
+    // Lucide React renderiza os ícones com classe "lucide lucide-<nome>".
+    // Quando expandida a seção mostra chevron-down; ao recolher passa a chevron-right.
+    const chevronDown = headerCred.locator('..').locator('svg.lucide-chevron-down').first()
+    const chevronRight = headerCred.locator('..').locator('svg.lucide-chevron-right').first()
+    await expect(chevronDown).toBeVisible({ timeout: 5_000 })
+
+    await headerCred.click()
+    await expect(chevronRight).toBeVisible({ timeout: 5_000 })
   })
 
   test('E2E-REL04 — seção Débitos pode ser recolhida', async ({ page }) => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
-    await expect(page.getByText('Débitos', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: /^categorias$/i }).click()
 
-    await page.getByText('Débitos', { exact: true }).click()
+    const headerDeb = page.getByText('Débitos', { exact: true }).first()
+    await expect(headerDeb).toBeVisible({ timeout: 15_000 })
 
-    // Total débitos deve sumir
-    await expect(page.getByText(/total débitos/i)).not.toBeVisible()
+    const chevronDown = headerDeb.locator('..').locator('svg.lucide-chevron-down').first()
+    const chevronRight = headerDeb.locator('..').locator('svg.lucide-chevron-right').first()
+    await expect(chevronDown).toBeVisible({ timeout: 5_000 })
+
+    await headerDeb.click()
+    await expect(chevronRight).toBeVisible({ timeout: 5_000 })
   })
 
   test('E2E-REL05 — botão Exportar aparece após gerar relatório', async ({ page }) => {

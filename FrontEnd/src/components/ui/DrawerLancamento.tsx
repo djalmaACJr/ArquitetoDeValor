@@ -511,6 +511,7 @@ export default function DrawerLancamento({
           <button
             ref={valorBtnRef}
             type="button"
+            aria-label="Valor"
             onClick={abrirCalc}
             onFocus={() => { if (!ignorarFoco.current) abrirCalc() }}
             className="w-full text-left px-3 py-2 rounded-lg border transition-colors text-[13px]"

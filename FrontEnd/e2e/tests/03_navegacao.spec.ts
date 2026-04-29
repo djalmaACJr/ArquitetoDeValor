@@ -49,8 +49,8 @@ test.describe('Navegação e Persistência de Estado', () => {
     await page.goto('/')
     await page.waitForLoadState('domcontentloaded')
 
-    // Voltar um mês com tratamento de erro
-    const btnAnterior = page.locator('button').filter({ hasText: '<' }).first()
+    // Voltar um mês via botão com aria-label do MonthPicker
+    const btnAnterior = page.getByRole('button', { name: /mês anterior/i }).first()
     if (await btnAnterior.isVisible({ timeout: 5000 })) {
       await btnAnterior.click()
       await page.waitForTimeout(1000) // espera carregamento

@@ -11,6 +11,9 @@ dotenv.config({ path: path.resolve(process.cwd(), '../.env') })
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL ?? ''
 const ANON_KEY     = process.env.VITE_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY ?? ''
 
+// Timeout maior (90s) para tolerar cold start das Edge Functions na 1ª chamada
+setup.setTimeout(90_000)
+
 setup('criar dados basicos', async ({ page, request }) => {
   if (!SUPABASE_URL || !ANON_KEY) {
     console.log('⚠️ SUPABASE_URL/ANON_KEY não definidos — pulando setup')

@@ -1,5 +1,6 @@
 // e2e/tests/07_transferencias.spec.ts
 import { test, expect } from '@playwright/test'
+import { abrirNovoLancamento, preencherValor } from './helpers'
 
 test.describe('Transferências (E2E)', () => {
 
@@ -9,16 +10,14 @@ test.describe('Transferências (E2E)', () => {
 
   // ── E2E-TRF01 ────────────────────────────────────────────────
   test('E2E-TRF01 — drawer abre na aba Transferência', async ({ page }) => {
-    await page.getByRole('button', { name: /novo lançamento/i }).click()
+    // Abre direto na aba Transferência via dropdown do BotaoNovoLancamento.
+    await abrirNovoLancamento(page, 'Transferência')
     const drawer = page.getByRole('dialog').first()
     await expect(drawer).toBeVisible({ timeout: 5000 })
     await page.waitForTimeout(400)
 
-    // Clicar na aba Transferência no Segmented
-    await drawer.getByRole('button', { name: /transferência/i }).click()
-
-    // Campo "Conta destino" deve aparecer
-    await expect(drawer.getByText(/conta destino/i)).toBeVisible({ timeout: 3000 })
+    // Campo "Conta destino" deve aparecer (label, não o botão de seleção)
+    await expect(drawer.getByText(/conta destino \*/i).first()).toBeVisible({ timeout: 3000 })
     // Campo "Categoria" não deve aparecer em transferências
     await expect(drawer.getByText(/^categoria$/i)).not.toBeVisible()
 
@@ -27,18 +26,14 @@ test.describe('Transferências (E2E)', () => {
 
   // ── E2E-TRF02 ────────────────────────────────────────────────
   test('E2E-TRF02 — criar transferência e verificar na lista', async ({ page }) => {
-    await page.getByRole('button', { name: /novo lançamento/i }).click()
+    await abrirNovoLancamento(page, 'Transferência')
     const drawer = page.getByRole('dialog').first()
     await expect(drawer).toBeVisible({ timeout: 5000 })
     await page.waitForTimeout(400)
 
-    // Selecionar tipo Transferência
-    await drawer.getByRole('button', { name: /transferência/i }).click()
-    await page.waitForTimeout(200)
-
     // Preencher descrição e valor
     await drawer.getByPlaceholder(/conta de luz|sal[áa]rio/i).fill('E2E Transferência Teste')
-    await drawer.getByPlaceholder('0,00').fill('12345')
+    await preencherValor(page, drawer, '12345')
 
     // Conta origem — primeiro SearchableSelect
     const btnsSelect = drawer.getByRole('button').filter({ hasText: /selecione a conta/i })
@@ -92,6 +87,17 @@ test.describe('Transferências (E2E)', () => {
     await inputDescricao.clear()
     await inputDescricao.fill('E2E Transferência Editada')
 
+    // Workaround: o DrawerLancamento não repopula `conta_destino_id` ao abrir uma
+    // transferência existente (formDeLanc seta string vazia), então é preciso reselecionar
+    // a conta de destino antes de salvar — caso contrário o submit dispara o erro
+    // "Selecione a conta de destino".
+    const btnDestino = drawer.getByRole('button').filter({ hasText: /selecione a conta destino/i })
+    await btnDestino.first().click()
+    await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(200)
+
     await drawer.getByRole('button', { name: /salvar|atualizar/i }).click()
     await expect(drawer).not.toBeVisible({ timeout: 10_000 })
     await expect(page.getByText('E2E Transferência Editada').first()).toBeVisible({ timeout: 10_000 })
@@ -120,17 +126,13 @@ test.describe('Transferências (E2E)', () => {
 
   // ── E2E-TRF06 ────────────────────────────────────────────────
   test('E2E-TRF06 — criar transferência recorrente (3 parcelas)', async ({ page }) => {
-    await page.getByRole('button', { name: /novo lançamento/i }).click()
+    await abrirNovoLancamento(page, 'Transferência')
     const drawer = page.getByRole('dialog').first()
     await expect(drawer).toBeVisible({ timeout: 5000 })
     await page.waitForTimeout(400)
 
-    // Selecionar tipo Transferência
-    await drawer.getByRole('button', { name: /transferência/i }).click()
-    await page.waitForTimeout(200)
-
     await drawer.getByPlaceholder(/conta de luz|sal[áa]rio/i).fill('E2E Transf Recorrente')
-    await drawer.getByPlaceholder('0,00').fill('5000')
+    await preencherValor(page, drawer, '5000')
 
     // Conta origem
     const btnsSelect = drawer.getByRole('button').filter({ hasText: /selecione a conta/i })

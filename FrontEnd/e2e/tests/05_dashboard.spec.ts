@@ -1,5 +1,6 @@
 // e2e/tests/01_dashboard.spec.ts
 import { test, expect } from '@playwright/test'
+import { abrirNovoLancamento } from './helpers'
 
 test.describe('Dashboard', () => {
 
@@ -60,8 +61,9 @@ test.describe('Dashboard', () => {
   })
 
   test('E2E-DB05 — botão Novo lançamento abre o drawer', async ({ page }) => {
-    await page.getByRole('button', { name: /novo lançamento/i }).click()
-    await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 5000 })
+    // Dashboard navega para /lancamentos antes de abrir o drawer; timeout maior cobre ambos.
+    await abrirNovoLancamento(page)
+    await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('E2E-DB06 — estado do mês persiste ao voltar da página de extrato', async ({ page }) => {

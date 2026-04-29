@@ -88,6 +88,8 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
         <button
           onClick={() => navMes(-1)}
           disabled={!!(min && value <= min)}
+          title="Mês anterior"
+          aria-label="Mês anterior"
           className="p-1.5 rounded-md bg-blue-400/10 border border-blue-400/20 text-blue-300
                      hover:bg-blue-400/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         >
@@ -108,6 +110,8 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
         <button
           onClick={() => navMes(1)}
           disabled={!!(max && value >= max)}
+          title="Próximo mês"
+          aria-label="Próximo mês"
           className="p-1.5 rounded-md bg-blue-400/10 border border-blue-400/20 text-blue-300
                      hover:bg-blue-400/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         >
