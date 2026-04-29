@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, List, CreditCard, Tag,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Settings,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
@@ -139,6 +139,7 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
 export default function Sidebar() {
   const { dark, toggle } = useTheme()
   const { signOut, session } = useAuth()
+  const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
 
   const nome  = session?.user?.user_metadata?.nome
@@ -185,12 +186,23 @@ export default function Sidebar() {
       {/* Rodapé - fixo no fundo, sempre visível */}
       <div className={`pt-3 border-t border-blue-400/30 bg-av-dark ${collapsed ? 'flex flex-col items-center gap-2' : ''}`}>
         {!collapsed && (
-          <div className="mb-2 px-1 py-1 rounded-lg bg-blue-400/8">
+          <button
+            onClick={() => navigate('/perfil')}
+            className="w-full mb-2 px-1 py-1 rounded-lg bg-blue-400/8 hover:bg-blue-400/15 transition-colors text-left"
+            title="Editar perfil"
+          >
             <p className="text-[12px] font-semibold text-white truncate">{nome}</p>
             <p className="text-[10px] text-blue-300/60 truncate">{email}</p>
-          </div>
+          </button>
         )}
         <div className={`flex items-center gap-1 ${collapsed ? 'flex-col' : 'px-1'}`}>
+          <button
+            onClick={() => navigate('/perfil')}
+            className="p-2 rounded-lg text-white/70 hover:text-blue-400 hover:bg-blue-400/10 transition-colors flex-shrink-0"
+            title="Perfil"
+          >
+            <Settings size={15}/>
+          </button>
           <button
             onClick={toggle}
             className="p-2 rounded-lg text-white/70 hover:text-av-amber hover:bg-av-amber/15 transition-colors flex-shrink-0"

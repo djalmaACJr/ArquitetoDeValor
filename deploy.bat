@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 echo ================================
-echo   DEPLOY - Supabase Functions v1.0.3
+echo   DEPLOY - Supabase Functions v1.1.0
 echo ================================
 echo.
 echo Escolha o modo de deploy:
@@ -14,20 +14,22 @@ echo   4 - transacoes
 echo   5 - transferencias
 echo   6 - versao
 echo   7 - limpar
-echo   8 - Configurar nivel de logs
-echo   9 - Deploy com --debug (usar nesta maquina)
+echo   8 - excluir_conta
+echo   9 - Configurar nivel de logs
+echo  10 - Deploy com --debug (usar nesta maquina)
 echo.
-set /p opcao="Digite a opcao desejada (1-8): "
+set /p opcao="Digite a opcao desejada (1-10): "
 
-if "%opcao%"=="1" goto todos
-if "%opcao%"=="2" goto contas
-if "%opcao%"=="3" goto categorias
-if "%opcao%"=="4" goto transacoes
-if "%opcao%"=="5" goto transferencias
-if "%opcao%"=="6" goto versao
-if "%opcao%"=="7" goto limpar
-if "%opcao%"=="8" goto config_log
-if "%opcao%"=="9" goto debug_mode
+if "%opcao%"=="1"  goto todos
+if "%opcao%"=="2"  goto contas
+if "%opcao%"=="3"  goto categorias
+if "%opcao%"=="4"  goto transacoes
+if "%opcao%"=="5"  goto transferencias
+if "%opcao%"=="6"  goto versao
+if "%opcao%"=="7"  goto limpar
+if "%opcao%"=="8"  goto excluir_conta
+if "%opcao%"=="9"  goto config_log
+if "%opcao%"=="10" goto debug_mode
 echo Opcao invalida! & pause & exit /b
 
 :debug_mode
@@ -44,8 +46,9 @@ echo   4 - transacoes
 echo   5 - transferencias
 echo   6 - versao
 echo   7 - limpar
+echo   8 - excluir_conta
 echo.
-set /p mod_debug="Digite o modulo (1-7): "
+set /p mod_debug="Digite o modulo (1-8): "
 
 if "%mod_debug%"=="1" goto debug_todos
 if "%mod_debug%"=="2" goto debug_contas
@@ -54,6 +57,7 @@ if "%mod_debug%"=="4" goto debug_transacoes
 if "%mod_debug%"=="5" goto debug_transferencias
 if "%mod_debug%"=="6" goto debug_versao
 if "%mod_debug%"=="7" goto debug_limpar
+if "%mod_debug%"=="8" goto debug_excluir_conta
 echo Opcao invalida! & pause & exit /b
 
 :debug_contas
@@ -98,6 +102,13 @@ supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] limpar deployed
 goto fim
 
+:debug_excluir_conta
+echo.
+echo [DEPLOY --debug] excluir_conta...
+supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo --debug
+echo [OK] excluir_conta deployed
+goto fim
+
 :debug_todos
 echo.
 echo [DEPLOY --debug] contas...
@@ -117,6 +128,9 @@ supabase functions deploy version --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] limpar...
 supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo --debug
+echo.
+echo [DEPLOY --debug] excluir_conta...
+supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [OK] Todos os modulos deployados com --debug
 goto fim
@@ -191,6 +205,13 @@ supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo
 echo [OK] limpar deployed
 goto fim
 
+:excluir_conta
+echo.
+echo [DEPLOY] excluir_conta...
+supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo
+echo [OK] excluir_conta deployed
+goto fim
+
 :todos
 echo.
 echo [DEPLOY] contas...
@@ -210,6 +231,9 @@ supabase functions deploy version --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] limpar...
 supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo
+echo.
+echo [DEPLOY] excluir_conta...
+supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [OK] Todos os modulos deployados
 goto fim

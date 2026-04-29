@@ -66,10 +66,11 @@ export default function CadastroPage() {
     setLoading(false)
 
     if (err) {
+      console.error('[CadastroPage] signUp error:', err.message, err)
       if (err.message.includes('already registered') || err.message.includes('already been registered')) {
         setError('Este e-mail já está cadastrado.')
       } else {
-        setError('Erro ao criar conta. Tente novamente.')
+        setError(`Erro ao criar conta: ${err.message}`)
       }
       return
     }
