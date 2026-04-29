@@ -3,6 +3,8 @@ import { useAuth } from './hooks/useAuth'
 import AppLayout from './components/layout/AppLayout'
 import LoginPage from './pages/LoginPage'
 import CadastroPage from './pages/CadastroPage'
+import PerfilPage from './pages/PerfilPage'
+import RedefinirSenhaPage from './pages/RedefinirSenhaPage'
 import DashboardPage from './pages/DashboardPage'
 import RelatoriosPage from './pages/RelatoriosPage'
 import ContasPage from './pages/ContasPage'
@@ -27,7 +29,8 @@ export default function App() {
       <PageStateProvider>
         <Routes>
           <Route path="/login"    element={<LoginPage/>}/>
-          <Route path="/cadastro" element={<CadastroPage/>}/>
+          <Route path="/cadastro"        element={<CadastroPage/>}/>
+          <Route path="/redefinir-senha" element={<RedefinirSenhaPage/>}/>
           <Route path="/" element={
             <PrivateRoute>
               <AppLayout/>
@@ -39,6 +42,7 @@ export default function App() {
             <Route path="categorias"  element={<CategoriasPage/>}/>
             <Route path="relatorios"  element={<RelatoriosPage/>}/>
             <Route path="importexport" element={<ImportExportPage/>}/>
+            <Route path="perfil"       element={<PerfilPage/>}/>
           </Route>
           <Route path="*" element={<Navigate to="/" replace/>}/>
         </Routes>

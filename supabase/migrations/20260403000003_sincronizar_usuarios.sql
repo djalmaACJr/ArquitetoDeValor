@@ -37,7 +37,7 @@ BEGIN
         (NEW.id, 'Carteira',     'CARTEIRA',    0, '👛', '#00c896'),
         (NEW.id, 'Nubank',       'CARTAO',      0, 'https://logo.clearbit.com/nubank.com.br',      '#820ad1'),
         (NEW.id, 'Inter',        'CARTAO',      0, 'https://logo.clearbit.com/bancointer.com.br',  '#ff7a00'),
-        (NEW.id, 'C6 Bank',      'CARTAO',      0, 'https://logo.clearbit.com/c6bank.com.br',      '#2d2d2d'),
+        (NEW.id, 'C6 Bank',      'CARTAO',      0, 'https://logo.clearbit.com/c6bank.com.br',      '#2d2d2d');
 
     -- Cria categorias pai iniciais e captura os IDs gerados
     WITH cats_pai AS (
