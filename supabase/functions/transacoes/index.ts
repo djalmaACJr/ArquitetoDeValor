@@ -448,9 +448,6 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
       }
       
       logDebug(`Parcela ${parcela.nr_parcela}: novaData=${update.data}, status=${update.status}`);
-    } else {
-      // Se não houve mudança de data, remover status do update para manter o original
-      delete update.status;
     }
 
     const { error: eUp } = await c.from("transacoes").update(update).eq("id", parcela.id);

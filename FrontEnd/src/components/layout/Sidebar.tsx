@@ -186,14 +186,10 @@ export default function Sidebar() {
       {/* Rodapé - fixo no fundo, sempre visível */}
       <div className={`pt-3 border-t border-blue-400/30 bg-av-dark ${collapsed ? 'flex flex-col items-center gap-2' : ''}`}>
         {!collapsed && (
-          <button
-            onClick={() => navigate('/perfil')}
-            className="w-full mb-2 px-1 py-1 rounded-lg bg-blue-400/8 hover:bg-blue-400/15 transition-colors text-left"
-            title="Editar perfil"
-          >
+          <div className="w-full mb-2 px-1 py-1">
             <p className="text-[12px] font-semibold text-white truncate">{nome}</p>
             <p className="text-[10px] text-blue-300/60 truncate">{email}</p>
-          </button>
+          </div>
         )}
         <div className={`flex items-center gap-1 ${collapsed ? 'flex-col' : 'px-1'}`}>
           <button

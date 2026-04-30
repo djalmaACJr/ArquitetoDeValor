@@ -444,3 +444,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/limpar/deno.json"
 entrypoint = "./functions/limpar/index.ts"
+
+[functions.excluir_conta]
+enabled = true
+verify_jwt = false
+import_map = "./functions/excluir_conta/deno.json"
+entrypoint = "./functions/excluir_conta/index.ts"
