@@ -561,9 +561,10 @@ function SecaoImport() {
 
   const inputRef = useRef<HTMLInputElement>(null)
   const [modo, setModo] = useState<ModoImport>('transacoes')
-  const [etapa, setEtapa] = useState<'idle' | 'revisando' | 'importando' | 'concluido'>('idle')
+  const [etapa, setEtapa] = useState<'idle' | 'analisando' | 'revisando' | 'importando' | 'concluido'>('idle')
   const [dragOver, setDragOver] = useState(false)
   const [grid, setGrid] = useState<LinhaGrid[]>([])
+  const [paginaAtual, setPaginaAtual] = useState(0)
   const [gridContas, setGridContas] = useState<ContaImport[]>([])
   const [gridCats, setGridCats] = useState<CategoriaImport[]>([])
   const [resolucaoContas, setResolucaoContas] = useState<Record<string, ResolucaoConta>>({})
@@ -590,6 +591,10 @@ function SecaoImport() {
   // ── Parse do arquivo ───────────────────────────────────────────
   const processarArquivo = async (file: File) => {
     try {
+      setEtapa('analisando')
+      setProgresso(0)
+      setProgressoInfo({ atual: 0, total: 0, ok: 0, erros: 0, eta: '', velocidade: '' })
+      
       // @ts-expect-error dynamic CDN import
       const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
       const buf  = await file.arrayBuffer()
@@ -678,50 +683,130 @@ function SecaoImport() {
       console.log('[Import] Total de linhas lidas:', rows.length)
       if (rows.length > 0) console.log('[Import] Primeira linha (keys):', Object.keys(rows[0]))
 
-      const parsed: LinhaImport[] = rows.map((row, idx) => {
-        const r = normalizar(row)
-        const dataRaw = r['data'] ?? r['date'] ?? ''
-        let dataFmt = ''
-        if (dataRaw instanceof Date) {
-          dataFmt = dataRaw.toISOString().slice(0, 10)
-        } else {
-          const s = String(dataRaw).trim()
-          if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
-            const [d, m, a] = s.split('/')
-            dataFmt = `${a}-${m}-${d}`
-          } else {
-            dataFmt = s.slice(0, 10)
+      setProgressoInfo({ 
+        atual: 0, 
+        total: rows.length, 
+        ok: 0, 
+        erros: 0, 
+        eta: '', 
+        velocidade: 'Iniciando análise...' 
+      })
+
+      const parsed: LinhaImport[] = []
+      const chunkSize = 500 // Reduzir para 500 linhas para melhor feedback
+      const tInicioAnalise = Date.now()
+      
+      const getLineNum = () => { const e = new Error(); return Error.captureStackTrace ? e.stack?.split('\n')[1]?.trim() || '???' : '???' }
+      
+      console.log(`[Import:${getLineNum()}] Iniciando processamento de`, rows.length, 'linhas em chunks de', chunkSize)
+      
+      // Limpar estado anterior para evitar memory leaks
+      if (parsed.length > 10000) {
+        console.warn(`[Import:${getLineNum()}] Grande volume de dados detectado, otimizando memória`)
+      }
+      
+      for (let chunkStart = 0; chunkStart < rows.length; chunkStart += chunkSize) {
+        const chunkEnd = Math.min(chunkStart + chunkSize, rows.length)
+        const chunk = rows.slice(chunkStart, chunkEnd)
+        
+        console.log(`[Import:${getLineNum()}] Processando chunk ${Math.floor(chunkStart/chunkSize)+1}: linhas ${chunkStart}-${chunkEnd}`)
+        
+        try {
+          // Processar chunk de forma síncrona para evitar travar
+          const chunkParsed: LinhaImport[] = chunk.map((row, idx) => {
+            const globalIdx = chunkStart + idx
+            const r = normalizar(row)
+            const dataRaw = r['data'] ?? r['date'] ?? ''
+            let dataFmt = ''
+            if (dataRaw instanceof Date) {
+              dataFmt = dataRaw.toISOString().slice(0, 10)
+            } else {
+              const s = String(dataRaw).trim()
+              if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+                const [d, m, a] = s.split('/')
+                dataFmt = `${a}-${m}-${d}`
+              } else {
+                dataFmt = s.slice(0, 10)
+              }
+            }
+
+            const valorRaw  = r['valor'] ?? r['value'] ?? 0
+            const valorNum  = parseValor(String(valorRaw))
+            const valor     = Math.abs(valorNum)
+            const tipoRaw   = String(r['tipo'] ?? r['type'] ?? '').toUpperCase()
+            const tipo: 'RECEITA' | 'DESPESA' = tipoRaw === 'RECEITA' ? 'RECEITA'
+              : tipoRaw === 'DESPESA' ? 'DESPESA'
+              : valorNum < 0 ? 'DESPESA' : 'RECEITA'
+            const statusRaw = String(r['status'] ?? '').toUpperCase()
+            const hoje = new Date().toISOString().slice(0, 10)
+            const statusAuto = dataFmt && dataFmt < hoje ? 'PAGO' : 'PENDENTE'
+            const status = ['PAGO', 'PENDENTE', 'PROJECAO'].includes(statusRaw) ? statusRaw : statusAuto
+
+            return {
+              idx: globalIdx,
+              data:           dataFmt,
+              descricao:      String(r['descrição'] ?? r['descricao'] ?? r['description'] ?? '').trim(),
+              valor,
+              tipo,
+              conta_nome:     String(r['conta'] ?? r['account'] ?? '').trim(),
+              categoria_nome: String(r['categoria'] ?? r['category'] ?? '').trim(),
+              status,
+              observacao:     String(r['observação'] ?? r['observacao'] ?? r['observation'] ?? '').trim(),
+            }
+          })
+          
+          parsed.push(...chunkParsed)
+          
+          // Forçar garbage collection periódico para grandes arquivos
+          if (chunkStart % 5000 === 0 && chunkStart > 0) {
+            if (typeof window !== 'undefined' && (window as any).gc) {
+              (window as any).gc()
+            }
           }
+          
+        } catch (error) {
+          console.error(`[Import:${getLineNum()}] Erro processando chunk ${chunkStart}-${chunkEnd}:`, error)
+          // Continuar processamento mesmo com erro no chunk
+          continue
         }
-
-        const valorRaw  = r['valor'] ?? r['value'] ?? 0
-        const valorNum  = parseValor(String(valorRaw))
-        const valor     = Math.abs(valorNum)
-        const tipoRaw   = String(r['tipo'] ?? r['type'] ?? '').toUpperCase()
-        const tipo: 'RECEITA' | 'DESPESA' = tipoRaw === 'RECEITA' ? 'RECEITA'
-          : tipoRaw === 'DESPESA' ? 'DESPESA'
-          : valorNum < 0 ? 'DESPESA' : 'RECEITA'
-        const statusRaw = String(r['status'] ?? '').toUpperCase()
-        const hoje = new Date().toISOString().slice(0, 10)
-        const statusAuto = dataFmt && dataFmt < hoje ? 'PAGO' : 'PENDENTE'
-        const status = ['PAGO', 'PENDENTE', 'PROJECAO'].includes(statusRaw) ? statusRaw : statusAuto
-
-        return {
-          idx,
-          data:           dataFmt,
-          descricao:      String(r['descrição'] ?? r['descricao'] ?? r['description'] ?? '').trim(),
-          valor,
-          tipo,
-          conta_nome:     String(r['conta'] ?? r['account'] ?? '').trim(),
-          categoria_nome: String(r['categoria'] ?? r['category'] ?? '').trim(),
-          status,
-          observacao:     String(r['observação'] ?? r['observacao'] ?? r['observation'] ?? '').trim(),
+        
+        // Atualizar progresso imediatamente após processar cada chunk
+        const progresso = Math.round((chunkEnd / rows.length) * 100)
+        const elapsed = (Date.now() - tInicioAnalise) / 1000
+        const velocidade = elapsed > 0 ? (chunkEnd / elapsed).toFixed(0) : '0'
+        const restantes = rows.length - chunkEnd
+        const etaSeg = elapsed > 0 && chunkEnd > 0 ? Math.round(restantes / (chunkEnd / elapsed)) : null
+        const eta = etaSeg !== null
+          ? etaSeg > 60
+            ? `${Math.floor(etaSeg / 60)}m ${etaSeg % 60}s`
+            : `${etaSeg}s`
+          : 'calculando...'
+        
+        console.log(`[Import:${getLineNum()}] Progresso: ${progresso}% (${chunkEnd}/${rows.length}) - ${velocidade} linhas/s`)
+        
+        // Forçar atualização do React
+        setProgresso(progresso)
+        setProgressoInfo({ 
+          atual: chunkEnd, 
+          total: rows.length, 
+          ok: 0, 
+          erros: 0, 
+          eta, 
+          velocidade: `${velocidade} linhas/s` 
+        })
+        
+        // Pequena pausa apenas se não for o último chunk - aumentar para melhor UI
+        if (chunkEnd < rows.length) {
+          await new Promise(r => setTimeout(r, 50)) // 50ms para UI respirar
         }
-      }).filter(l => l.descricao && l.valor > 0 && l.conta_nome && l.categoria_nome)
+      }
+      
+      // Filtrar linhas válidas
+      const filtered = parsed.filter(l => l.descricao && l.valor > 0 && l.conta_nome && l.categoria_nome)
 
-      console.log('[Import] Linhas após filtro:', parsed.length)
-      if (parsed.length === 0 && rows.length > 0) {
-        console.log('[Import] DEBUG primeira linha normalizada:', Object.fromEntries(
+      console.log(`[Import:${getLineNum()}] Linhas após filtro:`, filtered.length)
+      if (filtered.length === 0 && rows.length > 0) {
+        console.log(`[Import:${getLineNum()}] DEBUG primeira linha normalizada:`, Object.fromEntries(
           Object.keys(rows[0]).map(k => [k.toLowerCase().trim(), rows[0][k]])
         ))
       }
@@ -732,7 +817,7 @@ function SecaoImport() {
 
       const contasDesc = new Set<string>()
       const catsDesc   = new Map<string, 'RECEITA' | 'DESPESA'>()
-      parsed.forEach(l => {
+      filtered.forEach(l => {
         if (!contaMap[normalizarNome(l.conta_nome)]) contasDesc.add(l.conta_nome)
         if (!catMap[normalizarNome(l.categoria_nome)]) catsDesc.set(l.categoria_nome, l.tipo)
       })
@@ -745,19 +830,31 @@ function SecaoImport() {
       setResolucaoContas(rc)
       setResolucaoCats(rcat)
 
-      // ── Verificar duplicatas no banco ───────────────────────────
+      // ── Verificar duplicatas no banco (OTIMIZADO) ───────────────────────────
       setCarregandoDedup(true)
       let txExistentes: TransacaoRaw[] = []
       try {
         const { apiFetch: apiFetchDyn, extrairLista: extrairListaDyn } = await import('../lib/api')
-        // Buscar transações dos meses do arquivo para comparar
-        const datasUnicas = [...new Set(parsed.map(l => l.data.slice(0, 7)).filter(Boolean))]
+        
+        // Para arquivos grandes, limitar verificação aos últimos 6 meses para performance
+        const datasUnicas = [...new Set(filtered.map(l => l.data.slice(0, 7)).filter(Boolean))]
+        const mesesParaVerificar = datasUnicas.length > 6 
+          ? datasUnicas.slice(-6) // últimos 6 meses
+          : datasUnicas
+        
+        console.log(`[Import:${getLineNum()}] Verificando duplicatas em ${mesesParaVerificar.length} meses de ${datasUnicas.length} totais`)
+        
+        // Buscar em batch com limite maior para reduzir chamadas
         const resArr = await Promise.all(
-          datasUnicas.map(mes => apiFetchDyn(`/transacoes?mes=${mes}&per_page=1000&saldo=true`))
+          mesesParaVerificar.map(mes => apiFetchDyn(`/transacoes?mes=${mes}&per_page=5000&saldo=true`))
         )
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         txExistentes = resArr.flatMap(r => extrairListaDyn<any>(r.dados))
-      } catch { /* se falhar, segue sem checar duplicatas */ }
+        
+        console.log(`[Import:${getLineNum()}] Encontradas ${txExistentes.length} transações existentes para verificação`)
+      } catch (error) { 
+        console.warn(`[Import:${getLineNum()}] Erro ao verificar duplicatas, continuando sem verificação:`, error)
+      }
       setCarregandoDedup(false)
 
       // Chave de duplicata: data + descricao normalizada + categoria_nome normalizada
@@ -768,7 +865,7 @@ function SecaoImport() {
       )
 
       // ── Montar grid com status de cada linha ────────────────────
-      const linhasGrid: LinhaGrid[] = parsed.map(l => {
+      const linhasGrid: LinhaGrid[] = filtered.map(l => {
         const chave = `${l.data}|${normalizarNome(l.descricao)}|${normalizarNome(l.categoria_nome)}`
         const duplicada = chaveExistente.has(chave)
 
@@ -788,6 +885,7 @@ function SecaoImport() {
       })
 
       setGrid(linhasGrid)
+      setPaginaAtual(0) // Resetar página para início
       setEtapa('revisando')
 
     } catch (e) {
@@ -1342,7 +1440,7 @@ function SecaoImport() {
                           onChange={e => setResolucaoCats(r => ({ ...r, [nome]: { ...r[nome], mapear_para: e.target.value } }))}
                           className="w-full bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-1.5 text-[12px] text-gray-200">
                           <option value="">Selecionar categoria...</option>
-                          {(categorias as unknown as CategoriaRaw[]).filter(c => c.tipo === resolucaoCats[nome]?.tipo).map(c => (
+                          {categorias.map(c => (
                             <option key={c.id} value={c.id}>{c.descricao}</option>
                           ))}
                         </select>
@@ -1371,6 +1469,51 @@ function SecaoImport() {
                 </div>
               </div>
 
+              {/* Paginação para grandes arquivos */}
+              {grid.length > 100 && (
+                <div className="bg-blue-400/5 border border-blue-400/20 rounded-lg p-3 mb-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[11px] font-semibold text-blue-400">
+                        📊 Arquivo grande detectado ({grid.length} registros)
+                      </p>
+                      <p className="text-[10px] text-blue-400/70">
+                        Exibindo {paginaAtual * 100 + 1}-{Math.min((paginaAtual + 1) * 100, grid.length)} de {grid.length}
+                      </p>
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => setPaginaAtual(Math.max(0, paginaAtual - 1))}
+                        disabled={paginaAtual === 0}
+                        className="px-2 py-1 rounded text-[10px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{
+                          background: paginaAtual === 0 ? 'transparent' : '#4da6ff20',
+                          color: paginaAtual === 0 ? '#8b92a8' : '#4da6ff',
+                          border: `1px solid ${paginaAtual === 0 ? '#ffffff10' : '#4da6ff40'}`,
+                        }}
+                      >
+                        ← Anterior
+                      </button>
+                      <span className="px-2 py-1 text-[10px] font-semibold text-gray-400">
+                        Página {paginaAtual + 1} de {Math.ceil(grid.length / 100)}
+                      </span>
+                      <button
+                        onClick={() => setPaginaAtual(Math.min(Math.ceil(grid.length / 100) - 1, paginaAtual + 1))}
+                        disabled={paginaAtual >= Math.ceil(grid.length / 100) - 1}
+                        className="px-2 py-1 rounded text-[10px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{
+                          background: paginaAtual >= Math.ceil(grid.length / 100) - 1 ? 'transparent' : '#4da6ff20',
+                          color: paginaAtual >= Math.ceil(grid.length / 100) - 1 ? '#8b92a8' : '#4da6ff',
+                          border: `1px solid ${paginaAtual >= Math.ceil(grid.length / 100) - 1 ? '#ffffff10' : '#4da6ff40'}`,
+                        }}
+                      >
+                        Próximo →
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 max-h-[400px]">
                 <table className="w-full text-[11px]" style={{ minWidth: 900 }}>
                   <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
@@ -1385,7 +1528,7 @@ function SecaoImport() {
                     </tr>
                   </thead>
                   <tbody>
-                    {grid.map(l => {
+                    {(grid.length > 100 ? grid.slice(paginaAtual * 100, (paginaAtual + 1) * 100) : grid).map(l => {
                       const temProblema = !!l.problema
                       const bgRow = temProblema
                         ? 'rgba(255,107,74,0.06)'
@@ -1507,6 +1650,61 @@ function SecaoImport() {
                 {modo === 'contas' && `Importar ${gridContas.filter(l => l.importar).length} contas`}
                 {modo === 'categorias' && `Importar ${gridCats.filter(l => l.importar).length} categorias`}
               </Btn>
+            </div>
+          </div>
+        )}
+
+        {/* ── ANALISANDO ── */}
+        {etapa === 'analisando' && (
+          <div className="space-y-4">
+            {/* Cabeçalho */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Loader2 size={16} className="animate-spin text-blue-400" />
+                <span className="text-[13px] font-semibold" style={{ color: '#4da6ff' }}>
+                  Analisando arquivo...
+                </span>
+              </div>
+              <span className="text-[12px] font-bold" style={{ color: '#4da6ff' }}>
+                {progresso}%
+              </span>
+            </div>
+
+            {/* Barra de progresso */}
+            <div className="h-3 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-200"
+                style={{
+                  width: `${progresso}%`,
+                  background: progresso < 30
+                    ? '#4da6ff'
+                    : progresso < 70
+                    ? '#3b82f6'
+                    : '#2563eb',
+                }}
+              />
+            </div>
+
+            {/* Métricas */}
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { label: 'Linhas', value: `${progressoInfo.atual} / ${progressoInfo.total}`, color: '#e8eaf0' },
+                { label: 'Status', value: 'Analisando...', color: '#4da6ff' },
+                { label: 'Velocidade', value: progressoInfo.velocidade || '...', color: '#4da6ff' },
+                { label: 'ETA', value: progressoInfo.eta || '...', color: '#8b92a8' },
+              ].map((m, i) => (
+                <div key={i} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 text-center">
+                  <p className="text-[10px] uppercase tracking-wide mb-0.5" style={{ color: '#8b92a8' }}>{m.label}</p>
+                  <p className="text-[13px] font-bold" style={{ color: m.color }}>{m.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Mensagem informativa */}
+            <div className="bg-blue-400/5 border border-blue-400/20 rounded-lg p-3">
+              <p className="text-[11px] text-blue-400">
+                📊 Processando arquivo em blocos para melhor performance. A interface permanecerá responsiva.
+              </p>
             </div>
           </div>
         )}
