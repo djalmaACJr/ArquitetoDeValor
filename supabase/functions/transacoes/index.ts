@@ -49,8 +49,8 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
   const page     = parseInt(params.get("page") ?? "1");
   const perPage  = comSaldo
     ? 1000
-    : Math.min(parseInt(params.get("per_page") ?? "50"), 200);
-  const offset   = comSaldo ? 0 : (page - 1) * perPage;
+    : Math.min(parseInt(params.get("per_page") ?? "50"), 1000);
+  const offset   = (page - 1) * perPage;
 
   const fonte = comSaldo ? "vw_transacoes_com_saldo" : "transacoes";
   let q = c.from(fonte).select("*")

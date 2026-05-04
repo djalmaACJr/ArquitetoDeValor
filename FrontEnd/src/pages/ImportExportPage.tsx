@@ -12,15 +12,6 @@ import { MonthPicker } from '../components/ui/MonthPicker'
 import type { Conta } from '../types'
 
 // ── Tipos internos ──────────────────────────────────────────────
-interface CategoriaRaw {
-  id: string
-  descricao: string
-  tipo: string
-  protegida?: boolean
-  id_pai?: string | null
-  icone?: string | null
-  cor?: string | null
-}
 
 interface TransacaoRaw {
   id?: string
@@ -107,6 +98,30 @@ interface ResolucaoCategoria {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
+
+const _sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+function dividirEmChunks<T>(itens: T[], maxWorkers: number): T[][] {
+  if (itens.length === 0) return []
+  const n = Math.min(maxWorkers, itens.length)
+  const tamanho = Math.ceil(itens.length / n)
+  return Array.from({ length: n }, (_, i) => itens.slice(i * tamanho, (i + 1) * tamanho)).filter(c => c.length > 0)
+}
+
+async function apiComRetry(
+  path: string,
+  method: 'POST' | 'PUT' | 'DELETE',
+  body?: unknown,
+  tentativas = 3,
+): Promise<Awaited<ReturnType<typeof apiMutate>>> {
+  for (let t = 0; t < tentativas; t++) {
+    const r = await apiMutate(path, method, body)
+    if (r.ok || !(r.erro ?? '').includes('NetworkError')) return r
+    if (t < tentativas - 1) await _sleep(2000)
+  }
+  return apiMutate(path, method, body)
+}
+
 function mesAtual() { return new Date().toISOString().slice(0, 7) }
 
 function mesMenos(m: string, n: number) {
@@ -574,6 +589,8 @@ function SecaoImport() {
   const [progressoInfo,  setProgressoInfo]  = useState({ atual: 0, total: 0, ok: 0, erros: 0, eta: '', velocidade: '' })
   const [logTempoReal,   setLogTempoReal]   = useState<typeof log>([])
   const [carregandoDedup, setCarregandoDedup] = useState(false)
+  const canceladoRef = useRef(false)
+  const cancelar = () => { canceladoRef.current = true }
 
   // ── Helpers de edição do grid ──────────────────────────────────
   const setLinha = (idx: number, patch: Partial<LinhaGrid>) =>
@@ -594,6 +611,7 @@ function SecaoImport() {
       setEtapa('analisando')
       setProgresso(0)
       setProgressoInfo({ atual: 0, total: 0, ok: 0, erros: 0, eta: '', velocidade: '' })
+      canceladoRef.current = false
       
       // @ts-expect-error dynamic CDN import
       const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
@@ -696,7 +714,7 @@ function SecaoImport() {
       const chunkSize = 500 // Reduzir para 500 linhas para melhor feedback
       const tInicioAnalise = Date.now()
       
-      const getLineNum = () => { const e = new Error(); return Error.captureStackTrace ? e.stack?.split('\n')[1]?.trim() || '???' : '???' }
+      const getLineNum = () => { const e = new Error(); return e.stack?.split('\n')[1]?.trim() || '???' }
       
       console.log(`[Import:${getLineNum()}] Iniciando processamento de`, rows.length, 'linhas em chunks de', chunkSize)
       
@@ -706,6 +724,12 @@ function SecaoImport() {
       }
       
       for (let chunkStart = 0; chunkStart < rows.length; chunkStart += chunkSize) {
+        if (canceladoRef.current) {
+          setEtapa('idle')
+          setProgresso(0)
+          setProgressoInfo({ atual: 0, total: 0, ok: 0, erros: 0, eta: '', velocidade: '' })
+          return
+        }
         const chunkEnd = Math.min(chunkStart + chunkSize, rows.length)
         const chunk = rows.slice(chunkStart, chunkEnd)
         
@@ -912,6 +936,7 @@ function SecaoImport() {
     setProgresso(0)
     setProgressoInfo({ atual: 0, total: 0, ok: 0, erros: 0, eta: '', velocidade: '' })
     setLogTempoReal([])
+    canceladoRef.current = false
     const logs: typeof log = []
     const addLog = (tipo: 'ok' | 'erro' | 'aviso', msg: string) => {
       logs.push({ tipo, msg })
@@ -923,8 +948,9 @@ function SecaoImport() {
       const paraImportar = gridContas.filter(l => l.importar)
       let ok = 0, erros = 0
       for (let i = 0; i < paraImportar.length; i++) {
+        if (canceladoRef.current) { addLog('aviso', `Cancelado. ${ok} contas importadas.`); break }
         const l = paraImportar[i]
-        const r = await apiMutate('/contas', 'POST', {
+        const r = await apiComRetry('/contas', 'POST', {
           nome: l.nome, tipo: l.tipo, saldo_inicial: l.saldo_inicial,
           icone: l.icone || undefined, cor: l.cor || undefined,
         })
@@ -932,7 +958,7 @@ function SecaoImport() {
         else { addLog('erro', `"${l.nome}": ${r.erro}`); erros++ }
         setProgresso(Math.round(((i + 1) / paraImportar.length) * 100))
       }
-      addLog('ok', `Contas: ${ok} importadas, ${erros} erros`)
+      if (!canceladoRef.current) addLog('ok', `Contas: ${ok} importadas, ${erros} erros`)
       setLog(logs)
       setEtapa('concluido')
       return
@@ -951,19 +977,20 @@ function SecaoImport() {
       let ok = 0, erros = 0
       const total = pais.length + filhos.length
       for (let i = 0; i < pais.length; i++) {
+        if (canceladoRef.current) { addLog('aviso', `Cancelado. ${ok} categorias importadas.`); break }
         const l = pais[i]
-        const r = await apiMutate('/categorias', 'POST', {
+        const r = await apiComRetry('/categorias', 'POST', {
           descricao: l.categoria, icone: l.icone || undefined, cor: l.cor || undefined,
         })
         if (r.ok && (r.dados as { id?: string } | null)?.id) { mapaIdPai[normalizarNome(l.categoria)] = (r.dados as { id: string }).id; ok++ }
         else { addLog('erro', `"${l.categoria}": ${r.erro}`); erros++ }
         setProgresso(Math.round(((i + 1) / total) * 100))
       }
-      for (let i = 0; i < filhos.length; i++) {
+      for (let i = 0; i < filhos.length && !canceladoRef.current; i++) {
         const l = filhos[i]
         const idPai = mapaIdPai[normalizarNome(l.categoria)]
         if (!idPai) { addLog('aviso', `"${l.subcategoria}": categoria pai "${l.categoria}" não encontrada`); erros++; continue }
-        const r = await apiMutate('/categorias', 'POST', {
+        const r = await apiComRetry('/categorias', 'POST', {
           descricao: l.subcategoria, id_pai: idPai,
           icone: l.icone || undefined, cor: l.cor || undefined,
         })
@@ -971,7 +998,7 @@ function SecaoImport() {
         else { addLog('erro', `"${l.subcategoria}": ${r.erro}`); erros++ }
         setProgresso(Math.round(((pais.length + i + 1) / total) * 100))
       }
-      addLog('ok', `Categorias: ${ok} importadas, ${erros} erros`)
+      if (!canceladoRef.current) addLog('ok', `Categorias: ${ok} importadas, ${erros} erros`)
       setLog(logs)
       setEtapa('concluido')
       return
@@ -984,7 +1011,7 @@ function SecaoImport() {
       // 1. Criar/mapear contas desconhecidas
       for (const [nome, res] of Object.entries(resolucaoContas)) {
         if (res.acao === 'criar') {
-          const r = await apiMutate('/contas', 'POST', { nome, tipo: 'CORRENTE', saldo_inicial: 0 })
+          const r = await apiComRetry('/contas', 'POST', { nome, tipo: 'CORRENTE', saldo_inicial: 0 })
           if (r.ok && (r.dados as { conta_id?: string } | null)?.conta_id) {
             contaMap[normalizarNome(nome)] = (r.dados as { conta_id: string }).conta_id
             addLog('ok', `Conta criada: ${nome}`)
@@ -997,7 +1024,7 @@ function SecaoImport() {
       // 2. Criar/mapear categorias desconhecidas
       for (const [nome, res] of Object.entries(resolucaoCats)) {
         if (res.acao === 'criar') {
-          const r = await apiMutate('/categorias', 'POST', { descricao: nome, tipo: res.tipo })
+          const r = await apiComRetry('/categorias', 'POST', { descricao: nome, tipo: res.tipo })
           if (r.ok && (r.dados as { id?: string } | null)?.id) {
             catMap[normalizarNome(nome)] = (r.dados as { id: string }).id
             addLog('ok', `Categoria criada: ${nome} (${res.tipo})`)
@@ -1007,52 +1034,56 @@ function SecaoImport() {
         }
       }
 
-      // 3. Importar apenas linhas marcadas para importar
+      // 3. Importar em até 4 workers paralelos
       const linhasParaImportar = grid.filter(l => l.importar)
-      const total = linhasParaImportar.length
-      let ok = 0, erros = 0
+      const total   = linhasParaImportar.length
+      let ok = 0, erros = 0, processados = 0
       const tInicio = Date.now()
 
-      for (let i = 0; i < total; i++) {
-        const l = linhasParaImportar[i]
-        const conta_id     = contaMap[normalizarNome(l.conta_nome)]
-        const categoria_id = catMap[normalizarNome(l.categoria_nome)]
+      const chunks = dividirEmChunks(linhasParaImportar, 4)
 
-        if (!conta_id || !categoria_id) {
-          addLog('erro', `"${l.descricao}" ignorada: conta ou categoria não resolvida`)
-          erros++
-        } else {
-          const r = await apiMutate('/transacoes', 'POST', {
-            tipo: l.tipo, data: l.data, descricao: l.descricao,
-            valor: l.valor, conta_id, categoria_id,
-            status: l.status,
-            observacao: l.observacao || undefined,
-          })
-          if (r.ok) ok++
-          else { addLog('erro', `"${l.descricao}" (${l.data}): ${r.erro}`); erros++ }
-        }
+      addLog('ok', `Iniciando com ${chunks.length} workers paralelos (${total} registros)...`)
 
-        // Atualizar progresso e liberar event loop a cada 5 registros
-        if (i % 5 === 0 || i === total - 1) {
-          const pct      = Math.round(((i + 1) / total) * 100)
-          const elapsed  = (Date.now() - tInicio) / 1000
-          const velocidade = elapsed > 0 ? ((i + 1) / elapsed).toFixed(1) : '...'
-          const restantes = total - (i + 1)
-          const etaSeg   = elapsed > 0 && i > 0 ? Math.round(restantes / ((i + 1) / elapsed)) : null
-          const eta      = etaSeg !== null
-            ? etaSeg > 60
-              ? `${Math.floor(etaSeg / 60)}m ${etaSeg % 60}s`
-              : `${etaSeg}s`
-            : '...'
-          setProgresso(pct)
-          setProgressoInfo({ atual: i + 1, total, ok, erros, eta, velocidade: `${velocidade}/s` })
-          // Yield para o React atualizar o DOM
-          await new Promise(r => setTimeout(r, 0))
+      const processarChunk = async (chunk: LinhaGrid[]) => {
+        for (const l of chunk) {
+          if (canceladoRef.current) break
+          const conta_id     = contaMap[normalizarNome(l.conta_nome)]
+          const categoria_id = catMap[normalizarNome(l.categoria_nome)]
+
+          if (!conta_id || !categoria_id) {
+            addLog('erro', `"${l.descricao}" ignorada: conta ou categoria não resolvida`)
+            erros++
+          } else {
+            const r = await apiComRetry('/transacoes', 'POST', {
+              tipo: l.tipo, data: l.data, descricao: l.descricao,
+              valor: l.valor, conta_id, categoria_id,
+              status: l.status, observacao: l.observacao || undefined,
+            })
+            if (r.ok) ok++
+            else { addLog('erro', `"${l.descricao}" (${l.data}): ${r.erro}`); erros++ }
+          }
+
+          processados++
+          if (processados % 10 === 0 || processados === total) {
+            const pct      = Math.round((processados / total) * 100)
+            const elapsed  = (Date.now() - tInicio) / 1000
+            const velocidade = elapsed > 0 ? (processados / elapsed).toFixed(1) : '...'
+            const restantes  = total - processados
+            const etaSeg   = elapsed > 0 && processados > 0 ? Math.round(restantes / (processados / elapsed)) : null
+            const eta      = etaSeg !== null
+              ? etaSeg > 60 ? `${Math.floor(etaSeg / 60)}m ${etaSeg % 60}s` : `${etaSeg}s`
+              : '...'
+            setProgresso(pct)
+            setProgressoInfo({ atual: processados, total, ok, erros, eta, velocidade: `${velocidade}/s` })
+          }
         }
       }
 
+      await Promise.all(chunks.map(processarChunk))
+
       const ignoradas = grid.filter(l => !l.importar).length
-      addLog('ok', `Concluído: ${ok} importadas, ${erros} erros, ${ignoradas} ignoradas`)
+      if (canceladoRef.current) addLog('aviso', `Cancelado. ${ok} lançamentos importados de ${total}.`)
+      else addLog('ok', `Concluído: ${ok} importadas, ${erros} erros, ${ignoradas} ignoradas`)
     } catch (e) {
       addLog('erro', `Erro inesperado: ${(e as Error).message}`)
     } finally {
@@ -1706,6 +1737,14 @@ function SecaoImport() {
                 📊 Processando arquivo em blocos para melhor performance. A interface permanecerá responsiva.
               </p>
             </div>
+
+            <button
+              onClick={cancelar}
+              className="w-full py-2 rounded-lg text-[12px] font-semibold transition-colors"
+              style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
+            >
+              <X size={12} className="inline mr-1" /> Cancelar análise
+            </button>
           </div>
         )}
 
@@ -1777,6 +1816,14 @@ function SecaoImport() {
                 ))}
               </div>
             )}
+
+            <button
+              onClick={cancelar}
+              className="w-full py-2 rounded-lg text-[12px] font-semibold transition-colors"
+              style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
+            >
+              <X size={12} className="inline mr-1" /> Cancelar importação
+            </button>
           </div>
         )}
 
@@ -1829,32 +1876,35 @@ function SecaoBackup() {
       // 2. Categorias
       addLog('ok', `Categorias: ${categorias.length} registros`)
 
-      // 3. Transações — 60 meses passados + 24 meses futuros (cobre projeções e parcelas)
+      // 3. Transações — paginação sem filtro de mês para garantir completude
       addLog('ok', 'Buscando transações...')
+      const txMap = new Map<string, TransacaoRaw>()
+      let txPage = 1
+      while (true) {
+        const r = await apiFetch(`/transacoes?per_page=1000&page=${txPage}`)
+        const pagina = extrairLista<TransacaoRaw>(r.dados)
+        pagina.forEach((t: TransacaoRaw) => { if (t.id) txMap.set(String(t.id), t) })
+        if (pagina.length < 1000) break
+        txPage++
+        addLog('ok', `Buscando transações... ${txMap.size} encontradas`)
+      }
+      const transacoes = [...txMap.values()].filter(
+        (t: TransacaoRaw) => !t.id_par_transferencia && !t.descricao?.startsWith('[Transf.')
+      )
+      addLog('ok', `Transações: ${transacoes.length} registros`)
+
+      // 4. Transferências — paginação sem filtro de mês
+      addLog('ok', 'Buscando transferências...')
       const hoje = new Date()
       const meses: string[] = []
       for (let i = 60; i >= -24; i--) {
         const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1)
         meses.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
       }
-      const resArr = await Promise.all(
-        meses.map(mes => apiFetch(`/transacoes?mes=${mes}&per_page=1000`))
-      )
-      const todasTx = resArr.flatMap(r => extrairLista<TransacaoRaw>(r.dados))
-      // Deduplica por id (meses podem ter sobreposição nos limites)
-      const txMap = new Map(todasTx.map((t: TransacaoRaw) => [t.id, t]))
-      const transacoes = [...txMap.values()].filter(
-        (t: TransacaoRaw) => !t.id_par_transferencia && !t.descricao?.startsWith('[Transf.')
-      )
-      addLog('ok', `Transações: ${transacoes.length} registros`)
-
-      // 4. Transferências — busca mês a mês também (sem filtro de período no endpoint)
-      addLog('ok', 'Buscando transferências...')
       const resTrfArr = await Promise.all(
         meses.map(mes => apiFetch(`/transferencias?mes=${mes}`))
       )
       const todasTrf = resTrfArr.flatMap(r => extrairLista<TransacaoRaw>(r))
-      // Deduplica por id_par
       const trfMap = new Map(todasTrf.map((t: TransacaoRaw) => [t.id_par, t]))
       const transferencias = [...trfMap.values()]
       addLog('ok', `Transferências: ${transferencias.length} registros`)
@@ -1895,7 +1945,7 @@ function SecaoBackup() {
             {[
               'Todas as contas (ativas e inativas)',
               'Todas as categorias (com hierarquia)',
-              'Transações: 60 meses passados + 24 meses futuros',
+              'Todas as transações (sem limite de período)',
               'Todas as transferências',
             ].map((item, i) => (
               <li key={i} className="flex items-center gap-2 text-[12px] text-gray-400">
@@ -1942,6 +1992,8 @@ function SecaoRestore() {
   const [progresso, setProgresso] = useState(0)
   const [progressoLabel, setProgressoLabel] = useState('')
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro' | 'aviso'; msg: string }[]>([])
+  const canceladoRef = useRef(false)
+  const cancelar = () => { canceladoRef.current = true }
 
   const lerArquivo = (file: File) => {
     const reader = new FileReader()
@@ -1977,18 +2029,16 @@ function SecaoRestore() {
   const executarRestore = async () => {
     setEtapa('restaurando')
     setProgresso(0)
+    canceladoRef.current = false
     const logs: typeof log = []
     const addLog = (tipo: 'ok' | 'erro' | 'aviso', msg: string) => {
       logs.push({ tipo, msg })
       setLog([...logs])
     }
 
-    const mapaContas:     Record<string, string> = {}
-    const mapaCategorias: Record<string, string> = {}
-
-    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
-
-    const normNome = (s: string) => s?.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') ?? ''
+    const mapaContas:       Record<string, string> = {}
+    const mapaCategorias:   Record<string, string> = {}
+    const contasReativadas: string[]               = []
 
     try {
       if (!payload) throw new Error('Backup não carregado')
@@ -2002,12 +2052,22 @@ function SecaoRestore() {
       setProgressoLabel('Recriando contas...')
       let okCnt = 0
       for (const c of cntBackup) {
-        // Verificar se já existe
-        const existente = contas.find(x => normNome(x.nome) === normNome(c.nome) && x.tipo === c.tipo)
+        if (canceladoRef.current) { addLog('aviso', `Cancelado. ${okCnt} contas criadas.`); break }
+        // Verificar se já existe (ativa ou inativa)
+        const existente = contas.find(x => normalizarNome(x.nome) === normalizarNome(c.nome) && x.tipo === c.tipo)
         if (existente) {
           mapaContas[c.conta_id] = existente.conta_id
+          if (!existente.ativa) {
+            const r = await apiComRetry(`/contas/${existente.conta_id}`, 'PUT', { ativa: true })
+            if (r.ok) {
+              contasReativadas.push(existente.conta_id)
+              addLog('aviso', `Conta "${c.nome}" estava inativa — reativada temporariamente.`)
+            } else {
+              addLog('erro', `Não foi possível reativar conta "${c.nome}": ${r.erro}`)
+            }
+          }
         } else {
-          const r = await apiMutate('/contas', 'POST', {
+          const r = await apiComRetry('/contas', 'POST', {
             nome: c.nome, tipo: c.tipo,
             saldo_inicial: c.saldo_inicial ?? 0,
             icone: c.icone, cor: c.cor, ativa: c.ativa,
@@ -2018,14 +2078,14 @@ function SecaoRestore() {
           } else if (r.erro?.includes('409') || r.erro?.includes('duplicat')) {
             const lista = await apiFetch('/contas')
             const ex = extrairLista<ContaBackup>(lista.dados).find(
-              x => normNome(x.nome) === normNome(c.nome) && x.tipo === c.tipo
+              x => normalizarNome(x.nome) === normalizarNome(c.nome) && x.tipo === c.tipo
             )
             if (ex) mapaContas[c.conta_id] = ex.conta_id
           } else {
             addLog('erro', `Conta "${c.nome}": ${r.erro}`)
           }
         }
-        avanco(); await sleep(80)
+        avanco(); await _sleep(80)
       }
       addLog('ok', `Contas: ${okCnt} criadas, ${cntBackup.length - okCnt} já existiam`)
 
@@ -2033,7 +2093,7 @@ function SecaoRestore() {
       setProgressoLabel('Recriando categorias...')
       // Mapear protegidas
       for (const c of catBackup.filter((x: CategoriaBackup) => x.protegida)) {
-        const ex = categorias.find(x => normNome(x.descricao) === normNome(c.descricao) && x.protegida)
+        const ex = categorias.find(x => normalizarNome(x.descricao) === normalizarNome(c.descricao) && x.protegida)
         if (ex) mapaCategorias[c.id] = ex.id
       }
       // Pais não protegidos
@@ -2041,48 +2101,61 @@ function SecaoRestore() {
       const pais   = catBackup.filter((c: CategoriaBackup) => !c.id_pai && !c.protegida)
       const filhos = catBackup.filter((c: CategoriaBackup) => !!c.id_pai && !c.protegida)
       for (const c of pais) {
-        const ex = categorias.find(x => normNome(x.descricao) === normNome(c.descricao) && !x.id_pai)
+        if (canceladoRef.current) { addLog('aviso', `Cancelado. ${okCat} categorias criadas.`); break }
+        const ex = categorias.find(x => normalizarNome(x.descricao) === normalizarNome(c.descricao) && !x.id_pai)
         if (ex) { mapaCategorias[c.id] = ex.id }
         else {
-          const r = await apiMutate('/categorias', 'POST', { descricao: c.descricao, tipo: c.tipo, icone: c.icone, cor: c.cor })
+          const r = await apiComRetry('/categorias', 'POST', { descricao: c.descricao, tipo: c.tipo, icone: c.icone, cor: c.cor })
           if (r.ok && (r.dados as { id?: string } | null)?.id) { mapaCategorias[c.id] = (r.dados as { id: string }).id; okCat++ }
           else addLog('erro', `Categoria "${c.descricao}": ${r.erro}`)
         }
-        avanco(); await sleep(80)
+        avanco(); await _sleep(80)
       }
       // Filhos
       for (const c of filhos) {
+        if (canceladoRef.current) break
         const novoIdPai = mapaCategorias[c.id_pai ?? '']
         if (!novoIdPai) { addLog('aviso', `Subcategoria "${c.descricao}": pai não encontrado`); avanco(); continue }
-        const ex = categorias.find(x => normNome(x.descricao) === normNome(c.descricao) && x.id_pai === novoIdPai)
+        const ex = categorias.find(x => normalizarNome(x.descricao) === normalizarNome(c.descricao) && x.id_pai === novoIdPai)
         if (ex) { mapaCategorias[c.id] = ex.id }
         else {
-          const r = await apiMutate('/categorias', 'POST', { descricao: c.descricao, tipo: c.tipo, icone: c.icone, cor: c.cor, id_pai: novoIdPai })
+          const r = await apiComRetry('/categorias', 'POST', { descricao: c.descricao, tipo: c.tipo, icone: c.icone, cor: c.cor, id_pai: novoIdPai })
           if (r.ok && (r.dados as { id?: string } | null)?.id) { mapaCategorias[c.id] = (r.dados as { id: string }).id; okCat++ }
           else addLog('erro', `Subcategoria "${c.descricao}": ${r.erro}`)
         }
-        avanco(); await sleep(80)
+        avanco(); await _sleep(80)
       }
       addLog('ok', `Categorias: ${okCat} criadas`)
 
       // ── 3. Transações ────────────────────────────────────────────
       setProgressoLabel('Recriando transações...')
       let okTx = 0, errTx = 0
-      const txOrdenadas = [...txBackup].sort((a: TransacaoRaw, b: TransacaoRaw) => a.data.localeCompare(b.data))
-      for (const t of txOrdenadas) {
-        const conta_id    = mapaContas[t.conta_id ?? '']
-        const categoria_id = t.categoria_id ? mapaCategorias[t.categoria_id] : undefined
-        if (!conta_id) { addLog('aviso', `"${t.descricao}" ignorada: conta não mapeada`); errTx++; avanco(); continue }
-        const r = await apiMutate('/transacoes', 'POST', {
-          tipo: t.tipo, data: t.data, descricao: t.descricao,
-          valor: t.valor, conta_id, categoria_id,
-          status: t.status, observacao: t.observacao,
-        })
-        if (r.ok) okTx++
-        else { addLog('erro', `"${t.descricao}" (${t.data}): ${r.erro}`); errTx++ }
-        avanco(); await sleep(60)
+      const txOrdenadas  = [...txBackup].sort((a: TransacaoRaw, b: TransacaoRaw) => a.data.localeCompare(b.data))
+      const totalTx      = txOrdenadas.length
+      const txChunks = dividirEmChunks(txOrdenadas, 4)
+
+      addLog('ok', `Iniciando com ${txChunks.length} workers paralelos (${totalTx} transações)...`)
+
+      const processarChunkTx = async (chunk: TransacaoRaw[]) => {
+        for (const t of chunk) {
+          if (canceladoRef.current) break
+          const conta_id     = mapaContas[t.conta_id ?? '']
+          const categoria_id = t.categoria_id ? mapaCategorias[t.categoria_id] : undefined
+          if (!conta_id) { addLog('aviso', `"${t.descricao}" ignorada: conta não mapeada`); errTx++; avanco(); continue }
+          const r = await apiComRetry('/transacoes', 'POST', {
+            tipo: t.tipo, data: t.data, descricao: t.descricao,
+            valor: t.valor, conta_id, categoria_id,
+            status: t.status, observacao: t.observacao,
+          })
+          if (r.ok) okTx++
+          else { addLog('erro', `"${t.descricao}" (${t.data}): ${r.erro}`); errTx++ }
+          avanco()
+        }
       }
-      addLog('ok', `Transações: ${okTx} criadas, ${errTx} erros`)
+
+      await Promise.all(txChunks.map(processarChunkTx))
+      if (canceladoRef.current) addLog('aviso', `Cancelado. ${okTx} transações criadas de ${totalTx}.`)
+      else addLog('ok', `Transações: ${okTx} criadas, ${errTx} erros`)
 
       // ── 4. Transferências ────────────────────────────────────────
       if (trfBackup && trfBackup.length > 0) {
@@ -2095,16 +2168,17 @@ function SecaoRestore() {
           if (parId && !parsUnicos.has(parId)) parsUnicos.set(parId, t)
         }
         for (const t of parsUnicos.values()) {
+          if (canceladoRef.current) { addLog('aviso', `Cancelado. ${okTrf} transferências criadas.`); break }
           const origem  = mapaContas[t.conta_origem_id ?? t.conta_id]
           const destino = mapaContas[t.conta_destino_id]
           if (!origem || !destino) { addLog('aviso', `Transferência "${t.descricao ?? ''}" ignorada: contas não mapeadas`); errTrf++; avanco(); continue }
-          const r = await apiMutate('/transferencias', 'POST', {
+          const r = await apiComRetry('/transferencias', 'POST', {
             conta_origem_id: origem, conta_destino_id: destino,
             valor: t.valor, data: t.data, descricao: t.descricao, status: t.status,
           })
           if (r.ok) okTrf++
           else { addLog('erro', `Transferência "${t.descricao}" (${t.data}): ${r.erro}`); errTrf++ }
-          avanco(); await sleep(80)
+          avanco(); await _sleep(80)
         }
         addLog('ok', `Transferências: ${okTrf} criadas, ${errTrf} erros`)
       }
@@ -2113,6 +2187,14 @@ function SecaoRestore() {
     } catch (e) {
       addLog('erro', `Erro inesperado: ${(e as Error).message}`)
     } finally {
+      // Desativar contas que foram reativadas temporariamente
+      if (contasReativadas.length > 0) {
+        setProgressoLabel('Restaurando estado das contas...')
+        for (const contaId of contasReativadas) {
+          await apiComRetry(`/contas/${contaId}`, 'PUT', { ativa: false })
+        }
+        addLog('ok', `${contasReativadas.length} conta(s) devolvida(s) ao estado inativo.`)
+      }
       setEtapa('concluido')
     }
   }
@@ -2212,6 +2294,13 @@ function SecaoRestore() {
                 ))}
               </div>
             )}
+            <button
+              onClick={cancelar}
+              className="w-full py-2 rounded-lg text-[12px] font-semibold transition-colors"
+              style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
+            >
+              <X size={12} className="inline mr-1" /> Cancelar restore
+            </button>
           </div>
         )}
 

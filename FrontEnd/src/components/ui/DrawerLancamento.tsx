@@ -127,7 +127,9 @@ function formDeLanc(l: Lancamento, todasParcelas?: Lancamento[]): FormState {
     tipo: isTransf ? 'TRANSFERENCIA' : l.tipo,
     data: l.data, descricao: descricaoLimpa,
     valor: valorParaMascara(l.valor), conta_id: l.conta_id,
-    conta_destino_id: '',
+    conta_destino_id: isTransf && l.id_par_transferencia && todasParcelas
+      ? (todasParcelas.find(p => p.id_par_transferencia === l.id_par_transferencia && p.id !== l.id)?.conta_id ?? '')
+      : '',
     categoria_id: l.categoria_id ?? '', status: l.status,
     observacao: l.observacao ?? '',
     recorrente: !!l.id_recorrencia, 
@@ -198,7 +200,24 @@ export default function DrawerLancamento({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (novoLancamento) { setEditando(null); setForm({ ...FORM_VAZIO, tipo: tipoInicial ?? 'DESPESA', conta_id: contaIdInicial ?? '', categoria_id: categoriaIdInicial ?? '' }); setEscopo('SOMENTE_ESTE'); setExpandindo(false); setQtdAdicional('3'); setTimeout(() => descricaoRef.current?.focus(), 320); return }
-    if (lancamentoProp) { setEditando(lancamentoProp); setForm(formDeLanc(lancamentoProp, todasParcelas)); setEscopo('SOMENTE_ESTE'); setExpandindo(false); setQtdAdicional('3'); setTimeout(() => descricaoRef.current?.focus(), 320); return }
+    if (lancamentoProp) {
+      const formInicial = formDeLanc(lancamentoProp, todasParcelas)
+      setEditando(lancamentoProp)
+      setForm(formInicial)
+      setEscopo('SOMENTE_ESTE')
+      setExpandindo(false)
+      setQtdAdicional('3')
+      setTimeout(() => descricaoRef.current?.focus(), 320)
+      if (lancamentoProp.id_par_transferencia && !formInicial.conta_destino_id) {
+        fetch(`/functions/v1/transferencias/${lancamentoProp.id_par_transferencia}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('sb-token') ?? ''}` }
+        })
+        .then(r => r.json())
+        .then(data => { if (data?.conta_destino_id) setForm(f => ({ ...f, conta_destino_id: data.conta_destino_id })) })
+        .catch(() => null)
+      }
+      return
+    }
     if (lancamentoId) {
       setCarregando(true)
       fetch(`/functions/v1/transacoes/${lancamentoId}`, {
@@ -225,9 +244,18 @@ export default function DrawerLancamento({
             }
           }
           
+          const formInicial = formDeLanc(data, parcelasCompletas)
           setEditando(data)
-          setForm(formDeLanc(data, parcelasCompletas))
+          setForm(formInicial)
           setEscopo('SOMENTE_ESTE')
+          if (data.id_par_transferencia && !formInicial.conta_destino_id) {
+            fetch(`/functions/v1/transferencias/${data.id_par_transferencia}`, {
+              headers: { Authorization: `Bearer ${localStorage.getItem('sb-token') ?? ''}` }
+            })
+            .then(r => r.json())
+            .then(parData => { if (parData?.conta_destino_id) setForm(f => ({ ...f, conta_destino_id: parData.conta_destino_id })) })
+            .catch(() => null)
+          }
         }
       })
       .catch(() => null)
