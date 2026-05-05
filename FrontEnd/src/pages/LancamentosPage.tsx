@@ -5,6 +5,7 @@ import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import { Pencil, Zap, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
+import { FiltrosSalvosBtn } from '../components/ui/FiltrosSalvosBtn'
 import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
@@ -536,6 +537,19 @@ export default function LancamentosPage() {
             </span>
           )}
         </div>
+
+        {/* Filtros salvos */}
+        <FiltrosSalvosBtn
+          pagina="extrato"
+          filtAtual={{ filtContas, filtCats, filtStatus, comSaldo }}
+          temFiltroAtivo={filtContas.length > 0 || filtCats.length > 0 || filtStatus.length > 0}
+          onAplicar={d => setPgState({
+            filtContas: (d.filtContas as string[]) ?? [],
+            filtCats:   (d.filtCats   as string[]) ?? [],
+            filtStatus: (d.filtStatus as string[]) ?? [],
+            comSaldo:   (d.comSaldo   as boolean)  ?? true,
+          })}
+        />
         </div>
         {/* Calendário */}
         <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} />

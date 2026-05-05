@@ -450,3 +450,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/excluir_conta/deno.json"
 entrypoint = "./functions/excluir_conta/index.ts"
+
+[functions.filtros]
+enabled = true
+verify_jwt = false
+import_map = "./functions/filtros/deno.json"
+entrypoint = "./functions/filtros/index.ts"

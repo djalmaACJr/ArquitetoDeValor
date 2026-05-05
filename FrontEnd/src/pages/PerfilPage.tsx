@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
-import { User, Lock, Check, AlertCircle, Trash2 } from 'lucide-react'
+import { User, Lock, Check, AlertCircle, Trash2, Bookmark, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { apiMutate } from '../lib/api'
+import { useFiltrosSalvos } from '../hooks/useFiltrosSalvos'
 
 type Feedback = { tipo: 'ok' | 'erro'; msg: string }
 
@@ -125,6 +126,16 @@ export default function PerfilPage() {
     }
   }
 
+  // ── Filtros salvos ──────────────────────────────────────────
+  const { filtros, carregando: carregandoFiltros, excluir: excluirFiltro, excluirTodos } =
+    useFiltrosSalvos()  // sem pagina → carrega todos
+
+  const PAGINA_LABEL: Record<string, string> = {
+    extrato:    'Extrato',
+    relatorios: 'Relatórios',
+    dashboard:  'Dashboard',
+  }
+
   // ── Exclusão de conta ───────────────────────────────────────
   const [modalExcluir, setModalExcluir] = useState(false)
   const [confirmText,  setConfirmText]  = useState('')
@@ -230,6 +241,49 @@ export default function PerfilPage() {
             </div>
             <Alerta fb={fbSenha}/>
           </form>
+        </Secao>
+
+        {/* ── Seção: Filtros salvos ────────────────────────── */}
+        <Secao titulo="Filtros salvos" icone={<Bookmark size={15}/>}>
+          {carregandoFiltros ? (
+            <p className="text-[12px] text-white/40">Carregando…</p>
+          ) : filtros.length === 0 ? (
+            <p className="text-[12px] text-white/40">Nenhum filtro salvo.</p>
+          ) : (
+            <>
+              <div className="space-y-0.5">
+                {filtros.map(f => (
+                  <div key={f.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] group">
+                    <span
+                      className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                      style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
+                    >
+                      {PAGINA_LABEL[f.pagina] ?? f.pagina}
+                    </span>
+                    <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>
+                      {f.nome}
+                    </span>
+                    <button
+                      onClick={() => excluirFiltro(f.id)}
+                      title="Excluir filtro"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-red-400/10 flex-shrink-0"
+                      style={{ color: '#f87171' }}
+                    >
+                      <X size={12}/>
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end pt-3 mt-2 border-t border-white/8">
+                <button
+                  onClick={excluirTodos}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  Remover todos ({filtros.length})
+                </button>
+              </div>
+            </>
+          )}
         </Secao>
 
         {/* ── Seção: Zona de perigo ─────────────────────────── */}

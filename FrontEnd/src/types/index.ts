@@ -110,6 +110,16 @@ export interface DespesaCategoria {
   total:           number
 }
 
+// ── Filtros Salvos ────────────────────────────────────────
+export interface FiltroSalvo {
+  id:        string
+  user_id:   string
+  pagina:    string
+  nome:      string
+  dados:     Record<string, unknown>
+  criado_em: string
+}
+
 // ── Auth ──────────────────────────────────────────────────
 export interface Usuario {
   id:        string
