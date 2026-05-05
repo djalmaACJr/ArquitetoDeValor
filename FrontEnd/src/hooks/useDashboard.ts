@@ -102,50 +102,28 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
       setContas(extrairLista<Conta>(contasRes.dados))
 
       // ─ PENDENTES / PRÓXIMAS ─
-      // Função auxiliar para filtrar transferências E contas
-      const filtrarTransf = (t: Transacao) => {
-        const semTransf = !t.id_par_transferencia ||
-          t.descricao?.startsWith('[Transf.') ||
-          t.categoria_nome === 'Transferências'
-        
-        // Aplicar filtro de contas se houver
-        const comContaFiltro = contasFiltro.length === 0 || contasFiltro.includes(t.conta_id)
-        
-        return semTransf && comContaFiltro
-      }
+      const ehTransf = (t: Transacao) =>
+        !!t.id_par_transferencia ||
+        (t.descricao?.startsWith('[Transf.') ?? false) ||
+        t.categoria_nome === 'Transferências'
 
-      const pendMes      = extrairLista<Transacao>(pendentesRes.dados).filter(filtrarTransf)
-      const pendProximos = extrairLista<Transacao>(proximosRes.dados).filter(filtrarTransf)
+      const filtrarTx = (t: Transacao) =>
+        !ehTransf(t) && (contasFiltro.length === 0 || contasFiltro.includes(t.conta_id))
+
+      const pendMes      = extrairLista<Transacao>(pendentesRes.dados).filter(filtrarTx)
+      const pendProximos = extrairLista<Transacao>(proximosRes.dados).filter(filtrarTx)
       const todasPend    = [...pendMes, ...pendProximos]
 
       setPendentes(todasPend.filter(t => t.data <= hoje))
       setProximas(todasPend.filter(t => t.data > hoje))
 
-      // Função auxiliar para filtrar transferências E contas
-      const filtrarTransfComStatus = (t: Transacao) => {
-        const semTransf = !t.id_par_transferencia ||
-          t.descricao?.startsWith('[Transf.') ||
-          t.categoria_nome === 'Transferências'
-        
-        // Aplicar filtro de contas se houver
-        const comContaFiltro = contasFiltro.length === 0 || contasFiltro.includes(t.conta_id)
-        
-        return semTransf && comContaFiltro
-      }
-
-      const doMes = extrairLista<Transacao>(historicosRes[historicosRes.length - 1]?.dados).filter(filtrarTransfComStatus)
-
-      // Exclui transferências pelo id_par_transferencia, prefixo na descrição OU categoria "Transferências"
-      const isTransf = (t: Transacao) =>
-        !!t.id_par_transferencia ||
-        t.descricao?.startsWith('[Transf.') ||
-        t.categoria_nome === 'Transferências'
-      const entradas = doMes.filter(t => t.tipo === 'RECEITA' && !isTransf(t)).reduce((s, t) => s + t.valor, 0)
-      const saidas   = doMes.filter(t => t.tipo === 'DESPESA' && !isTransf(t)).reduce((s, t) => s + t.valor, 0)
+      const doMes    = extrairLista<Transacao>(historicosRes[historicosRes.length - 1]?.dados).filter(filtrarTx)
+      const entradas = doMes.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0)
+      const saidas   = doMes.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
 
       // Calcular valores por status para cada mês do histórico
       const historicoStatus = meses6.map((_, idx) => {
-        const fatia = extrairLista<Transacao>(historicosRes[idx]?.dados).filter(filtrarTransfComStatus)
+        const fatia = extrairLista<Transacao>(historicosRes[idx]?.dados).filter(filtrarTx)
         
         const pagosMes = {
           receitas: fatia.filter(t => t.tipo === 'RECEITA' && t.status === 'PAGO').reduce((s, t) => s + t.valor, 0),
@@ -175,37 +153,25 @@ export function useDashboard(mes: string, contasFiltro: string[] = []) {
 
       // ─ HISTÓRICO 6 MESES ─
       const hist: ResumoMensal[] = meses6.map((mesHist, idx) => {
-        const fatia = extrairLista<Transacao>(historicosRes[idx]?.dados)
-        const isTransfH = (t: Transacao) =>
-          !!t.id_par_transferencia ||
-          t.descricao?.startsWith('[Transf.') ||
-          t.categoria_nome === 'Transferências'
-        const totalEnt = fatia.filter(t => t.tipo === 'RECEITA' && !isTransfH(t)).reduce((s, t) => s + t.valor, 0)
-        const totalSai = fatia.filter(t => t.tipo === 'DESPESA' && !isTransfH(t)).reduce((s, t) => s + t.valor, 0)
+        const fatia    = extrairLista<Transacao>(historicosRes[idx]?.dados)
+        const fatiaFilt = fatia.filter(t => !ehTransf(t) && (contasFiltro.length === 0 || contasFiltro.includes(t.conta_id)))
+        const totalEnt = fatiaFilt.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0)
+        const totalSai = fatiaFilt.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
 
         let saldo_mes: number
         if (contasFiltro.length === 0) {
-          // Sem filtro: usa saldo_acumulado global da view (inclui todas as contas)
           const comSaldoAcum = fatia.filter(t => t.saldo_acumulado !== undefined)
           saldo_mes = comSaldoAcum.length > 0
             ? comSaldoAcum[comSaldoAcum.length - 1].saldo_acumulado!
             : 0
         } else {
-          // Com filtro: soma receitas pagas - despesas pagas das contas selecionadas
-          // a partir do saldo inicial dessas contas (saldo_atual já reflete estado atual,
-          // então recalculamos: saldo_base + entradas_pagas_mes - saidas_pagas_mes)
-          const fatiaConta = fatia.filter(t => contasFiltro.includes(t.conta_id) && !isTransfH(t))
+          const fatiaConta = fatia.filter(t => contasFiltro.includes(t.conta_id) && !ehTransf(t))
           const entPagas = fatiaConta.filter(t => t.tipo === 'RECEITA' && t.status === 'PAGO').reduce((s, t) => s + t.valor, 0)
           const saiPagas = fatiaConta.filter(t => t.tipo === 'DESPESA' && t.status === 'PAGO').reduce((s, t) => s + t.valor, 0)
-          // Base: pega saldo_acumulado do último lançamento das contas filtradas
           const comSaldo = fatiaConta.filter(t => t.saldo_acumulado !== undefined)
-          if (comSaldo.length > 0) {
-            // Se a view disponibilizar saldo por conta, use diretamente
-            saldo_mes = comSaldo[comSaldo.length - 1].saldo_acumulado!
-          } else {
-            // Fallback: calcula resultado líquido do mês para as contas filtradas
-            saldo_mes = entPagas - saiPagas
-          }
+          saldo_mes = comSaldo.length > 0
+            ? comSaldo[comSaldo.length - 1].saldo_acumulado!
+            : entPagas - saiPagas
         }
         return { mes: mesHist, total_entradas: totalEnt, total_saidas: totalSai, saldo_mes }
       })

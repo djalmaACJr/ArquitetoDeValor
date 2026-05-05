@@ -161,7 +161,8 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   const corInvalida = validarCor(body.cor);
   if (corInvalida) return corInvalida;
 
-  const campos = camposParaAtualizar(body, ["descricao","icone","cor","ativa"]);
+  // id_pai incluído para permitir mover subcategoria para outro pai
+  const campos = camposParaAtualizar(body, ["descricao","icone","cor","ativa","id_pai"]);
   const { data, error } = await c.from("categorias").update(campos).eq("id", id).select().single();
   
   if (error) {

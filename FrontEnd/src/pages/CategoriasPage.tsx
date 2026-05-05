@@ -1,13 +1,295 @@
 // src/pages/CategoriasPage.tsx
-import { useState } from 'react'
-import { Plus, Pencil, X as XIcon, ChevronDown, ChevronUp, Shield } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Plus, Pencil, X as XIcon, ChevronDown, ChevronUp, Shield, RefreshCw, ArrowLeft } from 'lucide-react'
 import { useCategorias } from '../hooks/useCategorias'
 import {
   Drawer, ColorPicker, IconPicker, Field, Input, SelectDark,
   Toggle, PreviewBadge, BtnSalvar, BtnCancelar, Segmented, Toast, ModalExcluir,
 } from '../components/ui/shared'
 import type { Categoria } from '../types'
+import { apiFetch, apiMutate, extrairLista } from '../lib/api'
+import { formatBRL, formatData } from '../lib/utils'
 
+// ── Helpers de importação paralela ───────────────────────────────────────────
+const _sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+function dividirEmChunks<T>(itens: T[], maxWorkers: number): T[][] {
+  if (itens.length === 0) return []
+  const n = Math.min(maxWorkers, itens.length)
+  const tamanho = Math.ceil(itens.length / n)
+  return Array.from({ length: n }, (_, i) => itens.slice(i * tamanho, (i + 1) * tamanho)).filter(c => c.length > 0)
+}
+
+async function apiComRetry(
+  path: string,
+  method: 'POST' | 'PUT' | 'DELETE',
+  body?: unknown,
+  tentativas = 3,
+): Promise<Awaited<ReturnType<typeof apiMutate>>> {
+  for (let t = 0; t < tentativas; t++) {
+    const r = await apiMutate(path, method, body)
+    if (r.ok || !(r.erro ?? '').includes('NetworkError')) return r
+    if (t < tentativas - 1) await _sleep(2000)
+  }
+  return apiMutate(path, method, body)
+}
+
+// ── Tipo local para transações no painel de reclassificação ──────────────────
+interface TxReclassif {
+  id: string
+  data: string
+  descricao: string
+  valor: number
+  tipo: 'RECEITA' | 'DESPESA'
+  status: 'PAGO' | 'PENDENTE' | 'PROJECAO'
+  conta_nome?: string | null
+}
+
+const STATUS_COR:   Record<string, string> = { PAGO: '#4ade80', PENDENTE: '#facc15', PROJECAO: '#94a3b8' }
+const STATUS_LABEL: Record<string, string> = { PAGO: 'Pago', PENDENTE: 'Pendente', PROJECAO: 'Projeção' }
+
+// ── Painel de reclassificação ─────────────────────────────────────────────────
+function PainelReclassificacao({
+  categoria,
+  todasCategorias,
+  onFechar,
+}: {
+  categoria: Categoria
+  todasCategorias: Categoria[]
+  onFechar: (reclassificouAlgo: boolean) => void
+}) {
+  const [transacoes,    setTransacoes]    = useState<TxReclassif[]>([])
+  const [loading,       setLoading]       = useState(true)
+  const [erro,          setErro]          = useState<string | null>(null)
+  const [catDestinoId,  setCatDestinoId]  = useState('')
+  const [processando,   setProcessando]   = useState(false)
+  const [progresso,     setProgresso]     = useState<{ feitos: number; total: number } | null>(null)
+  const canceladoRef    = useRef(false)
+  const reclassificouRef = useRef(false)
+
+  useEffect(() => {
+    let ativo = true
+    setLoading(true); setErro(null)
+    apiFetch<unknown>(`/transacoes?categoria_id=${categoria.id}&per_page=500`)
+      .then(res => {
+        if (!ativo) return
+        if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar transações')
+        setTransacoes(extrairLista<TxReclassif>(res.dados))
+        setLoading(false)
+      })
+      .catch(e => { if (!ativo) return; setErro((e as Error).message); setLoading(false) })
+    return () => { ativo = false }
+  }, [categoria.id])
+
+  const reclassificarUm = async (id: string) => {
+    if (!catDestinoId || processando) return
+    const res = await apiComRetry(`/transacoes/${id}?escopo=SOMENTE_ESTE`, 'PUT', { categoria_id: catDestinoId })
+    if (res.ok) {
+      reclassificouRef.current = true
+      setTransacoes(prev => prev.filter(t => t.id !== id))
+    }
+  }
+
+  const reclassificarTodas = async () => {
+    if (!catDestinoId || transacoes.length === 0 || processando) return
+    setProcessando(true)
+    canceladoRef.current = false
+    const copia = [...transacoes]
+    const total = copia.length
+    setProgresso({ feitos: 0, total })
+    let feitos = 0
+
+    await Promise.all(dividirEmChunks(copia, 8).map(async chunk => {
+      for (const tx of chunk) {
+        if (canceladoRef.current) break
+        const res = await apiComRetry(`/transacoes/${tx.id}?escopo=SOMENTE_ESTE`, 'PUT', { categoria_id: catDestinoId })
+        if (res.ok) {
+          feitos++
+          reclassificouRef.current = true
+          setProgresso(p => p ? { ...p, feitos } : null)
+          setTransacoes(prev => prev.filter(t => t.id !== tx.id))
+        }
+      }
+    }))
+
+    setProcessando(false)
+    setProgresso(null)
+  }
+
+  const catDest = todasCategorias.find(c => c.id === catDestinoId)
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#0a0f1a' }}>
+
+      {/* Header */}
+      <div className="flex items-center gap-3 px-5 py-4 border-b flex-shrink-0"
+        style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+        <button
+          onClick={() => onFechar(reclassificouRef.current)}
+          className="w-8 h-8 rounded-lg border flex items-center justify-center transition-all hover:bg-white/5"
+          style={{ borderColor: 'rgba(255,255,255,0.1)', color: '#8b92a8' }}>
+          <ArrowLeft size={16} />
+        </button>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[17px] flex-shrink-0"
+          style={{ background: `${categoria.cor ?? '#888'}22` }}>
+          {categoria.icone ?? '📂'}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-[15px] font-bold" style={{ color: '#e8eaf0' }}>Reclassificar transações</h2>
+          <p className="text-[11px]" style={{ color: '#8b92a8' }}>
+            {categoria.descricao}
+            {!loading && ` · ${transacoes.length} transaç${transacoes.length === 1 ? 'ão' : 'ões'} encontrada${transacoes.length === 1 ? '' : 's'}`}
+          </p>
+        </div>
+      </div>
+
+      {/* Barra de controles */}
+      <div className="flex items-center gap-3 px-5 py-3 border-b flex-shrink-0 flex-wrap"
+        style={{ borderColor: 'rgba(255,255,255,0.08)', background: '#111827' }}>
+        <span className="text-[12px] font-medium flex-shrink-0" style={{ color: '#8b92a8' }}>
+          Nova categoria:
+        </span>
+        <SelectDark value={catDestinoId} onChange={e => setCatDestinoId(e.target.value)}>
+          <option value="">Selecione...</option>
+          {(() => {
+            const naoProteg = todasCategorias.filter(c => !c.protegida && c.id !== categoria.id)
+            const pais = naoProteg.filter(c => !c.id_pai)
+              .sort((a, b) => a.descricao.localeCompare(b.descricao, 'pt-BR'))
+            const vistos = new Set<string>()
+            const elems: React.ReactNode[] = []
+
+            for (const pai of pais) {
+              const filhos = naoProteg.filter(c => c.id_pai === pai.id)
+                .sort((a, b) => a.descricao.localeCompare(b.descricao, 'pt-BR'))
+              vistos.add(pai.id)
+              filhos.forEach(f => vistos.add(f.id))
+
+              if (filhos.length > 0) {
+                elems.push(
+                  <optgroup key={pai.id} label={`${pai.icone ?? ''} ${pai.descricao}`}
+                    style={{ background: '#252d42', color: '#8b92a8' }}>
+                    <option value={pai.id} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
+                      {pai.icone ?? ''} {pai.descricao}
+                    </option>
+                    {filhos.map(f => (
+                      <option key={f.id} value={f.id} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
+                        {f.icone ?? ''} {f.descricao}
+                      </option>
+                    ))}
+                  </optgroup>
+                )
+              } else {
+                elems.push(
+                  <option key={pai.id} value={pai.id} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
+                    {pai.icone ?? ''} {pai.descricao}
+                  </option>
+                )
+              }
+            }
+
+            // Subcategorias cujo pai foi excluído da lista (ex: pai = categoria atual)
+            naoProteg.filter(c => !vistos.has(c.id))
+              .sort((a, b) => a.descricao.localeCompare(b.descricao, 'pt-BR'))
+              .forEach(c => elems.push(
+                <option key={c.id} value={c.id} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
+                  {c.icone ?? ''} {c.descricao}
+                </option>
+              ))
+
+            return elems
+          })()}
+        </SelectDark>
+        {catDestinoId && transacoes.length > 0 && (
+          <button
+            onClick={reclassificarTodas}
+            disabled={processando}
+            className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg transition-colors disabled:opacity-60 flex-shrink-0"
+            style={{ background: '#00c896', color: '#0a0f1a' }}>
+            <RefreshCw size={12} className={processando ? 'animate-spin' : ''} />
+            {progresso ? `Processando ${progresso.feitos}/${progresso.total}...` : 'Reclassificar todas'}
+          </button>
+        )}
+        {processando && (
+          <button
+            onClick={() => { canceladoRef.current = true }}
+            className="text-[12px] px-3 py-1.5 rounded-lg border transition-colors flex-shrink-0"
+            style={{ borderColor: 'rgba(248,113,113,0.3)', color: '#f87171' }}>
+            Cancelar
+          </button>
+        )}
+      </div>
+
+      {/* Lista */}
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        {loading && (
+          <p className="text-[13px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>
+        )}
+        {erro && (
+          <p className="text-[13px] text-center py-12" style={{ color: '#f87171' }}>{erro}</p>
+        )}
+        {!loading && !erro && transacoes.length === 0 && (
+          <div className="text-center py-16">
+            <p className="text-[13px]" style={{ color: '#8b92a8' }}>
+              Nenhuma transação encontrada nesta categoria.
+            </p>
+          </div>
+        )}
+        {!loading && !erro && transacoes.length > 0 && (
+          <div className="space-y-1 max-w-3xl">
+            {transacoes.map(t => (
+              <div key={t.id}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl border"
+                style={{ borderColor: 'rgba(255,255,255,0.06)', background: '#1a1f2e' }}>
+
+                {/* Data */}
+                <span className="text-[11px] flex-shrink-0 w-[68px]" style={{ color: '#8b92a8' }}>
+                  {formatData(t.data)}
+                </span>
+
+                {/* Descrição */}
+                <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>
+                  {t.descricao}
+                </span>
+
+                {/* Conta */}
+                {t.conta_nome && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 flex-shrink-0"
+                    style={{ color: '#8b92a8' }}>
+                    {t.conta_nome}
+                  </span>
+                )}
+
+                {/* Status */}
+                <span className="text-[10px] font-semibold flex-shrink-0 w-14 text-right"
+                  style={{ color: STATUS_COR[t.status] ?? '#8b92a8' }}>
+                  {STATUS_LABEL[t.status] ?? t.status}
+                </span>
+
+                {/* Valor */}
+                <span className="text-[12px] font-semibold w-24 text-right flex-shrink-0"
+                  style={{ color: t.tipo === 'RECEITA' ? '#4ade80' : '#f87171' }}>
+                  {t.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(t.valor)}
+                </span>
+
+                {/* Botão mover */}
+                <button
+                  onClick={() => reclassificarUm(t.id)}
+                  disabled={!catDestinoId || processando}
+                  title={catDest ? `Mover para: ${catDest.descricao}` : 'Selecione a nova categoria'}
+                  className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all disabled:opacity-30 flex-shrink-0 hover:bg-av-green/10"
+                  style={{ borderColor: 'rgba(0,200,150,0.3)', color: '#00c896' }}>
+                  Mover
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Tipos do formulário ───────────────────────────────────────────────────────
 type Nivel = 'pai' | 'sub'
 interface FormState {
   descricao: string; nivel: Nivel; id_pai: string
@@ -22,7 +304,7 @@ function formDeCat(c: Categoria): FormState {
   }
 }
 
-// ── Botão de ação pequeno ─────────────────────────────────────
+// ── Botão de ação pequeno ─────────────────────────────────────────────────────
 function AcaoBtn({ onClick, title, danger = false, children }: {
   onClick: (e: React.MouseEvent) => void; title: string; danger?: boolean; children: React.ReactNode
 }) {
@@ -53,15 +335,16 @@ function AcaoBtn({ onClick, title, danger = false, children }: {
 
 export default function CategoriasPage() {
   const { categorias, loading, error, criar, editar, excluir } = useCategorias()
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [editando,   setEditando]   = useState<Categoria | null>(null)
-  const [excluindo,  setExcluindo]  = useState<Categoria | null>(null)
-  const [form,       setForm]       = useState<FormState>(FORM_VAZIO)
-  const [erro,       setErro]       = useState<string | null>(null)
-  const [salvando,   setSalvando]   = useState(false)
-  const [feedback,   setFeedback]   = useState<string | null>(null)
-  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
-  const [busca,      setBusca]      = useState('')
+  const [drawerOpen,   setDrawerOpen]   = useState(false)
+  const [editando,     setEditando]     = useState<Categoria | null>(null)
+  const [excluindo,    setExcluindo]    = useState<Categoria | null>(null)
+  const [form,         setForm]         = useState<FormState>(FORM_VAZIO)
+  const [erro,         setErro]         = useState<string | null>(null)
+  const [salvando,     setSalvando]     = useState(false)
+  const [feedback,     setFeedback]     = useState<string | null>(null)
+  const [expandidos,   setExpandidos]   = useState<Set<string>>(new Set())
+  const [busca,        setBusca]        = useState('')
+  const [catReclassif, setCatReclassif] = useState<Categoria | null>(null)
 
   const pais   = categorias.filter(c => !c.id_pai)
   const subsOf = (id: string) => categorias.filter(c => c.id_pai === id)
@@ -112,6 +395,19 @@ export default function CategoriasPage() {
     !q || p.descricao.toLowerCase().includes(q) ||
     subsOf(p.id).some(s => s.descricao.toLowerCase().includes(q))
   )
+
+  if (catReclassif) {
+    return (
+      <PainelReclassificacao
+        categoria={catReclassif}
+        todasCategorias={categorias}
+        onFechar={reclassificouAlgo => {
+          setCatReclassif(null)
+          if (reclassificouAlgo) toast('Reclassificação concluída!')
+        }}
+      />
+    )
+  }
 
   return (
     <div className="p-5 max-w-[860px]">
@@ -176,7 +472,7 @@ export default function CategoriasPage() {
                     </p>
                   </div>
 
-                  {/* Botões — sempre visíveis: editar | excluir | expandir */}
+                  {/* Botões */}
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {subs.length > 0 && (
                       <span style={{ color: '#8b92a8' }}>
@@ -185,6 +481,9 @@ export default function CategoriasPage() {
                     )}
                     {!p.protegida && (
                       <>
+                        <AcaoBtn onClick={() => setCatReclassif(p)} title="Reclassificar transações">
+                          <RefreshCw size={12} />
+                        </AcaoBtn>
                         <AcaoBtn onClick={() => abrirEditar(p)} title="Editar">
                           <Pencil size={12} />
                         </AcaoBtn>
@@ -220,6 +519,11 @@ export default function CategoriasPage() {
 
                         {/* Botões subcategoria */}
                         <div className="flex items-center gap-1 flex-shrink-0">
+                          {!s.protegida && (
+                            <AcaoBtn onClick={() => setCatReclassif(s)} title="Reclassificar transações">
+                              <RefreshCw size={12} />
+                            </AcaoBtn>
+                          )}
                           <AcaoBtn onClick={() => abrirEditar(s)} title="Editar">
                             <Pencil size={12} />
                           </AcaoBtn>

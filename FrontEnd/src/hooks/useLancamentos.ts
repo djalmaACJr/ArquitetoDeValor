@@ -115,6 +115,15 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     setLancamentos(prev => prev.map(l => l.id === id ? { ...l, ...campos } : l))
   }
 
+  // Remove imediatamente da lista local — usado após exclusão via Drawer
+  // (que chama apiMutate direto, sem passar pelo excluir() do hook)
+  const removerLocal = useCallback((id: string, idPar?: string | null) => {
+    setLancamentos(prev => idPar
+      ? prev.filter(l => l.id_par_transferencia !== idPar)
+      : prev.filter(l => l.id !== id)
+    )
+  }, [])
+
   const criar = async (payload: Partial<Lancamento>): Promise<OpResult> => {
     const res = await apiMutate('/transacoes', 'POST', payload)
     if (res.ok) await carregar()
@@ -202,7 +211,7 @@ export function useLancamentos(filtros: FiltrosLancamento) {
   }
 
   return {
-    lancamentos, loading, error, carregar,
+    lancamentos, loading, error, carregar, removerLocal,
     criar, editar, excluir, antecipar, alterarStatus,
     criarTransferencia, editarTransferencia, excluirTransferencia,
   }

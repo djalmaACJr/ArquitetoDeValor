@@ -1,7 +1,7 @@
 // src/pages/DashboardPage.tsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
+import { Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw, History } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { mesLabel, formatBRL, formatData, CORES_CATEGORIA } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
@@ -39,6 +39,12 @@ function IconeConta({ icone, cor, size = 'md' }: {
 }
 
 const OCULTO = '??????'
+
+function navMesStr(ym: string, delta: number): string {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(y, m - 1 + delta, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
 
 // -- Card de resultado do mes -----------------------------
 function CardResultados({
@@ -413,6 +419,23 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
       },
       {
         type: 'line' as const,
+        label: 'Resultado',
+        data: oculto ? historico.map(() => null) : historico.map(h => h.total_entradas - h.total_saidas),
+        borderColor: '#f97316',
+        backgroundColor: 'rgba(249,115,22,0.1)',
+        borderWidth: 2,
+        borderDash: [4, 3],
+        pointRadius: 4,
+        pointBackgroundColor: '#f97316',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 1.5,
+        tension: 0.35,
+        fill: false,
+        yAxisID: 'ySaldo',
+        order: 2,
+      },
+      {
+        type: 'line' as const,
         label: 'Saldo',
         data: oculto ? historico.map(() => null) : historico.map(h => h.saldo_mes ?? null),
         borderColor: '#a78bfa',
@@ -470,9 +493,11 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
               if (desProj  > 0) linhas.push(`    🔵 Projeções:  ${formatBRL(desProj)}`)
             }
 
-            if (saldo !== null && !oculto) {
+            if (!oculto) {
+              const resultado = (recPagas + recPend + recProj) - (desPagas + desPend + desProj)
               if (temReceita || temDespesa) linhas.push('')
-              linhas.push(`  Saldo: ${formatBRL(saldo)}`)
+              linhas.push(`  Resultado: ${resultado >= 0 ? '+' : ''}${formatBRL(resultado)}`)
+              if (saldo !== null) linhas.push(`  Saldo:     ${formatBRL(saldo)}`)
             }
 
             return linhas
@@ -519,7 +544,7 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
       <p className="text-[13px] font-semibold text-gray-700 dark:text-gray-200 mb-0.5">Evolução mensal</p>
       <p className="text-[11px] text-gray-400 mb-3">Receitas, despesas e saldo - últimos 6 meses</p>
-      <div className="flex gap-6 mb-3 text-[10px]">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 mb-3 text-[10px]">
         <div className="flex items-center gap-2">
           <span className="text-gray-600 font-semibold">Status:</span>
           {pagos.some(p => p.receitas > 0 || p.despesas > 0) && (
@@ -540,6 +565,13 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
               <span className="text-gray-600">Projeções</span>
             </>
           )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-gray-600 font-semibold">Linhas:</span>
+          <svg width="16" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke="#f97316" strokeWidth="2" strokeDasharray="4 3"/></svg>
+          <span className="text-gray-600">Resultado</span>
+          <svg width="16" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke="#a78bfa" strokeWidth="2"/></svg>
+          <span className="text-gray-600">Saldo</span>
         </div>
       </div>
             <div style={{ position: 'relative', height: '300px', width: '100%' }}>
@@ -600,6 +632,106 @@ function GraficoDonut({ titulo, subtitulo, total, dados }: {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// -- Card de últimas alterações ------------------------------------
+interface AlteracaoItem {
+  id: string
+  descricao: string
+  valor: number
+  tipo: string
+  data: string
+  status: string
+  conta_id: string
+  atualizado_em: string
+}
+
+function formatRelativo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const min  = Math.floor(diff / 60000)
+  if (min < 1)  return 'agora'
+  if (min < 60) return `${min}min atrás`
+  const h = Math.floor(min / 60)
+  if (h < 24)   return `${h}h atrás`
+  const d = Math.floor(h / 24)
+  if (d < 7)    return `${d}d atrás`
+  return formatData(iso.split('T')[0])
+}
+
+function CardUltimasAlteracoes({ contas }: { contas: Conta[] }) {
+  const [aberto,  setAberto]  = useState(false)
+  const [items,   setItems]   = useState<AlteracaoItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [stamp,   setStamp]   = useState(0)
+
+  useEffect(() => {
+    if (!aberto) return
+    setLoading(true)
+    supabase
+      .schema('arqvalor')
+      .from('transacoes')
+      .select('id, descricao, valor, tipo, data, status, conta_id, atualizado_em')
+      .order('atualizado_em', { ascending: false })
+      .limit(50)
+      .then(({ data }) => { setItems(data ?? []); setLoading(false) })
+  }, [aberto, stamp])
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+      <button
+        onClick={() => setAberto(o => !o)}
+        className="flex items-center justify-between w-full"
+      >
+        <div className="flex items-center gap-2">
+          <History size={14} className="text-blue-400"/>
+          <span className="text-[12px] font-semibold text-gray-500 dark:text-gray-400">Últimas alterações</span>
+        </div>
+        {aberto ? <ChevronDown size={14} className="text-gray-400"/> : <ChevronRight size={14} className="text-gray-400"/>}
+      </button>
+
+      {aberto && (
+        <div className="mt-3">
+          <div className="flex justify-end mb-2">
+            <button
+              onClick={() => setStamp(Date.now())}
+              className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 flex items-center gap-1"
+            >
+              <RefreshCw size={10}/> Atualizar
+            </button>
+          </div>
+          {loading ? (
+            <p className="text-[12px] text-gray-400 text-center py-4">Carregando...</p>
+          ) : items.length === 0 ? (
+            <p className="text-[12px] text-gray-400 text-center py-4">Nenhuma alteração encontrada.</p>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {items.map(item => {
+                const conta = contas.find(c => c.conta_id === item.conta_id)
+                const isRec = item.tipo === 'RECEITA'
+                return (
+                  <div key={item.id} className="flex items-start gap-2 py-1.5 border-b border-gray-100 dark:border-gray-700 last:border-0">
+                    <span className={`mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 ${isRec ? 'bg-green-500' : 'bg-red-400'}`}/>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] text-gray-700 dark:text-gray-200 truncate">{item.descricao || '—'}</p>
+                      <p className="text-[10px] text-gray-400 truncate">
+                        {formatData(item.data)} · {conta?.nome ?? '—'} · {formatRelativo(item.atualizado_em)}
+                      </p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className={`text-[12px] font-semibold ${isRec ? 'text-green-500' : 'text-red-400'}`}>
+                        {formatBRL(item.valor)}
+                      </p>
+                      <p className="text-[9px] text-gray-400 uppercase">{item.status}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -736,10 +868,21 @@ export default function DashboardPage() {
   const mes          = pgState.mes
   const contasFiltro = pgState.contasFiltro
   const modo         = pgState.modo
-  const setMes          = (v: string)         => setPgState({ mes: v })
+  const setMes          = useCallback((v: string)         => setPgState({ mes: v }), [setPgState])
   const setContasFiltro = (v: string[])       => setPgState({ contasFiltro: v })
   const setModo         = (v: 'hoje' | 'fim') => setPgState({ modo: v })
   const [oculto, setOculto] = useState(false)
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); setMes(navMesStr(mes, -1)) }
+      if (e.key === 'ArrowRight') { e.preventDefault(); setMes(navMesStr(mes, 1))  }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [mes, setMes])
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -836,8 +979,8 @@ export default function DashboardPage() {
             <CardSaldo contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo}/>
           </div>
 
-          {/* Linha 2: alertas agrupados por conta */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* Linha 2: alertas + últimas alterações */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             <CardAlertas
               titulo="Vencidos não pagos"
               cor="#ff6b4a"
@@ -858,6 +1001,7 @@ export default function DashboardPage() {
               filtravel
               mes={mes}
             />
+            <CardUltimasAlteracoes contas={contas} />
           </div>
 
           {/* Linha 3: grafico de barras */}

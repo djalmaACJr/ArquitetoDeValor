@@ -196,7 +196,7 @@ export default function LancamentosPage() {
     setPgState({ comSaldo: typeof v === 'function' ? v(pgState.comSaldo) : v })
   const [saldoBaseConta, setSaldoBaseConta] = useState<Record<string, number>>({})
 
-  const { lancamentos, loading, error, carregar, editar, excluir, antecipar, alterarStatus } =
+  const { lancamentos, loading, error, carregar, removerLocal, editar, excluir, antecipar, alterarStatus } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus, com_saldo: comSaldo })
 
   const { contas }     = useContas()
@@ -936,7 +936,14 @@ export default function LancamentosPage() {
         categoriaIdInicial={novoLancamento && filtCats.length === 1 ? filtCats[0] : null}
         onFechar={fecharDrawer}
         onSalvo={() => { fecharDrawer(); carregar(); toast(lancamentoEditando ? 'Lançamento atualizado!' : 'Lançamento criado!') }}
-        onExcluido={() => { fecharDrawer(); carregar(); toast('Lançamento excluído.') }}
+        onExcluido={() => {
+          const id    = lancamentoEditando?.id ?? ''
+          const idPar = lancamentoEditando?.id_par_transferencia
+          fecharDrawer()
+          removerLocal(id, idPar)
+          carregar()
+          toast('Lançamento excluído.')
+        }}
       />
 
       {/* Fechar dropdown de status ao clicar fora */}

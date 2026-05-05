@@ -1036,11 +1036,9 @@ function SecaoImport() {
       }
 
       // 3. Detectar pares de transferência
-      // Critério: descrição contém "transfer" + categoria == "transferencias".
-      // Pareamento: mesma data, mesmo valor, tipos opostos (RECEITA × DESPESA), contas diferentes.
+      // Critério: categoria == "transferencias", pareamento por data + valor + tipos opostos + contas diferentes.
       const linhasParaImportar = grid.filter(l => l.importar)
       const isCandidatoTransf = (l: LinhaGrid) =>
-        normalizarNome(l.descricao).includes('transfer') &&
         normalizarNome(l.categoria_nome) === 'transferencias'
 
       const pares: Array<{ debito: LinhaGrid; credito: LinhaGrid }> = []
