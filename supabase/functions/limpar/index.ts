@@ -1,8 +1,28 @@
 // supabase/functions/limpar/index.ts
-// Arquiteto de Valor — Edge Function: limpar v6
+// Arquiteto de Valor — Edge Function: limpar v7
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, corsPreFlight } from "../_shared/utils.ts";
 import { logError, logInfo, logSuccess } from "../_shared/logger.ts";
+
+// Reativa todas as contas inativas do usuário e devolve seus ids.
+// Necessário porque o trigger trg_validar_isolamento_usuario rejeita
+// qualquer UPDATE em transacoes cuja conta esteja inativa.
+async function reativarContasInativas(c: ReturnType<typeof db>, userId: string): Promise<string[]> {
+  const { data, error } = await c.from("contas")
+    .select("id").eq("user_id", userId).eq("ativa", false);
+  if (error) throw error;
+  const ids = (data ?? []).map((r: { id: string }) => r.id);
+  if (ids.length === 0) return [];
+  const { error: eUp } = await c.from("contas").update({ ativa: true }).in("id", ids);
+  if (eUp) throw eUp;
+  return ids;
+}
+
+async function reinativarContas(c: ReturnType<typeof db>, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await c.from("contas").update({ ativa: false }).in("id", ids);
+  if (error) logError("[limpar] reinativar contas", JSON.stringify(error));
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return corsPreFlight();
@@ -31,27 +51,40 @@ Deno.serve(async (req: Request) => {
 async function limparTransacoes(c: ReturnType<typeof db>, userId: string) {
   logInfo("[limpar] Iniciando limpeza de transacoes", { userId });
 
-  // Desvincular transferências antes de deletar (bypassa trigger EXCLUSAO_AVULSA_TRANSFERENCIA)
-  const { error: eDesvinc } = await c
-    .from("transacoes")
-    .update({ id_par_transferencia: null })
-    .eq("user_id", userId)
-    .not("id_par_transferencia", "is", null);
-  if (eDesvinc) {
-    logError("[limpar] transacoes desvincular", JSON.stringify(eDesvinc));
-    return erro(eDesvinc.message);
+  // Reativar contas inativas para liberar o trigger trg_validar_isolamento_usuario
+  let contasReativadas: string[] = [];
+  try {
+    contasReativadas = await reativarContasInativas(c, userId);
+  } catch (e) {
+    logError("[limpar] transacoes reativar contas", JSON.stringify(e));
+    return erro((e as Error).message ?? "Erro ao reativar contas");
   }
 
-  const { count, error } = await c
-    .from("transacoes")
-    .delete({ count: "exact" })
-    .eq("user_id", userId);
-  if (error) {
-    logError("[limpar] transacoes", JSON.stringify(error));
-    return erro(error.message);
+  try {
+    // Desvincular transferências antes de deletar
+    const { error: eDesvinc } = await c
+      .from("transacoes")
+      .update({ id_par_transferencia: null })
+      .eq("user_id", userId)
+      .not("id_par_transferencia", "is", null);
+    if (eDesvinc) {
+      logError("[limpar] transacoes desvincular", JSON.stringify(eDesvinc));
+      return erro(eDesvinc.message);
+    }
+
+    const { count, error } = await c
+      .from("transacoes")
+      .delete({ count: "exact" })
+      .eq("user_id", userId);
+    if (error) {
+      logError("[limpar] transacoes", JSON.stringify(error));
+      return erro(error.message);
+    }
+    logSuccess("[limpar] transacoes", { excluidos: count });
+    return json({ ok: true, excluidos: count ?? 0, entidade: "transacoes" });
+  } finally {
+    await reinativarContas(c, contasReativadas);
   }
-  logSuccess("[limpar] transacoes", { excluidos: count });
-  return json({ ok: true, excluidos: count ?? 0, entidade: "transacoes" });
 }
 
 async function limparCategorias(c: ReturnType<typeof db>, userId: string) {
@@ -97,6 +130,15 @@ async function limparContas(c: ReturnType<typeof db>, userId: string) {
 async function limparTudo(c: ReturnType<typeof db>, userId: string) {
   logInfo("[limpar] Iniciando limpeza total", { userId });
   const logs: { entidade: string; excluidos: number }[] = [];
+
+  // Reativar contas inativas (necessário para o UPDATE em transacoes passar pelo trigger)
+  // Não há reinativação posterior — as contas serão deletadas no passo 3.
+  try {
+    await reativarContasInativas(c, userId);
+  } catch (e) {
+    logError("[limpar] tudo — reativar contas", JSON.stringify(e));
+    return erro((e as Error).message ?? "Erro ao reativar contas");
+  }
 
   // 1. Transações — desvincular transferências antes de deletar
   const { error: eDesvinc } = await c.from("transacoes")

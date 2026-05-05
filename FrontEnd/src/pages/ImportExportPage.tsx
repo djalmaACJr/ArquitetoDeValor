@@ -1004,6 +1004,7 @@ function SecaoImport() {
       return
     }
 
+    const contasReativadas: string[] = []
     try {
       const contaMap = Object.fromEntries(contas.map((c: Conta) => [normalizarNome(c.nome), c.conta_id]))
       const catMap   = Object.fromEntries(categorias.map(c => [normalizarNome(c.descricao), c.id]))
@@ -1034,15 +1035,108 @@ function SecaoImport() {
         }
       }
 
-      // 3. Importar em até 4 workers paralelos
+      // 3. Detectar pares de transferência
+      // Critério: descrição contém "transfer" + categoria == "transferencias".
+      // Pareamento: mesma data, mesmo valor, tipos opostos (RECEITA × DESPESA), contas diferentes.
       const linhasParaImportar = grid.filter(l => l.importar)
-      const total   = linhasParaImportar.length
+      const isCandidatoTransf = (l: LinhaGrid) =>
+        normalizarNome(l.descricao).includes('transfer') &&
+        normalizarNome(l.categoria_nome) === 'transferencias'
+
+      const pares: Array<{ debito: LinhaGrid; credito: LinhaGrid }> = []
+      const idsPareados = new Set<number>()
+      for (const a of linhasParaImportar) {
+        if (idsPareados.has(a.idx) || !isCandidatoTransf(a)) continue
+        const par = linhasParaImportar.find(b =>
+          b.idx !== a.idx &&
+          !idsPareados.has(b.idx) &&
+          isCandidatoTransf(b) &&
+          b.data === a.data &&
+          Math.abs(b.valor - a.valor) < 0.005 &&
+          b.tipo !== a.tipo &&
+          normalizarNome(b.conta_nome) !== normalizarNome(a.conta_nome)
+        )
+        if (par) {
+          idsPareados.add(a.idx); idsPareados.add(par.idx)
+          const debito  = a.tipo === 'DESPESA' ? a : par
+          const credito = a.tipo === 'RECEITA' ? a : par
+          pares.push({ debito, credito })
+        }
+      }
+      const linhasNormais = linhasParaImportar.filter(l => !idsPareados.has(l.idx))
+      if (pares.length > 0) addLog('ok', `${pares.length} par(es) de transferência detectado(s)`)
+
+      // 4. Reativar contas inativas envolvidas na importação
+      const contasUsadas = new Set<string>()
+      for (const l of linhasParaImportar) {
+        const cid = contaMap[normalizarNome(l.conta_nome)]
+        if (cid) contasUsadas.add(cid)
+      }
+      for (const cid of contasUsadas) {
+        const c = contas.find((x: Conta) => x.conta_id === cid)
+        if (c && !c.ativa) {
+          const r = await apiComRetry(`/contas/${cid}`, 'PUT', { ativa: true })
+          if (r.ok) {
+            contasReativadas.push(cid)
+            addLog('ok', `Conta "${c.nome}" reativada temporariamente`)
+          } else addLog('erro', `Falha ao reativar conta "${c.nome}": ${r.erro}`)
+        }
+      }
+
+      // 5. Importar — pares via /transferencias, restante via /transacoes em até 4 workers
+      const totalRows = pares.length * 2 + linhasNormais.length
       let ok = 0, erros = 0, processados = 0
       const tInicio = Date.now()
 
-      const chunks = dividirEmChunks(linhasParaImportar, 4)
+      const reportarProgresso = () => {
+        const pct = totalRows > 0 ? Math.round((processados / totalRows) * 100) : 100
+        const elapsed = (Date.now() - tInicio) / 1000
+        const velocidade = elapsed > 0 ? (processados / elapsed).toFixed(1) : '...'
+        const restantes  = totalRows - processados
+        const etaSeg   = elapsed > 0 && processados > 0 ? Math.round(restantes / (processados / elapsed)) : null
+        const eta      = etaSeg !== null
+          ? etaSeg > 60 ? `${Math.floor(etaSeg / 60)}m ${etaSeg % 60}s` : `${etaSeg}s`
+          : '...'
+        setProgresso(pct)
+        setProgressoInfo({ atual: processados, total: totalRows, ok, erros, eta, velocidade: `${velocidade}/s` })
+      }
 
-      addLog('ok', `Iniciando com ${chunks.length} workers paralelos (${total} registros)...`)
+      // 5a. Pares de transferência em até 8 workers paralelos
+      // (POST /transferencias cria os 2 lançamentos atomicamente — paralelizar entre pares é seguro)
+      const chunksPares = dividirEmChunks(pares, 8)
+      if (pares.length > 0)
+        addLog('ok', `Importando ${pares.length} transferência(s) em ${chunksPares.length} worker(s) paralelos...`)
+
+      const processarPar = async (chunk: typeof pares) => {
+        for (const par of chunk) {
+          if (canceladoRef.current) break
+          const origemId  = contaMap[normalizarNome(par.debito.conta_nome)]
+          const destinoId = contaMap[normalizarNome(par.credito.conta_nome)]
+          if (!origemId || !destinoId) {
+            addLog('erro', `Transferência "${par.debito.descricao}" (${par.debito.data}) ignorada: conta(s) não resolvida(s)`)
+            erros += 2
+          } else {
+            const r = await apiComRetry('/transferencias', 'POST', {
+              conta_origem_id:  origemId,
+              conta_destino_id: destinoId,
+              valor:            par.debito.valor,
+              data:             par.debito.data,
+              descricao:        par.debito.descricao,
+              status:           par.debito.status,
+            })
+            if (r.ok) ok += 2
+            else { addLog('erro', `Transferência "${par.debito.descricao}" (${par.debito.data}): ${r.erro}`); erros += 2 }
+          }
+          processados += 2
+          if (processados % 10 < 2 || processados === totalRows) reportarProgresso()
+        }
+      }
+      await Promise.all(chunksPares.map(processarPar))
+
+      // 5b. Lançamentos normais em até 8 workers paralelos
+      const chunks = dividirEmChunks(linhasNormais, 8)
+      if (linhasNormais.length > 0)
+        addLog('ok', `Iniciando com ${chunks.length} workers paralelos (${linhasNormais.length} registros)...`)
 
       const processarChunk = async (chunk: LinhaGrid[]) => {
         for (const l of chunk) {
@@ -1064,29 +1158,25 @@ function SecaoImport() {
           }
 
           processados++
-          if (processados % 10 === 0 || processados === total) {
-            const pct      = Math.round((processados / total) * 100)
-            const elapsed  = (Date.now() - tInicio) / 1000
-            const velocidade = elapsed > 0 ? (processados / elapsed).toFixed(1) : '...'
-            const restantes  = total - processados
-            const etaSeg   = elapsed > 0 && processados > 0 ? Math.round(restantes / (processados / elapsed)) : null
-            const eta      = etaSeg !== null
-              ? etaSeg > 60 ? `${Math.floor(etaSeg / 60)}m ${etaSeg % 60}s` : `${etaSeg}s`
-              : '...'
-            setProgresso(pct)
-            setProgressoInfo({ atual: processados, total, ok, erros, eta, velocidade: `${velocidade}/s` })
-          }
+          if (processados % 10 === 0 || processados === totalRows) reportarProgresso()
         }
       }
 
       await Promise.all(chunks.map(processarChunk))
 
       const ignoradas = grid.filter(l => !l.importar).length
-      if (canceladoRef.current) addLog('aviso', `Cancelado. ${ok} lançamentos importados de ${total}.`)
-      else addLog('ok', `Concluído: ${ok} importadas, ${erros} erros, ${ignoradas} ignoradas`)
+      if (canceladoRef.current) addLog('aviso', `Cancelado. ${ok} lançamento(s) importado(s) de ${totalRows}.`)
+      else addLog('ok', `Concluído: ${ok} importado(s), ${erros} erro(s), ${ignoradas} ignorada(s)`)
     } catch (e) {
       addLog('erro', `Erro inesperado: ${(e as Error).message}`)
     } finally {
+      // Reinativar contas que foram reativadas para a importação
+      for (const cid of contasReativadas) {
+        const c = contas.find((x: Conta) => x.conta_id === cid)
+        const r = await apiComRetry(`/contas/${cid}`, 'PUT', { ativa: false })
+        if (r.ok) addLog('ok', `Conta "${c?.nome ?? cid}" reinativada`)
+        else addLog('erro', `Falha ao reinativar "${c?.nome ?? cid}": ${r.erro}`)
+      }
       setLog(logs)
       setEtapa('concluido')
     }
@@ -2132,7 +2222,7 @@ function SecaoRestore() {
       let okTx = 0, errTx = 0
       const txOrdenadas  = [...txBackup].sort((a: TransacaoRaw, b: TransacaoRaw) => a.data.localeCompare(b.data))
       const totalTx      = txOrdenadas.length
-      const txChunks = dividirEmChunks(txOrdenadas, 4)
+      const txChunks = dividirEmChunks(txOrdenadas, 8)
 
       addLog('ok', `Iniciando com ${txChunks.length} workers paralelos (${totalTx} transações)...`)
 
@@ -2167,20 +2257,30 @@ function SecaoRestore() {
           const parId = (t.id_par ?? t.id_recorrencia) as string | undefined
           if (parId && !parsUnicos.has(parId)) parsUnicos.set(parId, t)
         }
-        for (const t of parsUnicos.values()) {
-          if (canceladoRef.current) { addLog('aviso', `Cancelado. ${okTrf} transferências criadas.`); break }
-          const origem  = mapaContas[t.conta_origem_id ?? t.conta_id]
-          const destino = mapaContas[t.conta_destino_id]
-          if (!origem || !destino) { addLog('aviso', `Transferência "${t.descricao ?? ''}" ignorada: contas não mapeadas`); errTrf++; avanco(); continue }
-          const r = await apiComRetry('/transferencias', 'POST', {
-            conta_origem_id: origem, conta_destino_id: destino,
-            valor: t.valor, data: t.data, descricao: t.descricao, status: t.status,
-          })
-          if (r.ok) okTrf++
-          else { addLog('erro', `Transferência "${t.descricao}" (${t.data}): ${r.erro}`); errTrf++ }
-          avanco(); await _sleep(80)
+        const trfList    = Array.from(parsUnicos.values())
+        const trfChunks  = dividirEmChunks(trfList, 8)
+
+        addLog('ok', `Iniciando com ${trfChunks.length} workers paralelos (${trfList.length} transferências)...`)
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const processarChunkTrf = async (chunk: any[]) => {
+          for (const t of chunk) {
+            if (canceladoRef.current) break
+            const origem  = mapaContas[t.conta_origem_id ?? t.conta_id]
+            const destino = mapaContas[t.conta_destino_id]
+            if (!origem || !destino) { addLog('aviso', `Transferência "${t.descricao ?? ''}" ignorada: contas não mapeadas`); errTrf++; avanco(); continue }
+            const r = await apiComRetry('/transferencias', 'POST', {
+              conta_origem_id: origem, conta_destino_id: destino,
+              valor: t.valor, data: t.data, descricao: t.descricao, status: t.status,
+            })
+            if (r.ok) okTrf++
+            else { addLog('erro', `Transferência "${t.descricao}" (${t.data}): ${r.erro}`); errTrf++ }
+            avanco()
+          }
         }
-        addLog('ok', `Transferências: ${okTrf} criadas, ${errTrf} erros`)
+        await Promise.all(trfChunks.map(processarChunkTrf))
+        if (canceladoRef.current) addLog('aviso', `Cancelado. ${okTrf} transferências criadas de ${trfList.length}.`)
+        else addLog('ok', `Transferências: ${okTrf} criadas, ${errTrf} erros`)
       }
 
       setProgressoLabel('Concluído!')
