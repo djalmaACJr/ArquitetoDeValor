@@ -15,8 +15,9 @@ node_modules/
 
 #arquivos do vistual studio
 .vs/
+
 #arquivos do vs code
-.vscode
+.vscode/
 
 #backups feitos durante teste de deploy
 tests/backup_data/
