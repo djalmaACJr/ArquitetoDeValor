@@ -108,6 +108,14 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   if (erroStatus || !body.status)
     return erro(erroStatus ?? "RV-007: status deve ser PAGO, PENDENTE ou PROJECAO");
 
+  // Categoria: se informada, deve existir e estar ativa
+  if (body.categoria_id) {
+    const { data: cat } = await c.from("categorias")
+      .select("ativa").eq("id", String(body.categoria_id)).maybeSingle();
+    if (!cat)       return erro("RV-005: categoria não encontrada", 422);
+    if (!cat.ativa) return erro("RV-005: categoria inativa não pode ser usada em novos lançamentos", 422);
+  }
+
   const statusOriginal = String(body.status);
   const dataBase       = String(body.data);
   const hoje           = new Date().toISOString().split("T")[0];
@@ -240,6 +248,15 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   const dataEfetiva = String(body.data ?? atual.data);
   if (body.status === "PROJECAO" && dataEfetiva <= hoje)
     return erro("RV-008: status PROJECAO só é permitido para datas futuras", 422);
+
+  // Categoria: se está sendo alterada, a nova deve estar ativa
+  if (body.categoria_id !== undefined && body.categoria_id !== null
+      && body.categoria_id !== atual.categoria_id) {
+    const { data: cat } = await c.from("categorias")
+      .select("ativa").eq("id", String(body.categoria_id)).maybeSingle();
+    if (!cat)       return erro("categoria não encontrada", 422);
+    if (!cat.ativa) return erro("categoria inativa não pode ser atribuída a um lançamento", 422);
+  }
 
   // Campos permitidos no update de dados do lançamento
   const camposPermitidos = ["tipo","data","descricao","valor","conta_id","categoria_id","status","observacao"];

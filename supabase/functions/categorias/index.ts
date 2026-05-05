@@ -164,7 +164,7 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   // id_pai incluído para permitir mover subcategoria para outro pai
   const campos = camposParaAtualizar(body, ["descricao","icone","cor","ativa","id_pai"]);
   const { data, error } = await c.from("categorias").update(campos).eq("id", id).select().single();
-  
+
   if (error) {
     logError("Editar categoria", error);
     if (error.message.includes("CATEGORIA_PROTEGIDA")) {
@@ -173,7 +173,16 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
     }
     return erro(error.message);
   }
-  
+
+  // Cascata: ao inativar categoria pai, inativa todas as filhas
+  if (body.ativa === false && !atual.protegida) {
+    const { error: eCasc } = await c.from("categorias")
+      .update({ ativa: false })
+      .eq("id_pai", id);
+    if (eCasc) logError("Cascata inativar filhas", eCasc);
+    else logSuccess("Subcategorias inativadas em cascata", { id_pai: id });
+  }
+
   logSuccess("Categoria atualizada", { id });
   logResponse(200, data);
   return json(data);

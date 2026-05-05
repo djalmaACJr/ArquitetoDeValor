@@ -294,17 +294,31 @@ export default function DrawerLancamento({
 
   const catsPai = categorias.filter(c => !c.id_pai && !c.protegida)
   const catsSub = categorias.filter(c => !!c.id_pai)
+
+  // Categorias inativas só aparecem se for edição e for a categoria atual do lançamento
+  const deveIncluirCat = (c: { id: string; ativa: boolean }) =>
+    c.ativa || (!!editando && c.id === form.categoria_id)
+
   const opcoesCategorias = [
     { id: '', label: 'Sem categoria', icone: '' },
-    ...catsPai.flatMap(p => [
-      { id: p.id, label: p.descricao, icone: p.icone ?? '' },
-      ...catsSub.filter(s => s.id_pai === p.id).map(s => ({
-        id: s.id,
-        label: s.descricao,
-        sublabel: p.descricao,
-        icone: s.icone ?? '',
-      }))
-    ])
+    ...catsPai
+      .filter(p => {
+        const temSubIncluida = catsSub.some(s => s.id_pai === p.id && deveIncluirCat(s))
+        return deveIncluirCat(p) || temSubIncluida
+      })
+      .flatMap(p => [
+        {
+          id: p.id,
+          label: p.ativa ? p.descricao : `${p.descricao} (inativa)`,
+          icone: p.icone ?? '',
+        },
+        ...catsSub.filter(s => s.id_pai === p.id && deveIncluirCat(s)).map(s => ({
+          id: s.id,
+          label: s.ativa ? s.descricao : `${s.descricao} (inativa)`,
+          sublabel: p.descricao,
+          icone: s.icone ?? '',
+        }))
+      ])
   ]
 
   // ── Salvar ─────────────────────────────────────────────────

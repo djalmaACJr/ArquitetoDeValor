@@ -343,12 +343,13 @@ function CardAlertas({
 }
 
 // -- Grafico barras + linha de saldo ----------------------
-function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: { 
-  historico: { mes: string; total_entradas: number; total_saidas: number; saldo_mes?: number }[]; 
+function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes, loading = false }: {
+  historico: { mes: string; total_entradas: number; total_saidas: number; saldo_mes?: number }[];
   oculto: boolean;
   pagos: { receitas: number; despesas: number }[];
   pendentes: { receitas: number; despesas: number }[];
   projecoes: { receitas: number; despesas: number }[];
+  loading?: boolean;
 }) {
   const labels = historico.map(h => mesLabel(h.mes))
 
@@ -574,9 +575,20 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes }: {
           <span className="text-gray-600">Saldo</span>
         </div>
       </div>
-            <div style={{ position: 'relative', height: '300px', width: '100%' }}>
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-        <Chart type="bar" data={data} options={options as any} />
+      <div style={{ position: 'relative', height: '300px', width: '100%' }}>
+        {loading ? (
+          <div className="absolute inset-0 flex flex-col justify-end gap-2 px-2 pb-2">
+            {[0.6, 0.85, 0.5, 0.75, 0.4, 0.9].map((h, i) => (
+              <div key={i} className="flex-1 flex items-end gap-1">
+                <div className="flex-1 rounded animate-pulse" style={{ height: `${h * 100}%`, background: 'rgba(255,255,255,0.07)' }} />
+                <div className="flex-1 rounded animate-pulse" style={{ height: `${(1 - h * 0.6) * 100}%`, background: 'rgba(255,255,255,0.05)' }} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+          <Chart type="bar" data={data} options={options as any} />
+        )}
       </div>
     </div>
   )
@@ -896,7 +908,7 @@ export default function DashboardPage() {
     setLancamentoEditando(tx)
   }
 
-  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, error, refetch } = useDashboard(mes, contasFiltro)
+  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch } = useDashboard(mes, contasFiltro)
 
   // Debug
   useEffect(() => {
@@ -1005,12 +1017,13 @@ export default function DashboardPage() {
           </div>
 
           {/* Linha 3: grafico de barras */}
-          <GraficoBarras 
-              historico={historico} 
+          <GraficoBarras
+              historico={historico}
               oculto={oculto}
               pagos={pagos}
               pendentes={pendentesStatus}
               projecoes={projecoes}
+              loading={loadingHistorico}
             />
 
           {/* Linha 4: donuts */}

@@ -152,7 +152,7 @@ function PainelReclassificacao({
         <SelectDark value={catDestinoId} onChange={e => setCatDestinoId(e.target.value)}>
           <option value="">Selecione...</option>
           {(() => {
-            const naoProteg = todasCategorias.filter(c => !c.protegida && c.id !== categoria.id)
+            const naoProteg = todasCategorias.filter(c => !c.protegida && c.ativa && c.id !== categoria.id)
             const pais = naoProteg.filter(c => !c.id_pai)
               .sort((a, b) => a.descricao.localeCompare(b.descricao, 'pt-BR'))
             const vistos = new Set<string>()
