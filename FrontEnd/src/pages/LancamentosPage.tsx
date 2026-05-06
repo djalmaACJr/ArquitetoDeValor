@@ -538,17 +538,18 @@ export default function LancamentosPage() {
           )}
         </div>
 
-        {/* Filtros salvos */}
+        {/* Filtros salvos + limpar */}
         <FiltrosSalvosBtn
           pagina="extrato"
           filtAtual={{ filtContas, filtCats, filtStatus, comSaldo }}
-          temFiltroAtivo={filtContas.length > 0 || filtCats.length > 0 || filtStatus.length > 0}
+          temFiltroAtivo={filtContas.length > 0 || filtCats.length > 0 || filtStatus.length > 0 || !comSaldo}
           onAplicar={d => setPgState({
             filtContas: (d.filtContas as string[]) ?? [],
             filtCats:   (d.filtCats   as string[]) ?? [],
             filtStatus: (d.filtStatus as string[]) ?? [],
             comSaldo:   (d.comSaldo   as boolean)  ?? true,
           })}
+          onLimpar={() => setPgState({ filtContas: [], filtCats: [], filtStatus: [], comSaldo: true })}
         />
         </div>
         {/* Calendário */}

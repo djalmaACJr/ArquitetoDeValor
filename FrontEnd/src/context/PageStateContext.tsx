@@ -25,6 +25,7 @@ interface RelatoriosState {
   fim:           string
   filtStatus:    string[]
   filtContas:    string[]
+  filtCats:      string[]
   incluirTransf: boolean
   lancamentos:   unknown[]
   buscado:       boolean
@@ -65,6 +66,7 @@ const RELATORIOS_INICIAL: RelatoriosState = {
   fim:           mesAtual(),
   filtStatus:    [],
   filtContas:    [],
+  filtCats:      [],
   incluirTransf: false,
   lancamentos:   [],
   buscado:       false,

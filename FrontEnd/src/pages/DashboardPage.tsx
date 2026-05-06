@@ -958,6 +958,7 @@ export default function DashboardPage() {
             filtAtual={{ filtContas: contasFiltro }}
             temFiltroAtivo={contasFiltro.length > 0}
             onAplicar={d => setPgState({ contasFiltro: (d.filtContas as string[]) ?? [] })}
+            onLimpar={() => setPgState({ contasFiltro: [] })}
           />
 
           {/* Botao atualizar */}

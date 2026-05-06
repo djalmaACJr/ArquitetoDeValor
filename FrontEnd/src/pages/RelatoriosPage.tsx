@@ -28,6 +28,12 @@ interface Lancamento {
   id_par_transferencia: string | null
 }
 
+interface DescricaoRow {
+  descricao: string
+  porMes: Record<string, number>
+  total: number
+}
+
 interface CelulaCategoria {
   categoria_id: string | null
   categoria_nome: string
@@ -36,6 +42,7 @@ interface CelulaCategoria {
   tipo: 'RECEITA' | 'DESPESA'
   porMes: Record<string, number>
   total: number
+  porDescricao: DescricaoRow[]
 }
 
 interface GrupoPai {
@@ -78,12 +85,20 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
   onCelulaClick: (catId: string | null, catNome: string, mes: string | null, titulo: string) => void
 }) {
   const [aberto, setAberto] = useState(nivel === 3)
+  const [expandidosSubs, setExpandidosSubs] = useState<Set<string>>(new Set())
   const cor = grupo.tipo === 'RECEITA' ? '#00c896' : '#f87171'
-  const mostrarSubs = aberto
+
+  function toggleSub(key: string) {
+    setExpandidosSubs(prev => {
+      const n = new Set(prev)
+      n.has(key) ? n.delete(key) : n.add(key)
+      return n
+    })
+  }
 
   return (
     <>
-      {/* Linha pai */}
+      {/* Linha pai — clica na linha toda para expandir/colapsar */}
       <tr
         onClick={() => setAberto(a => !a)}
         className="border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-pointer"
@@ -121,40 +136,91 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
         ))}
       </tr>
 
-      {/* Subcategorias — só no nível 3 */}
-      {mostrarSubs && grupo.subcategorias.map(sub => (
-        <tr key={sub.categoria_id ?? sub.categoria_nome}
-          className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
-          <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', minWidth: 220 }}>
-            <div className="flex items-center gap-2 pl-5">
-              <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: cor, opacity: 0.5 }}/>
-              <span className="text-[11px]" style={{ color: '#c5cad8' }}>{sub.categoria_nome}</span>
-            </div>
-          </td>
-          <td
-            className="px-3 py-2 text-right cursor-pointer hover:bg-white/5 transition-colors"
-            onClick={() => onCelulaClick(sub.categoria_id, sub.categoria_nome, null, `${sub.categoria_nome} - Total período`)}
-            title="Ver todos os lançamentos desta categoria no período"
-          >
-            <span className="text-[11px] font-medium" style={{ color: '#e8eaf0' }}>
-              {oculto ? '????' : formatBRL(sub.total)}
-            </span>
-          </td>
-          {meses.map(m => (
-            <td key={m}
-              className="px-3 py-2 text-right cursor-pointer hover:bg-white/5 transition-colors"
-              onClick={() => { if (sub.porMes[m]) onCelulaClick(sub.categoria_id, sub.categoria_nome, m, `${sub.categoria_nome} - ${mesLabel(m)}`) }}
-              title={sub.porMes[m] ? 'Ver lançamentos' : undefined}
-            >
-              <span className="text-[11px]" style={{ color: sub.porMes[m] ? '#c5cad8' : '#4a5168' }}>
-                {sub.porMes[m] ? (oculto ? '????' : formatBRL(sub.porMes[m])) : '-'}
-              </span>
-            </td>
-          ))}
-        </tr>
-      ))}
+      {/* Subcategorias com 3º nível inline por descrição */}
+      {aberto && grupo.subcategorias.map(sub => {
+        const subKey = sub.categoria_id ?? sub.categoria_nome
+        const subExpandido = expandidosSubs.has(subKey)
+        const temDescricoes = sub.porDescricao.length > 1
+        return (
+          <Fragment key={subKey}>
+            <tr className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
+              <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', minWidth: 220 }}>
+                <div className="flex items-center gap-2 pl-3">
+                  <span
+                    className="w-4 h-4 flex items-center justify-center flex-shrink-0 cursor-pointer"
+                    style={{ color: '#4a5168' }}
+                    onClick={temDescricoes ? () => toggleSub(subKey) : undefined}
+                  >
+                    {temDescricoes
+                      ? (subExpandido ? <ChevronDown size={11}/> : <ChevronRight size={11}/>)
+                      : <span className="w-1 h-1 rounded-full block" style={{ background: cor, opacity: 0.4 }}/>
+                    }
+                  </span>
+                  <span
+                    onClick={temDescricoes ? () => toggleSub(subKey) : undefined}
+                    className={`text-[11px] ${temDescricoes ? 'cursor-pointer hover:underline' : ''}`}
+                    style={{ color: '#c5cad8' }}
+                  >
+                    {sub.categoria_nome}
+                  </span>
+                </div>
+              </td>
+              <td
+                className="px-3 py-2 text-right cursor-pointer hover:bg-white/5 transition-colors"
+                onClick={() => onCelulaClick(sub.categoria_id, sub.categoria_nome, null, `${sub.categoria_nome} - Total período`)}
+                title="Ver todos os lançamentos desta categoria no período"
+              >
+                <span className="text-[11px] font-medium" style={{ color: '#e8eaf0' }}>
+                  {oculto ? '????' : formatBRL(sub.total)}
+                </span>
+              </td>
+              {meses.map(m => (
+                <td key={m}
+                  className="px-3 py-2 text-right cursor-pointer hover:bg-white/5 transition-colors"
+                  onClick={() => { if (sub.porMes[m]) onCelulaClick(sub.categoria_id, sub.categoria_nome, m, `${sub.categoria_nome} - ${mesLabel(m)}`) }}
+                  title={sub.porMes[m] ? 'Ver lançamentos' : undefined}
+                >
+                  <span className="text-[11px]" style={{ color: sub.porMes[m] ? '#c5cad8' : '#4a5168' }}>
+                    {sub.porMes[m] ? (oculto ? '????' : formatBRL(sub.porMes[m])) : '-'}
+                  </span>
+                </td>
+              ))}
+            </tr>
 
-      {mostrarSubs && (
+            {/* 3º nível: linhas de descrição side-by-side nos meses */}
+            {subExpandido && sub.porDescricao
+              .slice().sort((a, b) => b.total - a.total)
+              .map(d => (
+                <tr key={d.descricao}
+                  className="border-b border-white/[0.02] transition-colors"
+                  style={{ background: 'rgba(255,255,255,0.008)' }}
+                >
+                  <td className="px-4 py-1.5 sticky left-0 z-10" style={{ background: 'inherit', minWidth: 220 }}>
+                    <div className="flex items-center gap-2 pl-10">
+                      <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: '#4a5168' }}/>
+                      <span className="text-[10px] truncate" style={{ color: '#8b92a8' }}>{d.descricao}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-1.5 text-right">
+                    <span className="text-[10px]" style={{ color: '#6b7280' }}>
+                      {oculto ? '????' : formatBRL(d.total)}
+                    </span>
+                  </td>
+                  {meses.map(m => (
+                    <td key={m} className="px-3 py-1.5 text-right">
+                      <span className="text-[10px]" style={{ color: d.porMes[m] ? '#8b92a8' : '#2d3348' }}>
+                        {d.porMes[m] ? (oculto ? '????' : formatBRL(d.porMes[m])) : '-'}
+                      </span>
+                    </td>
+                  ))}
+                </tr>
+              ))
+            }
+          </Fragment>
+        )
+      })}
+
+      {aberto && (
         <tr className="border-b border-white/10">
           <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', minWidth: 220 }}>
             <span className="text-[10px] font-bold uppercase tracking-widest pl-6" style={{ color: cor, opacity: 0.7 }}>
@@ -184,13 +250,15 @@ export default function RelatoriosPage() {
   const { relatorios: pgState, setRelatorios: setPgState } = usePageState()
   const inicio       = pgState.inicio
   const fim          = pgState.fim
-  const filtStatus   = pgState.filtStatus
-  const filtContas   = pgState.filtContas
+  const filtStatus    = pgState.filtStatus
+  const filtContas    = pgState.filtContas
+  const filtCats      = pgState.filtCats ?? []
   const incluirTransf = pgState.incluirTransf
   const setInicio        = (v: string)   => setPgState({ inicio: v })
   const setFim           = (v: string)   => setPgState({ fim: v })
   const setFiltStatus    = (v: string[]) => setPgState({ filtStatus: v })
   const setFiltContas    = (v: string[]) => setPgState({ filtContas: v })
+  const setFiltCats      = (v: string[]) => setPgState({ filtCats: v })
   const setIncluirTransf = (v: boolean)  => setPgState({ incluirTransf: v })
   const [loading,     setLoading]     = useState(false)
   const lancamentos    = pgState.lancamentos as Lancamento[]
@@ -210,8 +278,8 @@ export default function RelatoriosPage() {
     mes: string | null  // null = todos os meses
   } | null>(null)
 
-  const { contas }     = useContas()
-  void useCategorias() // mantido para futuro uso de filtro por categoria
+  const { contas }       = useContas()
+  const { categorias }   = useCategorias()
 
   const meses = useMemo(() => gerarMeses(inicio, fim), [inicio, fim])
 
@@ -254,11 +322,26 @@ export default function RelatoriosPage() {
       l.descricao?.startsWith('[Transf.') ||
       l.categoria_nome === 'Transferências'
 
+    // Helper filtro de categoria (pai ou sub)
+    const catsSelecionadas = filtCats.length > 0
+      ? new Set(filtCats.flatMap(id => {
+          const cat = categorias.find(c => c.id === id)
+          if (!cat) return [id]
+          // se for pai, incluir todas as subs filhas
+          if (!cat.id_pai) {
+            const subs = categorias.filter(c => c.id_pai === cat.id).map(c => c.id)
+            return [cat.id, ...subs]
+          }
+          return [cat.id]
+        }))
+      : null
+
     // Filtros
     let lista = lancamentos
     if (!incluirTransf) lista = lista.filter(l => !isTransf(l))
     if (filtStatus.length > 0) lista = lista.filter(l => filtStatus.includes(l.status))
-    if (filtContas.length > 1) lista = lista.filter(l => filtContas.includes(l.conta_id))
+    if (filtContas.length > 0) lista = lista.filter(l => filtContas.includes(l.conta_id))
+    if (catsSelecionadas)       lista = lista.filter(l => catsSelecionadas.has(l.categoria_id ?? ''))
 
     // Agrupar por categoria pai -> categoria -> mes
     const mapa = new Map<string, CelulaCategoria>()
@@ -278,11 +361,22 @@ export default function RelatoriosPage() {
           tipo:              l.tipo,
           porMes:            {},
           total:             0,
+          porDescricao:      [],
         })
       }
       const cel = mapa.get(key)!
       cel.porMes[mesLanc] = (cel.porMes[mesLanc] ?? 0) + l.valor
       cel.total           += l.valor
+
+      // 3º nível inline: agregar por descrição
+      const desc = l.descricao || '—'
+      let dRow = cel.porDescricao.find(d => d.descricao === desc)
+      if (!dRow) {
+        dRow = { descricao: desc, porMes: {}, total: 0 }
+        cel.porDescricao.push(dRow)
+      }
+      dRow.porMes[mesLanc] = (dRow.porMes[mesLanc] ?? 0) + l.valor
+      dRow.total           += l.valor
     }
 
     // Agrupar em pais
@@ -341,7 +435,7 @@ export default function RelatoriosPage() {
     const grandTotalDespesas = grupos.filter(g => g.tipo === 'DESPESA').reduce((s, g) => s + g.total, 0)
 
     return { grupos, totaisMes, grandTotalEntradas, grandTotalDespesas }
-  }, [lancamentos, buscado, filtStatus, filtContas, incluirTransf, meses])
+  }, [lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias])
 
   const exportarExcel = useCallback(async () => {
     if (!buscado || grupos.length === 0) return
@@ -411,7 +505,16 @@ export default function RelatoriosPage() {
     if (!drillDown || !buscado) return []
     let lista = lancamentos
     if (filtStatus.length > 0) lista = lista.filter(l => filtStatus.includes(l.status))
-    if (filtContas.length > 1) lista = lista.filter(l => filtContas.includes(l.conta_id))
+    if (filtContas.length > 0) lista = lista.filter(l => filtContas.includes(l.conta_id))
+    if (filtCats.length > 0) {
+      const ids = new Set(filtCats.flatMap(id => {
+        const cat = categorias.find(c => c.id === id)
+        if (!cat) return [id]
+        if (!cat.id_pai) return [cat.id, ...categorias.filter(c => c.id_pai === cat.id).map(c => c.id)]
+        return [cat.id]
+      }))
+      lista = lista.filter(l => ids.has(l.categoria_id ?? ''))
+    }
     const isTransf = (l: Lancamento) =>
       !!l.id_par_transferencia ||
       l.descricao?.startsWith('[Transf.') ||
@@ -437,7 +540,7 @@ export default function RelatoriosPage() {
     }
 
     return lista.sort((a, b) => a.data.localeCompare(b.data))
-  }, [drillDown, lancamentos, buscado, filtStatus, filtContas, incluirTransf, meses])
+  }, [drillDown, lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias])
 
   // Grupos por descrição dentro do drill-down
   const gruposDescricao = useMemo((): GrupoDescricao[] => {
@@ -499,6 +602,26 @@ export default function RelatoriosPage() {
             />
           </div>
 
+          {/* Categorias */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Categorias</p>
+            <MultiSelect
+              placeholder="Todas as categorias"
+              className="w-48"
+              values={filtCats}
+              onChange={setFiltCats}
+              options={[
+                ...categorias.filter(c => !c.id_pai && !c.protegida && c.ativa).map(p => ({
+                  value: p.id, label: p.descricao, icone: p.icone ?? undefined, cor: p.cor ?? undefined,
+                })),
+                ...categorias.filter(c => !!c.id_pai && c.ativa).map(s => {
+                  const pai = categorias.find(p => p.id === s.id_pai)
+                  return { value: s.id, label: s.descricao, icone: s.icone ?? undefined, cor: s.cor ?? undefined, grupo: pai?.descricao ?? '' }
+                }),
+              ]}
+            />
+          </div>
+
           {/* Status */}
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Status</p>
@@ -541,20 +664,22 @@ export default function RelatoriosPage() {
           </div>
 
           {/* Botoes */}
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
             <FiltrosSalvosBtn
               pagina="relatorios"
-              filtAtual={{ filtContas, filtStatus, incluirTransf }}
-              temFiltroAtivo={filtContas.length > 0 || filtStatus.length > 0 || incluirTransf}
+              filtAtual={{ filtContas, filtCats, filtStatus, incluirTransf }}
+              temFiltroAtivo={filtContas.length > 0 || filtCats.length > 0 || filtStatus.length > 0 || incluirTransf}
               onAplicar={d => {
                 const newContas = (d.filtContas as string[]) ?? []
                 setPgState({
                   filtContas:    newContas,
+                  filtCats:      (d.filtCats      as string[]) ?? [],
                   filtStatus:    (d.filtStatus    as string[]) ?? [],
                   incluirTransf: (d.incluirTransf as boolean)  ?? false,
                 })
                 if (buscado) buscar(newContas)
               }}
+              onLimpar={() => setPgState({ filtContas: [], filtCats: [], filtStatus: [], incluirTransf: false })}
             />
             {buscado && (
               <button
@@ -859,10 +984,11 @@ export default function RelatoriosPage() {
                           </td>
                           <td/>
                         </tr>
-                        {/* Lançamentos individuais (expandido) */}
+                        {/* Lançamentos individuais (expandido) — 4º nível: clicar exibe detalhes */}
                         {expandido && g.lancamentos.map(l => (
                           <tr key={l.id}
-                            className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors"
+                            onClick={() => setLancamentoEditando(l)}
+                            className="cursor-pointer border-b border-white/[0.02] hover:bg-white/[0.04] transition-colors"
                             style={{ background: 'rgba(255,255,255,0.015)' }}>
                             <td className="px-4 py-2 pl-10">
                               <span className="text-[10px]" style={{ color: '#8b92a8' }}>
@@ -896,10 +1022,10 @@ export default function RelatoriosPage() {
                             </td>
                             <td className="px-2 py-2 text-center">
                               <button
-                                onClick={e => { e.stopPropagation(); setLancamentoEditando(l) }}
-                                className="w-6 h-6 rounded-md border border-white/10 flex items-center justify-center transition-all hover:bg-white/10 mx-auto"
-                                style={{ color: '#8b92a8' }}
-                                title="Editar lançamento"
+                                onClick={e => e.stopPropagation()}
+                                className="w-6 h-6 rounded-md flex items-center justify-center"
+                                style={{ color: '#4a5168' }}
+                                title="Clique na linha para ver detalhes"
                               >
                                 <Pencil size={10} />
                               </button>

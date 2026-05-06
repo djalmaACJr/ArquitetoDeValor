@@ -21,9 +21,11 @@ interface Props {
   temFiltroAtivo: boolean
   /** Chamado ao clicar num filtro salvo — recebe `dados` como foi salvo */
   onAplicar: (dados: Record<string, unknown>) => void
+  /** Chamado ao clicar em "Limpar filtros" — se omitido, botão não aparece */
+  onLimpar?: () => void
 }
 
-export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar }: Props) {
+export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar, onLimpar }: Props) {
   const { filtros, carregando, salvar } = useFiltrosSalvos(pagina)
   const [aberto, setAberto] = useState(false)
   const [nome, setNome]     = useState('')
@@ -49,7 +51,17 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar 
   }
 
   return (
-    <div ref={ref} className="relative flex-shrink-0">
+    <div ref={ref} className="relative flex-shrink-0 flex items-center gap-1.5">
+      {/* Limpar filtros */}
+      {temFiltroAtivo && onLimpar && (
+        <button
+          onClick={onLimpar}
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all hover:bg-white/5"
+          style={{ borderColor: 'rgba(248,113,113,0.3)', color: '#f87171' }}
+        >
+          × Limpar
+        </button>
+      )}
       {/* Botão principal */}
       <button
         onClick={() => setAberto(v => !v)}
