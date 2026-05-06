@@ -22,6 +22,7 @@ Deno.serve(async (req: Request) => {
   try {
     if (m === "GET"    && !id) return await listar(c, userId, url.searchParams);
     if (m === "POST")          return await criar(c, await req.json(), userId);
+    if (m === "PUT"    &&  id) return await renomear(c, id, await req.json(), userId);
     if (m === "DELETE" &&  id) return await excluir(c, id, userId);
     return erro("Rota não encontrada", 404);
   } catch (e) {
@@ -84,6 +85,35 @@ async function criar(
   logSuccess("Filtro criado", { id: data.id, pagina, nome });
   logResponse(201, data);
   return json(data, 201);
+}
+
+async function renomear(
+  c: ReturnType<typeof db>,
+  id: string,
+  body: Record<string, unknown>,
+  userId: string,
+) {
+  const { nome } = body;
+  logRequest("PUT", `/filtros/${id}`, { nome });
+
+  if (!nome || typeof nome !== "string" || !nome.trim())
+    return erro("nome é obrigatório");
+  if (String(nome).length > 50)
+    return erro("nome deve ter no máximo 50 caracteres");
+
+  const { data, error } = await c
+    .from("filtros_salvos")
+    .update({ nome: String(nome).trim() })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select()
+    .single();
+
+  if (error) { logError("Renomear filtro", error); return erro(error.message); }
+
+  logSuccess("Filtro renomeado", { id, nome });
+  logResponse(200, data);
+  return json(data);
 }
 
 async function excluir(

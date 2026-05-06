@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
-import { User, Lock, Check, AlertCircle, Trash2, Bookmark, X } from 'lucide-react'
+import { User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown, Pencil } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { apiMutate } from '../lib/api'
 import { useFiltrosSalvos } from '../hooks/useFiltrosSalvos'
+import { useContas } from '../hooks/useContas'
+import { useCategorias } from '../hooks/useCategorias'
 
 type Feedback = { tipo: 'ok' | 'erro'; msg: string }
 
@@ -127,13 +129,68 @@ export default function PerfilPage() {
   }
 
   // ── Filtros salvos ──────────────────────────────────────────
-  const { filtros, carregando: carregandoFiltros, excluir: excluirFiltro, excluirTodos } =
-    useFiltrosSalvos()  // sem pagina → carrega todos
+  const { filtros, carregando: carregandoFiltros, renomear: renomearFiltro, excluir: excluirFiltro, excluirTodos } =
+    useFiltrosSalvos()
+
+  const [editandoId,   setEditandoId]   = useState<string | null>(null)
+  const [editandoNome, setEditandoNome] = useState('')
+  const [salvandoNome, setSalvandoNome] = useState(false)
+
+  const iniciarEdicao = (id: string, nomeAtual: string) => {
+    setEditandoId(id)
+    setEditandoNome(nomeAtual)
+    setFiltroExpandido(null)
+  }
+
+  const confirmarEdicao = async (id: string) => {
+    const n = editandoNome.trim()
+    if (!n) return
+    setSalvandoNome(true)
+    await renomearFiltro(id, n)
+    setSalvandoNome(false)
+    setEditandoId(null)
+  }
+
+  const { contas }     = useContas()
+  const { categorias } = useCategorias()
+
+  const [filtroExpandido, setFiltroExpandido] = useState<string | null>(null)
 
   const PAGINA_LABEL: Record<string, string> = {
     extrato:    'Extrato',
     relatorios: 'Relatórios',
     dashboard:  'Dashboard',
+  }
+
+  const STATUS_LABEL: Record<string, string> = {
+    PAGO: 'Pago', PENDENTE: 'Pendente', PROJECAO: 'Projeção',
+  }
+
+  function detalhesFiltro(dados: Record<string, unknown>): { label: string; valor: string }[] {
+    const linhas: { label: string; valor: string }[] = []
+    const ids = (key: string) => (dados[key] as string[] | undefined) ?? []
+
+    const contaIds = ids('filtContas')
+    if (contaIds.length) {
+      const nomes = contaIds.map(id => contas.find(c => c.conta_id === id)?.nome ?? id)
+      linhas.push({ label: 'Contas', valor: nomes.join(', ') })
+    }
+
+    const catIds = ids('filtCats')
+    if (catIds.length) {
+      const nomes = catIds.map(id => categorias.find(c => c.id === id)?.descricao ?? id)
+      linhas.push({ label: 'Categorias', valor: nomes.join(', ') })
+    }
+
+    const statusIds = ids('filtStatus')
+    if (statusIds.length) {
+      linhas.push({ label: 'Status', valor: statusIds.map(s => STATUS_LABEL[s] ?? s).join(', ') })
+    }
+
+    if (dados.incluirTransf === true)  linhas.push({ label: 'Transferências', valor: 'Incluídas' })
+    if (dados.comSaldo === false)      linhas.push({ label: 'Saldo anterior', valor: 'Desativado' })
+
+    return linhas
   }
 
   // ── Exclusão de conta ───────────────────────────────────────
@@ -252,27 +309,119 @@ export default function PerfilPage() {
           ) : (
             <>
               <div className="space-y-0.5">
-                {filtros.map(f => (
-                  <div key={f.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] group">
-                    <span
-                      className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
-                      style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
-                    >
-                      {PAGINA_LABEL[f.pagina] ?? f.pagina}
-                    </span>
-                    <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>
-                      {f.nome}
-                    </span>
-                    <button
-                      onClick={() => excluirFiltro(f.id)}
-                      title="Excluir filtro"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-red-400/10 flex-shrink-0"
-                      style={{ color: '#f87171' }}
-                    >
-                      <X size={12}/>
-                    </button>
-                  </div>
-                ))}
+                {filtros.map(f => {
+                  const expandido = filtroExpandido === f.id
+                  const editando  = editandoId === f.id
+                  const detalhes  = detalhesFiltro(f.dados)
+                  return (
+                    <div key={f.id}>
+                      {/* ── Modo edição ── */}
+                      {editando ? (
+                        <div className="flex items-center gap-2 px-2 py-1.5">
+                          <span
+                            className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                            style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
+                          >
+                            {PAGINA_LABEL[f.pagina] ?? f.pagina}
+                          </span>
+                          <input
+                            autoFocus
+                            value={editandoNome}
+                            onChange={e => setEditandoNome(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') confirmarEdicao(f.id)
+                              if (e.key === 'Escape') setEditandoId(null)
+                            }}
+                            className="flex-1 text-[12px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
+                            style={{ color: '#e8eaf0' }}
+                            maxLength={50}
+                          />
+                          <button
+                            onClick={() => confirmarEdicao(f.id)}
+                            disabled={!editandoNome.trim() || salvandoNome}
+                            title="Salvar nome"
+                            className="w-5 h-5 flex items-center justify-center rounded hover:bg-av-green/10 flex-shrink-0 disabled:opacity-40"
+                            style={{ color: '#00c896' }}
+                          >
+                            <Check size={12}/>
+                          </button>
+                          <button
+                            onClick={() => setEditandoId(null)}
+                            title="Cancelar"
+                            className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/5 flex-shrink-0"
+                            style={{ color: '#8b92a8' }}
+                          >
+                            <X size={12}/>
+                          </button>
+                        </div>
+                      ) : (
+                        /* ── Modo normal ── */
+                        <div
+                          className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] group cursor-pointer"
+                          onClick={() => setFiltroExpandido(expandido ? null : f.id)}
+                        >
+                          <span
+                            className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                            style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
+                          >
+                            {PAGINA_LABEL[f.pagina] ?? f.pagina}
+                          </span>
+                          <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>
+                            {f.nome}
+                          </span>
+                          <ChevronDown
+                            size={12}
+                            className="flex-shrink-0 transition-transform"
+                            style={{
+                              color: '#4a5168',
+                              transform: expandido ? 'rotate(180deg)' : 'rotate(0deg)',
+                            }}
+                          />
+                          <button
+                            onClick={e => { e.stopPropagation(); iniciarEdicao(f.id, f.nome) }}
+                            title="Renomear filtro"
+                            className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 flex-shrink-0"
+                            style={{ color: '#8b92a8' }}
+                          >
+                            <Pencil size={11}/>
+                          </button>
+                          <button
+                            onClick={e => { e.stopPropagation(); excluirFiltro(f.id) }}
+                            title="Excluir filtro"
+                            className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-red-400/10 flex-shrink-0"
+                            style={{ color: '#f87171' }}
+                          >
+                            <X size={12}/>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* ── Detalhes expandidos ── */}
+                      {expandido && !editando && (
+                        <div className="mx-2 mb-1 px-3 py-2 rounded-lg"
+                          style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}
+                        >
+                          {detalhes.length === 0 ? (
+                            <p className="text-[11px]" style={{ color: '#4a5168' }}>Sem filtros específicos definidos.</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {detalhes.map(d => (
+                                <div key={d.label} className="flex gap-2">
+                                  <span className="text-[10px] font-semibold w-24 flex-shrink-0" style={{ color: '#8b92a8' }}>
+                                    {d.label}
+                                  </span>
+                                  <span className="text-[11px]" style={{ color: '#c5cad8' }}>
+                                    {d.valor}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
               <div className="flex justify-end pt-3 mt-2 border-t border-white/8">
                 <button

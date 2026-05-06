@@ -430,8 +430,8 @@ export default function LancamentosPage() {
   )
 
   // CategoriasCategorias pai para o select (exclui protegidas)
-  const catsPai = categorias.filter(c => !c.id_pai && !c.protegida)
-  const catsSub = categorias.filter(c => !!c.id_pai)
+  const catsPai = categorias.filter(c => !c.id_pai && !c.protegida && c.ativa)
+  const catsSub = categorias.filter(c => !!c.id_pai && c.ativa)
 
   return (
     <div className="p-5">
@@ -453,7 +453,7 @@ export default function LancamentosPage() {
           className="w-40"
           values={filtContas}
           onChange={setFiltContas}
-          options={contas.map(c => ({
+          options={contas.filter(c => c.ativa).map(c => ({
             value: c.conta_id,
             label: c.nome,
             cor: c.cor ?? undefined,
@@ -655,7 +655,8 @@ export default function LancamentosPage() {
                       const isAtrasado = !isPago && l.data <= hoje
                       return (
                         <div key={l.id}
-                          className="grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center"
+                          onClick={() => abrirEditar(l)}
+                          className="grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center cursor-pointer"
                           style={{
                             gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px',
                             ...(isAtrasado && {
@@ -667,7 +668,7 @@ export default function LancamentosPage() {
                           {/* Checkbox seleção */}
                           <div className="flex items-center justify-center">
                             <span
-                              onClick={() => toggleSelecionado(l.id)}
+                              onClick={e => { e.stopPropagation(); toggleSelecionado(l.id) }}
                               className="w-4 h-4 rounded flex items-center justify-center border cursor-pointer transition-all flex-shrink-0"
                               style={{
                                 background: selecionados.has(l.id) ? '#00c896' : 'transparent',
@@ -744,7 +745,7 @@ export default function LancamentosPage() {
                           </div>
 
                           {/* Status — clicável */}
-                          <div className="relative">
+                          <div className="relative" onClick={e => e.stopPropagation()}>
                             <div onClick={() => setStatusOpen(statusOpen === l.id ? null : l.id)}
                               className="cursor-pointer">
                               <StatusBadge status={l.status} />
@@ -843,7 +844,8 @@ export default function LancamentosPage() {
                         const podeEditar = !(isRecorr && isPago && l.nr_parcela != null && l.total_parcelas != null && l.nr_parcela < l.total_parcelas)
                         return (
                           <div key={l.id}
-                            className="bg-[#1a1f2e] rounded-xl p-3"
+                            onClick={() => abrirEditar(l)}
+                            className="bg-[#1a1f2e] rounded-xl p-3 cursor-pointer"
                             style={{
                               border: isAtrasado ? '1px solid rgba(248,113,113,0.4)' : '1px solid rgba(255,255,255,0.1)',
                               ...(isAtrasado && {

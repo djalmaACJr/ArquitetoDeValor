@@ -10,19 +10,22 @@ export function useFiltrosSalvos(pagina?: string) {
 
   const carregar = useCallback(async () => {
     setCarregando(true)
-    const path = pagina
-      ? `/filtros?pagina=${encodeURIComponent(pagina)}`
-      : '/filtros'
-    const { ok, dados } = await apiFetch<FiltroSalvo[]>(path)
+    const { ok, dados } = await apiFetch<FiltroSalvo[]>('/filtros')
     if (ok && Array.isArray(dados)) setFiltros(dados)
     setCarregando(false)
-  }, [pagina])
+  }, [])
 
   useEffect(() => { carregar() }, [carregar])
 
   const salvar = async (nome: string, dados: Record<string, unknown>): Promise<boolean> => {
     const { ok } = await apiMutate('/filtros', 'POST', { pagina, nome, dados })
     if (ok) await carregar()
+    return ok
+  }
+
+  const renomear = async (id: string, novoNome: string): Promise<boolean> => {
+    const { ok } = await apiMutate(`/filtros/${id}`, 'PUT', { nome: novoNome.trim() })
+    if (ok) setFiltros(prev => prev.map(f => f.id === id ? { ...f, nome: novoNome.trim() } : f))
     return ok
   }
 
@@ -37,5 +40,5 @@ export function useFiltrosSalvos(pagina?: string) {
     setFiltros([])
   }
 
-  return { filtros, carregando, salvar, excluir, excluirTodos }
+  return { filtros, carregando, salvar, renomear, excluir, excluirTodos }
 }

@@ -322,7 +322,7 @@ export default function DrawerLancamento({
   ]
 
   // ── Salvar ─────────────────────────────────────────────────
-  const salvar = async () => {
+  const salvar = async (criarNovo = false) => {
     if (!form.descricao.trim()) { 
       setErro('Descrição é obrigatória.'); 
       // Rolar para mostrar o erro de validação
@@ -407,7 +407,13 @@ export default function DrawerLancamento({
       const url = editando ? `/transferencias/${editando.id_par_transferencia ?? editando.id}` : '/transferencias'
       const res = await apiMutate(url, editando ? 'PUT' : 'POST', payload)
       setSalvando(false)
-      if (res.ok) { onSalvo?.(); onFechar() } else setErro(res.erro ?? 'Erro ao salvar.')
+      if (res.ok) {
+        onSalvo?.()
+        if (criarNovo) {
+          setForm({ ...FORM_VAZIO, tipo: form.tipo, data: form.data, conta_id: form.conta_id })
+          setTimeout(() => descricaoRef.current?.focus(), 50)
+        } else { onFechar() }
+      } else setErro(res.erro ?? 'Erro ao salvar.')
       return
     }
 
@@ -457,7 +463,14 @@ export default function DrawerLancamento({
     console.log('OK:', res.ok)
     console.log('Dados:', res.dados)
     setSalvando(false)
-    if (res.ok) { onSalvo?.(); onFechar() } else {
+    if (res.ok) {
+      onSalvo?.()
+      if (criarNovo) {
+        setForm({ ...FORM_VAZIO, tipo: form.tipo, data: form.data, conta_id: form.conta_id })
+        setEscopo('SOMENTE_ESTE'); setExpandindo(false)
+        setTimeout(() => descricaoRef.current?.focus(), 50)
+      } else { onFechar() }
+    } else {
       setErro(res.erro ?? 'Erro ao salvar.')
       // Rolar para mostrar a mensagem de erro dentro do Drawer
       setTimeout(() => {
@@ -515,7 +528,17 @@ export default function DrawerLancamento({
               </button>
             )}
             <BtnCancelar onClick={onFechar} />
-            <BtnSalvar editando={!!editando} salvando={salvando} onClick={salvar}
+            {!editando && (
+              <button
+                onClick={() => salvar(true)}
+                disabled={salvando}
+                className="px-3 py-2.5 rounded-lg border text-[12px] font-semibold transition-all hover:bg-av-green/5"
+                style={{ borderColor: 'rgba(0,200,150,0.3)', color: '#00c896' }}
+              >
+                {salvando ? 'Salvando…' : '+ Criar novo'}
+              </button>
+            )}
+            <BtnSalvar editando={!!editando} salvando={salvando} onClick={() => salvar()}
               labelSalvar="Salvar" labelEditar="Atualizar" />
           </>
         }

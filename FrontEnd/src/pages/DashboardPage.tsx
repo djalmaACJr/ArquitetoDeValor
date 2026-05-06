@@ -17,6 +17,7 @@ import type { Lancamento } from '../hooks/useLancamentos'
 import { supabase } from '../lib/supabase'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
+import { FiltrosSalvosBtn } from '../components/ui/FiltrosSalvosBtn'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, LineElement, PointElement)
 
@@ -672,7 +673,7 @@ function formatRelativo(iso: string): string {
   return formatData(iso.split('T')[0])
 }
 
-function CardUltimasAlteracoes({ contas }: { contas: Conta[] }) {
+function CardUltimasAlteracoes({ contas, onEditar }: { contas: Conta[]; onEditar: (id: string) => void }) {
   const [aberto,  setAberto]  = useState(false)
   const [items,   setItems]   = useState<AlteracaoItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -723,7 +724,7 @@ function CardUltimasAlteracoes({ contas }: { contas: Conta[] }) {
                 const conta = contas.find(c => c.conta_id === item.conta_id)
                 const isRec = item.tipo === 'RECEITA'
                 return (
-                  <div key={item.id} className="flex items-start gap-2 py-1.5 border-b border-gray-100 dark:border-gray-700 last:border-0">
+                  <div key={item.id} onClick={() => onEditar(item.id)} className="flex items-start gap-2 py-1.5 border-b border-gray-100 dark:border-gray-700 last:border-0 cursor-pointer hover:bg-white/5 rounded transition-colors">
                     <span className={`mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 ${isRec ? 'bg-green-500' : 'bg-red-400'}`}/>
                     <div className="flex-1 min-w-0">
                       <p className="text-[12px] text-gray-700 dark:text-gray-200 truncate">{item.descricao || '—'}</p>
@@ -896,6 +897,7 @@ export default function DashboardPage() {
     return () => document.removeEventListener('keydown', onKey)
   }, [mes, setMes])
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
+  const [editandoId,         setEditandoId]         = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
   const handleRefresh = async () => {
@@ -950,6 +952,13 @@ export default function DashboardPage() {
               </option>
             ))}
           </select>
+
+          <FiltrosSalvosBtn
+            pagina="dashboard"
+            filtAtual={{ filtContas: contasFiltro }}
+            temFiltroAtivo={contasFiltro.length > 0}
+            onAplicar={d => setPgState({ contasFiltro: (d.filtContas as string[]) ?? [] })}
+          />
 
           {/* Botao atualizar */}
           <button
@@ -1013,7 +1022,7 @@ export default function DashboardPage() {
               filtravel
               mes={mes}
             />
-            <CardUltimasAlteracoes contas={contas} />
+            <CardUltimasAlteracoes contas={contas} onEditar={id => setEditandoId(id)} />
           </div>
 
           {/* Linha 3: grafico de barras */}
@@ -1056,6 +1065,14 @@ export default function DashboardPage() {
           onFechar={() => setLancamentoEditando(null)}
           onSalvo={() => { setLancamentoEditando(null); refetch() }}
           onExcluido={() => { setLancamentoEditando(null); refetch() }}
+        />
+      )}
+      {editandoId && !lancamentoEditando && (
+        <DrawerLancamento
+          lancamentoId={editandoId}
+          onFechar={() => setEditandoId(null)}
+          onSalvo={() => { setEditandoId(null); refetch() }}
+          onExcluido={() => { setEditandoId(null); refetch() }}
         />
       )}
     </div>

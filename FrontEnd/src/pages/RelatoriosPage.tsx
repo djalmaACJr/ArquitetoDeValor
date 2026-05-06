@@ -1,5 +1,5 @@
 // src/pages/RelatoriosPage.tsx
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react'
 import { ChevronDown, ChevronRight, Download, RefreshCw, Filter, Pencil } from 'lucide-react'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 
@@ -45,6 +45,13 @@ interface GrupoPai {
   totalPorMes: Record<string, number>
   total: number
   aberto: boolean
+}
+
+interface GrupoDescricao {
+  descricao: string
+  lancamentos: Lancamento[]
+  total: number
+  qtd: number
 }
 
 // -- Helpers ----------------------------------------------------
@@ -195,6 +202,7 @@ export default function RelatoriosPage() {
   const drillRef    = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [lancamentoEditando, setLancamentoEditando] = useState<any | null>(null)
+  const [expandidosDrill,   setExpandidosDrill]    = useState<Set<string>>(new Set())
   const [drillDown,   setDrillDown]   = useState<{
     titulo: string
     categoria_id: string | null
@@ -208,13 +216,14 @@ export default function RelatoriosPage() {
   const meses = useMemo(() => gerarMeses(inicio, fim), [inicio, fim])
 
   // -- Buscar dados ---------------------------------------------
-  const buscar = useCallback(async () => {
+  const buscar = useCallback(async (contasOverride?: string[]) => {
+    const contas = contasOverride ?? filtContas
     setLoading(true)
     try {
       const todos: Lancamento[] = []
       await Promise.all(meses.map(async m => {
         const params = new URLSearchParams({ mes: m, per_page: '1000', saldo: 'true' })
-        if (filtContas.length === 1) params.set('conta_id', filtContas[0])
+        if (contas.length === 1) params.set('conta_id', contas[0])
         const res = await apiFetch<{ dados: Lancamento[] }>(`/transacoes?${params}`)
         const lista = (res.dados?.dados ?? res.dados ?? []) as Lancamento[]
         todos.push(...lista)
@@ -430,6 +439,24 @@ export default function RelatoriosPage() {
     return lista.sort((a, b) => a.data.localeCompare(b.data))
   }, [drillDown, lancamentos, buscado, filtStatus, filtContas, incluirTransf, meses])
 
+  // Grupos por descrição dentro do drill-down
+  const gruposDescricao = useMemo((): GrupoDescricao[] => {
+    if (!lancamentosDrill.length) return []
+    const map = new Map<string, GrupoDescricao>()
+    for (const l of lancamentosDrill) {
+      const desc = l.descricao || '—'
+      if (!map.has(desc)) map.set(desc, { descricao: desc, lancamentos: [], total: 0, qtd: 0 })
+      const g = map.get(desc)!
+      g.lancamentos.push(l)
+      g.total += l.valor
+      g.qtd++
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total)
+  }, [lancamentosDrill])
+
+  // Reset expansão ao trocar de drill-down
+  useEffect(() => { setExpandidosDrill(new Set()) }, [drillDown])
+
   return (
     <div className="p-5 min-h-screen" style={{ background: '#0e1320' }}>
       {/* Topbar */}
@@ -468,7 +495,7 @@ export default function RelatoriosPage() {
               className="w-44"
               values={filtContas}
               onChange={setFiltContas}
-              options={contas.map(c => ({ value: c.conta_id, label: c.nome, cor: c.cor ?? undefined }))}
+              options={contas.filter(c => c.ativa).map(c => ({ value: c.conta_id, label: c.nome, cor: c.cor ?? undefined }))}
             />
           </div>
 
@@ -515,6 +542,20 @@ export default function RelatoriosPage() {
 
           {/* Botoes */}
           <div className="flex items-center gap-2 ml-auto">
+            <FiltrosSalvosBtn
+              pagina="relatorios"
+              filtAtual={{ filtContas, filtStatus, incluirTransf }}
+              temFiltroAtivo={filtContas.length > 0 || filtStatus.length > 0 || incluirTransf}
+              onAplicar={d => {
+                const newContas = (d.filtContas as string[]) ?? []
+                setPgState({
+                  filtContas:    newContas,
+                  filtStatus:    (d.filtStatus    as string[]) ?? [],
+                  incluirTransf: (d.incluirTransf as boolean)  ?? false,
+                })
+                if (buscado) buscar(newContas)
+              }}
+            />
             {buscado && (
               <button
                 onClick={exportarExcel}
@@ -526,7 +567,7 @@ export default function RelatoriosPage() {
               </button>
             )}
             <button
-              onClick={buscar}
+              onClick={() => buscar()}
               disabled={loading || meses.length === 0}
               className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-all hover:opacity-90"
               style={{ background: '#00c896', color: '#0a0f1a', opacity: loading ? 0.7 : 1 }}
@@ -744,7 +785,7 @@ export default function RelatoriosPage() {
             <div>
               <p className="text-[13px] font-bold" style={{ color: '#e8eaf0' }}>{drillDown.titulo}</p>
               <p className="text-[10px] mt-0.5" style={{ color: '#8b92a8' }}>
-                {lancamentosDrill.length} lançamento(s)
+                {gruposDescricao.length} descrição(ões) · {lancamentosDrill.length} lançamento(s)
               </p>
             </div>
             <button
@@ -783,51 +824,91 @@ export default function RelatoriosPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lancamentosDrill.map(l => (
-                    <tr key={l.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
-                      <td className="px-4 py-2.5">
-                        <span className="text-[11px]" style={{ color: '#8b92a8' }}>
-                          {l.data.split('-').reverse().join('/')}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <span className="text-[12px] truncate block" style={{ color: '#e8eaf0' }}>{l.descricao}</span>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <span className="text-[11px] truncate block" style={{ color: '#c5cad8' }}>
-                          {l.categoria_pai_nome ? `${l.categoria_pai_nome} / ${l.categoria_nome}` : (l.categoria_nome ?? '-')}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <span className="text-[11px]" style={{ color: '#c5cad8' }}>{l.conta_nome ?? '-'}</span>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap"
-                          style={{
-                            background: l.status === 'PAGO' ? 'rgba(0,200,150,0.12)' : l.status === 'PENDENTE' ? 'rgba(77,166,255,0.12)' : 'rgba(240,180,41,0.12)',
-                            color:      l.status === 'PAGO' ? '#00c896'              : l.status === 'PENDENTE' ? '#4da6ff'              : '#f0b429',
-                          }}>
-                          {l.status === 'PAGO' ? 'Pago' : l.status === 'PENDENTE' ? 'Pendente' : 'Projeção'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <span className="text-[12px] font-bold whitespace-nowrap"
-                          style={{ color: l.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}>
-                          {l.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(l.valor)}
-                        </span>
-                      </td>
-                      <td className="px-2 py-2.5 text-center">
-                        <button
-                          onClick={() => setLancamentoEditando(l)}
-                          className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center transition-all hover:bg-white/10 mx-auto"
-                          style={{ color: '#8b92a8' }}
-                          title="Editar lançamento"
+                  {gruposDescricao.map(g => {
+                    const expandido = expandidosDrill.has(g.descricao)
+                    const tipoGrupo = g.lancamentos[0]?.tipo ?? 'DESPESA'
+                    const cor = tipoGrupo === 'RECEITA' ? '#00c896' : '#f87171'
+                    return (
+                      <Fragment key={g.descricao}>
+                        {/* Linha do grupo (descrição) */}
+                        <tr
+                          onClick={() => setExpandidosDrill(prev => {
+                            const n = new Set(prev)
+                            n.has(g.descricao) ? n.delete(g.descricao) : n.add(g.descricao)
+                            return n
+                          })}
+                          className="cursor-pointer border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors"
+                          style={{ background: expandido ? 'rgba(255,255,255,0.02)' : undefined }}
                         >
-                          <Pencil size={12} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                          <td colSpan={5} className="px-4 py-2.5">
+                            <div className="flex items-center gap-2">
+                              {expandido
+                                ? <ChevronDown size={12} style={{ color: '#4a5168', flexShrink: 0 }}/>
+                                : <ChevronRight size={12} style={{ color: '#4a5168', flexShrink: 0 }}/>}
+                              <span className="text-[12px] font-medium truncate" style={{ color: '#e8eaf0' }}>{g.descricao}</span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0"
+                                style={{ background: 'rgba(255,255,255,0.06)', color: '#8b92a8' }}>
+                                {g.qtd}×
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <span className="text-[12px] font-bold whitespace-nowrap" style={{ color: cor }}>
+                              {formatBRL(g.total)}
+                            </span>
+                          </td>
+                          <td/>
+                        </tr>
+                        {/* Lançamentos individuais (expandido) */}
+                        {expandido && g.lancamentos.map(l => (
+                          <tr key={l.id}
+                            className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors"
+                            style={{ background: 'rgba(255,255,255,0.015)' }}>
+                            <td className="px-4 py-2 pl-10">
+                              <span className="text-[10px]" style={{ color: '#8b92a8' }}>
+                                {l.data.split('-').reverse().join('/')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className="text-[11px] truncate block" style={{ color: '#c5cad8' }}>{l.descricao}</span>
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className="text-[10px] truncate block" style={{ color: '#c5cad8' }}>
+                                {l.categoria_pai_nome ? `${l.categoria_pai_nome} / ${l.categoria_nome}` : (l.categoria_nome ?? '-')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className="text-[10px]" style={{ color: '#c5cad8' }}>{l.conta_nome ?? '-'}</span>
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap"
+                                style={{
+                                  background: l.status === 'PAGO' ? 'rgba(0,200,150,0.12)' : l.status === 'PENDENTE' ? 'rgba(77,166,255,0.12)' : 'rgba(240,180,41,0.12)',
+                                  color:      l.status === 'PAGO' ? '#00c896'              : l.status === 'PENDENTE' ? '#4da6ff'              : '#f0b429',
+                                }}>
+                                {l.status === 'PAGO' ? 'Pago' : l.status === 'PENDENTE' ? 'Pendente' : 'Projeção'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <span className="text-[11px] font-bold whitespace-nowrap" style={{ color: cor }}>
+                                {l.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(l.valor)}
+                              </span>
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <button
+                                onClick={e => { e.stopPropagation(); setLancamentoEditando(l) }}
+                                className="w-6 h-6 rounded-md border border-white/10 flex items-center justify-center transition-all hover:bg-white/10 mx-auto"
+                                style={{ color: '#8b92a8' }}
+                                title="Editar lançamento"
+                              >
+                                <Pencil size={10} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
                 {/* Total do drill-down */}
                 <tfoot>

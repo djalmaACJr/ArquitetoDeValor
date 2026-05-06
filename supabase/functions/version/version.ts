@@ -1,7 +1,7 @@
 // SISTEMA DE VERSÃO - Backend
 // Mantido sincronizado com o frontend (mesma versão do arquivo raiz)
 
-export const BACKEND_VERSION = "1.0.3"
+export const BACKEND_VERSION = "1.2.0"
 
 export const getVersionInfo = () => ({
   version: BACKEND_VERSION,

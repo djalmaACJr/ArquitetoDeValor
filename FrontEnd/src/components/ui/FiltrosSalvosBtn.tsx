@@ -1,9 +1,16 @@
 // src/components/ui/FiltrosSalvosBtn.tsx
-// Botão + dropdown para salvar, listar e aplicar filtros nomeados.
-// Reutilizável em qualquer página — identifica-se pela prop `pagina`.
+// Botão + dropdown para salvar e aplicar filtros nomeados.
+// Exibe TODOS os filtros do usuário (qualquer página) com badge de origem.
+// Exclusão de filtros só é permitida na tela de Perfil.
 import { useState, useEffect, useRef } from 'react'
-import { Bookmark, X } from 'lucide-react'
+import { Bookmark } from 'lucide-react'
 import { useFiltrosSalvos } from '../../hooks/useFiltrosSalvos'
+
+const PAGINA_LABEL: Record<string, string> = {
+  extrato:    'Extrato',
+  relatorios: 'Relatórios',
+  dashboard:  'Dashboard',
+}
 
 interface Props {
   /** Identificador da página — ex.: 'extrato', 'relatorios' */
@@ -17,7 +24,7 @@ interface Props {
 }
 
 export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar }: Props) {
-  const { filtros, carregando, salvar, excluir } = useFiltrosSalvos(pagina)
+  const { filtros, carregando, salvar } = useFiltrosSalvos(pagina)
   const [aberto, setAberto] = useState(false)
   const [nome, setNome]     = useState('')
   const [salvando, setSalvando] = useState(false)
@@ -55,25 +62,26 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar 
         }}
       >
         <Bookmark size={13} />
-        {filtros.length > 0 && (
-          <span className="text-[10px] font-bold" style={{ color: 'inherit' }}>
-            {filtros.length}
-          </span>
-        )}
+        <span className="text-[11px] font-medium" style={{ color: 'inherit' }}>
+          {filtros.length > 0 ? `Filtros (${filtros.length})` : 'Filtros'}
+        </span>
       </button>
 
       {/* Dropdown */}
       {aberto && (
         <div
           className="absolute top-9 right-0 z-30 rounded-xl border shadow-xl"
-          style={{ background: '#1a1f2e', borderColor: 'rgba(255,255,255,0.1)', minWidth: 280 }}
+          style={{ background: '#1a1f2e', borderColor: 'rgba(255,255,255,0.1)', minWidth: 300 }}
         >
           {/* Header */}
           <div className="px-4 py-2.5 border-b border-white/10">
             <p className="text-[12px] font-semibold" style={{ color: '#e8eaf0' }}>Filtros salvos</p>
+            <p className="text-[10px] mt-0.5" style={{ color: '#4a5168' }}>
+              Clique para aplicar · Gerencie na tela de Perfil
+            </p>
           </div>
 
-          {/* Lista */}
+          {/* Lista — todos os filtros do usuário */}
           {carregando ? (
             <p className="px-4 py-3 text-[11px]" style={{ color: '#8b92a8' }}>Carregando…</p>
           ) : filtros.length === 0 ? (
@@ -81,25 +89,23 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar 
               Nenhum filtro salvo ainda.
             </p>
           ) : (
-            <div className="py-1 max-h-52 overflow-y-auto">
+            <div className="py-1 max-h-56 overflow-y-auto">
               {filtros.map(f => (
-                <div key={f.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.03] group">
-                  <button
-                    onClick={() => { onAplicar(f.dados); setAberto(false) }}
-                    className="flex-1 text-left text-[12px] truncate"
-                    style={{ color: '#c5cad8' }}
+                <button
+                  key={f.id}
+                  onClick={() => { onAplicar(f.dados); setAberto(false) }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.04] transition-colors text-left"
+                >
+                  <span
+                    className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                    style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
                   >
+                    {PAGINA_LABEL[f.pagina] ?? f.pagina}
+                  </span>
+                  <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>
                     {f.nome}
-                  </button>
-                  <button
-                    onClick={() => excluir(f.id)}
-                    title="Excluir filtro"
-                    className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-red-400/10 flex-shrink-0"
-                    style={{ color: '#f87171' }}
-                  >
-                    <X size={11} />
-                  </button>
-                </div>
+                  </span>
+                </button>
               ))}
             </div>
           )}
