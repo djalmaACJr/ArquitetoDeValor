@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, Download, RefreshCw, Filter, Pencil } from '
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 
 import { apiFetch } from '../lib/api'
-import { formatBRL, mesLabel } from '../lib/utils'
+import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG, STATUS_OPCOES } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
@@ -91,7 +91,7 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
   function toggleSub(key: string) {
     setExpandidosSubs(prev => {
       const n = new Set(prev)
-      n.has(key) ? n.delete(key) : n.add(key)
+      if (n.has(key)) { n.delete(key) } else { n.add(key) }
       return n
     })
   }
@@ -252,7 +252,7 @@ export default function RelatoriosPage() {
   const fim          = pgState.fim
   const filtStatus    = pgState.filtStatus
   const filtContas    = pgState.filtContas
-  const filtCats      = pgState.filtCats ?? []
+  const filtCats      = pgState.filtCats
   const incluirTransf = pgState.incluirTransf
   const setInicio        = (v: string)   => setPgState({ inicio: v })
   const setFim           = (v: string)   => setPgState({ fim: v })
@@ -630,11 +630,7 @@ export default function RelatoriosPage() {
               className="w-40"
               values={filtStatus}
               onChange={setFiltStatus}
-              options={[
-                { value: 'PAGO',     label: 'Pago',     cor: '#00c896' },
-                { value: 'PENDENTE', label: 'Pendente', cor: '#4da6ff' },
-                { value: 'PROJECAO', label: 'Projeção', cor: '#f0b429' },
-              ]}
+              options={STATUS_OPCOES}
             />
           </div>
 
@@ -959,7 +955,7 @@ export default function RelatoriosPage() {
                         <tr
                           onClick={() => setExpandidosDrill(prev => {
                             const n = new Set(prev)
-                            n.has(g.descricao) ? n.delete(g.descricao) : n.add(g.descricao)
+                            if (n.has(g.descricao)) { n.delete(g.descricao) } else { n.add(g.descricao) }
                             return n
                           })}
                           className="cursor-pointer border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors"
@@ -1009,10 +1005,10 @@ export default function RelatoriosPage() {
                             <td className="px-4 py-2">
                               <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap"
                                 style={{
-                                  background: l.status === 'PAGO' ? 'rgba(0,200,150,0.12)' : l.status === 'PENDENTE' ? 'rgba(77,166,255,0.12)' : 'rgba(240,180,41,0.12)',
-                                  color:      l.status === 'PAGO' ? '#00c896'              : l.status === 'PENDENTE' ? '#4da6ff'              : '#f0b429',
+                                  background: STATUS_BG[l.status]  ?? STATUS_BG.PENDENTE,
+                                  color:      STATUS_COR[l.status] ?? STATUS_COR.PENDENTE,
                                 }}>
-                                {l.status === 'PAGO' ? 'Pago' : l.status === 'PENDENTE' ? 'Pendente' : 'Projeção'}
+                                {STATUS_LABEL[l.status] ?? l.status}
                               </span>
                             </td>
                             <td className="px-4 py-2 text-right">

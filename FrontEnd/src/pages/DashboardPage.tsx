@@ -15,7 +15,7 @@ import {
   ArcElement, Tooltip, Legend, LineElement, PointElement,
 } from 'chart.js'
 import type { TooltipItem } from 'chart.js'
-import type { Conta, Transacao, DespesaCategoria } from '../types'
+import type { Conta, Transacao, DespesaCategoria, Categoria } from '../types'
 import type { Lancamento } from '../hooks/useLancamentos'
 import { supabase } from '../lib/supabase'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
@@ -702,6 +702,7 @@ function CardUltimasAlteracoes({ contas, onEditar }: { contas: Conta[]; onEditar
 
   useEffect(() => {
     if (!aberto) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     supabase
       .schema('arqvalor')
@@ -912,8 +913,8 @@ export default function DashboardPage() {
   const [oculto, setOculto] = useState(false)
 
   const { categorias } = useCategorias()
-  const catsPai = categorias.filter(c => !c.id_pai)
-  const catsSub = categorias.filter(c => !!c.id_pai)
+  const catsPai = categorias.filter((c: Categoria) => !c.id_pai)
+  const catsSub = categorias.filter((c: Categoria) => !!c.id_pai)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -971,7 +972,7 @@ export default function DashboardPage() {
             className="w-40"
             values={contasFiltro}
             onChange={setContasFiltro}
-            options={contas.filter(c => c.ativa).map(c => ({
+            options={contas.filter((c: Conta) => c.ativa).map((c: Conta) => ({
               value: c.conta_id,
               label: c.nome,
               cor: c.cor ?? undefined,
@@ -985,14 +986,14 @@ export default function DashboardPage() {
             values={filtCats}
             onChange={setFiltCats}
             options={[
-              ...catsPai.map(p => ({
+              ...catsPai.map((p: Categoria) => ({
                 value: p.id,
                 label: p.descricao,
                 icone: p.icone ?? undefined,
                 cor: p.cor ?? undefined,
               })),
-              ...catsSub.map(s => {
-                const pai = catsPai.find(p => p.id === s.id_pai)
+              ...catsSub.map((s: Categoria) => {
+                const pai = catsPai.find((p: Categoria) => p.id === s.id_pai)
                 return {
                   value: s.id,
                   label: s.descricao,

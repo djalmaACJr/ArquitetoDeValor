@@ -177,10 +177,11 @@ export default function DrawerLancamento({
   const [qtdAdicional,        setQtdAdicional]        = useState('3')
 
   const set = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
-  const tipoRef      = useRef<HTMLDivElement>(null)
-  const valorBtnRef  = useRef<HTMLButtonElement>(null)
-  const descricaoRef = useRef<HTMLInputElement>(null)
-  const ignorarFoco  = useRef(false)
+  const tipoRef              = useRef<HTMLDivElement>(null)
+  const valorBtnRef          = useRef<HTMLButtonElement>(null)
+  const descricaoRef         = useRef<HTMLInputElement>(null)
+  const ignorarFoco          = useRef(false)
+  const criarNovoPreserved   = useRef<null | Pick<FormState, 'tipo' | 'data' | 'conta_id' | 'status'>>(null)
 
   function abrirCalc() { setCalcAberta(true) }
 
@@ -201,7 +202,22 @@ export default function DrawerLancamento({
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (novoLancamento) { setEditando(null); setForm({ ...FORM_VAZIO, tipo: tipoInicial ?? 'DESPESA', conta_id: contaIdInicial ?? '', categoria_id: categoriaIdInicial ?? '' }); setEscopo('SOMENTE_ESTE'); setExpandindo(false); setQtdAdicional('3'); setCalcAberta(false); setTimeout(() => descricaoRef.current?.focus(), 320); return }
+    if (novoLancamento) {
+      const preserved = criarNovoPreserved.current
+      criarNovoPreserved.current = null
+      setEditando(null)
+      setForm({
+        ...FORM_VAZIO,
+        tipo:         preserved?.tipo     ?? tipoInicial ?? 'DESPESA',
+        data:         preserved?.data     ?? new Date().toISOString().slice(0, 10),
+        conta_id:     preserved?.conta_id ?? contaIdInicial ?? '',
+        status:       preserved?.status   ?? 'PAGO',
+        categoria_id: categoriaIdInicial ?? '',
+      })
+      setEscopo('SOMENTE_ESTE'); setExpandindo(false); setQtdAdicional('3'); setCalcAberta(false)
+      setTimeout(() => descricaoRef.current?.focus(), 320)
+      return
+    }
     if (lancamentoProp) {
       const formInicial = formDeLanc(lancamentoProp, todasParcelas)
       setEditando(lancamentoProp)
@@ -247,6 +263,7 @@ export default function DrawerLancamento({
         setCarregando(false)
       })()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lancamentoId, lancamentoProp, novoLancamento, tipoInicial, todasParcelas])
 
   // Buscar parâmetros reais quando mudar escopo para ESTE_E_SEGUINTES
@@ -382,6 +399,11 @@ export default function DrawerLancamento({
         conta_origem_id: form.conta_id, conta_destino_id: form.conta_destino_id,
         valor: valorNumerico, data: form.data, descricao: form.descricao.trim(),
         status: form.status, observacao: form.observacao || undefined,
+        ...(!editando && form.recorrente ? {
+          total_parcelas:        parseInt(form.total_parcelas) || 2,
+          tipo_recorrencia:      form.tipo_recorrencia,
+          intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
+        } : {}),
       }
       const url = editando ? `/transferencias/${editando.id_par_transferencia ?? editando.id}` : '/transferencias'
       const res = await apiMutate(url, editando ? 'PUT' : 'POST', payload)
@@ -391,7 +413,8 @@ export default function DrawerLancamento({
         const savedId = dadosResp?.id_debito ?? dadosResp?.id ?? editando?.id
         onSalvo?.(savedId)
         if (criarNovo) {
-          setForm({ ...FORM_VAZIO, tipo: form.tipo, data: form.data, conta_id: form.conta_id })
+          criarNovoPreserved.current = { tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status }
+          setForm({ ...FORM_VAZIO, tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status })
           setTimeout(() => descricaoRef.current?.focus(), 50)
         } else { onFechar() }
       } else setErro(res.erro ?? 'Erro ao salvar.')
@@ -443,7 +466,8 @@ export default function DrawerLancamento({
       const savedId = dadosResp?.id ?? editando?.id
       onSalvo?.(savedId)
       if (criarNovo) {
-        setForm({ ...FORM_VAZIO, tipo: form.tipo, data: form.data, conta_id: form.conta_id })
+        criarNovoPreserved.current = { tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status }
+        setForm({ ...FORM_VAZIO, tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status })
         setEscopo('SOMENTE_ESTE'); setExpandindo(false)
         setTimeout(() => descricaoRef.current?.focus(), 50)
       } else { onFechar() }
@@ -635,7 +659,7 @@ export default function DrawerLancamento({
         </Field>
 
         {/* Recorrência */}
-        {form.tipo !== 'TRANSFERENCIA' && (
+        {(
           <Field label="Recorrência">
             {!editando ? (
               <>

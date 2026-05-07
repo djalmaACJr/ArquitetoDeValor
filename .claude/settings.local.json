@@ -9,7 +9,11 @@
       "Bash(npx jest *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
       "Bash(npx playwright *)",
-      "Bash(git show *)"
+      "Bash(git show *)",
+      "Bash(npm ls *)",
+      "Bash(npm install *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Pessoal\\\\ArquitetoDeValor\\\\FrontEnd\\\\src\" -Directory)",
+      "Bash(Select-Object Name)"
     ]
   }
 }

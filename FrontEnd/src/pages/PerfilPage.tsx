@@ -8,6 +8,7 @@ import { apiMutate } from '../lib/api'
 import { useFiltrosSalvos } from '../hooks/useFiltrosSalvos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
+import { STATUS_LABEL } from '../lib/utils'
 
 type Feedback = { tipo: 'ok' | 'erro'; msg: string }
 
@@ -52,6 +53,7 @@ export default function PerfilPage() {
   const [nome, setNome]         = useState(nomeAtual)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (user) setNome(user.user_metadata?.nome ?? user.email?.split('@')[0] ?? '')
   }, [user])
   const [fbNome, setFbNome]     = useState<Feedback | null>(null)
@@ -160,10 +162,6 @@ export default function PerfilPage() {
     extrato:    'Extrato',
     relatorios: 'Relatórios',
     dashboard:  'Dashboard',
-  }
-
-  const STATUS_LABEL: Record<string, string> = {
-    PAGO: 'Pago', PENDENTE: 'Pendente', PROJECAO: 'Projeção',
   }
 
   function detalhesFiltro(dados: Record<string, unknown>): { label: string; valor: string }[] {

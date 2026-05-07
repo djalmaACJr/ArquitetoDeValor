@@ -18,6 +18,7 @@ export default function BotaoNovoLancamento({ onSelect, className }: Props) {
   return (
     <div className={`relative group${className ? ` ${className}` : ''}`}>
       <button
+        onClick={() => onSelect('DESPESA')}
         className="flex items-center gap-1.5 bg-av-green text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
         style={{ color: '#0a0f1a' }}
       >

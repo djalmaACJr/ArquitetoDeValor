@@ -9,7 +9,7 @@ import { FiltrosSalvosBtn } from '../components/ui/FiltrosSalvosBtn'
 import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
-import { formatBRL, mesLabel } from '../lib/utils'
+import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG, STATUS_OPCOES } from '../lib/utils'
 import { apiMutate } from '../lib/api'
 import { usePageState } from '../context/PageStateContext'
 import { supabase } from '../lib/supabase'
@@ -35,12 +35,11 @@ function agruparPorData<T extends { data: string }>(items: T[]): [string, T[]][]
 }
 // ── Badge de status ───────────────────────────────────────────
 function StatusBadge({ status, onClick }: { status: string; onClick?: () => void }) {
-  const cfg: Record<string, { label: string; bg: string; color: string }> = {
-    PAGO:     { label: 'Pago',     bg: 'rgba(0,200,150,.12)',  color: '#00c896' },
-    PENDENTE: { label: 'Pendente', bg: 'rgba(77,166,255,.12)', color: '#4da6ff' },
-    PROJECAO: { label: 'Projeção', bg: 'rgba(240,180,41,.12)', color: '#f0b429' },
+  const c = {
+    label: STATUS_LABEL[status] ?? 'Pendente',
+    bg:    STATUS_BG[status]    ?? STATUS_BG.PENDENTE,
+    color: STATUS_COR[status]   ?? STATUS_COR.PENDENTE,
   }
-  const c = cfg[status] ?? cfg.PENDENTE
   return (
     <span
       onClick={onClick}
@@ -326,6 +325,7 @@ export default function LancamentosPage() {
     }
     // Limpar state para não reabrir ao recarregar
     window.history.replaceState({}, '')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, lancamentos])
 
   const hoje = useMemo(() => new Date().toISOString().split('T')[0], [])
@@ -440,7 +440,7 @@ export default function LancamentosPage() {
     if (primeiro?.saldo_acumulado === undefined) return null
     const delta = primeiro.tipo === 'RECEITA' ? primeiro.valor : -primeiro.valor
     return primeiro.saldo_acumulado - delta
-  }, [lancamentosComSaldoCorrigido, comSaldo])
+  }, [lancamentosComSaldoCorrigido, comSaldo, filtCats])
 
   // Primeira data do mês para exibir o badge de saldo anterior
   const primeiraData = useMemo(() => {
@@ -518,11 +518,7 @@ export default function LancamentosPage() {
           className="w-36"
           values={filtStatus}
           onChange={setFiltStatus}
-          options={[
-            { value: 'PAGO',     label: 'Pago',     cor: '#00c896' },
-            { value: 'PENDENTE', label: 'Pendente', cor: '#4da6ff' },
-            { value: 'PROJECAO', label: 'Projeção', cor: '#f0b429' },
-          ]}
+          options={STATUS_OPCOES}
         />
 
         {/* Toggle moderno — incluir saldo anterior */}
@@ -798,7 +794,7 @@ export default function LancamentosPage() {
                                     className="flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-white/5 transition-colors">
                                     {l.status === s && <Check size={10} style={{ color: '#00c896' }} />}
                                     <span className="text-[11px]" style={{ color: '#e8eaf0' }}>
-                                      {s === 'PAGO' ? 'Pago' : s === 'PENDENTE' ? 'Pendente' : 'Projeção'}
+                                      {STATUS_LABEL[s] ?? s}
                                     </span>
                                   </button>
                                 ))}
@@ -994,7 +990,6 @@ export default function LancamentosPage() {
         onFechar={fecharDrawer}
         onSalvo={(savedId) => {
           const idAlvo = savedId ?? lancamentoEditando?.id
-          fecharDrawer()
           carregar()
           destacar(idAlvo ?? undefined)
           toast(lancamentoEditando ? 'Lançamento atualizado!' : 'Lançamento criado!')

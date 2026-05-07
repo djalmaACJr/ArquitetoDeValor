@@ -87,17 +87,6 @@ test.describe('Transferências (E2E)', () => {
     await inputDescricao.clear()
     await inputDescricao.fill('E2E Transferência Editada')
 
-    // Workaround: o DrawerLancamento não repopula `conta_destino_id` ao abrir uma
-    // transferência existente (formDeLanc seta string vazia), então é preciso reselecionar
-    // a conta de destino antes de salvar — caso contrário o submit dispara o erro
-    // "Selecione a conta de destino".
-    const btnDestino = drawer.getByRole('button').filter({ hasText: /selecione a conta destino/i })
-    await btnDestino.first().click()
-    await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
-    await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('Enter')
-    await page.waitForTimeout(200)
-
     await drawer.getByRole('button', { name: /salvar|atualizar/i }).click()
     await expect(drawer).not.toBeVisible({ timeout: 10_000 })
     await expect(page.getByText('E2E Transferência Editada').first()).toBeVisible({ timeout: 10_000 })

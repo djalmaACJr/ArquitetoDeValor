@@ -784,8 +784,8 @@ function SecaoImport() {
           
           // Forçar garbage collection periódico para grandes arquivos
           if (chunkStart % 5000 === 0 && chunkStart > 0) {
-            if (typeof window !== 'undefined' && (window as any).gc) {
-              (window as any).gc()
+            if (typeof window !== 'undefined' && (window as Window & { gc?: () => void }).gc) {
+              (window as Window & { gc?: () => void }).gc!()
             }
           }
           

@@ -82,3 +82,28 @@ export const GRUPOS_CONTA: GrupoConta[] = [
 export const CORES_CATEGORIA = [
   '#7F77DD', '#00c896', '#ff6b4a', '#f0b429', '#4da6ff', '#888780', '#D85A30', '#1D9E75',
 ]
+
+// ── Status de transação — labels, cores e opções de filtro ────────────────────
+export const STATUS_LABEL: Record<string, string> = {
+  PAGO:     'Pago',
+  PENDENTE: 'Pendente',
+  PROJECAO: 'Projeção',
+}
+
+export const STATUS_COR: Record<string, string> = {
+  PAGO:     '#00c896',
+  PENDENTE: '#4da6ff',
+  PROJECAO: '#f0b429',
+}
+
+export const STATUS_BG: Record<string, string> = {
+  PAGO:     'rgba(0,200,150,.12)',
+  PENDENTE: 'rgba(77,166,255,.12)',
+  PROJECAO: 'rgba(240,180,41,.12)',
+}
+
+export const STATUS_OPCOES: { value: string; label: string; cor: string }[] = [
+  { value: 'PAGO',     label: 'Pago',     cor: '#00c896' },
+  { value: 'PENDENTE', label: 'Pendente', cor: '#4da6ff' },
+  { value: 'PROJECAO', label: 'Projeção', cor: '#f0b429' },
+]

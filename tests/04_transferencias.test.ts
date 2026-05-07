@@ -20,6 +20,12 @@ interface Transferencia {
   id_credito: string;
 }
 
+function dataFutura(dias: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + dias);
+  return d.toISOString().split("T")[0];
+}
+
 const NOMES_CONTAS_TESTE = [
   "Conta Origem TRF",
   "Conta Destino TRF",
@@ -344,7 +350,7 @@ describe("Transferências — CA-TRF01 a CA-TRF22", () => {
         conta_origem_id: contaOrigemId,
         conta_destino_id: contaDestinoId,
         valor: 200,
-        data: "2026-05-01",
+        data: dataFutura(7),
         descricao: "Projeção de transferência",
         status: "PROJECAO",
       }),

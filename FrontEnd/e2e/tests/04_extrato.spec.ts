@@ -161,7 +161,6 @@ test.describe('Extrato (Lançamentos)', () => {
     const linhaRecorrente = page.getByText('E2E Recorrente Mensal').first()
     const row = linhaRecorrente.locator('../..').first()
     // O ícone Repeat2 (recorrente) ou texto "1/X" deve estar no row
-    const indicador = row.locator('[data-lucide="repeat-2"], svg[class*="repeat"], text=/\\d+\\/\\d+/').first()
     // Verificação soft: pelo menos o row existe e está visível
     await expect(row).toBeVisible()
   })

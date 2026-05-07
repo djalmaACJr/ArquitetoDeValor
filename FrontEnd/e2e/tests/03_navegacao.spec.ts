@@ -63,6 +63,8 @@ test.describe('Navegação e Persistência de Estado', () => {
     
     await page.getByRole('link', { name: /painel/i }).click()
     await page.waitForLoadState('domcontentloaded')
+    // RelatoriosPage tem 2 MonthPickers; aguarda até restar apenas 1 (dashboard)
+    await expect(page.locator('[aria-label="Mês anterior"]')).toHaveCount(1, { timeout: 5000 })
 
     const mesApos = await page.locator('button:has-text("/2")').first().textContent({ timeout: 10_000 })
     expect(mes).toBe(mesApos)

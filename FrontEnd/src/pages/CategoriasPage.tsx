@@ -8,7 +8,7 @@ import {
 } from '../components/ui/shared'
 import type { Categoria } from '../types'
 import { apiFetch, apiMutate, extrairLista } from '../lib/api'
-import { formatBRL, formatData } from '../lib/utils'
+import { formatBRL, formatData, STATUS_LABEL, STATUS_COR } from '../lib/utils'
 
 // ── Helpers de importação paralela ───────────────────────────────────────────
 const _sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -45,8 +45,6 @@ interface TxReclassif {
   conta_nome?: string | null
 }
 
-const STATUS_COR:   Record<string, string> = { PAGO: '#4ade80', PENDENTE: '#facc15', PROJECAO: '#94a3b8' }
-const STATUS_LABEL: Record<string, string> = { PAGO: 'Pago', PENDENTE: 'Pendente', PROJECAO: 'Projeção' }
 
 // ── Painel de reclassificação ─────────────────────────────────────────────────
 function PainelReclassificacao({

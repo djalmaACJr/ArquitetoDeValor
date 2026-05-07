@@ -31,6 +31,9 @@ export default defineConfig({
     {
       name: 'auth',
       testMatch: /auth\.setup\.ts/,
+      use: {
+        ...devices['Desktop Firefox'],
+      },
     },
     // Setup: cria dados básicos (contas, categorias)
     {

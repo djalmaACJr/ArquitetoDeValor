@@ -17,7 +17,6 @@ function avaliarExpr(expr: string): number | null {
     .replace(/[^0-9+\-*/.()]/g, '')
   if (!sanitized) return null
   try {
-    // eslint-disable-next-line no-new-func
     const resultado = Function(`"use strict"; return (${sanitized})`)() as unknown
     return typeof resultado === 'number' && isFinite(resultado) ? resultado : null
   } catch {
@@ -157,6 +156,24 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
     }
   }
 
+  function handlePaste(e: React.ClipboardEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const texto = e.clipboardData.getData('text')
+    const limpo = texto
+      .replace(/\s/g, '')
+      .replace(/\./g, '')   // separador de milhar BR
+      .replace(/,/g, '.')   // decimal BR → ponto
+      .replace(/[^0-9+\-*/.]/g, '')
+    if (!limpo) return
+    const valor = parseFloat(limpo)
+    if (!isNaN(valor)) {
+      setExpr(valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+      setAcabouIgual(false)
+      setResultado(null)
+    }
+  }
+
   // ── Display / preview ──────────────────────────────────────
   const displayStr = expr || '0'
   const previewStr = (() => {
@@ -172,6 +189,7 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
       ref={containerRef}
       tabIndex={0}
       onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
       className="rounded-2xl border border-white/10 overflow-hidden mt-2 outline-none"
       style={{ background: '#141b2e' }}
     >
@@ -219,7 +237,7 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
         {/* = — ocupa linhas 4 e 5 */}
         <button
           type="button"
-          onMouseDown={e => { e.preventDefault(); acabouIgual ? confirmar() : pressIgual() }}
+          onMouseDown={e => { e.preventDefault(); if (acabouIgual) { confirmar() } else { pressIgual() } }}
           className={`${BTN} bg-av-green hover:bg-av-green/90 row-span-2`}
           style={{ gridRow: 'span 2', height: 'auto', minHeight: '46px', color: '#0a0f1a' }}
         >
