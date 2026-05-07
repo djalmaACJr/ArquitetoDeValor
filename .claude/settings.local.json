@@ -13,7 +13,10 @@
       "Bash(npm ls *)",
       "Bash(npm install *)",
       "Bash(Get-ChildItem -Path \"C:\\\\Pessoal\\\\ArquitetoDeValor\\\\FrontEnd\\\\src\" -Directory)",
-      "Bash(Select-Object Name)"
+      "Bash(Select-Object Name)",
+      "Bash(Remove-Item \"C:\\\\Pessoal\\\\ArquitetoDeValor\\\\.github\\\\workflows\\\\tests.yml\" -Force)",
+      "Bash(Remove-Item \"C:\\\\Pessoal\\\\ArquitetoDeValor\\\\.github\\\\workflows\\\\lint.yml\" -Force)",
+      "Bash(Get-ChildItem \"C:\\\\Pessoal\\\\ArquitetoDeValor\\\\.github\\\\workflows\\\\\")"
     ]
   }
 }
