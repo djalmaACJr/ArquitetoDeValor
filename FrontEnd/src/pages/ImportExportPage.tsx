@@ -6,6 +6,7 @@ import {
   DatabaseBackup, RotateCcw, Save,
 } from 'lucide-react'
 import { apiFetch, apiMutate, extrairLista } from '../lib/api'
+import { log as logDev } from '../lib/logger'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { MonthPicker } from '../components/ui/MonthPicker'
@@ -696,10 +697,10 @@ function SecaoImport() {
       const ws   = wb.Sheets[abaNome]
       const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as XlsxRow[]
 
-      console.log('[Import] Abas disponíveis:', wb.SheetNames)
-      console.log('[Import] Aba selecionada:', abaNome)
-      console.log('[Import] Total de linhas lidas:', rows.length)
-      if (rows.length > 0) console.log('[Import] Primeira linha (keys):', Object.keys(rows[0]))
+      logDev('[Import] Abas disponíveis:', wb.SheetNames)
+      logDev('[Import] Aba selecionada:', abaNome)
+      logDev('[Import] Total de linhas lidas:', rows.length)
+      if (rows.length > 0) logDev('[Import] Primeira linha (keys):', Object.keys(rows[0]))
 
       setProgressoInfo({ 
         atual: 0, 
@@ -716,7 +717,7 @@ function SecaoImport() {
       
       const getLineNum = () => { const e = new Error(); return e.stack?.split('\n')[1]?.trim() || '???' }
       
-      console.log(`[Import:${getLineNum()}] Iniciando processamento de`, rows.length, 'linhas em chunks de', chunkSize)
+      logDev(`[Import:${getLineNum()}] Iniciando processamento de`, rows.length, 'linhas em chunks de', chunkSize)
       
       // Limpar estado anterior para evitar memory leaks
       if (parsed.length > 10000) {
@@ -733,7 +734,7 @@ function SecaoImport() {
         const chunkEnd = Math.min(chunkStart + chunkSize, rows.length)
         const chunk = rows.slice(chunkStart, chunkEnd)
         
-        console.log(`[Import:${getLineNum()}] Processando chunk ${Math.floor(chunkStart/chunkSize)+1}: linhas ${chunkStart}-${chunkEnd}`)
+        logDev(`[Import:${getLineNum()}] Processando chunk ${Math.floor(chunkStart/chunkSize)+1}: linhas ${chunkStart}-${chunkEnd}`)
         
         try {
           // Processar chunk de forma síncrona para evitar travar
@@ -806,7 +807,7 @@ function SecaoImport() {
             : `${etaSeg}s`
           : 'calculando...'
         
-        console.log(`[Import:${getLineNum()}] Progresso: ${progresso}% (${chunkEnd}/${rows.length}) - ${velocidade} linhas/s`)
+        logDev(`[Import:${getLineNum()}] Progresso: ${progresso}% (${chunkEnd}/${rows.length}) - ${velocidade} linhas/s`)
         
         // Forçar atualização do React
         setProgresso(progresso)
@@ -828,9 +829,9 @@ function SecaoImport() {
       // Filtrar linhas válidas
       const filtered = parsed.filter(l => l.descricao && l.valor > 0 && l.conta_nome && l.categoria_nome)
 
-      console.log(`[Import:${getLineNum()}] Linhas após filtro:`, filtered.length)
+      logDev(`[Import:${getLineNum()}] Linhas após filtro:`, filtered.length)
       if (filtered.length === 0 && rows.length > 0) {
-        console.log(`[Import:${getLineNum()}] DEBUG primeira linha normalizada:`, Object.fromEntries(
+        logDev(`[Import:${getLineNum()}] DEBUG primeira linha normalizada:`, Object.fromEntries(
           Object.keys(rows[0]).map(k => [k.toLowerCase().trim(), rows[0][k]])
         ))
       }
@@ -866,7 +867,7 @@ function SecaoImport() {
           ? datasUnicas.slice(-6) // últimos 6 meses
           : datasUnicas
         
-        console.log(`[Import:${getLineNum()}] Verificando duplicatas em ${mesesParaVerificar.length} meses de ${datasUnicas.length} totais`)
+        logDev(`[Import:${getLineNum()}] Verificando duplicatas em ${mesesParaVerificar.length} meses de ${datasUnicas.length} totais`)
         
         // Buscar em batch com limite maior para reduzir chamadas
         const resArr = await Promise.all(
@@ -875,7 +876,7 @@ function SecaoImport() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         txExistentes = resArr.flatMap(r => extrairListaDyn<any>(r.dados))
         
-        console.log(`[Import:${getLineNum()}] Encontradas ${txExistentes.length} transações existentes para verificação`)
+        logDev(`[Import:${getLineNum()}] Encontradas ${txExistentes.length} transações existentes para verificação`)
       } catch (error) { 
         console.warn(`[Import:${getLineNum()}] Erro ao verificar duplicatas, continuando sem verificação:`, error)
       }

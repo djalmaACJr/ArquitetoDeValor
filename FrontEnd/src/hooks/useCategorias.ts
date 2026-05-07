@@ -1,40 +1,32 @@
 // src/hooks/useCategorias.ts
-import { useState, useEffect, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
+import { qk } from '../lib/queryKeys'
 import type { Categoria } from '../types'
 
 interface OpResult { ok: boolean; erro: string | null }
 
+async function fetchCategorias(): Promise<Categoria[]> {
+  const res = await apiFetch<Categoria[]>('/categorias')
+  if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar categorias')
+  return res.dados ?? []
+}
+
 export function useCategorias() {
-  const [categorias, setCategorias] = useState<Categoria[]>([])
-  const [loading,    setLoading]    = useState(true)
-  const [error,      setError]      = useState<string | null>(null)
+  const qc = useQueryClient()
 
-  const carregar = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true); setError(null)
-    try {
-      const res = await apiFetch<Categoria[]>('/categorias', signal)
-      if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar categorias')
-      setCategorias(res.dados ?? [])
-    } catch (e) {
-      if ((e as Error).name === 'AbortError') return
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const { data: categorias = [], isLoading: loading, error } = useQuery({
+    queryKey: qk.categorias(),
+    queryFn:  fetchCategorias,
+  })
 
-  useEffect(() => {
-    const controller = new AbortController()
-    carregar(controller.signal)
-    return () => controller.abort()
-  }, [carregar])
+  const carregar = async () => { await qc.invalidateQueries({ queryKey: qk.categorias() }) }
 
   const criar = async (payload: {
     descricao: string; id_pai?: string | null; icone?: string; cor?: string
   }): Promise<OpResult> => {
     const res = await apiMutate('/categorias', 'POST', payload)
-    if (res.ok) await carregar()
+    if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias() })
     return { ok: res.ok, erro: res.erro }
   }
 
@@ -42,15 +34,23 @@ export function useCategorias() {
     descricao: string; id_pai: string | null; icone: string; cor: string; ativa: boolean
   }>): Promise<OpResult> => {
     const res = await apiMutate(`/categorias/${id}`, 'PUT', payload)
-    if (res.ok) await carregar()
+    if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias() })
     return { ok: res.ok, erro: res.erro }
   }
 
   const excluir = async (id: string): Promise<OpResult> => {
     const res = await apiMutate(`/categorias/${id}`, 'DELETE')
-    if (res.ok) await carregar()
+    if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias() })
     return { ok: res.ok, erro: res.erro }
   }
 
-  return { categorias, loading, error, carregar, criar, editar, excluir }
+  return {
+    categorias,
+    loading,
+    error: error ? (error as Error).message : null,
+    carregar,
+    criar,
+    editar,
+    excluir,
+  }
 }

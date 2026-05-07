@@ -17,6 +17,8 @@ interface LancamentosState {
 interface DashboardState {
   mes:          string
   contasFiltro: string[]
+  filtCats:     string[]
+  filtStatus:   string[]
   modo:         'hoje' | 'fim'
 }
 
@@ -58,6 +60,8 @@ const LANCAMENTOS_INICIAL: LancamentosState = {
 const DASHBOARD_INICIAL: DashboardState = {
   mes:          mesAtual(),
   contasFiltro: [],
+  filtCats:     [],
+  filtStatus:   [],
   modo:         'hoje',
 }
 

@@ -1,12 +1,9 @@
 // src/types/index.ts
 
-// ── Contas ────────────────────────────────────────────────
-export type TipoConta =
-  | 'CORRENTE'
-  | 'REMUNERACAO'
-  | 'CARTAO'
-  | 'INVESTIMENTO'
-  | 'CARTEIRA'
+// Enums centralizados em lib/constants.ts — importados e re-exportados aqui
+// para preservar `import type { TipoConta } from '../types'` existentes.
+import type { TipoConta, TipoTransacao, StatusTransacao } from '../lib/constants'
+export type { TipoConta, TipoTransacao, StatusTransacao }
 
 export interface Conta {
   conta_id:      string
@@ -37,9 +34,6 @@ export interface Categoria {
 }
 
 // ── Transações ────────────────────────────────────────────
-export type TipoTransacao   = 'RECEITA' | 'DESPESA'
-export type StatusTransacao = 'PAGO' | 'PENDENTE' | 'PROJECAO'
-
 export interface Transacao {
   id:               string
   user_id:          string

@@ -45,12 +45,13 @@ Sistema cliente-servidor 100% serverless:
 ### Stack
 
 - React 19 (functional components + hooks)
-- Vite 8 (build) + TypeScript 6
+- Vite 8 (Rolldown) + TypeScript 6
 - Tailwind CSS 3
 - React Router 7
 - Radix UI (Dialog, Dropdown, Select, Tooltip)
 - Chart.js 4 + react-chartjs-2
 - Lucide React (ícones)
+- **`@tanstack/react-query`** — cache e dedup de fetch para hooks de domínio
 
 ### Camadas
 
@@ -58,11 +59,11 @@ Sistema cliente-servidor 100% serverless:
 |---|---|
 | `pages/` | Composição de UI por rota — sem regra de negócio |
 | `components/layout/` | `AppLayout`, `Sidebar` — chrome da aplicação |
-| `components/ui/` | Componentes reusáveis (drawer de lançamento, multiselect, ícone de conta, …) |
-| `hooks/` | Lógica de negócio + estado (`useLancamentos`, `useDashboard`, …) |
-| `context/` | `AuthContext` (sessão), `PageStateContext` (filtros persistidos) |
-| `lib/` | `api.ts` (HTTP), `supabase.ts` (cliente Auth), `utils.ts` |
-| `types/` | Contratos TypeScript compartilhados |
+| `components/ui/` | Componentes reusáveis (`DrawerLancamento`, `Calculadora`, `MultiSelect`, `BotaoNovoLancamento`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, …) |
+| `hooks/` | Lógica de negócio + estado — todos baseados em `@tanstack/react-query` (`useLancamentos`, `useDashboard`, `useContas`, `useCategorias`, `useFiltrosSalvos`, `useAuth`, `useTheme`) |
+| `context/` | `AuthContext` (sessão), `PageStateContext` (filtros persistidos entre páginas) |
+| `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums centralizados), `queryKeys.ts` (chaves React Query), `logger.ts` (log condicional dev-only) |
+| `types/` | Contratos TypeScript compartilhados — re-exporta enums de `constants.ts` |
 
 ### Cliente HTTP — `lib/api.ts`
 
@@ -87,8 +88,10 @@ A API responde `{ dados }` em sucesso e `{ erro }` em falha — `apiFetch` desem
 ### Princípios
 
 - Páginas são declarativas; estado mora nos hooks.
-- Hooks expõem `{ dados, loading, erro, recarregar, criar, editar, excluir }` quando aplicável.
+- Hooks expõem `{ dados, loading, erro, carregar, criar, editar, excluir, ... }` quando aplicável.
 - Tipagem forte usando `src/types/index.ts`.
+- **React Query**: configurado em `main.tsx` (`QueryClientProvider`) com `staleTime: 30s`, `refetchOnWindowFocus: false`, `retry: 1`. Cada hook usa `useQuery(queryKey)` e invalida via `qc.invalidateQueries(queryKey)` após mutation.
+- **Logs**: usar `log()` / `debug()` de `lib/logger.ts` em vez de `console.log` — são no-op em produção via `import.meta.env.DEV` (tree-shaken pelo bundler).
 
 ---
 
@@ -105,7 +108,10 @@ supabase/functions/
 ├── categorias/index.ts
 ├── transacoes/index.ts        # + version.ts
 ├── transferencias/index.ts
-└── limpar/index.ts            # usado em testes
+├── filtros/index.ts            # CRUD de filtros nomeados (Dashboard/Extrato/Relatórios)
+├── excluir_conta/index.ts      # apaga todos os dados do usuário (chama fn_excluir_dados_usuario)
+├── version/index.ts            # /version — endpoint de introspecção
+└── limpar/index.ts             # usado em testes (reativa contas inativas antes do UPDATE/DELETE)
 ```
 
 Cada função tem `deno.json` próprio (importmap).
@@ -189,12 +195,14 @@ Tudo vive em **`arqvalor`** — `search_path` é configurado nas migrations. Ext
 `id (PK = auth.uid)`, `email UNIQUE`, `nome`, `criado_em`.
 
 #### `contas`
-`id`, `user_id → usuarios`, `nome (1..100)`, `tipo (tipo_conta)`, `saldo_inicial NUMERIC(15,2)`, `icone`, `cor (#RRGGBB)`, `ativa`, `criado_em`, `atualizado_em`.
+`id`, `user_id → usuarios`, `nome (1..100)`, `tipo (tipo_conta)`, `saldo_inicial NUMERIC(15,2)`, `icone`, `cor (#RRGGBB)`, `ativa`, `dia_fechamento (1..31)`, `dia_pagamento (1..31)`, `criado_em`, `atualizado_em`.
 Índices: `(user_id)`, `(user_id, ativa)`.
+Colunas `dia_fechamento` / `dia_pagamento` adicionadas por `20260429000008`.
 
 #### `categorias`
 `id`, `user_id`, `id_pai → categorias`, `descricao (1..20)`, `icone`, `cor`, `ativa`, `protegida` (flag de bloqueio para "Transferências"), timestamps.
 Índices: `(user_id)`, `(id_pai)`, `(user_id, ativa)`.
+Coluna `protegida` adicionada por `20260429000008`.
 
 #### `transacoes`
 Campos principais:
@@ -205,6 +213,7 @@ ano_tx, mes_tx        -- generated columns
 descricao (2..200), valor (>0),
 tipo, status, valor_projetado,
 id_recorrencia, nr_parcela, total_parcelas, tipo_recorrencia,
+intervalo_recorrencia (>=1, opcional)  -- adicionada em 008, ainda não persistida pelos endpoints
 id_par_transferencia,  -- liga DESPESA + RECEITA de uma transferência
 observacao, criado_em, atualizado_em
 ```
@@ -215,10 +224,16 @@ Constraints:
 - `chk_nr_parcela_range` — `nr_parcela <= total_parcelas`.
 - `valor > 0`, `valor_projetado > 0` quando presente.
 
-Índices: `user_id`, `conta_id`, `categoria_id`, `data`, `status`, `id_recorrencia`, `criado_em`, listagem `(user_id, conta_id, data, criado_em)`, `(user_id, ano_tx, mes_tx)`.
+Índices: `user_id`, `conta_id`, `categoria_id`, `data`, `status`, `id_recorrencia`, `criado_em`, listagem `(user_id, conta_id, data, criado_em)`, `(user_id, ano_tx, mes_tx)`, parcial `id_par_transferencia` (não-nulos).
 
 #### `auditoria`
 `id`, `user_id`, `tabela`, `registro_id`, `acao` (`INSERT|UPDATE|DELETE|ANTECIPAR`), `payload_old/new JSONB`, `ip`, `criado_em`.
+
+#### `filtros_salvos`
+`id`, `user_id → auth.users` (cascade DELETE), `pagina`, `nome`, `dados JSONB`, `criado_em`.
+Restrições: `length(trim(nome)) > 0`, `length(trim(pagina)) > 0`.
+Índice: `(user_id, pagina)`.
+Tabela criada por `20260505000004_filtros_salvos.sql`.
 
 ### Funções
 

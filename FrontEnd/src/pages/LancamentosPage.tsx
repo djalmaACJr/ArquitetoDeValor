@@ -268,6 +268,31 @@ export default function LancamentosPage() {
   // Limpar seleção ao trocar de mês
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setSelecionados(new Set()) }, [mes])
+
+  // Destaque temporário do lançamento recém-criado/editado
+  const [idDestaque, setIdDestaque] = useState<string | null>(null)
+  const destaqueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const linhasRef = useRef<Map<string, HTMLDivElement>>(new Map())
+
+  const destacar = (id?: string) => {
+    if (!id) return
+    setIdDestaque(id)
+    if (destaqueTimerRef.current) clearTimeout(destaqueTimerRef.current)
+    destaqueTimerRef.current = setTimeout(() => setIdDestaque(null), 4000)
+  }
+
+  // Quando idDestaque muda E a linha está renderizada, rola até ela
+  useEffect(() => {
+    if (!idDestaque) return
+    if (!lancamentos.some(l => l.id === idDestaque)) return
+    const el = linhasRef.current.get(idDestaque)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [idDestaque, lancamentos])
+
+  // Cleanup do timer ao desmontar
+  useEffect(() => {
+    return () => { if (destaqueTimerRef.current) clearTimeout(destaqueTimerRef.current) }
+  }, [])
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
 
   const abrirEditar = (l: Lancamento) => {
@@ -650,12 +675,18 @@ export default function LancamentosPage() {
                     </div>
                     {/* Linhas */}
                     {grupo.map(l => {
-                      const isTransf  = !!l.id_par_transferencia
-                      const isRecorr  = !!l.id_recorrencia && !isTransf
-                      const isPago    = l.status === 'PAGO'
+                      const isTransf   = !!l.id_par_transferencia
+                      const isRecorr   = !!l.id_recorrencia && !isTransf
+                      const isPago     = l.status === 'PAGO'
                       const isAtrasado = !isPago && l.data <= hoje
+                      const isSelecionado = selecionados.has(l.id)
+                      const isDestaque    = idDestaque === l.id
                       return (
                         <div key={l.id}
+                          ref={el => {
+                            if (el) linhasRef.current.set(l.id, el)
+                            else    linhasRef.current.delete(l.id)
+                          }}
                           onClick={() => abrirEditar(l)}
                           className="grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center cursor-pointer"
                           style={{
@@ -663,6 +694,15 @@ export default function LancamentosPage() {
                             ...(isAtrasado && {
                               boxShadow: 'inset 4px 0 0 rgba(248,113,113,0.9)',
                               background: 'rgba(248,113,113,0.08)',
+                            }),
+                            ...(isDestaque && {
+                              boxShadow: 'inset 0 0 0 2px rgba(77,166,255,0.7)',
+                              background: 'rgba(77,166,255,0.12)',
+                              animation: 'pulse-destaque 1.2s ease-out 2',
+                            }),
+                            ...(isSelecionado && {
+                              boxShadow: 'inset 4px 0 0 rgba(0,200,150,0.95)',
+                              background: 'rgba(0,200,150,0.10)',
                             }),
                           }}>
 
@@ -952,7 +992,13 @@ export default function LancamentosPage() {
         contaIdInicial={novoLancamento && filtContas.length === 1 ? filtContas[0] : null}
         categoriaIdInicial={novoLancamento && filtCats.length === 1 ? filtCats[0] : null}
         onFechar={fecharDrawer}
-        onSalvo={() => { fecharDrawer(); carregar(); toast(lancamentoEditando ? 'Lançamento atualizado!' : 'Lançamento criado!') }}
+        onSalvo={(savedId) => {
+          const idAlvo = savedId ?? lancamentoEditando?.id
+          fecharDrawer()
+          carregar()
+          destacar(idAlvo ?? undefined)
+          toast(lancamentoEditando ? 'Lançamento atualizado!' : 'Lançamento criado!')
+        }}
         onExcluido={() => {
           const id    = lancamentoEditando?.id ?? ''
           const idPar = lancamentoEditando?.id_par_transferencia

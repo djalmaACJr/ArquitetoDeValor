@@ -6,7 +6,9 @@ import { useState, useEffect, useRef } from 'react'
 import { Repeat2, Trash2 } from 'lucide-react'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
-import { apiMutate } from '../../lib/api'
+import { apiFetch, apiMutate } from '../../lib/api'
+// Logger desativado — reativar removendo o comentário desta linha e dos log() abaixo
+// import { log } from '../../lib/logger'
 import {
   Drawer, Field, Input, SearchableSelect, Toggle,
   BtnSalvar, BtnCancelar, Segmented, ModalExcluir,
@@ -149,7 +151,7 @@ interface DrawerLancamentoProps {
   contaIdInicial?:     string | null
   categoriaIdInicial?: string | null
   onFechar:            () => void
-  onSalvo?:            () => void
+  onSalvo?:            (savedId?: string) => void
   onExcluido?:         () => void
 }
 
@@ -199,7 +201,7 @@ export default function DrawerLancamento({
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (novoLancamento) { setEditando(null); setForm({ ...FORM_VAZIO, tipo: tipoInicial ?? 'DESPESA', conta_id: contaIdInicial ?? '', categoria_id: categoriaIdInicial ?? '' }); setEscopo('SOMENTE_ESTE'); setExpandindo(false); setQtdAdicional('3'); setTimeout(() => descricaoRef.current?.focus(), 320); return }
+    if (novoLancamento) { setEditando(null); setForm({ ...FORM_VAZIO, tipo: tipoInicial ?? 'DESPESA', conta_id: contaIdInicial ?? '', categoria_id: categoriaIdInicial ?? '' }); setEscopo('SOMENTE_ESTE'); setExpandindo(false); setQtdAdicional('3'); setCalcAberta(false); setTimeout(() => descricaoRef.current?.focus(), 320); return }
     if (lancamentoProp) {
       const formInicial = formDeLanc(lancamentoProp, todasParcelas)
       setEditando(lancamentoProp)
@@ -207,83 +209,60 @@ export default function DrawerLancamento({
       setEscopo('SOMENTE_ESTE')
       setExpandindo(false)
       setQtdAdicional('3')
+      setCalcAberta(false)
       setTimeout(() => descricaoRef.current?.focus(), 320)
       if (lancamentoProp.id_par_transferencia && !formInicial.conta_destino_id) {
-        fetch(`/functions/v1/transferencias/${lancamentoProp.id_par_transferencia}`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('sb-token') ?? ''}` }
-        })
-        .then(r => r.json())
-        .then(data => { if (data?.conta_destino_id) setForm(f => ({ ...f, conta_destino_id: data.conta_destino_id })) })
-        .catch(() => null)
+        apiFetch<{ conta_destino_id?: string }>(`/transferencias/${lancamentoProp.id_par_transferencia}`)
+          .then(res => {
+            if (res.ok && res.dados?.conta_destino_id) {
+              setForm(f => ({ ...f, conta_destino_id: res.dados!.conta_destino_id! }))
+            }
+          })
       }
       return
     }
     if (lancamentoId) {
       setCarregando(true)
-      fetch(`/functions/v1/transacoes/${lancamentoId}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('sb-token') ?? ''}` }
-      })
-      .then(r => r.json())
-      .then(async data => {
-        if (data && !data.erro) {
+      ;(async () => {
+        const res = await apiFetch<Lancamento>(`/transacoes/${lancamentoId}`)
+        if (res.ok && res.dados) {
+          const data = res.dados
           let parcelasCompletas = todasParcelas
-          
           // Se for recorrente, buscar todas as parcelas da recorrência
           if (data.id_recorrencia) {
-            try {
-              const response = await fetch(`/functions/v1/transacoes?id_recorrencia=${data.id_recorrencia}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem('sb-token') ?? ''}` }
-              })
-              const result = await response.json()
-              if (result.dados && !result.erro) {
-                parcelasCompletas = result.dados
-                console.log('Parcelas completas da recorrência:', parcelasCompletas?.length)
-              }
-            } catch (e) {
-              console.error('Erro ao buscar parcelas da recorrência:', e)
-            }
+            const recRes = await apiFetch<Lancamento[]>(`/transacoes?id_recorrencia=${data.id_recorrencia}`)
+            if (recRes.ok && recRes.dados) parcelasCompletas = recRes.dados
           }
-          
           const formInicial = formDeLanc(data, parcelasCompletas)
           setEditando(data)
           setForm(formInicial)
           setEscopo('SOMENTE_ESTE')
           if (data.id_par_transferencia && !formInicial.conta_destino_id) {
-            fetch(`/functions/v1/transferencias/${data.id_par_transferencia}`, {
-              headers: { Authorization: `Bearer ${localStorage.getItem('sb-token') ?? ''}` }
-            })
-            .then(r => r.json())
-            .then(parData => { if (parData?.conta_destino_id) setForm(f => ({ ...f, conta_destino_id: parData.conta_destino_id })) })
-            .catch(() => null)
+            const trfRes = await apiFetch<{ conta_destino_id?: string }>(`/transferencias/${data.id_par_transferencia}`)
+            if (trfRes.ok && trfRes.dados?.conta_destino_id) {
+              setForm(f => ({ ...f, conta_destino_id: trfRes.dados!.conta_destino_id! }))
+            }
           }
         }
-      })
-      .catch(() => null)
-      .finally(() => setCarregando(false))
+        setCarregando(false)
+      })()
     }
   }, [lancamentoId, lancamentoProp, novoLancamento, tipoInicial, todasParcelas])
 
   // Buscar parâmetros reais quando mudar escopo para ESTE_E_SEGUINTES
   useEffect(() => {
     if (editando?.id_recorrencia && escopo === 'ESTE_E_SEGUINTES') {
-      // Buscar todas as parcelas da recorrência para inferir parâmetros reais
-      fetch(`/transacoes?id_recorrencia=${editando.id_recorrencia}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('sb-token') ?? ''}` }
-      })
-      .then(r => r.json())
-      .then(result => {
-        if (result.dados && result.dados.length > 1) {
-          const params = inferirParametrosRecorrencia(result.dados)
-          setForm(f => ({ 
-            ...f, 
-            tipo_recorrencia: params.frequencia, 
-            intervalo_recorrencia: String(params.intervalo) 
-          }))
-        }
-      })
-      .catch(() => {
-        // Se falhar, mantém os valores padrão
-      })
+      apiFetch<Lancamento[]>(`/transacoes?id_recorrencia=${editando.id_recorrencia}`)
+        .then(res => {
+          if (res.ok && res.dados && res.dados.length > 1) {
+            const params = inferirParametrosRecorrencia(res.dados)
+            setForm(f => ({
+              ...f,
+              tipo_recorrencia: params.frequencia,
+              intervalo_recorrencia: String(params.intervalo),
+            }))
+          }
+        })
     }
   }, [escopo, editando?.id_recorrencia])
 
@@ -408,7 +387,9 @@ export default function DrawerLancamento({
       const res = await apiMutate(url, editando ? 'PUT' : 'POST', payload)
       setSalvando(false)
       if (res.ok) {
-        onSalvo?.()
+        const dadosResp = res.dados as { id?: string; id_debito?: string } | null
+        const savedId = dadosResp?.id_debito ?? dadosResp?.id ?? editando?.id
+        onSalvo?.(savedId)
         if (criarNovo) {
           setForm({ ...FORM_VAZIO, tipo: form.tipo, data: form.data, conta_id: form.conta_id })
           setTimeout(() => descricaoRef.current?.focus(), 50)
@@ -451,20 +432,16 @@ export default function DrawerLancamento({
     const url    = editando ? `/transacoes/${editando.id}?escopo=${escopoEfetivo}` : '/transacoes'
     const method = editando ? 'PUT' : 'POST'
     
-    console.log('=== SALVAMENTO ===')
-    console.log('URL:', url)
-    console.log('Método:', method)
-    console.log('Payload:', payload)
-    console.log('Escopo:', escopo)
-    
-    const res    = await apiMutate(url, method, payload)
-    
-    console.log('Resposta:', res)
-    console.log('OK:', res.ok)
-    console.log('Dados:', res.dados)
+    // log('=== SALVAMENTO ===', { url, method, payload, escopo })
+
+    const res = await apiMutate(url, method, payload)
+
+    // log('Resposta:', { ok: res.ok, dados: res.dados })
     setSalvando(false)
     if (res.ok) {
-      onSalvo?.()
+      const dadosResp = res.dados as { id?: string } | null
+      const savedId = dadosResp?.id ?? editando?.id
+      onSalvo?.(savedId)
       if (criarNovo) {
         setForm({ ...FORM_VAZIO, tipo: form.tipo, data: form.data, conta_id: form.conta_id })
         setEscopo('SOMENTE_ESTE'); setExpandindo(false)
@@ -499,6 +476,21 @@ export default function DrawerLancamento({
   }
 
   const aberto = !!(novoLancamento || lancamentoProp || lancamentoId)
+
+  // Reset de estados voláteis quando o drawer fecha
+  // (este componente fica montado entre aberturas — sem isso, calcAberta,
+  // confirmandoExclusao etc. ficariam presos da sessão anterior)
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!aberto) {
+      setCalcAberta(false)
+      setConfirmandoExclusao(false)
+      setExpandindo(false)
+      setErro(null)
+      ignorarFoco.current = false
+    }
+  }, [aberto])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Foco no campo Tipo ao abrir o drawer (após animação)
   useEffect(() => {

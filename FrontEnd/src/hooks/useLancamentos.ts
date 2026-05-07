@@ -1,6 +1,7 @@
 // src/hooks/useLancamentos.ts
-import { useState, useEffect, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
+import { qk } from '../lib/queryKeys'
 
 export interface Lancamento {
   id: string
@@ -42,91 +43,81 @@ export interface FiltrosLancamento {
 
 interface OpResult { ok: boolean; erro: string | null }
 
+async function fetchLancamentos(filtros: FiltrosLancamento, signal?: AbortSignal): Promise<Lancamento[]> {
+  const params = new URLSearchParams({ mes: filtros.mes, saldo: 'true' })
+
+  // Server-side: API aceita só 1 valor por filtro hoje. Para múltiplos,
+  // baixamos uma página maior e filtramos no client.
+  if (filtros.conta_ids?.length === 1) params.set('conta_id', filtros.conta_ids[0])
+  if (filtros.categoria_ids?.length === 1) params.set('categoria_id', filtros.categoria_ids[0])
+  if ((filtros.status_ids?.length ?? 0) === 1) params.set('status', filtros.status_ids![0])
+  else if (filtros.status) params.set('status', filtros.status)
+
+  const temFiltroMulti =
+    (filtros.conta_ids?.length ?? 0) > 1 ||
+    (filtros.categoria_ids?.length ?? 0) > 1 ||
+    (filtros.status_ids?.length ?? 0) > 1
+  params.set('per_page', temFiltroMulti ? '200' : '50')
+
+  const res = await apiFetch<{ dados: Lancamento[] }>(`/transacoes?${params}`, signal)
+  if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar lançamentos')
+
+  // API retorna { dados: [...] } — apiFetch já desembala um nível
+  const raw = res.dados
+  let lista: Lancamento[] =
+    (raw as unknown as { dados: Lancamento[] })?.dados
+    ?? (raw as unknown as Lancamento[])
+    ?? []
+
+  // Filtragem residual para múltiplos IDs
+  if ((filtros.conta_ids?.length ?? 0) > 1) {
+    lista = lista.filter(l => filtros.conta_ids!.includes(l.conta_id))
+  }
+  if ((filtros.categoria_ids?.length ?? 0) > 1) {
+    lista = lista.filter(l => l.categoria_id != null && filtros.categoria_ids!.includes(l.categoria_id))
+  }
+  if ((filtros.status_ids?.length ?? 0) > 1) {
+    lista = lista.filter(l => filtros.status_ids!.includes(l.status))
+  }
+
+  return lista
+}
+
 export function useLancamentos(filtros: FiltrosLancamento) {
-  const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState<string | null>(null)
+  const qc = useQueryClient()
 
-  const carregar = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true); setError(null)
-    try {
-      const params = new URLSearchParams({ mes: filtros.mes, saldo: 'true' })
+  const { data: lancamentos = [], isLoading: loading, error } = useQuery({
+    queryKey: qk.lancamentos(filtros),
+    queryFn:  ({ signal }) => fetchLancamentos(filtros, signal),
+  })
 
-      // ── Filtragem server-side ─────────────────────────────────────────────
-      // Corrigido: envia todos os conta_ids/categoria_ids como parâmetros
-      // separados para que a API filtre corretamente independente da quantidade.
-      // A filtragem no cliente era limitada pela paginação (50 registros).
-      //
-      // NOTA: A Edge Function /transacoes aceita conta_id e categoria_id como
-      // parâmetro único. Se a API for atualizada para aceitar múltiplos valores
-      // (ex: conta_ids[]=x&conta_ids[]=y), remova a filtragem client-side abaixo.
-      if (filtros.conta_ids?.length === 1) {
-        params.set('conta_id', filtros.conta_ids[0])
-      }
-      if (filtros.categoria_ids?.length === 1) {
-        params.set('categoria_id', filtros.categoria_ids[0])
-      }
-      // Status: se só 1 selecionado, manda para a API; se múltiplos, filtra client-side
-      if ((filtros.status_ids?.length ?? 0) === 1) {
-        params.set('status', filtros.status_ids![0])
-      } else if (filtros.status) {
-        params.set('status', filtros.status)
-      }
-      const temFiltroMulti = (filtros.conta_ids?.length ?? 0) > 1 || (filtros.categoria_ids?.length ?? 0) > 1 || (filtros.status_ids?.length ?? 0) > 1
-      params.set('per_page', temFiltroMulti ? '200' : '50')
+  const carregar = async () => {
+    await qc.invalidateQueries({ queryKey: qk.lancamentos(filtros) })
+  }
 
-      const res = await apiFetch<{ dados: Lancamento[] }>(`/transacoes?${params}`, signal)
-      if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar lançamentos')
-
-      // Extrai a lista — a API retorna { dados: [...] }
-      const raw = res.dados
-      let lista: Lancamento[] = (raw as unknown as { dados: Lancamento[] })?.dados
-        ?? (raw as unknown as Lancamento[])
-        ?? []
-
-      // Filtragem client-side residual para múltiplos IDs (enquanto a API não suporta)
-      if ((filtros.conta_ids?.length ?? 0) > 1) {
-        lista = lista.filter(l => filtros.conta_ids!.includes(l.conta_id))
-      }
-      if ((filtros.categoria_ids?.length ?? 0) > 1) {
-        lista = lista.filter(l => l.categoria_id != null && filtros.categoria_ids!.includes(l.categoria_id))
-      }
-      if ((filtros.status_ids?.length ?? 0) > 1) {
-        lista = lista.filter(l => filtros.status_ids!.includes(l.status))
-      }
-
-      setLancamentos(lista)
-    } catch (e) {
-      if ((e as Error).name === 'AbortError') return
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [filtros.mes, JSON.stringify(filtros.conta_ids), JSON.stringify(filtros.categoria_ids), filtros.status, JSON.stringify(filtros.status_ids), filtros.com_saldo]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const controller = new AbortController()
-    carregar(controller.signal)
-    return () => controller.abort()
-  }, [carregar])
-
-  // ── Atualização local (sem reload completo) ──────────────────────────────
+  // Atualização local — atualiza o cache do TanStack diretamente sem refetch
   const atualizarLocal = (id: string, campos: Partial<Lancamento>) => {
-    setLancamentos(prev => prev.map(l => l.id === id ? { ...l, ...campos } : l))
+    qc.setQueryData<Lancamento[]>(qk.lancamentos(filtros), prev =>
+      prev?.map(l => l.id === id ? { ...l, ...campos } : l) ?? []
+    )
   }
 
   // Remove imediatamente da lista local — usado após exclusão via Drawer
-  // (que chama apiMutate direto, sem passar pelo excluir() do hook)
-  const removerLocal = useCallback((id: string, idPar?: string | null) => {
-    setLancamentos(prev => idPar
-      ? prev.filter(l => l.id_par_transferencia !== idPar)
-      : prev.filter(l => l.id !== id)
+  const removerLocal = (id: string, idPar?: string | null) => {
+    qc.setQueryData<Lancamento[]>(qk.lancamentos(filtros), prev =>
+      idPar
+        ? prev?.filter(l => l.id_par_transferencia !== idPar) ?? []
+        : prev?.filter(l => l.id !== id) ?? []
     )
-  }, [])
+  }
+
+  // Invalida TODAS as queries de lançamentos (qualquer filtro) — usado quando
+  // a mudança pode afetar outros meses/filtros.
+  const invalidarTudo = () => qc.invalidateQueries({ queryKey: ['lancamentos'] })
 
   const criar = async (payload: Partial<Lancamento>): Promise<OpResult> => {
     const res = await apiMutate('/transacoes', 'POST', payload)
-    if (res.ok) await carregar()
+    if (res.ok) await invalidarTudo()
     return { ok: res.ok, erro: res.erro }
   }
 
@@ -137,11 +128,8 @@ export function useLancamentos(filtros: FiltrosLancamento) {
   ): Promise<OpResult> => {
     const res = await apiMutate(`/transacoes/${id}?escopo=${escopo}`, 'PUT', payload)
     if (res.ok) {
-      if (escopo === 'SOMENTE_ESTE') {
-        atualizarLocal(id, payload)
-      } else {
-        await carregar()
-      }
+      if (escopo === 'SOMENTE_ESTE') atualizarLocal(id, payload)
+      else await invalidarTudo()
     }
     return { ok: res.ok, erro: res.erro }
   }
@@ -152,18 +140,15 @@ export function useLancamentos(filtros: FiltrosLancamento) {
   ): Promise<OpResult> => {
     const res = await apiMutate(`/transacoes/${id}?escopo=${escopo}`, 'DELETE')
     if (res.ok) {
-      if (escopo === 'SOMENTE_ESTE') {
-        setLancamentos(prev => prev.filter(l => l.id !== id))
-      } else {
-        await carregar()
-      }
+      if (escopo === 'SOMENTE_ESTE') removerLocal(id)
+      else await invalidarTudo()
     }
     return { ok: res.ok, erro: res.erro }
   }
 
   const antecipar = async (id: string): Promise<OpResult> => {
     const res = await apiMutate(`/transacoes/${id}/antecipar`, 'POST')
-    if (res.ok) await carregar()
+    if (res.ok) await invalidarTudo()
     return { ok: res.ok, erro: res.erro ?? null }
   }
 
@@ -183,7 +168,7 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     observacao?: string
   }): Promise<OpResult> => {
     const res = await apiMutate('/transferencias', 'POST', payload)
-    if (res.ok) await carregar()
+    if (res.ok) await invalidarTudo()
     return { ok: res.ok, erro: res.erro }
   }
 
@@ -200,19 +185,29 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     }
   ): Promise<OpResult> => {
     const res = await apiMutate(`/transferencias/${id}`, 'PUT', payload)
-    if (res.ok) await carregar()
+    if (res.ok) await invalidarTudo()
     return { ok: res.ok, erro: res.erro }
   }
 
   const excluirTransferencia = async (idPar: string): Promise<OpResult> => {
     const res = await apiMutate(`/transferencias/${idPar}`, 'DELETE')
-    if (res.ok) await carregar()
+    if (res.ok) await invalidarTudo()
     return { ok: res.ok, erro: res.erro ?? null }
   }
 
   return {
-    lancamentos, loading, error, carregar, removerLocal,
-    criar, editar, excluir, antecipar, alterarStatus,
-    criarTransferencia, editarTransferencia, excluirTransferencia,
+    lancamentos,
+    loading,
+    error: error ? (error as Error).message : null,
+    carregar,
+    removerLocal,
+    criar,
+    editar,
+    excluir,
+    antecipar,
+    alterarStatus,
+    criarTransferencia,
+    editarTransferencia,
+    excluirTransferencia,
   }
 }

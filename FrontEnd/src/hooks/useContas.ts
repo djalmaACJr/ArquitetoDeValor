@@ -1,35 +1,26 @@
 // src/hooks/useContas.ts
-import { useState, useEffect, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
+import { qk } from '../lib/queryKeys'
 import type { Conta, TipoConta } from '../types'
 
 interface OpResult { ok: boolean; erro: string | null }
 
+async function fetchContas(): Promise<Conta[]> {
+  const res = await apiFetch<Conta[]>('/contas')
+  if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar contas')
+  return res.dados ?? []
+}
+
 export function useContas() {
-  const [contas,  setContas]  = useState<Conta[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState<string | null>(null)
+  const qc = useQueryClient()
 
-  const carregar = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await apiFetch<Conta[]>('/contas', signal)
-      if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar contas')
-      setContas(res.dados ?? [])
-    } catch (e) {
-      if ((e as Error).name === 'AbortError') return  // componente desmontado — ignora
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const { data: contas = [], isLoading: loading, error } = useQuery({
+    queryKey: qk.contas(),
+    queryFn:  fetchContas,
+  })
 
-  useEffect(() => {
-    const controller = new AbortController()
-    carregar(controller.signal)
-    return () => controller.abort()
-  }, [carregar])
+  const carregar = async () => { await qc.invalidateQueries({ queryKey: qk.contas() }) }
 
   const criar = async (payload: {
     nome: string; tipo: TipoConta; saldo_inicial?: number
@@ -37,7 +28,7 @@ export function useContas() {
     dia_fechamento?: number | null; dia_pagamento?: number | null
   }): Promise<OpResult> => {
     const res = await apiMutate('/contas', 'POST', payload)
-    if (res.ok) await carregar()
+    if (res.ok) await qc.invalidateQueries({ queryKey: qk.contas() })
     return { ok: res.ok, erro: res.erro }
   }
 
@@ -47,15 +38,23 @@ export function useContas() {
     dia_fechamento: number | null; dia_pagamento: number | null
   }>): Promise<OpResult> => {
     const res = await apiMutate(`/contas/${id}`, 'PUT', payload)
-    if (res.ok) await carregar()
+    if (res.ok) await qc.invalidateQueries({ queryKey: qk.contas() })
     return { ok: res.ok, erro: res.erro }
   }
 
   const excluir = async (id: string): Promise<OpResult> => {
     const res = await apiMutate(`/contas/${id}`, 'DELETE')
-    if (res.ok) await carregar()
+    if (res.ok) await qc.invalidateQueries({ queryKey: qk.contas() })
     return { ok: res.ok, erro: res.erro }
   }
 
-  return { contas, loading, error, carregar, criar, editar, excluir }
+  return {
+    contas,
+    loading,
+    error: error ? (error as Error).message : null,
+    carregar,
+    criar,
+    editar,
+    excluir,
+  }
 }

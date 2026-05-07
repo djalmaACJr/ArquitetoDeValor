@@ -23,21 +23,25 @@
 - `cor` — formato hex `#RRGGBB` (validado por regex).
 - `icone` — texto livre (emoji ou URL de logo).
 - `ativa` — boolean (soft delete).
+- `dia_fechamento` / `dia_pagamento` — `INTEGER 1..31`, opcionais. Usados pelo tipo `CARTAO`.
 
 ### Saldo
 
-- **Saldo atual** = `saldo_inicial` + Σ(`RECEITA`) − Σ(`DESPESA`) — provido pela view `vw_saldo_contas`.
+- **Saldo atual** = `saldo_inicial` + Σ(`RECEITA` PAGAS) − Σ(`DESPESA` PAGAS) — provido pela view `vw_saldo_contas` (apenas transações com `status = PAGO`).
 - Saldo nunca é armazenado denormalizado; sempre calculado.
+- A função `fn_saldos_contas_ate_data(p_data)` retorna saldo até uma data (usada no Dashboard).
 
 ### Restrições
 
-- ❌ **Não pode excluir conta com lançamentos** (trigger `fn_bloquear_exclusao_conta` bloqueia).
-- ❌ **Não pode lançar transação em conta inativa** (trigger `fn_validar_isolamento_usuario`).
+- ❌ **Não pode excluir conta com lançamentos** (trigger `fn_bloquear_exclusao_conta`).
+- ❌ **Não pode CRIAR transação em conta inativa** (trigger `fn_validar_isolamento_usuario` — INSERT, ou UPDATE com mudança de `conta_id`).
+- ⚠️ Pode ATUALIZAR transação existente cuja `conta_id` está inativa **desde que `conta_id` não mude** (mudança feita em `20260505000001` — antes bloqueava qualquer UPDATE).
 - ❌ Conta de um usuário **nunca** é visível para outro (RLS).
 
 ### Cartões
 
-Não há campos `dia_fechamento`/`dia_pagamento` na schema atual — suporte previsto, mas o tipo `CARTAO` hoje é tratado como conta comum.
+- Tipo `CARTAO` é uma conta como as outras, com a adição opcional de `dia_fechamento` e `dia_pagamento` para representar ciclo de fatura.
+- Frontend usa esses campos apenas para exibição; cálculos de saldo seguem a regra padrão (movimentação `PAGO`).
 
 ---
 
@@ -67,10 +71,15 @@ Cada uma com 2–4 subcategorias (ex.: Moradia → Aluguel, Condomínio, IPTU, M
 
 ### Restrições
 
-- ❌ Não pode excluir categoria com **subcategorias** (trigger).
+- ❌ Não pode excluir categoria com **subcategorias** (trigger `fn_bloquear_exclusao_categoria`).
 - ❌ Não pode excluir categoria com **transações vinculadas** (trigger).
-- ❌ Não pode editar/excluir categoria com `protegida = true`.
-- ❌ `categoria_id` precisa pertencer ao mesmo `user_id` (trigger).
+- ❌ `categoria_id` precisa pertencer ao mesmo `user_id` (trigger `fn_validar_isolamento_usuario`).
+- ❌ Categoria com `protegida = true`:
+  - **Somente `cor` e `icone`** podem ser alterados via UPDATE.
+  - **DELETE bloqueado** (trigger `trg_proteger_categoria`).
+  - Mudanças em `descricao` / `id_pai` / `ativa` são bloqueadas.
+- 🔄 **Cascata de inatividade**: ao mudar uma categoria pai de `ativa=TRUE → FALSE`, todas as filhas com `ativa=TRUE` são automaticamente inativadas (trigger `trg_cascata_inativar_subcategorias`).
+- ❌ Não pode CRIAR/atribuir categoria inativa a um lançamento (validação no endpoint `/transacoes`).
 
 ---
 
@@ -102,28 +111,38 @@ Cada uma com 2–4 subcategorias (ex.: Moradia → Aluguel, Condomínio, IPTU, M
 
 ### Recorrência
 
-#### Frequência (na API: `frequencia` / no enum: `intervalo_recorr`)
+#### Frequência (recebida pela API, usada apenas para calcular datas)
 
-| Frequência (API) | ENUM | Período |
-|---|---|---|
-| `DIARIA` | `DIA` | dia a dia |
-| `SEMANAL` | `SEMANA` | a cada 7 dias |
-| `MENSAL` | `MES` | mesmo dia do mês seguinte |
-| `ANUAL` | `ANO` | mesmo dia/mês do ano seguinte |
+| Valor | Período |
+|---|---|
+| `DIARIA` | a cada `intervalo` dia(s) |
+| `SEMANAL` | a cada `intervalo` semana(s) |
+| `MENSAL` | a cada `intervalo` mês(es) — mesmo dia do mês |
+| `ANUAL` | a cada `intervalo` ano(s) — mesmo dia/mês |
 
-#### Tipo de recorrência (ENUM `tipo_recorrencia`)
+⚠️ A frequência **não é persistida no banco**. As parcelas armazenam apenas `data` calculada. Quando o usuário edita escopo `ESTE_E_SEGUINTES`, o backend infere a frequência analisando a diferença em dias entre as duas primeiras parcelas (ex.: 30 dias → MENSAL/1).
 
-- `PARCELA` — número fixo de ocorrências (ex.: 12 parcelas).
-- `PROJECAO` — projeção contínua (não-fechada).
+#### Coluna `tipo_recorrencia` (ENUM `tipo_recorrencia`)
 
-#### Campos vinculados
+Indica como cada parcela é tratada:
 
-- `id_recorrencia` (UUID que agrupa todas as parcelas/projeções da série)
+- `PARCELA` — parcela com data efetiva (default).
+- `PROJECAO` — parcela ainda projetada (data futura), pode virar `PAGO` automaticamente quando a data chega.
+
+#### Campos vinculados (todos NULL ou todos preenchidos)
+
+- `id_recorrencia` (UUID que agrupa todas as parcelas da série)
 - `nr_parcela` (≥ 1)
 - `total_parcelas` (≥ `nr_parcela`)
-- `tipo_recorrencia`
+- `tipo_recorrencia` (`PARCELA` | `PROJECAO`)
 
-**Regra de consistência (constraint do banco)**: ou os 4 campos estão presentes, ou os 4 são `NULL`. Não pode haver mistura.
+**Constraint `chk_parcela_consistente`**: os 4 campos estão presentes ou todos `NULL`. Não pode haver mistura.
+
+**Constraint `chk_nr_parcela_range`**: `nr_parcela <= total_parcelas`.
+
+#### `intervalo_recorrencia` (INTEGER)
+
+Coluna existe na tabela (`>= 1`), prevista para representar o intervalo (ex.: a cada 2 meses). **Atualmente não é persistida** pelas inserções do backend — ver "Pontos de atenção" no `ARCHITECTURE.md`.
 
 ### Edição/exclusão de recorrência
 
@@ -168,12 +187,13 @@ Toda transferência é representada por **2 transações** ligadas pelo mesmo `i
 ### Regras
 
 - ✅ `conta_origem_id ≠ conta_destino_id`.
-- ✅ Ambas as contas precisam existir, pertencer ao usuário e estar **ativas**.
+- ✅ Ambas as contas precisam existir, pertencer ao usuário e estar **ativas** (verificado em CRIAÇÃO de transferência).
 - ✅ `valor > 0`.
 - ✅ `descricao` (quando informada): 2 a 200 caracteres.
 - ✅ Status válido: `PAGO`, `PENDENTE`, `PROJECAO`.
 - ❌ **Não pode existir só um lado** do par — endpoint cria/atualiza/exclui sempre os 2.
 - ❌ Categoria de transferência é fixa — frontend/backend não devem expor a escolha.
+- ❌ **Não pode excluir uma transação avulsa** que tenha `id_par_transferencia` quando a categoria é protegida — trigger `trg_bloquear_exclusao_transf_avulsa` força uso de `DELETE /transferencias/:id_par`.
 
 ### Recorrência em transferências
 
@@ -195,6 +215,57 @@ Quando `total_parcelas > 1` é informado, gera-se uma série inteira de pares (c
 - Sempre filtrados por usuário (RLS).
 - Despesas agrupadas por categoria pai consolidam as filhas (a view já faz `COALESCE(cat_pai.id, t.categoria_id)`).
 - Exportação Excel disponível em Relatórios.
+
+---
+
+## 🔖 Filtros salvos
+
+### Conceito
+
+Usuário pode salvar conjuntos nomeados de filtros por página (Dashboard, Extrato, Relatórios) e reaplicá-los depois.
+
+### Tabela `filtros_salvos`
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | UUID | PK |
+| `user_id` | UUID | FK `auth.users` (cascade DELETE) |
+| `pagina` | TEXT | identificador da página (`extrato`, `relatorios`, `dashboard`) |
+| `nome` | TEXT | até 50 chars |
+| `dados` | JSONB | estrutura livre por página |
+| `criado_em` | TIMESTAMPTZ | `now()` |
+
+### Regras
+
+- RLS por `user_id = auth.uid()`.
+- Endpoint `/filtros`: `GET` (listar — opcionalmente filtrado por `?pagina=`), `POST` (salvar), `PUT /:id` (renomear), `DELETE /:id`.
+- Componente `FiltrosSalvosBtn` reutilizado em todas as 3 páginas.
+- Gerenciamento (renomear/excluir) na tela **Perfil**.
+
+---
+
+## 📥 Importação de transações (XLSX/CSV)
+
+### Detecção automática de transferências
+
+Durante a importação, o frontend pareia linhas em transferências quando todas as condições abaixo são satisfeitas:
+
+1. **Descrição** contém o token `transfer` (case-insensitive, sem acentos);
+2. **Categoria** normalizada == `transferencias` em ambos os lados;
+3. **Mesma data**;
+4. **Mesmo valor** (tolerância `< 0,005`);
+5. **Tipos opostos** (uma `RECEITA`, outra `DESPESA`);
+6. **Contas diferentes**.
+
+Pares formados são importados via `POST /transferencias` (atômico — cria os 2 lançamentos com prefixo `[Transf. saída]`/`[Transf. entrada]`). Linhas que satisfazem o critério mas não acham par são importadas como `/transacoes` normais.
+
+### Reativação automática de contas inativas
+
+Antes de importar, o frontend dá `PUT /contas/:id { ativa: true }` em todas as contas inativas envolvidas. Ao final (mesmo em erro/cancelamento, via `try/finally`), restaura `ativa: false`.
+
+Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `UPDATE id_par_transferencia = NULL` antes do DELETE também precisa que a conta esteja ativa — a edge function reativa antes e:
+- Modo `transacoes`: reinativa no fim.
+- Modo `tudo`: contas serão deletadas, não reinativa.
 
 ---
 
@@ -230,8 +301,12 @@ Tabela `arqvalor.auditoria` registra ações sensíveis:
 | `valor_projetado` | > 0 quando presente |
 | `nr_parcela` | ≥ 1 e ≤ `total_parcelas` |
 | `total_parcelas` | ≥ 1 |
+| `intervalo_recorrencia` | ≥ 1 |
+| `dia_fechamento` / `dia_pagamento` | 1..31 |
+| `nome` (filtro salvo) | 1..50 |
 | `status` | `PAGO` \| `PENDENTE` \| `PROJECAO` |
-| `frequencia` | `DIARIA` \| `SEMANAL` \| `MENSAL` \| `ANUAL` |
+| `frequencia` (API) | `DIARIA` \| `SEMANAL` \| `MENSAL` \| `ANUAL` |
+| `tipo_recorrencia` (banco) | `PARCELA` \| `PROJECAO` |
 | `tipo_conta` | `CORRENTE` \| `REMUNERACAO` \| `CARTAO` \| `INVESTIMENTO` \| `CARTEIRA` |
 | `tipo_transacao` | `RECEITA` \| `DESPESA` |
 | `escopo` | `SOMENTE_ESTE` \| `ESTE_E_SEGUINTES` \| `TODOS` |
@@ -240,12 +315,14 @@ Tabela `arqvalor.auditoria` registra ações sensíveis:
 
 ## 🚫 Restrições críticas (resumo)
 
-- ❌ Misturar dados entre usuários (bloqueado por RLS + trigger).
-- ❌ Quebrar pares de transferência (deve ser sempre atômico).
-- ❌ Inconsistência em recorrência — `id_recorrencia/nr_parcela/total_parcelas/tipo_recorrencia` são "tudo ou nada".
-- ❌ Excluir conta com transações.
-- ❌ Excluir categoria com filhos ou lançamentos.
-- ❌ Editar/excluir categoria protegida (`Transferências`).
-- ❌ `valor` ≤ 0.
+- ❌ Misturar dados entre usuários (bloqueado por RLS + trigger `fn_validar_isolamento_usuario`).
+- ❌ Quebrar pares de transferência — sempre atômico via endpoint `/transferencias`.
+- ❌ Excluir avulso uma transação que tem `id_par_transferencia` com categoria protegida (trigger `trg_bloquear_exclusao_transf_avulsa`).
+- ❌ Inconsistência em recorrência — `id_recorrencia/nr_parcela/total_parcelas/tipo_recorrencia` são "tudo ou nada" (`chk_parcela_consistente`).
+- ❌ Excluir conta com transações (`fn_bloquear_exclusao_conta`).
+- ❌ Excluir categoria com filhos ou lançamentos (`fn_bloquear_exclusao_categoria`).
+- ❌ Excluir categoria com `protegida = true`. Edição limitada a `cor`/`icone` (`trg_proteger_categoria`).
+- ❌ `valor` ≤ 0 (constraint `valor > 0`).
 - ❌ Transferência com mesma conta de origem e destino.
-- ❌ Lançamento em conta inativa.
+- ❌ Criar lançamento em conta inativa, ou em categoria inativa (validações no endpoint).
+- ✅ Atualizar campos não-relacionais (status, descricao, valor) de uma transação cuja conta esteja inativa **é permitido** desde a migration `20260505000001`.

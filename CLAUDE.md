@@ -31,12 +31,13 @@ Permite:
 
 ### Frontend (`FrontEnd/`)
 
-- React **19** + Vite + TypeScript
-- Tailwind CSS
+- React **19** + Vite **8** (Rolldown) + TypeScript **6**
+- Tailwind CSS 3
 - React Router 7
 - Radix UI (Dialog, Dropdown, Select, Tooltip)
-- Chart.js + react-chartjs-2
+- Chart.js 4 + react-chartjs-2
 - Lucide React (ícones)
+- **`@tanstack/react-query`** — cache + dedup + invalidação para `useContas`, `useCategorias`, `useLancamentos`, `useDashboard`, `useFiltrosSalvos`
 
 ### Backend (Supabase)
 
@@ -59,13 +60,13 @@ Permite:
 
 | Pasta | Conteúdo |
 |---|---|
-| `pages/` | `DashboardPage`, `LancamentosPage`, `ContasPage`, `CategoriasPage`, `RelatoriosPage`, `ImportExportPage`, `LoginPage` |
+| `pages/` | `DashboardPage`, `LancamentosPage`, `ContasPage`, `CategoriasPage`, `RelatoriosPage`, `ImportExportPage`, `PerfilPage`, `LoginPage` |
 | `components/layout/` | `AppLayout`, `Sidebar` |
-| `components/ui/` | `DrawerLancamento`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion`, `shared` |
-| `hooks/` | `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useTheme` |
+| `components/ui/` | `DrawerLancamento`, `Calculadora`, `BotaoNovoLancamento`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion`, `shared` |
+| `hooks/` | `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useTheme` |
 | `context/` | `AuthContext`, `PageStateContext` (persiste filtros entre páginas) |
-| `lib/` | `api.ts` (cliente HTTP centralizado), `supabase.ts`, `utils.ts` |
-| `types/index.ts` | Tipos compartilhados (`Conta`, `Transacao`, `Transferencia`, `Categoria`, …) |
+| `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums), `queryKeys.ts` (chaves do React Query), `logger.ts` (log condicional dev-only) |
+| `types/index.ts` | Tipos compartilhados (`Conta`, `Transacao`, `Transferencia`, `Categoria`, …) — re-exporta enums de `lib/constants.ts` |
 
 ### Backend — `supabase/`
 
@@ -76,7 +77,10 @@ Permite:
 | `functions/categorias/` | CRUD de categorias hierárquicas |
 | `functions/transacoes/` | CRUD + recorrência + `POST /:id/antecipar` |
 | `functions/transferencias/` | Par débito + crédito atômico |
-| `functions/limpar/` | Limpeza usada nos testes |
+| `functions/filtros/` | CRUD de filtros nomeados por página (Dashboard, Extrato, Relatórios) |
+| `functions/excluir_conta/` | Exclui todos os dados do usuário (chama `fn_excluir_dados_usuario`) |
+| `functions/version/` | Endpoint de versão (introspecção) |
+| `functions/limpar/` | Limpeza usada nos testes (reativa contas inativas para destravar UPDATE) |
 | `migrations/` | DDL idempotente (schema, ENUMs, triggers, views, RLS, seed de usuário) |
 
 ### Testes
@@ -113,14 +117,16 @@ Permite:
 ### Categorias
 
 - Hierarquia **pai → filho** (1 nível)
-- Campo `protegida` (boolean) — `true` para "Transferências", impede edição/remoção
-- Banco bloqueia exclusão se houver subcategorias ou lançamentos vinculados (trigger)
+- Campo `protegida` (boolean) — `true` para "Transferências". Trigger `trg_proteger_categoria` permite alterar **somente `cor` e `icone`**; bloqueia DELETE e mudanças em `descricao`/`id_pai`/`ativa`.
+- Banco bloqueia exclusão se houver subcategorias ou lançamentos vinculados.
+- Inativar categoria pai cascateia: trigger `trg_cascata_inativar_subcategorias` inativa as filhas em sequência.
 
 ### Contas
 
 - Tipos: `CORRENTE` | `REMUNERACAO` | `CARTAO` | `INVESTIMENTO` | `CARTEIRA`
-- Banco bloqueia exclusão se houver lançamentos (trigger `fn_bloquear_exclusao_conta`)
-- Saldo calculado pela view `vw_saldo_contas` (= `saldo_inicial` + soma de receitas - despesas)
+- Cartão: campos opcionais `dia_fechamento` e `dia_pagamento` (1..31).
+- Banco bloqueia exclusão se houver lançamentos (trigger `fn_bloquear_exclusao_conta`).
+- Saldo calculado pela view `vw_saldo_contas` (= `saldo_inicial` + soma de receitas - despesas, somente `status = PAGO`).
 
 ---
 
@@ -143,6 +149,15 @@ Permite:
 - Nunca pode existir só um lado do par (débito sem crédito ou vice-versa)
 - Edição/exclusão precisa atualizar **ambos** os registros
 - Quando recorrente, todos os pares da série compartilham `id_recorrencia`
+- Trigger `trg_bloquear_exclusao_transf_avulsa` impede DELETE direto em `transacoes` que tenha `id_par_transferencia` quando a categoria é protegida — força uso do endpoint `/transferencias/:id_par`.
+
+### 🔁 Validação de isolamento (trigger)
+
+`fn_validar_isolamento_usuario` (trigger BEFORE INSERT OR UPDATE em `transacoes`) revalida posse de `conta_id`/`categoria_id` apenas:
+- No **INSERT** (sempre);
+- No **UPDATE** somente quando `conta_id` ou `categoria_id` é alterado.
+
+Antes da migration `20260505000001`, qualquer UPDATE em `transacoes` revalidava — bloqueando reclassificações em conta inativa. Hoje você pode atualizar status/descricao/valor sem ativar a conta primeiro.
 
 ---
 
@@ -152,10 +167,12 @@ Permite:
 
 - Lógica de negócio nos hooks `useX` — páginas só compõem UI
 - Componentes em `components/ui` reutilizáveis
-- Tipos centralizados em `src/types/index.ts`
+- Tipos centralizados em `src/types/index.ts`; enums em `src/lib/constants.ts` (re-exportados pelo types)
 - Comunicação com API via `apiFetch` / `apiMutate` em `lib/api.ts`
   - Resposta padronizada: `{ ok, dados, erro, status }`
   - Header `Authorization: Bearer <jwt>` + `apikey`
+- **Cache via React Query**: hooks de domínio usam `useQuery`/`useMutation` com chaves de `lib/queryKeys.ts`. Invalidação após mutation (`qc.invalidateQueries`). `staleTime: 30s`, `refetchOnWindowFocus: false`.
+- **Logs**: `lib/logger.ts` expõe `log`/`debug`/`info` no-op em produção (tree-shake via `import.meta.env.DEV`). Use ao invés de `console.log` para debug. `console.warn`/`console.error` permanecem ativos.
 
 ### Backend (Edge Functions)
 

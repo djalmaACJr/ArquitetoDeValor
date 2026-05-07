@@ -258,48 +258,6 @@ export default function PerfilPage() {
           </form>
         </Secao>
 
-        {/* ── Seção: Alterar senha ──────────────────────────── */}
-        <Secao titulo="Alterar senha" icone={<Lock size={15}/>}>
-          <form onSubmit={salvarSenha} className="space-y-3">
-            <div>
-              <label className={label}>Senha atual</label>
-              <input
-                type="password" required value={senhaAtual}
-                onChange={e => setSenhaAtual(e.target.value)}
-                className={input}
-                placeholder="••••••••"
-              />
-            </div>
-            <div>
-              <label className={label}>Nova senha</label>
-              <input
-                type="password" required value={novaSenha}
-                onChange={e => setNovaSenha(e.target.value)}
-                className={input}
-                placeholder="Mínimo 6 caracteres"
-              />
-            </div>
-            <div>
-              <label className={label}>Confirmar nova senha</label>
-              <input
-                type="password" required value={confirmar}
-                onChange={e => setConfirmar(e.target.value)}
-                className={input}
-                placeholder="••••••••"
-              />
-            </div>
-            <div className="flex justify-end pt-1">
-              <button
-                type="submit" disabled={loadSenha}
-                className={`${btn} bg-blue-500/20 text-blue-300 hover:bg-blue-500/30`}
-              >
-                {loadSenha ? 'Atualizando...' : 'Atualizar senha'}
-              </button>
-            </div>
-            <Alerta fb={fbSenha}/>
-          </form>
-        </Secao>
-
         {/* ── Seção: Filtros salvos ────────────────────────── */}
         <Secao titulo="Filtros salvos" icone={<Bookmark size={15}/>}>
           {carregandoFiltros ? (
@@ -433,6 +391,48 @@ export default function PerfilPage() {
               </div>
             </>
           )}
+        </Secao>
+
+        {/* ── Seção: Alterar senha ──────────────────────────── */}
+        <Secao titulo="Alterar senha" icone={<Lock size={15}/>}>
+          <form onSubmit={salvarSenha} className="space-y-3">
+            <div>
+              <label className={label}>Senha atual</label>
+              <input
+                type="password" required value={senhaAtual}
+                onChange={e => setSenhaAtual(e.target.value)}
+                className={input}
+                placeholder="••••••••"
+              />
+            </div>
+            <div>
+              <label className={label}>Nova senha</label>
+              <input
+                type="password" required value={novaSenha}
+                onChange={e => setNovaSenha(e.target.value)}
+                className={input}
+                placeholder="Mínimo 6 caracteres"
+              />
+            </div>
+            <div>
+              <label className={label}>Confirmar nova senha</label>
+              <input
+                type="password" required value={confirmar}
+                onChange={e => setConfirmar(e.target.value)}
+                className={input}
+                placeholder="••••••••"
+              />
+            </div>
+            <div className="flex justify-end pt-1">
+              <button
+                type="submit" disabled={loadSenha}
+                className={`${btn} bg-blue-500/20 text-blue-300 hover:bg-blue-500/30`}
+              >
+                {loadSenha ? 'Atualizando...' : 'Atualizar senha'}
+              </button>
+            </div>
+            <Alerta fb={fbSenha}/>
+          </form>
         </Secao>
 
         {/* ── Seção: Zona de perigo ─────────────────────────── */}

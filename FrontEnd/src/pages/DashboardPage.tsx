@@ -3,9 +3,12 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw, History } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
+import { useCategorias } from '../hooks/useCategorias'
+import { log } from '../lib/logger'
 import { mesLabel, formatBRL, formatData, CORES_CATEGORIA } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
 import { MonthPicker } from '../components/ui/MonthPicker'
+import { MultiSelect } from '../components/ui/MultiSelect'
 import { Doughnut, Chart } from 'react-chartjs-2'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement,
@@ -344,13 +347,14 @@ function CardAlertas({
 }
 
 // -- Grafico barras + linha de saldo ----------------------
-function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes, loading = false }: {
+function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes, loading = false, onMesClick }: {
   historico: { mes: string; total_entradas: number; total_saidas: number; saldo_mes?: number }[];
   oculto: boolean;
   pagos: { receitas: number; despesas: number }[];
   pendentes: { receitas: number; despesas: number }[];
   projecoes: { receitas: number; despesas: number }[];
   loading?: boolean;
+  onMesClick?: (mes: string) => void;
 }) {
   const labels = historico.map(h => mesLabel(h.mes))
 
@@ -459,6 +463,23 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes, loading
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: 'index' as const, intersect: false },
+    onClick: (
+      _evt: unknown,
+      elements: { index: number }[],
+      chart: { tooltip?: { _active?: { index: number }[] } },
+    ) => {
+      if (!onMesClick) return
+      // Tooltip ativo (mode 'index') é a fonte mais confiável do mês clicado
+      const idxTooltip = chart?.tooltip?._active?.[0]?.index
+      const idx = idxTooltip ?? elements?.[0]?.index
+      if (idx === undefined) return
+      const m = historico[idx]?.mes
+      if (m) onMesClick(m)
+    },
+    onHover: (evt: { native?: Event }, elements: unknown[]) => {
+      const target = (evt?.native?.target as HTMLElement | undefined)
+      if (target && onMesClick) target.style.cursor = elements.length > 0 ? 'pointer' : 'default'
+    },
     plugins: {
       legend: { display: false },
       tooltip: {
@@ -783,7 +804,7 @@ function CardContas({ contas, oculto, mes, modo, setModo }: {
       if (!session) return
       supabase.rpc('fn_saldos_contas_ate_data', { p_data: dataAlvo })
         .then(({ data, error }) => {
-          console.log('[saldos RPC]', { dataAlvo, data, error })
+          log('[saldos RPC]', { dataAlvo, data, error })
           if (data) {
             const mapa: Record<string, number> = {}
             ;(data as { conta_id: string; saldo: number }[]).forEach(r => {
@@ -880,11 +901,19 @@ export default function DashboardPage() {
   const { dashboard: pgState, setDashboard: setPgState } = usePageState()
   const mes          = pgState.mes
   const contasFiltro = pgState.contasFiltro
+  const filtCats     = pgState.filtCats
+  const filtStatus   = pgState.filtStatus
   const modo         = pgState.modo
   const setMes          = useCallback((v: string)         => setPgState({ mes: v }), [setPgState])
   const setContasFiltro = (v: string[])       => setPgState({ contasFiltro: v })
+  const setFiltCats     = (v: string[])       => setPgState({ filtCats: v })
+  const setFiltStatus   = (v: string[])       => setPgState({ filtStatus: v })
   const setModo         = (v: 'hoje' | 'fim') => setPgState({ modo: v })
   const [oculto, setOculto] = useState(false)
+
+  const { categorias } = useCategorias()
+  const catsPai = categorias.filter(c => !c.id_pai)
+  const catsSub = categorias.filter(c => !!c.id_pai)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -910,11 +939,11 @@ export default function DashboardPage() {
     setLancamentoEditando(tx)
   }
 
-  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch } = useDashboard(mes, contasFiltro)
+  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
 
-  // Debug
+  // Debug (no-op em produção via lib/logger)
   useEffect(() => {
-    console.log('🔍 Estado do Dashboard:', {
+    log('🔍 Estado do Dashboard:', {
       contas: contas.length,
       pendentes: pendentes.length,
       proximas: proximas.length,
@@ -923,7 +952,7 @@ export default function DashboardPage() {
       receitasCat: receitasCat.length,
       historico: historico.length,
       loading,
-      error
+      error,
     })
   }, [contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading, error])
 
@@ -936,29 +965,69 @@ export default function DashboardPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h1 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
         <div className="flex flex-wrap items-center gap-2">
-          {/* Filtro de contas */}
-          <select
-            value={contasFiltro[0] || ''}
-            onChange={(e) => {
-              const value = e.target.value
-              setContasFiltro(value ? [value] : [])
-            }}
-            className="text-[13px] font-normal text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-3 py-1.5 cursor-pointer"
-          >
-            <option value="">Todas as contas</option>
-            {contas.filter(c => c.ativa).map(conta => (
-              <option key={conta.conta_id} value={conta.conta_id}>
-                {conta.nome}
-              </option>
-            ))}
-          </select>
+          {/* Conta — multi-select */}
+          <MultiSelect
+            placeholder="Todas as contas"
+            className="w-40"
+            values={contasFiltro}
+            onChange={setContasFiltro}
+            options={contas.filter(c => c.ativa).map(c => ({
+              value: c.conta_id,
+              label: c.nome,
+              cor: c.cor ?? undefined,
+            }))}
+          />
+
+          {/* Categoria — multi-select agrupado */}
+          <MultiSelect
+            placeholder="Categorias"
+            className="w-44"
+            values={filtCats}
+            onChange={setFiltCats}
+            options={[
+              ...catsPai.map(p => ({
+                value: p.id,
+                label: p.descricao,
+                icone: p.icone ?? undefined,
+                cor: p.cor ?? undefined,
+              })),
+              ...catsSub.map(s => {
+                const pai = catsPai.find(p => p.id === s.id_pai)
+                return {
+                  value: s.id,
+                  label: s.descricao,
+                  icone: s.icone ?? undefined,
+                  cor: s.cor ?? undefined,
+                  grupo: pai?.descricao ?? '',
+                  idPai: s.id_pai ?? undefined,
+                }
+              }),
+            ]}
+          />
+
+          {/* Status — multi-select */}
+          <MultiSelect
+            placeholder="Todos status"
+            className="w-36"
+            values={filtStatus}
+            onChange={setFiltStatus}
+            options={[
+              { value: 'PAGO',     label: 'Pago',     cor: '#00c896' },
+              { value: 'PENDENTE', label: 'Pendente', cor: '#4da6ff' },
+              { value: 'PROJECAO', label: 'Projeção', cor: '#f0b429' },
+            ]}
+          />
 
           <FiltrosSalvosBtn
             pagina="dashboard"
-            filtAtual={{ filtContas: contasFiltro }}
-            temFiltroAtivo={contasFiltro.length > 0}
-            onAplicar={d => setPgState({ contasFiltro: (d.filtContas as string[]) ?? [] })}
-            onLimpar={() => setPgState({ contasFiltro: [] })}
+            filtAtual={{ filtContas: contasFiltro, filtCats, filtStatus }}
+            temFiltroAtivo={contasFiltro.length > 0 || filtCats.length > 0 || filtStatus.length > 0}
+            onAplicar={d => setPgState({
+              contasFiltro: (d.filtContas as string[]) ?? [],
+              filtCats:     (d.filtCats   as string[]) ?? [],
+              filtStatus:   (d.filtStatus as string[]) ?? [],
+            })}
+            onLimpar={() => setPgState({ contasFiltro: [], filtCats: [], filtStatus: [] })}
           />
 
           {/* Botao atualizar */}
@@ -1034,6 +1103,7 @@ export default function DashboardPage() {
               pendentes={pendentesStatus}
               projecoes={projecoes}
               loading={loadingHistorico}
+              onMesClick={setMes}
             />
 
           {/* Linha 4: donuts */}
