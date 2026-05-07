@@ -196,7 +196,7 @@ export default function LancamentosPage() {
     setPgState({ comSaldo: typeof v === 'function' ? v(pgState.comSaldo) : v })
   const [saldoBaseConta, setSaldoBaseConta] = useState<Record<string, number>>({})
 
-  const { lancamentos, loading, error, carregar, removerLocal, editar, excluir, antecipar, alterarStatus } =
+  const { lancamentos, loading, fetching, error, carregar, removerLocal, prefetchAdj, editar, excluir, antecipar, alterarStatus } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus, com_saldo: comSaldo })
 
   const { contas }     = useContas()
@@ -243,8 +243,8 @@ export default function LancamentosPage() {
       const tag = (e.target as HTMLElement).tagName
       if (['INPUT','TEXTAREA','SELECT','BUTTON'].includes(tag)) return
       if (drawerAberto) return
-      if (e.key === 'ArrowLeft')  { e.preventDefault(); navMes(-1) }
-      if (e.key === 'ArrowRight') { e.preventDefault(); navMes(1)  }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); prefetchAdj(-1); navMes(-1) }
+      if (e.key === 'ArrowRight') { e.preventDefault(); prefetchAdj(1);  navMes(1)  }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -470,7 +470,18 @@ export default function LancamentosPage() {
         {/* Filtros — tudo em uma linha */}
         <div className="flex flex-wrap gap-2 mb-2 items-center">
         {/* Mês */}
-        <MonthPicker value={mes} onChange={setMes} />
+        <div className="flex items-center gap-1.5">
+          <MonthPicker value={mes} onChange={setMes}
+            onHoverPrev={() => prefetchAdj(-1)}
+            onHoverNext={() => prefetchAdj(1)}
+          />
+          {fetching && !loading && (
+            <span
+              className="inline-block w-3.5 h-3.5 rounded-full border-2 border-transparent animate-spin"
+              style={{ borderTopColor: '#4da6ff', borderRightColor: 'rgba(77,166,255,0.3)' }}
+            />
+          )}
+        </div>
 
         {/* Conta — multi-select */}
         <MultiSelect

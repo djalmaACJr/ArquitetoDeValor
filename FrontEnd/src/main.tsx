@@ -18,6 +18,60 @@ const queryClient = new QueryClient({
   },
 })
 
+// ── Cache persistido em localStorage ─────────────────────────────────────────
+// Navegação entre meses é instantânea a partir da 2ª visita (mesmo após
+// refresh/login): os dados do localStorage aparecem imediatamente e o
+// React Query refaz o fetch em background para atualizar.
+const LS_KEY     = 'arqv-lc'
+const LS_MAX_AGE = 8 * 60 * 60 * 1000 // 8 horas
+
+function hydratarCache() {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (!raw) return
+    const { data, savedAt } = JSON.parse(raw) as {
+      data: Record<string, unknown>
+      savedAt: number
+    }
+    if (Date.now() - savedAt > LS_MAX_AGE) { localStorage.removeItem(LS_KEY); return }
+    for (const [keyStr, value] of Object.entries(data)) {
+      queryClient.setQueryData(JSON.parse(keyStr), value)
+    }
+    // Marca como stale — React Query vai refrescar em background quando o
+    // componente se inscrever, sem bloquear a exibição imediata do cache.
+    queryClient.invalidateQueries({ queryKey: ['lancamentos'] })
+  } catch {
+    localStorage.removeItem(LS_KEY)
+  }
+}
+
+function persistirCache() {
+  try {
+    const data: Record<string, unknown> = {}
+    queryClient.getQueryCache().getAll()
+      .filter(q =>
+        (q.queryKey as unknown[])[0] === 'lancamentos' &&
+        q.state.status === 'success'
+      )
+      .forEach(q => { data[JSON.stringify(q.queryKey)] = q.state.data })
+    if (Object.keys(data).length === 0) return
+    localStorage.setItem(LS_KEY, JSON.stringify({ data, savedAt: Date.now() }))
+  } catch { /* quota exceeded — ignora silenciosamente */ }
+}
+
+hydratarCache()
+
+queryClient.getQueryCache().subscribe(event => {
+  if (
+    event.type === 'updated' &&
+    (event.query.queryKey as unknown[])[0] === 'lancamentos' &&
+    event.query.state.status === 'success'
+  ) {
+    persistirCache()
+  }
+})
+// ─────────────────────────────────────────────────────────────────────────────
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

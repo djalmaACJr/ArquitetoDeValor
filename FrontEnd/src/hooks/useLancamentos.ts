@@ -1,5 +1,6 @@
 // src/hooks/useLancamentos.ts
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData, type QueryClient } from '@tanstack/react-query'
+import { useEffect, useCallback } from 'react'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 
@@ -83,13 +84,65 @@ async function fetchLancamentos(filtros: FiltrosLancamento, signal?: AbortSignal
   return lista
 }
 
+function mesAdjacente(mes: string, delta: number): string {
+  const [ano, m] = mes.split('-').map(Number)
+  const d = new Date(ano, m - 1 + delta, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * Pré-aquece o cache do React Query com os meses vizinhos ao mês informado,
+ * usando filtros padrão (sem conta/categoria/status). Ideal para chamar logo
+ * após o login (ex.: AppLayout) para que LancamentosPage encontre o cache pronto.
+ */
+export function prefetchLancamentosVizinhos(qc: QueryClient, mes: string) {
+  for (let delta = -3; delta <= 3; delta++) {
+    const filtroAdj: FiltrosLancamento = {
+      mes:          mesAdjacente(mes, delta),
+      conta_ids:    [],
+      categoria_ids:[],
+      status_ids:   [],
+      com_saldo:    true,
+    }
+    qc.prefetchQuery({
+      queryKey: qk.lancamentos(filtroAdj),
+      queryFn:  ({ signal }) => fetchLancamentos(filtroAdj, signal),
+      staleTime: 30_000,
+    })
+  }
+}
+
 export function useLancamentos(filtros: FiltrosLancamento) {
   const qc = useQueryClient()
 
-  const { data: lancamentos = [], isLoading: loading, error } = useQuery({
-    queryKey: qk.lancamentos(filtros),
-    queryFn:  ({ signal }) => fetchLancamentos(filtros, signal),
+  const { data: lancamentos = [], isLoading: loading, isFetching: fetching, error } = useQuery({
+    queryKey:        qk.lancamentos(filtros),
+    queryFn:         ({ signal }) => fetchLancamentos(filtros, signal),
+    staleTime:       30_000,
+    placeholderData: keepPreviousData,
   })
+
+  // Prefetch pontual — chamado no onMouseEnter dos botões de navegação
+  const prefetchAdj = useCallback((delta: number) => {
+    const filtroAdj = { ...filtros, mes: mesAdjacente(filtros.mes, delta) }
+    qc.prefetchQuery({
+      queryKey: qk.lancamentos(filtroAdj),
+      queryFn:  ({ signal }) => fetchLancamentos(filtroAdj, signal),
+      staleTime: 30_000,
+    })
+  }, [filtros, qc])
+
+  // Prefetch de background — cobre navegação por teclado e saltos maiores
+  useEffect(() => {
+    for (const delta of [-3, -2, -1, 1, 2, 3]) {
+      const filtroAdj = { ...filtros, mes: mesAdjacente(filtros.mes, delta) }
+      qc.prefetchQuery({
+        queryKey: qk.lancamentos(filtroAdj),
+        queryFn:  ({ signal }) => fetchLancamentos(filtroAdj, signal),
+        staleTime: 30_000,
+      })
+    }
+  }, [filtros.mes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const carregar = async () => {
     await qc.invalidateQueries({ queryKey: qk.lancamentos(filtros) })
@@ -198,9 +251,11 @@ export function useLancamentos(filtros: FiltrosLancamento) {
   return {
     lancamentos,
     loading,
+    fetching,
     error: error ? (error as Error).message : null,
     carregar,
     removerLocal,
+    prefetchAdj,
     criar,
     editar,
     excluir,

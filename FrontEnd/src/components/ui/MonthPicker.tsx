@@ -17,9 +17,13 @@ interface MonthPickerProps {
   /** Maior mês permitido (formato "YYYY-MM"). Padrão: sem limite. */
   max?: string
   className?: string
+  /** Chamado no mouseenter do botão "←" — útil para prefetch */
+  onHoverPrev?: () => void
+  /** Chamado no mouseenter do botão "→" — útil para prefetch */
+  onHoverNext?: () => void
 }
 
-export function MonthPicker({ value, onChange, min, max, className = '' }: MonthPickerProps) {
+export function MonthPicker({ value, onChange, min, max, className = '', onHoverPrev, onHoverNext }: MonthPickerProps) {
   const [open, setOpen]       = useState(false)
   const [anoGrid, setAnoGrid] = useState(() => parseInt(value.split('-')[0]))
   const ref                   = useRef<HTMLDivElement>(null)
@@ -87,6 +91,7 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
       <div className="flex items-center gap-1">
         <button
           onClick={() => navMes(-1)}
+          onMouseEnter={onHoverPrev}
           disabled={!!(min && value <= min)}
           title="Mês anterior"
           aria-label="Mês anterior"
@@ -109,6 +114,7 @@ export function MonthPicker({ value, onChange, min, max, className = '' }: Month
 
         <button
           onClick={() => navMes(1)}
+          onMouseEnter={onHoverNext}
           disabled={!!(max && value >= max)}
           title="Próximo mês"
           aria-label="Próximo mês"

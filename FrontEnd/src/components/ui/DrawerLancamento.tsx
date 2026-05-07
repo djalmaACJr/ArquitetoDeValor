@@ -421,6 +421,42 @@ export default function DrawerLancamento({
       return
     }
 
+    // ── Conversão: lançamento único → recorrente ───────────────
+    const convertendoParaRecorrente =
+      !!editando && !editando.id_recorrencia &&
+      form.recorrente && (parseInt(form.total_parcelas) || 0) > 1
+
+    if (convertendoParaRecorrente) {
+      const delRes = await apiMutate(`/transacoes/${editando!.id}?escopo=SOMENTE_ESTE`, 'DELETE', {})
+      if (!delRes.ok) { setSalvando(false); setErro(delRes.erro ?? 'Erro ao converter lançamento.'); return }
+      const res = await apiMutate('/transacoes', 'POST', {
+        tipo:                  form.tipo,
+        descricao:             form.descricao.trim(),
+        valor:                 valorNumerico,
+        conta_id:              form.conta_id,
+        categoria_id:          form.categoria_id || undefined,
+        status:                form.status,
+        observacao:            form.observacao || undefined,
+        data:                  form.data,
+        total_parcelas:        parseInt(form.total_parcelas) || 2,
+        tipo_recorrencia:      form.tipo_recorrencia,
+        intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
+      })
+      setSalvando(false)
+      if (res.ok) {
+        const dadosResp = res.dados as { parcelas?: { id: string }[]; id?: string } | null
+        const savedId = dadosResp?.parcelas?.[0]?.id ?? dadosResp?.id
+        onSalvo?.(savedId)
+        if (criarNovo) {
+          criarNovoPreserved.current = { tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status }
+          setForm({ ...FORM_VAZIO, tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status })
+          setEscopo('SOMENTE_ESTE'); setExpandindo(false)
+          setTimeout(() => descricaoRef.current?.focus(), 50)
+        } else { onFechar() }
+      } else { setErro(res.erro ?? 'Erro ao salvar.') }
+      return
+    }
+
     const payload: Partial<Lancamento> = {
       tipo: form.tipo as 'RECEITA' | 'DESPESA',
       descricao: form.descricao.trim(),
@@ -875,7 +911,52 @@ export default function DrawerLancamento({
                     )}
                   </>
                 </>
-              ) : null
+              ) : (
+                /* Lançamento único sendo editado — permite converter para recorrente */
+                form.tipo !== 'TRANSFERENCIA' && (
+                  <>
+                    <Toggle checked={form.recorrente} onChange={v => set({ recorrente: v })}
+                      label={form.recorrente ? 'Recorrente' : 'Lançamento único'} />
+                    {form.recorrente && (
+                      <>
+                        <div className="mt-2 flex gap-2">
+                          <div className="w-20">
+                            <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
+                            <Input type="number" min="1" max="99" value={form.intervalo_recorrencia}
+                              onChange={e => set({ intervalo_recorrencia: e.target.value })} />
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
+                              {parseInt(form.intervalo_recorrencia) > 1
+                                ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as Record<string, string>)[form.tipo_recorrencia] ?? 'períodos'
+                                : 'Frequência'}
+                            </p>
+                            <select
+                              value={form.tipo_recorrencia}
+                              onChange={e => set({ tipo_recorrencia: e.target.value })}
+                              className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-av-green transition-colors"
+                              style={{ color: '#e8eaf0' }}
+                            >
+                              <option value="MENSAL">Mensal</option>
+                              <option value="SEMANAL">Semanal</option>
+                              <option value="ANUAL">Anual</option>
+                              <option value="DIARIA">Diária</option>
+                            </select>
+                          </div>
+                          <div className="w-20">
+                            <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
+                            <Input type="number" min="2" max="999" value={form.total_parcelas}
+                              onChange={e => set({ total_parcelas: e.target.value })} />
+                          </div>
+                        </div>
+                        <p className="text-[10px] mt-2 px-2 py-1.5 rounded-lg" style={{ color: '#f0b429', background: 'rgba(240,180,41,0.08)', border: '1px solid rgba(240,180,41,0.2)' }}>
+                          Este lançamento será substituído por {form.total_parcelas || 2} parcelas recorrentes.
+                        </p>
+                      </>
+                    )}
+                  </>
+                )
+              )
             )}
           </Field>
         )}
