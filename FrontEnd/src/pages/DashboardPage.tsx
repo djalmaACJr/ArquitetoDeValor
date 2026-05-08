@@ -19,8 +19,6 @@ import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import { FiltrosSalvosBtn } from '../components/ui/FiltrosSalvosBtn'
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, LineElement, PointElement)
-
 // -- Icone de conta inline (sem dependencia externa) ------
 function IconeConta({ icone, cor, size = 'md' }: {
   icone?: string | null; cor?: string | null; size?: 'sm' | 'md' | 'lg'
