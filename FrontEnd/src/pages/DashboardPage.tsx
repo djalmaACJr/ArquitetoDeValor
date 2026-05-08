@@ -10,10 +10,7 @@ import { usePageState } from '../context/PageStateContext'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import { MultiSelect } from '../components/ui/MultiSelect'
 import { Doughnut, Chart } from 'react-chartjs-2'
-import {
-  Chart as ChartJS, CategoryScale, LinearScale, BarElement,
-  ArcElement, Tooltip, Legend, LineElement, PointElement,
-} from 'chart.js'
+import 'chart.js/auto'
 import type { TooltipItem } from 'chart.js'
 import type { Conta, Transacao, DespesaCategoria, Categoria } from '../types'
 import type { Lancamento } from '../hooks/useLancamentos'
@@ -21,8 +18,6 @@ import { supabase } from '../lib/supabase'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import { FiltrosSalvosBtn } from '../components/ui/FiltrosSalvosBtn'
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, LineElement, PointElement)
 
 // -- Icone de conta inline (sem dependencia externa) ------
 function IconeConta({ icone, cor, size = 'md' }: {
@@ -916,16 +911,6 @@ export default function DashboardPage() {
   const catsPai = categorias.filter((c: Categoria) => !c.id_pai)
   const catsSub = categorias.filter((c: Categoria) => !!c.id_pai)
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement).tagName
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
-      if (e.key === 'ArrowLeft')  { e.preventDefault(); setMes(navMesStr(mes, -1)) }
-      if (e.key === 'ArrowRight') { e.preventDefault(); setMes(navMesStr(mes, 1))  }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [mes, setMes])
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
   const [editandoId,         setEditandoId]         = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -941,6 +926,25 @@ export default function DashboardPage() {
   }
 
   const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch, prefetchMesSeguinte, prefetchMesAnterior } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        prefetchMesAnterior()
+        setMes(navMesStr(mes, -1))
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        prefetchMesSeguinte()
+        setMes(navMesStr(mes, 1))
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [mes, setMes, prefetchMesAnterior, prefetchMesSeguinte])
 
   // Debug (no-op em produção via lib/logger)
   useEffect(() => {

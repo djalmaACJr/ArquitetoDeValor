@@ -134,13 +134,18 @@ export function useDashboard(
   useEffect(() => {
     if (!parsed) return
 
-    for (const delta of [-3, -2, -1, 1, 2, 3]) {
+    // Prefetcha a janela do histórico completo + alguns meses adjacentes,
+    // para que a troca de mês por setas e teclado já tenha os dados em cache.
+    for (const delta of [-6, -5, -4, -3, -2, -1, 0, 1, 2, 3]) {
       const mesPrefetch = mesAdjacente(mes, delta)
-      qc.prefetchQuery({
-        queryKey: ['dashboard-fase1', mesPrefetch],
-        queryFn: ({ signal }) => fetchFase1(mesPrefetch, signal),
-        staleTime: 60_000,
-      })
+      if (delta !== 0) {
+        qc.prefetchQuery({
+          queryKey: ['dashboard-fase1', mesPrefetch],
+          queryFn: ({ signal }) => fetchFase1(mesPrefetch, signal),
+          staleTime: 60_000,
+        })
+      }
+
       // Mes individual — alimenta o histórico de QUALQUER mês adjacente
       // (cache key compartilhado entre todas as visões do dashboard)
       qc.prefetchQuery({
@@ -176,8 +181,10 @@ export function useDashboard(
     return gerarUltimosMeses(parsed.ano, parsed.m, 6)
   }, [parsed])
 
+  const mesesAnteriores = useMemo(() => meses6.slice(0, -1), [meses6])
+
   const historicoQs = useQueries({
-    queries: meses6.map(mh => ({
+    queries: mesesAnteriores.map(mh => ({
       queryKey:        ['transacoes-mes', mh] as const,
       queryFn:         ({ signal }: { signal?: AbortSignal }) => fetchTransacoesMes(mh, signal),
       enabled:         fase2Enabled,
@@ -193,7 +200,7 @@ export function useDashboard(
     [historicoQs],
   )
 
-  // ── Derivados (useMemo para evitar recálculo desnecessário) ─────
+  // ── Derivados (useMemo para evitar recomputação desnecessária) ─────
   const hoje = new Date().toISOString().split('T')[0]
 
   // Filtros: passa contas (sempre) + categorias + status (com_status para alguns cálculos)
@@ -218,14 +225,13 @@ export function useDashboard(
         despesasCat: [] as DespesaCategoria[], receitasCat: [] as DespesaCategoria[],
       }
     }
+
     const { pendMes, pendProx, doMesRaw } = fase1Q.data
 
-    // Pendentes / Próximas — status já é PENDENTE pela query
     const pendMesF  = pendMes.filter(filtros.filtrarSemStatus)
     const pendProxF = pendProx.filter(filtros.filtrarSemStatus)
     const todasPend = [...pendMesF, ...pendProxF]
 
-    // Resumo
     const doMes = doMesRaw.filter(filtros.filtrarTx)
     const entradas = doMes.filter(t => t.tipo === 'RECEITA').reduce((s, t) => s + t.valor, 0)
     const saidas   = doMes.filter(t => t.tipo === 'DESPESA').reduce((s, t) => s + t.valor, 0)
@@ -248,8 +254,9 @@ export function useDashboard(
         projecoes: [] as { receitas: number; despesas: number }[],
       }
     }
+
     const meses6 = gerarUltimosMeses(parsed.ano, parsed.m, 6)
-    const todos = [...(fase2Q.data ?? []), fase1Q.data.doMesRaw]
+    const todos = [...historicoData, fase1Q.data.doMesRaw]
     // Se fase2 ainda não chegou, preenche com [] para manter ordem
     while (todos.length < 6) todos.unshift([])
 
@@ -286,39 +293,37 @@ export function useDashboard(
       pendentesStatus: status6.map(s => s.pendentes),
       projecoes:       status6.map(s => s.projecoes),
     }
-  }, [fase1Q.data, fase2Q.data, filtros, parsed,
+  }, [fase1Q.data, historicoData, filtros, parsed,
       contasFiltro.length, filtCats.length, filtStatus.length])
 
   const refetch = async () => {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ['dashboard-fase1', mes] }),
-      qc.invalidateQueries({ queryKey: ['dashboard-fase2', mes, mesesAnteriores] }),
+      qc.invalidateQueries({ queryKey: ['transacoes-mes'] }),
       qc.invalidateQueries({ queryKey: qk.contas() }),
     ])
   }
 
-  // Prefetch do mês seguinte/anterior (chamado ao passar mouse nos botões)
-  const prefetchMesSeguinte = () => {
+  const prefetchMes = (delta: number) => {
     if (!parsed) return
     const [y, m] = mes.split('-').map(Number)
-    const novoMes = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+    const d = new Date(y, m - 1 + delta, 1)
+    const novoMes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+
     qc.prefetchQuery({
       queryKey: ['dashboard-fase1', novoMes],
       queryFn: ({ signal }) => fetchFase1(novoMes, signal),
+      staleTime: 60_000,
+    })
+    qc.prefetchQuery({
+      queryKey: ['transacoes-mes', novoMes],
+      queryFn: ({ signal }) => fetchTransacoesMes(novoMes, signal),
       staleTime: 60_000,
     })
   }
 
-  const prefetchMesAnterior = () => {
-    if (!parsed) return
-    const [y, m] = mes.split('-').map(Number)
-    const novoMes = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
-    qc.prefetchQuery({
-      queryKey: ['dashboard-fase1', novoMes],
-      queryFn: ({ signal }) => fetchFase1(novoMes, signal),
-      staleTime: 60_000,
-    })
-  }
+  const prefetchMesSeguinte = () => prefetchMes(1)
+  const prefetchMesAnterior = () => prefetchMes(-1)
 
   return {
     contas,
@@ -326,7 +331,7 @@ export function useDashboard(
     resumo, despesasCat, receitasCat,
     historico, pagos, pendentesStatus, projecoes,
     loading:          fase1Q.isLoading,
-    loadingHistorico: fase2Q.isLoading,
+    loadingHistorico: historicoLoading,
     error:            !parsed ? `Mês inválido: ${mes}` : (fase1Q.error ? (fase1Q.error as Error).message : null),
     refetch,
     prefetchMesSeguinte,
