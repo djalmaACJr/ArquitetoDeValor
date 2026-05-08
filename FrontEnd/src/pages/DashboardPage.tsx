@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.tsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw, History } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
@@ -347,7 +347,7 @@ function CardAlertas({
 }
 
 // -- Grafico barras + linha de saldo ----------------------
-function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes, loading = false, onMesClick }: {
+const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes, loading = false, onMesClick }: {
   historico: { mes: string; total_entradas: number; total_saidas: number; saldo_mes?: number }[];
   oculto: boolean;
   pagos: { receitas: number; despesas: number }[];
@@ -614,10 +614,10 @@ function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes, loading
       </div>
     </div>
   )
-}
+})
 
 // -- Grafico donut de categoria ---------------------------
-function GraficoDonut({ titulo, subtitulo, total, dados }: {
+const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dados }: {
   titulo: string; subtitulo: string; total: number
   dados: DespesaCategoria[]; corCentro: string
 }) {
@@ -668,7 +668,7 @@ function GraficoDonut({ titulo, subtitulo, total, dados }: {
       </div>
     </div>
   )
-}
+})
 
 // -- Card de últimas alterações ------------------------------------
 interface AlteracaoItem {
@@ -940,7 +940,7 @@ export default function DashboardPage() {
     setLancamentoEditando(tx)
   }
 
-  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
+  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch, prefetchMesSeguinte, prefetchMesAnterior } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
 
   // Debug (no-op em produção via lib/logger)
   useEffect(() => {
@@ -1051,7 +1051,12 @@ export default function DashboardPage() {
             {oculto ? 'Mostrar' : 'Ocultar'}
           </button>
 
-          <MonthPicker value={mes} onChange={setMes} />
+          <MonthPicker
+            value={mes}
+            onChange={setMes}
+            onHoverPrev={prefetchMesAnterior}
+            onHoverNext={prefetchMesSeguinte}
+          />
 
           <BotaoNovoLancamento
             onSelect={tipo => navigate('/lancamentos', { state: { novoLancamento: true, tipoInicial: tipo } })}

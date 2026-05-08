@@ -1,6 +1,6 @@
 // src/hooks/useDashboard.ts
-import { useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo, useEffect, useState } from 'react'
+import { useQuery, useQueries, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiFetch, extrairLista } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import type { Conta, Transacao, ResumoMensal, DespesaCategoria } from '../types'
@@ -47,6 +47,13 @@ function parseMes(mes: string): { ano: number; m: number } | null {
   const m   = parseInt(mesStr, 10)
   if (Number.isNaN(ano) || Number.isNaN(m) || m < 1 || m > 12) return null
   return { ano, m }
+}
+
+/** Calcula mês adjacente com delta (ex: -1 = mês anterior, +1 = próximo) */
+function mesAdjacente(mes: string, delta: number): string {
+  const [y, m] = mes.split('-').map(Number)
+  const d = new Date(y, m - 1 + delta, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
 /** Extrai totais por status de uma fatia de transações já filtrada */
@@ -96,13 +103,13 @@ async function fetchFase1(mes: string, signal?: AbortSignal): Promise<Fase1> {
   }
 }
 
-async function fetchFase2(mesesAnteriores: readonly string[], signal?: AbortSignal): Promise<Transacao[][]> {
-  const arr = await Promise.all(
-    mesesAnteriores.map(mh =>
-      apiFetch(`/transacoes?mes=${mh}&per_page=1000&saldo=true`, signal),
-    ),
-  )
-  return arr.map(r => extrairLista<Transacao>(r.dados))
+/**
+ * Busca todas as transações de um mês individual.
+ * Usado pelo histórico (1 query por mês, cache compartilhado entre navegações).
+ */
+async function fetchTransacoesMes(mes: string, signal?: AbortSignal): Promise<Transacao[]> {
+  const res = await apiFetch(`/transacoes?mes=${mes}&per_page=1000&saldo=true`, signal)
+  return extrairLista<Transacao>(res.dados)
 }
 
 export function useDashboard(
@@ -113,31 +120,78 @@ export function useDashboard(
 ) {
   const qc = useQueryClient()
   const parsed = useMemo(() => parseMes(mes), [mes])
+  
+  // Lazy-load: ativa fase 2 somente após UI renderizar (500ms)
+  const [fase2Enabled, setFase2Enabled] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setFase2Enabled(true), 500)
+    return () => clearTimeout(timer)
+  }, [])
+
+  // ── Prefetch em background: 3 meses para trás + 3 meses para frente ─────
+  // Prefetcha tanto fase 1 (alertas/saldo) quanto cada mês individual do
+  // histórico para que ambos os gráficos fiquem prontos ao navegar.
+  useEffect(() => {
+    if (!parsed) return
+
+    for (const delta of [-3, -2, -1, 1, 2, 3]) {
+      const mesPrefetch = mesAdjacente(mes, delta)
+      qc.prefetchQuery({
+        queryKey: ['dashboard-fase1', mesPrefetch],
+        queryFn: ({ signal }) => fetchFase1(mesPrefetch, signal),
+        staleTime: 60_000,
+      })
+      // Mes individual — alimenta o histórico de QUALQUER mês adjacente
+      // (cache key compartilhado entre todas as visões do dashboard)
+      qc.prefetchQuery({
+        queryKey: ['transacoes-mes', mesPrefetch],
+        queryFn: ({ signal }) => fetchTransacoesMes(mesPrefetch, signal),
+        staleTime: 60_000,
+      })
+    }
+  }, [mes, parsed, qc])
 
   // Contas (cache compartilhado com useContas via mesma query key)
   const { data: contas = [] } = useQuery({
     queryKey: qk.contas(),
     queryFn:  ({ signal }) => fetchContas(signal),
+    staleTime: 5 * 60_000, // 5 minutos
   })
 
   // FASE 1 — mês atual + próximos pendentes (libera UI imediato)
+  // keepPreviousData: mantém dados do mês anterior enquanto carrega novos
   const fase1Q = useQuery({
     queryKey: ['dashboard-fase1', mes],
     queryFn:  ({ signal }) => fetchFase1(mes, signal),
     enabled:  !!parsed,
+    staleTime: 60_000, // 1 minuto
+    placeholderData: keepPreviousData,
   })
 
-  // FASE 2 — 5 meses anteriores (atualiza gráfico em background)
-  const mesesAnteriores = useMemo(() => {
+  // ── HISTÓRICO — 6 meses (5 anteriores + atual) com cache POR MÊS ──────
+  // Cada mês é uma query individual. Ao navegar para o mês adjacente, 5 dos
+  // 6 meses já estão no cache. Apenas o mês novo dispara fetch real.
+  const meses6 = useMemo(() => {
     if (!parsed) return [] as string[]
-    return gerarUltimosMeses(parsed.ano, parsed.m, 6).slice(0, 5)
+    return gerarUltimosMeses(parsed.ano, parsed.m, 6)
   }, [parsed])
 
-  const fase2Q = useQuery({
-    queryKey: ['dashboard-fase2', mes, mesesAnteriores],
-    queryFn:  ({ signal }) => fetchFase2(mesesAnteriores, signal),
-    enabled:  !!parsed && mesesAnteriores.length > 0,
+  const historicoQs = useQueries({
+    queries: meses6.map(mh => ({
+      queryKey:        ['transacoes-mes', mh] as const,
+      queryFn:         ({ signal }: { signal?: AbortSignal }) => fetchTransacoesMes(mh, signal),
+      enabled:         fase2Enabled,
+      staleTime:       60_000,
+      placeholderData: keepPreviousData,
+    })),
   })
+
+  // Helpers derivados das queries individuais
+  const historicoData = useMemo(() => historicoQs.map(q => q.data ?? []), [historicoQs])
+  const historicoLoading = useMemo(
+    () => historicoQs.some(q => q.isLoading),
+    [historicoQs],
+  )
 
   // ── Derivados (useMemo para evitar recálculo desnecessário) ─────
   const hoje = new Date().toISOString().split('T')[0]
@@ -243,6 +297,29 @@ export function useDashboard(
     ])
   }
 
+  // Prefetch do mês seguinte/anterior (chamado ao passar mouse nos botões)
+  const prefetchMesSeguinte = () => {
+    if (!parsed) return
+    const [y, m] = mes.split('-').map(Number)
+    const novoMes = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+    qc.prefetchQuery({
+      queryKey: ['dashboard-fase1', novoMes],
+      queryFn: ({ signal }) => fetchFase1(novoMes, signal),
+      staleTime: 60_000,
+    })
+  }
+
+  const prefetchMesAnterior = () => {
+    if (!parsed) return
+    const [y, m] = mes.split('-').map(Number)
+    const novoMes = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
+    qc.prefetchQuery({
+      queryKey: ['dashboard-fase1', novoMes],
+      queryFn: ({ signal }) => fetchFase1(novoMes, signal),
+      staleTime: 60_000,
+    })
+  }
+
   return {
     contas,
     pendentes, proximas,
@@ -252,5 +329,7 @@ export function useDashboard(
     loadingHistorico: fase2Q.isLoading,
     error:            !parsed ? `Mês inválido: ${mes}` : (fase1Q.error ? (fase1Q.error as Error).message : null),
     refetch,
+    prefetchMesSeguinte,
+    prefetchMesAnterior,
   }
 }
