@@ -10,10 +10,7 @@ import { usePageState } from '../context/PageStateContext'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import { MultiSelect } from '../components/ui/MultiSelect'
 import { Doughnut, Chart } from 'react-chartjs-2'
-import {
-  Chart as ChartJS, CategoryScale, LinearScale, BarElement,
-  ArcElement, Tooltip, Legend, LineElement, PointElement,
-} from 'chart.js'
+import 'chart.js/auto'
 import type { TooltipItem } from 'chart.js'
 import type { Conta, Transacao, DespesaCategoria, Categoria } from '../types'
 import type { Lancamento } from '../hooks/useLancamentos'
