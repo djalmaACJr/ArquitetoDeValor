@@ -24,9 +24,14 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  // userId no key do PageStateProvider força reset do estado de filtros
+  // (filtContas, filtCats, etc.) ao trocar de usuário — sem isso, IDs do
+  // usuário anterior vazariam para o novo (ex.: contaIdInicial do drawer).
+  const { session } = useAuth()
+  const userId = session?.user?.id ?? null
   return (
     <BrowserRouter>
-      <PageStateProvider>
+      <PageStateProvider key={userId ?? 'anon'}>
         <Routes>
           <Route path="/login"    element={<LoginPage/>}/>
           <Route path="/cadastro"        element={<CadastroPage/>}/>

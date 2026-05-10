@@ -10,7 +10,10 @@ interface Props {
 
 // Avalia uma expressão aritmética simples de forma segura
 function avaliarExpr(expr: string): number | null {
-  const sanitized = expr
+  // Remove pontos usados como separador de milhar BR (ex.: "1.234,56" → "1234,56").
+  // Padrão: ponto entre dígitos seguido de exatamente 3 dígitos e operador/fim.
+  const semMilhar = expr.replace(/(\d)\.(?=\d{3}(?:\D|$))/g, '$1')
+  const sanitized = semMilhar
     .replace(/,/g, '.')
     .replace(/×/g, '*')
     .replace(/÷/g, '/')

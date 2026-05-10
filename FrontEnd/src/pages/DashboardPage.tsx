@@ -1088,7 +1088,7 @@ export default function DashboardPage() {
               total={totalPendentes}
               itens={pendentes}
               contas={contas}
-              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: 'PENDENTE', mes } })}
+              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: ['PENDENTE', 'PROJECAO'], mes, limparOutrosFiltros: true } })}
               onEditar={abrirEdicao}
             />
             <CardAlertas
@@ -1097,7 +1097,7 @@ export default function DashboardPage() {
               total={totalProximas}
               itens={proximas}
               contas={contas}
-              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: 'PENDENTE', mes } })}
+              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: ['PENDENTE', 'PROJECAO'], mes, limparOutrosFiltros: true } })}
               onEditar={abrirEdicao}
               filtravel
               mes={mes}

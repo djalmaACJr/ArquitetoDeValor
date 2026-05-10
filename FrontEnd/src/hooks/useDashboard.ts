@@ -90,16 +90,19 @@ async function fetchFase1(mes: string, signal?: AbortSignal): Promise<Fase1> {
     ? `${anoN + 1}-01`
     : `${anoN}-${String(mesN + 1).padStart(2, '0')}`
 
-  const [pendentesRes, proximosRes, mesAtualRes] = await Promise.all([
-    apiFetch(`/transacoes?status=PENDENTE&mes=${mes}&per_page=500&saldo=true`, signal),
-    apiFetch(`/transacoes?status=PENDENTE&mes=${mesSeguinte}&per_page=500&saldo=true`, signal),
+  const [mesAtualRes, mesSeguinteRes] = await Promise.all([
     apiFetch(`/transacoes?mes=${mes}&per_page=1000&saldo=true`, signal),
+    apiFetch(`/transacoes?mes=${mesSeguinte}&per_page=1000&saldo=true`, signal),
   ])
 
+  const doMesRaw  = extrairLista<Transacao>(mesAtualRes.dados)
+  const doProxRaw = extrairLista<Transacao>(mesSeguinteRes.dados)
+  const naoPago = (t: Transacao) => t.status === 'PENDENTE' || t.status === 'PROJECAO'
+
   return {
-    pendMes:  extrairLista<Transacao>(pendentesRes.dados),
-    pendProx: extrairLista<Transacao>(proximosRes.dados),
-    doMesRaw: extrairLista<Transacao>(mesAtualRes.dados),
+    pendMes:  doMesRaw.filter(naoPago),
+    pendProx: doProxRaw.filter(naoPago),
+    doMesRaw,
   }
 }
 
@@ -211,6 +214,7 @@ export function useDashboard(
     return {
       filtrarTx:        (t: Transacao) => !ehTransf(t) && passaConta(t) && passaCat(t) && passaStatus(t),
       filtrarSemStatus: (t: Transacao) => !ehTransf(t) && passaConta(t) && passaCat(t),
+      filtrarPendentes: (t: Transacao) => passaConta(t) && passaCat(t),
     }
     // contasFiltro/filtCats/filtStatus são arrays; depender deles diretamente
     // gera recomputação a cada render. JSON.stringify estabiliza por valor.
@@ -228,8 +232,8 @@ export function useDashboard(
 
     const { pendMes, pendProx, doMesRaw } = fase1Q.data
 
-    const pendMesF  = pendMes.filter(filtros.filtrarSemStatus)
-    const pendProxF = pendProx.filter(filtros.filtrarSemStatus)
+    const pendMesF  = pendMes.filter(filtros.filtrarPendentes)
+    const pendProxF = pendProx.filter(filtros.filtrarPendentes)
     const todasPend = [...pendMesF, ...pendProxF]
 
     const doMes = doMesRaw.filter(filtros.filtrarTx)

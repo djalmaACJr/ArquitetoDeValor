@@ -451,7 +451,7 @@ export function IconPicker({ value, onChange }: { value: string; onChange: (ic: 
 // Dropdown com campo de busca e navegação por teclado completa.
 // Tab/Enter/Space: abre | Setas: navega | Enter: seleciona | Escape: fecha
 export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selecione...' }: {
-  opcoes: { id: string; label: string; sublabel?: string; icone?: string }[]
+  opcoes: { id: string; label: string; sublabel?: string; icone?: string; idPai?: string }[]
   value: string
   onChange: (id: string) => void
   placeholder?: string
@@ -463,12 +463,30 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
   const inputRef     = useRef<HTMLInputElement>(null)
   const listRef      = useRef<HTMLDivElement>(null)
 
-  const filtradas = busca
-    ? opcoes.filter(o => o.label.toLowerCase().includes(busca.toLowerCase()) ||
-                         (o.sublabel ?? '').toLowerCase().includes(busca.toLowerCase()))
-    : opcoes
+  // Busca: casa em label ou sublabel. Ao digitar o nome do pai, suas filhas
+  // entram porque o sublabel da filha é o nome do pai. Ao digitar uma filha,
+  // o pai é incluído como cabeçalho de contexto (mesmo sem casar diretamente).
+  const filtradas = (() => {
+    if (!busca) return opcoes
+    const q = busca.toLowerCase()
+    const matchDireto = opcoes.filter(o =>
+      o.label.toLowerCase().includes(q) ||
+      (o.sublabel ?? '').toLowerCase().includes(q)
+    )
+    const matchIds = new Set(matchDireto.map(o => o.id))
+    // Inclui pais cujos filhos casaram (mantém contexto visual)
+    const paisExtras = opcoes.filter(p =>
+      !matchIds.has(p.id) &&
+      !p.idPai &&
+      opcoes.some(f => f.idPai === p.id && matchIds.has(f.id))
+    )
+    paisExtras.forEach(p => matchIds.add(p.id))
+    // Preserva a ordem original (pai → filhos)
+    return opcoes.filter(o => matchIds.has(o.id))
+  })()
 
   const selecionada = opcoes.find(o => o.id === value)
+  const idsNaLista  = new Set(filtradas.map(o => o.id))
 
   // Fecha ao clicar fora
   useEffect(() => {
@@ -543,23 +561,35 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
             style={{ color: '#e8eaf0' }}
           />
           <div ref={listRef} className="max-h-52 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#2a3045 transparent' }}>
-            {filtradas.map((op, idx) => (
-              <button
-                key={op.id}
-                type="button"
-                onClick={() => selecionar(op.id)}
-                className="w-full text-left px-3 py-2 text-[12px] transition-colors"
-                style={{
-                  color: op.id === value ? '#00c896' : op.id === '' ? '#ffffff50' : '#e8eaf0',
-                  background: idx === focusIdx ? 'rgba(255,255,255,0.07)' : 'transparent',
-                }}
-              >
-                <span>{op.icone ? `${op.icone} ` : ''}{op.label}</span>
-                {op.sublabel && (
-                  <span className="ml-1 text-[10px]" style={{ color: '#8b92a8' }}>{op.sublabel}</span>
-                )}
-              </button>
-            ))}
+            {filtradas.map((op, idx) => {
+              // Filho: tem idPai (preferencial) ou sublabel.
+              const isFilho   = !!op.idPai || !!op.sublabel
+              // Pai = só destaca em negrito quando há ao menos uma filha cadastrada
+              // (em listas planas como contas, todas as opções ficam regulares).
+              const isPai     = !isFilho && op.id !== '' && opcoes.some(o => o.idPai === op.id)
+              // Mostra o nome do pai entre parênteses só quando ele NÃO está
+              // visível na lista filtrada (ex.: busca por nome de filha apenas).
+              const paiNaLista = isFilho && op.idPai ? idsNaLista.has(op.idPai) : false
+              return (
+                <button
+                  key={op.id}
+                  type="button"
+                  onClick={() => selecionar(op.id)}
+                  className="w-full text-left px-3 py-2 text-[12px] transition-colors"
+                  style={{
+                    color: op.id === value ? '#00c896' : op.id === '' ? '#ffffff50' : '#e8eaf0',
+                    background: idx === focusIdx ? 'rgba(255,255,255,0.07)' : 'transparent',
+                    paddingLeft: isFilho ? '24px' : undefined,
+                    fontWeight: isPai ? 600 : 400,
+                  }}
+                >
+                  <span>{op.icone ? `${op.icone} ` : ''}{op.label}</span>
+                  {isFilho && !paiNaLista && op.sublabel && (
+                    <span className="ml-1 text-[10px]" style={{ color: '#8b92a8' }}>({op.sublabel})</span>
+                  )}
+                </button>
+              )
+            })}
             {filtradas.length === 0 && (
               <p className="px-3 py-2 text-[12px]" style={{ color: '#8b92a8' }}>Nenhum resultado</p>
             )}

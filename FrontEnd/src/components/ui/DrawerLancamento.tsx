@@ -3,10 +3,11 @@
 // Usado em: LancamentosPage, DashboardPage, RelatoriosPage
 
 import { useState, useEffect, useRef } from 'react'
-import { Repeat2, Trash2 } from 'lucide-react'
+import { Repeat2, Trash2, Zap } from 'lucide-react'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
 import { apiFetch, apiMutate } from '../../lib/api'
+import { formatBRL } from '../../lib/utils'
 // Logger desativado — reativar removendo o comentário desta linha e dos log() abaixo
 // import { log } from '../../lib/logger'
 import {
@@ -107,6 +108,19 @@ function formDeLanc(l: Lancamento, todasParcelas?: Lancamento[]): FormState {
     ? l.descricao.replace(/^\[Transf\. (saída|entrada)\] /, '').replace(/ \d+\/\d+$/, '')
     : l.descricao
 
+  // Para transferências, localiza saída (DESPESA = origem) e entrada (RECEITA = destino)
+  // por tipo — o usuário pode ter clicado em qualquer dos dois lados (ex.: alertas
+  // do dashboard). Sem isso, clicar na entrada inverteria conta_id ↔ conta_destino_id.
+  let contaOrigem  = l.conta_id
+  let contaDestino = ''
+  if (isTransf && l.id_par_transferencia && todasParcelas) {
+    const par = todasParcelas.filter(p => p.id_par_transferencia === l.id_par_transferencia)
+    const saida   = par.find(p => p.tipo === 'DESPESA')
+    const entrada = par.find(p => p.tipo === 'RECEITA')
+    if (saida)   contaOrigem  = saida.conta_id
+    if (entrada) contaDestino = entrada.conta_id
+  }
+
   // Para recorrências, usar valores padrão que podem ser editados
   let frequencia = 'MENSAL'
   let intervalo = 1
@@ -128,13 +142,12 @@ function formDeLanc(l: Lancamento, todasParcelas?: Lancamento[]): FormState {
   return {
     tipo: isTransf ? 'TRANSFERENCIA' : l.tipo,
     data: l.data, descricao: descricaoLimpa,
-    valor: valorParaMascara(l.valor), conta_id: l.conta_id,
-    conta_destino_id: isTransf && l.id_par_transferencia && todasParcelas
-      ? (todasParcelas.find(p => p.id_par_transferencia === l.id_par_transferencia && p.id !== l.id)?.conta_id ?? '')
-      : '',
+    valor: valorParaMascara(l.valor),
+    conta_id: contaOrigem,
+    conta_destino_id: contaDestino,
     categoria_id: l.categoria_id ?? '', status: l.status,
     observacao: l.observacao ?? '',
-    recorrente: !!l.id_recorrencia, 
+    recorrente: !!l.id_recorrencia,
     total_parcelas: String(l.total_parcelas ?? 2),
     tipo_recorrencia: frequencia,
     intervalo_recorrencia: String(intervalo),
@@ -171,6 +184,8 @@ export default function DrawerLancamento({
   const [carregando,          setCarregando]          = useState(false)
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false)
   const [excluindo,           setExcluindo]           = useState(false)
+  const [confirmandoAntecip,  setConfirmandoAntecip]  = useState(false)
+  const [antecipando,         setAntecipando]         = useState(false)
   const [escopo,              setEscopo]              = useState<'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES'>('SOMENTE_ESTE')
   const [calcAberta,          setCalcAberta]          = useState(false)
   const [expandindo,          setExpandindo]          = useState(false)
@@ -228,10 +243,15 @@ export default function DrawerLancamento({
       setCalcAberta(false)
       setTimeout(() => descricaoRef.current?.focus(), 320)
       if (lancamentoProp.id_par_transferencia && !formInicial.conta_destino_id) {
-        apiFetch<{ conta_destino_id?: string }>(`/transferencias/${lancamentoProp.id_par_transferencia}`)
+        apiFetch<{ conta_origem_id?: string; conta_destino_id?: string }>(`/transferencias/${lancamentoProp.id_par_transferencia}`)
           .then(res => {
-            if (res.ok && res.dados?.conta_destino_id) {
-              setForm(f => ({ ...f, conta_destino_id: res.dados!.conta_destino_id! }))
+            if (res.ok && res.dados) {
+              const { conta_origem_id, conta_destino_id } = res.dados
+              setForm(f => ({
+                ...f,
+                ...(conta_origem_id  ? { conta_id: conta_origem_id }            : {}),
+                ...(conta_destino_id ? { conta_destino_id: conta_destino_id }   : {}),
+              }))
             }
           })
       }
@@ -254,9 +274,14 @@ export default function DrawerLancamento({
           setForm(formInicial)
           setEscopo('SOMENTE_ESTE')
           if (data.id_par_transferencia && !formInicial.conta_destino_id) {
-            const trfRes = await apiFetch<{ conta_destino_id?: string }>(`/transferencias/${data.id_par_transferencia}`)
-            if (trfRes.ok && trfRes.dados?.conta_destino_id) {
-              setForm(f => ({ ...f, conta_destino_id: trfRes.dados!.conta_destino_id! }))
+            const trfRes = await apiFetch<{ conta_origem_id?: string; conta_destino_id?: string }>(`/transferencias/${data.id_par_transferencia}`)
+            if (trfRes.ok && trfRes.dados) {
+              const { conta_origem_id, conta_destino_id } = trfRes.dados
+              setForm(f => ({
+                ...f,
+                ...(conta_origem_id  ? { conta_id: conta_origem_id }            : {}),
+                ...(conta_destino_id ? { conta_destino_id: conta_destino_id }   : {}),
+              }))
             }
           }
         }
@@ -312,6 +337,7 @@ export default function DrawerLancamento({
           id: s.id,
           label: s.ativa ? s.descricao : `${s.descricao} (inativa)`,
           sublabel: p.descricao,
+          idPai: p.id,
           icone: s.icone ?? '',
         }))
       ])
@@ -535,6 +561,43 @@ export default function DrawerLancamento({
     if (res.ok) { onExcluido?.(); onFechar() } else setErro(res.erro ?? 'Erro ao excluir.')
   }
 
+  // ── Antecipar parcelas ─────────────────────────────────────
+  const podeAntecipar = !!editando
+    && !!editando.id_recorrencia
+    && !editando.id_par_transferencia
+    && editando.status !== 'PAGO'
+    && (editando.nr_parcela ?? 0) < (editando.total_parcelas ?? 0)
+
+  const confirmarAntecipar = async () => {
+    if (!editando) return
+    setAntecipando(true)
+    try {
+      const nrAtual       = editando.nr_parcela ?? 0
+      const totalParc     = editando.total_parcelas ?? 0
+      const nFuturas      = Math.max(0, totalParc - nrAtual)
+      const valorUnitario = editando.valor
+      const valorTotal    = valorUnitario * (nFuturas + 1)
+
+      const res = await apiMutate(`/transacoes/${editando.id}/antecipar`, 'POST')
+      if (!res.ok) {
+        setErro(res.erro ?? 'Erro ao antecipar.')
+        return
+      }
+      if (nFuturas > 0) {
+        const dataHoje   = new Date().toLocaleDateString('pt-BR')
+        const totalParcs = nFuturas + 1
+        const nota       = `[Antecip. ${dataHoje}: ${totalParcs} parc. (${nrAtual}–${totalParc}/${totalParc}) · ${formatBRL(valorUnitario)}/un · Total ${formatBRL(valorTotal)}]`
+        const obsAtual   = editando.observacao ? `${editando.observacao}\n${nota}` : nota
+        await apiMutate(`/transacoes/${editando.id}?escopo=SOMENTE_ESTE`, 'PUT', { observacao: obsAtual })
+      }
+      setConfirmandoAntecip(false)
+      onSalvo?.(editando.id)
+      onFechar()
+    } finally {
+      setAntecipando(false)
+    }
+  }
+
   const aberto = !!(novoLancamento || lancamentoProp || lancamentoId)
 
   // Reset de estados voláteis quando o drawer fecha
@@ -545,6 +608,7 @@ export default function DrawerLancamento({
     if (!aberto) {
       setCalcAberta(false)
       setConfirmandoExclusao(false)
+      setConfirmandoAntecip(false)
       setExpandindo(false)
       setErro(null)
       ignorarFoco.current = false
@@ -571,13 +635,24 @@ export default function DrawerLancamento({
         rodape={
           <>
             {editando && (
-              <button
-                onClick={() => setConfirmandoExclusao(true)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold transition-colors mr-auto"
-                style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
-              >
-                <Trash2 size={13} /> Excluir
-              </button>
+              <div className="flex gap-2 mr-auto">
+                <button
+                  onClick={() => setConfirmandoExclusao(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold transition-colors"
+                  style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
+                >
+                  <Trash2 size={13} /> Excluir
+                </button>
+                {podeAntecipar && (
+                  <button
+                    onClick={() => setConfirmandoAntecip(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold transition-colors"
+                    style={{ background: 'rgba(240,180,41,0.1)', color: '#f0b429', border: '1px solid rgba(240,180,41,0.3)' }}
+                  >
+                    <Zap size={13} /> Antecipar
+                  </button>
+                )}
+              </div>
             )}
             <BtnCancelar onClick={onFechar} />
             {!editando && (
@@ -994,6 +1069,75 @@ export default function DrawerLancamento({
           salvando={excluindo}
         />
       )}
+
+      {/* Modal confirmação antecipação */}
+      {confirmandoAntecip && editando && (() => {
+        const nrAtual       = editando.nr_parcela ?? 0
+        const totalParc     = editando.total_parcelas ?? 0
+        const nFuturas      = Math.max(0, totalParc - nrAtual)
+        const valorUnitario = editando.valor
+        const valorTotal    = valorUnitario * (nFuturas + 1)
+        const corValor      = editando.tipo === 'RECEITA' ? '#00c896' : '#f87171'
+        const sinal         = editando.tipo === 'RECEITA' ? '+' : '-'
+        return (
+          <div role="dialog" aria-modal="true" aria-label="Confirmar antecipação"
+            className="fixed inset-0 z-[200] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60" onClick={() => setConfirmandoAntecip(false)} />
+            <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-yellow-400/10">
+                  <Zap size={16} style={{ color: '#f0b429' }} />
+                </div>
+                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar antecipação</p>
+              </div>
+
+              <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
+                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{editando.descricao}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcela atual</span>
+                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>
+                    {nrAtual}/{totalParc} — {formatBRL(valorUnitario)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcelas a eliminar</span>
+                  <span className="text-[12px]" style={{ color: corValor }}>
+                    {nFuturas}× — {sinal}{formatBRL(nFuturas * valorUnitario)}
+                  </span>
+                </div>
+                <div className="border-t border-white/5 pt-2 flex justify-between">
+                  <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
+                    Total antecipado ({nFuturas + 1} parcelas)
+                  </span>
+                  <span className="text-[13px] font-bold" style={{ color: corValor }}>
+                    {sinal}{formatBRL(valorTotal)}
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
+                A parcela atual será marcada como <span style={{ color: '#00c896' }}>PAGA</span> com o valor consolidado e as {nFuturas} parcelas seguintes serão removidas.
+              </p>
+
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmandoAntecip(false)} disabled={antecipando}
+                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20 disabled:opacity-50"
+                  style={{ color: '#8b92a8' }}>
+                  Cancelar
+                </button>
+                <button onClick={confirmarAntecipar} disabled={antecipando}
+                  className="flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:bg-yellow-400/90 disabled:opacity-50"
+                  style={{ background: '#f0b429', color: '#0a0f1a' }}>
+                  {antecipando ? 'Antecipando…' : <><Zap size={12} className="inline mr-1" /> Antecipar</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </>
   )
 }
