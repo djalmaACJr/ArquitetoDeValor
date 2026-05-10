@@ -4,13 +4,12 @@ import { ChevronDown, ChevronRight, Download, RefreshCw, Filter, Pencil } from '
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 
 import { apiFetch } from '../lib/api'
-import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG, STATUS_OPCOES } from '../lib/utils'
+import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
-import { MultiSelect } from '../components/ui/MultiSelect'
+import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { MonthPicker } from '../components/ui/MonthPicker'
-import { FiltrosSalvosBtn } from '../components/ui/FiltrosSalvosBtn'
 
 // -- Tipos -----------------------------------------------------
 interface Lancamento {
@@ -590,48 +589,25 @@ export default function RelatoriosPage() {
             <MonthPicker value={fim} onChange={setFim} />
           </div>
 
-          {/* Contas */}
+          {/* Contas + Categorias + Status + Filtros salvos (componente unificado) */}
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Contas</p>
-            <MultiSelect
-              placeholder="Todas as contas"
-              className="w-44"
-              values={filtContas}
-              onChange={setFiltContas}
-              options={contas.filter(c => c.ativa).map(c => ({ value: c.conta_id, label: c.nome, cor: c.cor ?? undefined }))}
-            />
-          </div>
-
-          {/* Categorias */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Categorias</p>
-            <MultiSelect
-              placeholder="Todas as categorias"
-              className="w-48"
-              values={filtCats}
-              onChange={setFiltCats}
-              options={[
-                ...categorias.filter(c => !c.id_pai && !c.protegida && c.ativa).map(p => ({
-                  value: p.id, label: p.descricao, icone: p.icone ?? undefined, cor: p.cor ?? undefined,
-                })),
-                ...categorias.filter(c => !!c.id_pai && c.ativa).map(s => {
-                  const pai = categorias.find(p => p.id === s.id_pai)
-                  return { value: s.id, label: s.descricao, icone: s.icone ?? undefined, cor: s.cor ?? undefined, grupo: pai?.descricao ?? '' }
-                }),
-              ]}
-            />
-          </div>
-
-          {/* Status */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Status</p>
-            <MultiSelect
-              placeholder="Todos status"
-              className="w-40"
-              values={filtStatus}
-              onChange={setFiltStatus}
-              options={STATUS_OPCOES}
-            />
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Filtros</p>
+            <div className="flex gap-2">
+              <FiltrosLancamentos
+                pagina="relatorios"
+                filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
+                setFiltContas={setFiltContas} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
+                classNameContas="w-44" classNameCats="w-48" classNameStatus="w-40"
+                extras={{ incluirTransf }}
+                extrasFiltroAtivo={incluirTransf}
+                onAplicarExtras={d => {
+                  const novo = (d.incluirTransf as boolean) ?? false
+                  setIncluirTransf(novo)
+                  if (buscado) buscar((d.filtContas as string[]) ?? [])
+                }}
+                onLimparExtras={() => setIncluirTransf(false)}
+              />
+            </div>
           </div>
 
           {/* Transferencias toggle */}
@@ -661,22 +637,6 @@ export default function RelatoriosPage() {
 
           {/* Botoes */}
           <div className="flex items-center gap-2 ml-auto flex-wrap">
-            <FiltrosSalvosBtn
-              pagina="relatorios"
-              filtAtual={{ filtContas, filtCats, filtStatus, incluirTransf }}
-              temFiltroAtivo={filtContas.length > 0 || filtCats.length > 0 || filtStatus.length > 0 || incluirTransf}
-              onAplicar={d => {
-                const newContas = (d.filtContas as string[]) ?? []
-                setPgState({
-                  filtContas:    newContas,
-                  filtCats:      (d.filtCats      as string[]) ?? [],
-                  filtStatus:    (d.filtStatus    as string[]) ?? [],
-                  incluirTransf: (d.incluirTransf as boolean)  ?? false,
-                })
-                if (buscado) buscar(newContas)
-              }}
-              onLimpar={() => setPgState({ filtContas: [], filtCats: [], filtStatus: [], incluirTransf: false })}
-            />
             {buscado && (
               <button
                 onClick={exportarExcel}

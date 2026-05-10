@@ -163,15 +163,30 @@ interface DrawerLancamentoProps {
   todasParcelas?:      Lancamento[]
   contaIdInicial?:     string | null
   categoriaIdInicial?: string | null
+  mesInicial?:         string | null   // "YYYY-MM" — usa este mês/ano na data padrão
   onFechar:            () => void
   onSalvo?:            (savedId?: string) => void
   onExcluido?:         () => void
 }
 
+// Data padrão para novo lançamento: hoje quando o mês informado é o atual,
+// senão dia de hoje (clampado ao último dia do mês alvo) no mês/ano alvo.
+function dataPadrao(mes?: string | null): string {
+  const hoje = new Date()
+  const hojeStr = hoje.toISOString().slice(0, 10)
+  if (!mes) return hojeStr
+  const [y, m] = mes.split('-').map(Number)
+  if (Number.isNaN(y) || Number.isNaN(m) || m < 1 || m > 12) return hojeStr
+  if (hojeStr.startsWith(mes)) return hojeStr
+  const ultimoDia = new Date(y, m, 0).getDate()
+  const dia = Math.min(hoje.getDate(), ultimoDia)
+  return `${y}-${String(m).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
+}
+
 // ── Componente ─────────────────────────────────────────────────
 export default function DrawerLancamento({
   lancamentoId, lancamento: lancamentoProp, novoLancamento, tipoInicial,
-  todasParcelas, contaIdInicial, categoriaIdInicial,
+  todasParcelas, contaIdInicial, categoriaIdInicial, mesInicial,
   onFechar, onSalvo, onExcluido,
 }: DrawerLancamentoProps) {
   const { contas }     = useContas()
@@ -195,6 +210,7 @@ export default function DrawerLancamento({
   const tipoRef              = useRef<HTMLDivElement>(null)
   const valorBtnRef          = useRef<HTMLButtonElement>(null)
   const descricaoRef         = useRef<HTMLInputElement>(null)
+  const dataRef              = useRef<HTMLInputElement>(null)
   const ignorarFoco          = useRef(false)
   const criarNovoPreserved   = useRef<null | Pick<FormState, 'tipo' | 'data' | 'conta_id' | 'status'>>(null)
 
@@ -224,13 +240,21 @@ export default function DrawerLancamento({
       setForm({
         ...FORM_VAZIO,
         tipo:         preserved?.tipo     ?? tipoInicial ?? 'DESPESA',
-        data:         preserved?.data     ?? new Date().toISOString().slice(0, 10),
+        data:         preserved?.data     ?? dataPadrao(mesInicial),
         conta_id:     preserved?.conta_id ?? contaIdInicial ?? '',
         status:       preserved?.status   ?? 'PAGO',
         categoria_id: categoriaIdInicial ?? '',
       })
       setEscopo('SOMENTE_ESTE'); setExpandindo(false); setQtdAdicional('3'); setCalcAberta(false)
-      setTimeout(() => descricaoRef.current?.focus(), 320)
+      // Foco vai para o campo de Data (novo lançamento) e abre o calendário
+      // — facilita confirmar/ajustar a data antes do resto. showPicker requer
+      // ativação do usuário (o clique que abriu o drawer); fallback é só focar.
+      setTimeout(() => {
+        const el = dataRef.current
+        if (!el) return
+        el.focus()
+        try { el.showPicker?.() } catch { /* navegador sem suporte */ }
+      }, 320)
       return
     }
     if (lancamentoProp) {
@@ -685,7 +709,7 @@ export default function DrawerLancamento({
 
         {/* Data */}
         <Field label="Data *">
-          <Input type="date" value={form.data} onChange={e => set({ data: e.target.value })} />
+          <Input ref={dataRef} type="date" value={form.data} onChange={e => set({ data: e.target.value })} />
         </Field>
 
         {/* Descrição */}

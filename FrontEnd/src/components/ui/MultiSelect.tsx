@@ -79,24 +79,37 @@ export function MultiSelect({
     onChange([])
   }
 
-  // Filtra opções
+  // Filtra opções (busca em label e em grupo = nome do pai)
   const buscaLow = busca.toLowerCase()
   const filtradas = options.filter(o =>
     o.label.toLowerCase().includes(buscaLow) ||
     (o.grupo ?? '').toLowerCase().includes(buscaLow)
   )
 
-  // Monta a lista ordenada: pai → filhos → próximo pai
+  // Monta a lista ordenada: pai → filhos → próximo pai.
+  // Importante: se um filho casou na busca mas o pai NÃO casou, incluímos o pai
+  // como contexto visual (sem ele os filhos somem porque a renderização agrupa
+  // por pai). O pai entra com sel/click normal.
   const opcoesordenadas = (() => {
-    const pais = filtradas.filter(o => !o.idPai)
+    const idsCasados = new Set(filtradas.map(o => o.value))
+    // Pais a exibir: casaram diretamente OU têm pelo menos um filho que casou.
+    const paisVisiveis = options.filter(o =>
+      !o.idPai && (
+        idsCasados.has(o.value) ||
+        filtradas.some(f => f.idPai === o.value)
+      )
+    )
     const resultado: MultiSelectOption[] = []
-
-    pais.forEach(pai => {
+    paisVisiveis.forEach(pai => {
       resultado.push(pai)
       const filhos = filtradas.filter(o => o.idPai === pai.value)
       resultado.push(...filhos)
     })
-
+    // Filhos órfãos (sem pai correspondente nas options) — mantém ordem original.
+    const orfaos = filtradas.filter(o =>
+      o.idPai && !options.some(p => !p.idPai && p.value === o.idPai)
+    )
+    resultado.push(...orfaos)
     return resultado
   })()
 

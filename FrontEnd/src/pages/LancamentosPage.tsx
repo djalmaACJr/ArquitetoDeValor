@@ -6,17 +6,15 @@ import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import { Pencil, Zap, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
-import { FiltrosSalvosBtn } from '../components/ui/FiltrosSalvosBtn'
+import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
-import { useCategorias } from '../hooks/useCategorias'
-import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG, STATUS_OPCOES } from '../lib/utils'
+import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { apiMutate } from '../lib/api'
 import { usePageState } from '../context/PageStateContext'
 import { supabase } from '../lib/supabase'
 import { IconeConta } from '../components/ui/IconeConta'
 import { Toast, ModalExcluir } from '../components/ui/shared'
-import { MultiSelect } from '../components/ui/MultiSelect'
 import { MonthPicker } from '../components/ui/MonthPicker'
 
 // ── Helpers de data ───────────────────────────────────────────
@@ -223,7 +221,6 @@ export default function LancamentosPage() {
         })
     })
   }, [filtContas, mes])
-  const { categorias } = useCategorias()
 
   const [drawerAberto,       setDrawerAberto]       = useState(false)
   const [lancamentoEditando, setLancamentoEditando] = useState<Lancamento | null>(null)
@@ -460,9 +457,6 @@ export default function LancamentosPage() {
     [lancamentosComSaldoCorrigido]
   )
 
-  // CategoriasCategorias pai para o select (exclui protegidas)
-  const catsPai = categorias.filter(c => !c.id_pai && !c.protegida && c.ativa)
-  const catsSub = categorias.filter(c => !!c.id_pai && c.ativa)
 
   return (
     <div className="p-5">
@@ -489,53 +483,14 @@ export default function LancamentosPage() {
           )}
         </div>
 
-        {/* Conta — multi-select */}
-        <MultiSelect
-          placeholder="Todas as contas"
-          className="w-40"
-          values={filtContas}
-          onChange={setFiltContas}
-          options={contas.filter(c => c.ativa).map(c => ({
-            value: c.conta_id,
-            label: c.nome,
-            cor: c.cor ?? undefined,
-          }))}
-        />
-
-        {/* Categoria — multi-select agrupado */}
-        <MultiSelect
-          placeholder="Categorias"
-          className="w-44"
-          values={filtCats}
-          onChange={setFiltCats}
-          options={[
-            ...catsPai.map(p => ({
-              value: p.id,
-              label: p.descricao,
-              icone: p.icone ?? undefined,
-              cor: p.cor ?? undefined,
-            })),
-            ...catsSub.map(s => {
-              const pai = catsPai.find(p => p.id === s.id_pai)
-              return {
-                value: s.id,
-                label: s.descricao,
-                icone: s.icone ?? undefined,
-                cor: s.cor ?? undefined,
-                grupo: pai?.descricao ?? '',
-                idPai: s.id_pai ?? undefined,
-              }
-            }),
-          ]}
-        />
-
-        {/* Status — multi-select */}
-        <MultiSelect
-          placeholder="Todos status"
-          className="w-36"
-          values={filtStatus}
-          onChange={setFiltStatus}
-          options={STATUS_OPCOES}
+        <FiltrosLancamentos
+          pagina="extrato"
+          filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
+          setFiltContas={setFiltContas} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
+          extras={{ comSaldo }}
+          extrasFiltroAtivo={!comSaldo}
+          onAplicarExtras={d => setComSaldo((d.comSaldo as boolean) ?? true)}
+          onLimparExtras={() => setComSaldo(true)}
         />
 
         {/* Toggle moderno — incluir saldo anterior */}
@@ -576,19 +531,6 @@ export default function LancamentosPage() {
           )}
         </div>
 
-        {/* Filtros salvos + limpar */}
-        <FiltrosSalvosBtn
-          pagina="extrato"
-          filtAtual={{ filtContas, filtCats, filtStatus, comSaldo }}
-          temFiltroAtivo={filtContas.length > 0 || filtCats.length > 0 || filtStatus.length > 0 || !comSaldo}
-          onAplicar={d => setPgState({
-            filtContas: (d.filtContas as string[]) ?? [],
-            filtCats:   (d.filtCats   as string[]) ?? [],
-            filtStatus: (d.filtStatus as string[]) ?? [],
-            comSaldo:   (d.comSaldo   as boolean)  ?? true,
-          })}
-          onLimpar={() => setPgState({ filtContas: [], filtCats: [], filtStatus: [], comSaldo: true })}
-        />
         </div>
         {/* Calendário */}
         <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} />
@@ -995,6 +937,7 @@ export default function LancamentosPage() {
         todasParcelas={lancamentos}
         contaIdInicial={novoLancamento && filtContas.length === 1 ? filtContas[0] : null}
         categoriaIdInicial={novoLancamento && filtCats.length === 1 ? filtCats[0] : null}
+        mesInicial={novoLancamento ? mes : null}
         onFechar={fecharDrawer}
         onSalvo={(savedId) => {
           const idAlvo = savedId ?? lancamentoEditando?.id

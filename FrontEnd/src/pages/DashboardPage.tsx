@@ -3,21 +3,19 @@ import { useState, useEffect, useCallback, memo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw, History } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
-import { useCategorias } from '../hooks/useCategorias'
 import { log } from '../lib/logger'
 import { mesLabel, formatBRL, formatData, CORES_CATEGORIA } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
 import { MonthPicker } from '../components/ui/MonthPicker'
-import { MultiSelect } from '../components/ui/MultiSelect'
+import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { Doughnut, Chart } from 'react-chartjs-2'
 import 'chart.js/auto'
 import type { TooltipItem } from 'chart.js'
-import type { Conta, Transacao, DespesaCategoria, Categoria } from '../types'
+import type { Conta, Transacao, DespesaCategoria } from '../types'
 import type { Lancamento } from '../hooks/useLancamentos'
 import { supabase } from '../lib/supabase'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
-import { FiltrosSalvosBtn } from '../components/ui/FiltrosSalvosBtn'
 
 // -- Icone de conta inline (sem dependencia externa) ------
 function IconeConta({ icone, cor, size = 'md' }: {
@@ -907,9 +905,6 @@ export default function DashboardPage() {
   const setModo         = (v: 'hoje' | 'fim') => setPgState({ modo: v })
   const [oculto, setOculto] = useState(false)
 
-  const { categorias } = useCategorias()
-  const catsPai = categorias.filter((c: Categoria) => !c.id_pai)
-  const catsSub = categorias.filter((c: Categoria) => !!c.id_pai)
 
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
   const [editandoId,         setEditandoId]         = useState<string | null>(null)
@@ -970,69 +965,10 @@ export default function DashboardPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h1 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
         <div className="flex flex-wrap items-center gap-2">
-          {/* Conta — multi-select */}
-          <MultiSelect
-            placeholder="Todas as contas"
-            className="w-40"
-            values={contasFiltro}
-            onChange={setContasFiltro}
-            options={contas.filter((c: Conta) => c.ativa).map((c: Conta) => ({
-              value: c.conta_id,
-              label: c.nome,
-              cor: c.cor ?? undefined,
-            }))}
-          />
-
-          {/* Categoria — multi-select agrupado */}
-          <MultiSelect
-            placeholder="Categorias"
-            className="w-44"
-            values={filtCats}
-            onChange={setFiltCats}
-            options={[
-              ...catsPai.map((p: Categoria) => ({
-                value: p.id,
-                label: p.descricao,
-                icone: p.icone ?? undefined,
-                cor: p.cor ?? undefined,
-              })),
-              ...catsSub.map((s: Categoria) => {
-                const pai = catsPai.find((p: Categoria) => p.id === s.id_pai)
-                return {
-                  value: s.id,
-                  label: s.descricao,
-                  icone: s.icone ?? undefined,
-                  cor: s.cor ?? undefined,
-                  grupo: pai?.descricao ?? '',
-                  idPai: s.id_pai ?? undefined,
-                }
-              }),
-            ]}
-          />
-
-          {/* Status — multi-select */}
-          <MultiSelect
-            placeholder="Todos status"
-            className="w-36"
-            values={filtStatus}
-            onChange={setFiltStatus}
-            options={[
-              { value: 'PAGO',     label: 'Pago',     cor: '#00c896' },
-              { value: 'PENDENTE', label: 'Pendente', cor: '#4da6ff' },
-              { value: 'PROJECAO', label: 'Projeção', cor: '#f0b429' },
-            ]}
-          />
-
-          <FiltrosSalvosBtn
+          <FiltrosLancamentos
             pagina="dashboard"
-            filtAtual={{ filtContas: contasFiltro, filtCats, filtStatus }}
-            temFiltroAtivo={contasFiltro.length > 0 || filtCats.length > 0 || filtStatus.length > 0}
-            onAplicar={d => setPgState({
-              contasFiltro: (d.filtContas as string[]) ?? [],
-              filtCats:     (d.filtCats   as string[]) ?? [],
-              filtStatus:   (d.filtStatus as string[]) ?? [],
-            })}
-            onLimpar={() => setPgState({ contasFiltro: [], filtCats: [], filtStatus: [] })}
+            filtContas={contasFiltro} filtCats={filtCats} filtStatus={filtStatus}
+            setFiltContas={setContasFiltro} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
           />
 
           {/* Botao atualizar */}
