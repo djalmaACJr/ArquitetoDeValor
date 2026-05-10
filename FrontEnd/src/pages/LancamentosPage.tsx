@@ -1,5 +1,6 @@
 // src/pages/LancamentosPage.tsx
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
@@ -250,8 +251,9 @@ export default function LancamentosPage() {
     return () => document.removeEventListener('keydown', onKey)
   }, [navMes, drawerAberto])
 
-  // Status dropdown aberto
-  const [statusOpen,  setStatusOpen]  = useState<string | null>(null)
+  // Status dropdown aberto — guarda também a posição (rect) do badge para
+  // renderizar via portal e escapar do overflow:hidden do grupo de dia.
+  const [statusOpen,  setStatusOpen]  = useState<{ id: string; top: number; left: number } | null>(null)
   // Modal de antecipação
   const [antecipando,        setAntecipando]        = useState<Lancamento | null>(null)
   const [confirmandoProjecao, setConfirmandoProjecao] = useState<Lancamento | null>(null)
@@ -314,6 +316,10 @@ export default function LancamentosPage() {
       const tipo = state.tipoInicial ?? 'DESPESA'
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTipoNovo(tipo); setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
+    }
+    if (state.limparOutrosFiltros) {
+      setFiltContas([])
+      setFiltCats([])
     }
     if (state.filtroStatus) setFiltStatus(state.filtroStatus as string[])
     if (state.mes)           setMes(state.mes as string)
@@ -792,25 +798,16 @@ export default function LancamentosPage() {
                             )}
                           </div>
 
-                          {/* Status — clicável */}
+                          {/* Status — clicável (dropdown renderizado via portal) */}
                           <div className="relative" onClick={e => e.stopPropagation()}>
-                            <div onClick={() => setStatusOpen(statusOpen === l.id ? null : l.id)}
+                            <div onClick={e => {
+                              if (statusOpen?.id === l.id) { setStatusOpen(null); return }
+                              const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                              setStatusOpen({ id: l.id, top: r.bottom + 4, left: r.left })
+                            }}
                               className="cursor-pointer">
                               <StatusBadge status={l.status} />
                             </div>
-                            {statusOpen === l.id && (
-                              <div className="absolute top-6 left-0 bg-[#252d42] border border-white/10 rounded-lg overflow-hidden z-10 shadow-xl">
-                                {(['PAGO','PENDENTE','PROJECAO'] as StatusTx[]).map(s => (
-                                  <button key={s} onClick={() => handleStatus(l, s)}
-                                    className="flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-white/5 transition-colors">
-                                    {l.status === s && <Check size={10} style={{ color: '#00c896' }} />}
-                                    <span className="text-[11px]" style={{ color: '#e8eaf0' }}>
-                                      {STATUS_LABEL[s] ?? s}
-                                    </span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
                           </div>
 
                           {/* Ações */}
@@ -1015,11 +1012,30 @@ export default function LancamentosPage() {
         }}
       />
 
-      {/* Fechar dropdown de status ao clicar fora */}
-      {statusOpen && (
-        <div className="fixed inset-0 z-[5]" onClick={() => setStatusOpen(null)} />
-      )}
-
+      {/* Dropdown de status — renderizado via portal para escapar do
+          overflow:hidden do grupo de dia (cabe quando é o último registro). */}
+      {statusOpen && (() => {
+        const l = lancamentos.find(x => x.id === statusOpen.id)
+        if (!l) return null
+        return createPortal(
+          <>
+            <div className="fixed inset-0 z-[200]" onClick={() => setStatusOpen(null)} />
+            <div className="fixed bg-[#252d42] border border-white/10 rounded-lg overflow-hidden z-[201] shadow-xl"
+              style={{ top: statusOpen.top, left: statusOpen.left }}>
+              {(['PAGO','PENDENTE','PROJECAO'] as StatusTx[]).map(s => (
+                <button key={s} onClick={() => handleStatus(l, s)}
+                  className="flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-white/5 transition-colors">
+                  {l.status === s && <Check size={10} style={{ color: '#00c896' }} />}
+                  <span className="text-[11px]" style={{ color: '#e8eaf0' }}>
+                    {STATUS_LABEL[s] ?? s}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>,
+          document.body,
+        )
+      })()}
       {/* ── Modal confirmar projeção → pago ─────────────────── */}
       {confirmandoProjecao && (() => {
         const l      = confirmandoProjecao

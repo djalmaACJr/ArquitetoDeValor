@@ -447,12 +447,14 @@ function SecaoExport() {
         const txs = resArr.flatMap(r => extrairLista<TransacaoRaw>(r.dados))
         const contaMap = Object.fromEntries(contas.map(c => [c.conta_id, c.nome]))
         const linhas = txs
-          .filter((t: TransacaoRaw) => !t.id_par_transferencia && !t.descricao?.startsWith('[Transf.'))
           .map((t: TransacaoRaw) => {
             const [a, m, d] = t.data.split('-')
+            // Remove prefixo "[Transf. saída] " / "[Transf. entrada] " da descrição
+            // para que o re-import via /transferencias não duplique o prefixo.
+            const descricao = (t.descricao ?? '').replace(/^\[Transf\. (saída|entrada)\] ?/, '')
             return {
               Data: `${d}/${m}/${a}`,
-              Descrição: t.descricao,
+              Descrição: descricao,
               Valor: t.tipo === 'DESPESA' ? -Math.abs(t.valor) : Math.abs(t.valor),
               Conta: contaMap[t.conta_id ?? ''] ?? t.conta_id,
               Categoria: t.categoria_nome ?? t.categoria_pai_nome ?? '',

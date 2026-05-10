@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.1, 1.0.2, 1.0.3) 
 // 3º nível (Z): Tentativas (ex: 1.0.1.1, 1.0.1.2)
 
-export const APP_VERSION = "1.95"
+export const APP_VERSION = "1.95.1"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
