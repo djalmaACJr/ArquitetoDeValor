@@ -85,6 +85,7 @@ interface FormState {
   conta_id: string; conta_destino_id: string; categoria_id: string
   status: StatusTx; observacao: string
   recorrente: boolean; total_parcelas: string; tipo_recorrencia: string; intervalo_recorrencia: string
+  criarLembrete: boolean
 }
 
 // ── Máscara BR ─────────────────────────────────────────────────
@@ -100,6 +101,7 @@ const FORM_VAZIO: FormState = {
   tipo: 'DESPESA', data: new Date().toISOString().slice(0, 10), descricao: '', valor: '',
   conta_id: '', conta_destino_id: '', categoria_id: '', status: 'PAGO', observacao: '',
   recorrente: false, total_parcelas: '2', tipo_recorrencia: 'MENSAL', intervalo_recorrencia: '1',
+  criarLembrete: false,
 }
 
 function formDeLanc(l: Lancamento, todasParcelas?: Lancamento[]): FormState {
@@ -207,6 +209,7 @@ export default function DrawerLancamento({
   const [qtdAdicional,        setQtdAdicional]        = useState('3')
 
   const set = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
+  const hojeStr = new Date().toISOString().slice(0, 10)
   const tipoRef              = useRef<HTMLDivElement>(null)
   const valorBtnRef          = useRef<HTMLButtonElement>(null)
   const descricaoRef         = useRef<HTMLInputElement>(null)
@@ -550,6 +553,13 @@ export default function DrawerLancamento({
     if (res.ok) {
       const dadosResp = res.dados as { id?: string } | null
       const savedId = dadosResp?.id ?? editando?.id
+      if (!editando && form.criarLembrete && savedId && form.data > hojeStr) {
+        await apiMutate('/lembretes', 'POST', {
+          data:          form.data,
+          descricao:     form.descricao.trim(),
+          lancamento_id: savedId,
+        })
+      }
       onSalvo?.(savedId)
       if (criarNovo) {
         criarNovoPreserved.current = { tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status }
@@ -1073,6 +1083,30 @@ export default function DrawerLancamento({
             style={{ color: '#e8eaf0' }}
           />
         </Field>
+
+        {/* Criar lembrete — só para novos lançamentos com data futura */}
+        {!editando && form.tipo !== 'TRANSFERENCIA' && (
+          <label
+            className="flex items-center gap-2.5 cursor-pointer select-none"
+            style={{ opacity: form.data > hojeStr ? 1 : 0.4 }}
+          >
+            <input
+              type="checkbox"
+              checked={form.criarLembrete}
+              disabled={form.data <= hojeStr}
+              onChange={e => set({ criarLembrete: e.target.checked })}
+              className="w-4 h-4 rounded accent-yellow-400"
+            />
+            <span className="text-[12px]" style={{ color: '#f0b429' }}>
+              Criar lembrete para este lançamento
+            </span>
+            {form.data <= hojeStr && (
+              <span className="text-[10px]" style={{ color: '#8b92a8' }}>
+                (data deve ser futura)
+              </span>
+            )}
+          </label>
+        )}
 
         {erro && (
           <p 

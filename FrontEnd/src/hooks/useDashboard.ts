@@ -221,10 +221,10 @@ export function useDashboard(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(contasFiltro), JSON.stringify(filtCats), JSON.stringify(filtStatus)])
 
-  const { pendentes, proximas, resumo, despesasCat, receitasCat } = useMemo(() => {
+  const { pendentes, proximas, proximasRaw, resumo, despesasCat, receitasCat } = useMemo(() => {
     if (!fase1Q.data || !parsed) {
       return {
-        pendentes: [] as Transacao[], proximas: [] as Transacao[],
+        pendentes: [] as Transacao[], proximas: [] as Transacao[], proximasRaw: [] as Transacao[],
         resumo: null as ResumoMensal | null,
         despesasCat: [] as DespesaCategoria[], receitasCat: [] as DespesaCategoria[],
       }
@@ -243,6 +243,7 @@ export function useDashboard(
     return {
       pendentes:   todasPend.filter(t => t.data <= hoje),
       proximas:    todasPend.filter(t => t.data > hoje),
+      proximasRaw: [...pendMes, ...pendProx].filter(t => t.data > hoje),
       resumo:      { mes, total_entradas: entradas, total_saidas: saidas },
       despesasCat: agruparPorCategoria(doMes, 'DESPESA', 5),
       receitasCat: agruparPorCategoria(doMes, 'RECEITA', 4),
@@ -331,7 +332,7 @@ export function useDashboard(
 
   return {
     contas,
-    pendentes, proximas,
+    pendentes, proximas, proximasRaw,
     resumo, despesasCat, receitasCat,
     historico, pagos, pendentesStatus, projecoes,
     loading:          fase1Q.isLoading,

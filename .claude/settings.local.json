@@ -18,7 +18,9 @@
       "Bash(Remove-Item \"C:\\\\Pessoal\\\\ArquitetoDeValor\\\\.github\\\\workflows\\\\lint.yml\" -Force)",
       "Bash(Get-ChildItem \"C:\\\\Pessoal\\\\ArquitetoDeValor\\\\.github\\\\workflows\\\\\")",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(xargs grep -l \"lembrete\")",
+      "Bash(powershell -command \"\\(Get-Content 'c:\\\\Pessoal\\\\ArquitetoDeValor\\\\FrontEnd\\\\src\\\\components\\\\ui\\\\DrawerLancamento.tsx'\\).Count\")"
     ]
   }
 }

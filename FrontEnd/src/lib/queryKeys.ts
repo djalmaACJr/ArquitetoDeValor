@@ -13,6 +13,9 @@ export const qk = {
   // Lançamentos por filtro — chave inclui os filtros para cache por consulta
   lancamentos: (f: FiltrosLancamento) => ['lancamentos', f] as const,
 
+  // Lembretes — chave inclui mês para cache por período
+  lembretes: (f: { mes?: string }) => ['lembretes', f] as const,
+
   // Dashboard — chave inclui mês e filtros para cache por visão
   dashboard: (
     mes: string,

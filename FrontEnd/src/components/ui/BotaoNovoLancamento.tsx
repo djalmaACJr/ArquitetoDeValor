@@ -1,11 +1,12 @@
 // src/components/ui/BotaoNovoLancamento.tsx
-import { Plus, TrendingDown, TrendingUp, ArrowLeftRight, type LucideIcon } from 'lucide-react'
+import { Plus, TrendingDown, TrendingUp, ArrowLeftRight, Bell, type LucideIcon } from 'lucide-react'
 
 type TipoTx = 'DESPESA' | 'RECEITA' | 'TRANSFERENCIA'
 
 interface Props {
-  onSelect: (tipo: TipoTx) => void
-  className?: string
+  onSelect:    (tipo: TipoTx) => void
+  onLembrete?: () => void
+  className?:  string
 }
 
 const OPCOES: { tipo: TipoTx; label: string; cor: string; Icon: LucideIcon }[] = [
@@ -14,7 +15,7 @@ const OPCOES: { tipo: TipoTx; label: string; cor: string; Icon: LucideIcon }[] =
   { tipo: 'TRANSFERENCIA', label: 'Transferência', cor: '#60a5fa', Icon: ArrowLeftRight },
 ]
 
-export default function BotaoNovoLancamento({ onSelect, className }: Props) {
+export default function BotaoNovoLancamento({ onSelect, onLembrete, className }: Props) {
   return (
     <div className={`relative group${className ? ` ${className}` : ''}`}>
       <button
@@ -47,6 +48,20 @@ export default function BotaoNovoLancamento({ onSelect, className }: Props) {
               {label}
             </button>
           ))}
+
+          {onLembrete && (
+            <>
+              <div className="mx-3 border-t border-white/8" />
+              <button
+                onClick={onLembrete}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] font-medium transition-colors hover:bg-white/5"
+                style={{ color: '#e8eaf0' }}
+              >
+                <Bell size={14} style={{ color: '#f0b429', flexShrink: 0 }} />
+                Lembrete
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

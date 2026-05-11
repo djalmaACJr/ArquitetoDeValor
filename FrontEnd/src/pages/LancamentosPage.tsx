@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
+import ModalLembrete from '../components/ui/ModalLembrete'
 import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X } from 'lucide-react'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { useLancamentos, fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
@@ -224,6 +225,7 @@ export default function LancamentosPage() {
   const [tipoNovo,           setTipoNovo]           = useState<'DESPESA' | 'RECEITA' | 'TRANSFERENCIA'>('DESPESA')
   const [feedback,           setFeedback]           = useState<string | null>(null)
   const [confirmandoExcLote, setConfirmandoExcLote] = useState(false)
+  const [modalLembreteAberto, setModalLembreteAberto] = useState(false)
 
   // Navegação por teclado ← → entre meses
   const navMes = useCallback((delta: number) => {
@@ -559,9 +561,10 @@ export default function LancamentosPage() {
   }, [lancamentosComSaldoCorrigido])
 
   // Dias do mês com pelo menos um lançamento (para destacar no calendário)
+  // Usa lancamentosParaExibir para refletir também a pesquisa por texto
   const diasComMovimento = useMemo(
-    () => new Set(lancamentosComSaldoCorrigido.map(l => l.data)),
-    [lancamentosComSaldoCorrigido]
+    () => new Set(lancamentosParaExibir.map(l => l.data)),
+    [lancamentosParaExibir]
   )
 
 
@@ -572,7 +575,7 @@ export default function LancamentosPage() {
         {/* Topbar */}
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>Lançamentos</h1>
-          <BotaoNovoLancamento onSelect={abrirNovo} />
+          <BotaoNovoLancamento onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
         </div>
         {/* Filtros — tudo em uma linha */}
         <div className="flex flex-wrap gap-2 mb-2 items-center">
@@ -1464,6 +1467,11 @@ export default function LancamentosPage() {
           </div>
         )
       })()}
+
+      <ModalLembrete
+        aberto={modalLembreteAberto}
+        onFechar={() => setModalLembreteAberto(false)}
+      />
     </div>
   )
 }

@@ -33,6 +33,18 @@ export interface Categoria {
   subcategorias?: Categoria[]
 }
 
+// ── Lembretes ─────────────────────────────────────────────
+export interface Lembrete {
+  id:            string
+  user_id:       string
+  data:          string
+  descricao:     string
+  status:        'PENDENTE' | 'CONCLUIDO'
+  lancamento_id: string | null
+  criado_em:     string
+  atualizado_em: string
+}
+
 // ── Transações ────────────────────────────────────────────
 export interface Transacao {
   id:               string

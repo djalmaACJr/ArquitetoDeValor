@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.tsx
-import { useState, useEffect, useCallback, memo } from 'react'
+import { useState, useEffect, useCallback, memo, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw, History } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
@@ -16,6 +16,10 @@ import type { Lancamento } from '../hooks/useLancamentos'
 import { supabase } from '../lib/supabase'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
+import CalendarioDashboard from '../components/ui/CalendarioDashboard'
+import ModalLembrete from '../components/ui/ModalLembrete'
+import { useLembretes } from '../hooks/useLembretes'
+import type { Lembrete } from '../types'
 
 // -- Icone de conta inline (sem dependencia externa) ------
 function IconeConta({ icone, cor, size = 'md' }: {
@@ -51,7 +55,7 @@ function CardResultados({
 }) {
   const resultado = (resumo?.total_entradas ?? 0) - (resumo?.total_saidas ?? 0)
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 h-full">
       <div className="flex items-center gap-2 mb-3">
         <span className="w-2 h-2 rounded-full bg-av-green"/>
         <span className="text-[12px] font-semibold text-gray-500 dark:text-gray-400">Resultados do mês</span>
@@ -121,7 +125,7 @@ function CardSaldo({ contas, oculto, mes, historico, modo, setModo }: {
   })()
 
   return (
-    <div className="bg-av-dark rounded-xl p-4 relative overflow-hidden">
+    <div className="bg-av-dark rounded-xl p-4 relative overflow-hidden h-full">
       <div className="absolute inset-0 opacity-[0.07]" style={{
         backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px),repeating-linear-gradient(90deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px)'
       }}/>
@@ -908,7 +912,12 @@ export default function DashboardPage() {
 
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
   const [editandoId,         setEditandoId]         = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
+  const [refreshing,         setRefreshing]         = useState(false)
+  const [modalLembreteAberto, setModalLembreteAberto] = useState(false)
+  const [lembreteEditando,    setLembreteEditando]    = useState<Lembrete | null>(null)
+  const [dataInicialLembrete, setDataInicialLembrete] = useState<string | undefined>(undefined)
+
+  const { lembretes, editar: editarLembrete, excluir: excluirLembrete } = useLembretes({ mes })
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -920,7 +929,7 @@ export default function DashboardPage() {
     setLancamentoEditando(tx)
   }
 
-  const { contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch, prefetchMesSeguinte, prefetchMesAnterior } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
+  const { contas, pendentes, proximas, proximasRaw, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch, prefetchMesSeguinte, prefetchMesAnterior } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -941,6 +950,9 @@ export default function DashboardPage() {
     return () => document.removeEventListener('keydown', onKey)
   }, [mes, setMes, prefetchMesAnterior, prefetchMesSeguinte])
 
+  // Recarrega ao montar para pegar transações criadas em outra página (ex: LancamentosPage)
+  useEffect(() => { refetch() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Debug (no-op em produção via lib/logger)
   useEffect(() => {
     log('🔍 Estado do Dashboard:', {
@@ -958,6 +970,57 @@ export default function DashboardPage() {
 
   const totalPendentes = pendentes.reduce((s, t) => s + (t.tipo === 'DESPESA' ? -t.valor : t.valor), 0)
   const totalProximas  = proximas.reduce((s, t)  => s + (t.tipo === 'DESPESA' ? -t.valor : t.valor), 0)
+
+  // Projeção de saldo negativo por dia — exclui apenas CARTAO e INVESTIMENTO
+  const diasNegativos = useMemo(() => {
+    const hoje = new Date().toISOString().split('T')[0]
+    const mesAtual = new Date().toISOString().slice(0, 7)
+    if (mes < mesAtual) return new Set<string>()
+
+    // Inclui CORRENTE, REMUNERACAO e CARTEIRA (qualquer conta de saldo real)
+    const bancarias = contas.filter(c => !['CARTAO', 'INVESTIMENTO'].includes(c.tipo) && c.ativa)
+
+    log('[diasNegativos] contas elegíveis:', bancarias.map(c => `${c.nome}(${c.tipo}) saldo=${c.saldo_atual}`))
+    log('[diasNegativos] proximasRaw.length:', proximasRaw.length)
+
+    if (bancarias.length === 0) return new Set<string>()
+
+    const contaIds = new Set(bancarias.map(c => c.conta_id))
+    const saldos: Record<string, number> = {}
+    for (const c of bancarias) saldos[c.conta_id] = c.saldo_atual
+
+    const txPorDia = new Map<string, { conta_id: string; tipo: string; valor: number; nome?: string }[]>()
+    for (const tx of proximasRaw) {
+      if (!contaIds.has(tx.conta_id)) continue
+      const arr = txPorDia.get(tx.data) ?? []
+      arr.push({ conta_id: tx.conta_id, tipo: tx.tipo, valor: tx.valor, nome: tx.descricao })
+      txPorDia.set(tx.data, arr)
+    }
+
+    log('[diasNegativos] txPorDia dates:', Array.from(txPorDia.keys()).sort())
+
+    const [anoM, mesM] = mes.split('-').map(Number)
+    const ultimoDia = `${mes}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2, '0')}`
+
+    const datesOrdenadas = Array.from(txPorDia.keys())
+      .filter(d => d > hoje && d <= ultimoDia)
+      .sort()
+
+    const negativos = new Set<string>()
+    for (const ds of datesOrdenadas) {
+      for (const tx of txPorDia.get(ds) ?? []) {
+        if (tx.tipo === 'RECEITA') saldos[tx.conta_id] += tx.valor
+        else if (tx.tipo === 'DESPESA') saldos[tx.conta_id] -= tx.valor
+      }
+      const saldoNegativo = bancarias.find(c => saldos[c.conta_id] < 0)
+      if (saldoNegativo) {
+        log(`[diasNegativos] ${ds}: ${saldoNegativo.nome} ficou negativo (${saldos[saldoNegativo.conta_id]})`)
+        negativos.add(ds)
+      }
+    }
+    log('[diasNegativos] dias negativos:', Array.from(negativos))
+    return negativos
+  }, [contas, proximasRaw, mes])
 
   return (
     <div className="p-4 md:p-5 max-w-[1400px] mx-auto">
@@ -1000,6 +1063,7 @@ export default function DashboardPage() {
 
           <BotaoNovoLancamento
             onSelect={tipo => navigate('/lancamentos', { state: { novoLancamento: true, tipoInicial: tipo } })}
+            onLembrete={() => { setLembreteEditando(null); setDataInicialLembrete(undefined); setModalLembreteAberto(true) }}
           />
         </div>
       </div>
@@ -1010,10 +1074,22 @@ export default function DashboardPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {/* Linha 1: resultados + saldo */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <CardResultados resumo={resumo}/>
-            <CardSaldo contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo}/>
+          {/* Linha 1: calendário + resultados + saldo */}
+          <div className="flex flex-wrap gap-3 items-stretch">
+            <CalendarioDashboard
+              mes={mes}
+              lembretes={lembretes}
+              contas={contas}
+              diasNegativos={diasNegativos}
+              onEditar={l => { setLembreteEditando(l); setModalLembreteAberto(true) }}
+              onExcluir={id => excluirLembrete(id)}
+              onToggle={(id, novoStatus) => editarLembrete(id, { status: novoStatus })}
+              onNovoNoDia={data => { setLembreteEditando(null); setDataInicialLembrete(data); setModalLembreteAberto(true) }}
+            />
+            <div className="flex-1 min-w-[300px] flex flex-col gap-3">
+              <CardResultados resumo={resumo}/>
+              <CardSaldo contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo}/>
+            </div>
           </div>
 
           {/* Linha 2: alertas + últimas alterações */}
@@ -1092,6 +1168,13 @@ export default function DashboardPage() {
           onExcluido={() => { setEditandoId(null); refetch() }}
         />
       )}
+      <ModalLembrete
+        aberto={modalLembreteAberto}
+        onFechar={() => { setModalLembreteAberto(false); setLembreteEditando(null) }}
+        lembrete={lembreteEditando}
+        dataInicial={dataInicialLembrete}
+        onSalvo={() => { setModalLembreteAberto(false); setLembreteEditando(null) }}
+      />
     </div>
   )
 }
