@@ -121,10 +121,36 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
     onConfirmar(Math.abs(valor))
   }
 
+  // ── Colagem ────────────────────────────────────────────────
+  function aplicarColagem(texto: string) {
+    const limpo = texto
+      .replace(/\s/g, '')
+      .replace(/\./g, '')
+      .replace(/,/g, '.')
+      .replace(/[^0-9+\-*/.]/g, '')
+    if (!limpo) return
+    const valor = parseFloat(limpo)
+    if (isNaN(valor)) return
+    const formatado = valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    if (acabouIgual) {
+      setExpr(formatado)
+      setAcabouIgual(false)
+    } else {
+      setExpr(e => e + formatado)
+    }
+    setResultado(null)
+  }
+
   // ── Teclado ────────────────────────────────────────────────
   function handleKeyDown(e: React.KeyboardEvent) {
     // Não propaga para o drawer nem para outros handlers
     e.stopPropagation()
+
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      e.preventDefault()
+      navigator.clipboard.readText().then(aplicarColagem).catch(() => {})
+      return
+    }
 
     if (e.key >= '0' && e.key <= '9') { e.preventDefault(); pressDigito(e.key); return }
 
@@ -162,19 +188,7 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
   function handlePaste(e: React.ClipboardEvent) {
     e.preventDefault()
     e.stopPropagation()
-    const texto = e.clipboardData.getData('text')
-    const limpo = texto
-      .replace(/\s/g, '')
-      .replace(/\./g, '')   // separador de milhar BR
-      .replace(/,/g, '.')   // decimal BR → ponto
-      .replace(/[^0-9+\-*/.]/g, '')
-    if (!limpo) return
-    const valor = parseFloat(limpo)
-    if (!isNaN(valor)) {
-      setExpr(valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
-      setAcabouIgual(false)
-      setResultado(null)
-    }
+    aplicarColagem(e.clipboardData.getData('text'))
   }
 
   // ── Display / preview ──────────────────────────────────────
