@@ -6,7 +6,6 @@ import DrawerLancamento from '../components/ui/DrawerLancamento'
 import { apiFetch } from '../lib/api'
 import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
-import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { MonthPicker } from '../components/ui/MonthPicker'
@@ -277,7 +276,6 @@ export default function RelatoriosPage() {
     mes: string | null  // null = todos os meses
   } | null>(null)
 
-  const { contas }       = useContas()
   const { categorias }   = useCategorias()
 
   const meses = useMemo(() => gerarMeses(inicio, fim), [inicio, fim])
