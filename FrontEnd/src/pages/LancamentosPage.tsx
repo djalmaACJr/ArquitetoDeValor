@@ -5,9 +5,9 @@ import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
-import { Pencil, Zap, Check, Repeat2, ArrowLeftRight } from 'lucide-react'
+import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X } from 'lucide-react'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
-import { useLancamentos, type Lancamento } from '../hooks/useLancamentos'
+import { useLancamentos, fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { apiMutate } from '../lib/api'
@@ -83,10 +83,11 @@ function AcaoBtn({ onClick, title, color = '#8b92a8', children }: {
 // ── Calendário de dias ────────────────────────────────────────
 const DIAS_ABR = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
 
-function CalendarioStrip({ mes, diasComMovimento, hoje }: {
+function CalendarioStrip({ mes, diasComMovimento, hoje, onSelectDia }: {
   mes: string
   diasComMovimento: Set<string>
   hoje: string
+  onSelectDia?: (data: string) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const hojeRef      = useRef<HTMLButtonElement>(null)
@@ -105,14 +106,6 @@ function CalendarioStrip({ mes, diasComMovimento, hoje }: {
       container.scrollTo({ left: 0, behavior: 'instant' })
     }
   }, [mes])
-
-  function scrollParaDia(data: string) {
-    const els = document.querySelectorAll<HTMLElement>(`[data-date="${data}"]`)
-    for (const el of els) {
-      if (el.offsetParent !== null) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return }
-    }
-    els[0]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
 
   return (
     <div
@@ -154,7 +147,10 @@ function CalendarioStrip({ mes, diasComMovimento, hoje }: {
           <button
             key={data}
             ref={ehHoje ? hojeRef : undefined}
-            onClick={() => temMov && scrollParaDia(data)}
+            onClick={() => {
+              if (!temMov) return
+              onSelectDia?.(data)
+            }}
             style={{
               minWidth: 42, flexShrink: 0, display: 'flex', flexDirection: 'column',
               alignItems: 'center', gap: 3, padding: '6px 4px', borderRadius: 10,
@@ -331,7 +327,105 @@ export default function LancamentosPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, lancamentos])
 
+  const [diaFocado, setDiaFocado] = useState<string | null>(null)
+  const stickyRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!diaFocado) return
+    const timer = setTimeout(() => setDiaFocado(null), 2200)
+    return () => clearTimeout(timer)
+  }, [diaFocado])
+
+  const handleSelectDia = useCallback((data: string) => {
+    setDiaFocado(data)
+    requestAnimationFrame(() => {
+      const els = Array.from(document.querySelectorAll<HTMLElement>(`[data-date="${data}"]`))
+      const target = els.find(el => el.offsetParent !== null) ?? els[0]
+      if (!target) return
+      const scrollEl = document.querySelector('main') as HTMLElement | null
+      if (!scrollEl) { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); return }
+      const headerH = stickyRef.current?.offsetHeight ?? 160
+      const containerRect = scrollEl.getBoundingClientRect()
+      const rect = target.getBoundingClientRect()
+      const targetTop = rect.top - containerRect.top + scrollEl.scrollTop - headerH - 8
+      scrollEl.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' })
+    })
+  }, [])
+
   const hoje = useMemo(() => new Date().toISOString().split('T')[0], [])
+
+  // ── Pesquisa ──────────────────────────────────────────────────
+  const [pesquisa,         setPesquisa]         = useState('')
+  const [escopoPesquisa,   setEscopoPesquisa]   = useState<'MES_ATUAL' | 'MESES_ANTERIORES' | 'PROXIMOS_MESES'>('MES_ATUAL')
+  const [buscaResultados,  setBuscaResultados]  = useState<Lancamento[]>([])
+  const [carregandoBusca,  setCarregandoBusca]  = useState(false)
+  const [buscaParada,      setBuscaParada]      = useState(false)
+  const pararBuscaRef = useRef<(() => void) | null>(null)
+
+  const buscaMultiMes = pesquisa.length > 0 && escopoPesquisa !== 'MES_ATUAL'
+
+  const [buscaMesesVistos, setBuscaMesesVistos] = useState(0)
+
+  useEffect(() => {
+    if (!pesquisa || escopoPesquisa === 'MES_ATUAL') {
+      setBuscaResultados([])
+      setBuscaMesesVistos(0)
+      setCarregandoBusca(false)
+      return
+    }
+    setCarregandoBusca(true)
+    setBuscaResultados([])
+    setBuscaMesesVistos(0)
+    setBuscaParada(false)
+    const term = pesquisa.toLowerCase()
+    const ctrl = new AbortController()
+    pararBuscaRef.current = () => { ctrl.abort(); setCarregandoBusca(false); setBuscaParada(true) }
+    const timer = setTimeout(async () => {
+      const dir         = escopoPesquisa === 'MESES_ANTERIORES' ? -1 : 1
+      const filtrosBase = { conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus }
+      const matchTerm   = (l: Lancamento) =>
+        l.descricao?.toLowerCase().includes(term) ||
+        l.categoria_nome?.toLowerCase().includes(term) ||
+        l.conta_nome?.toLowerCase().includes(term) ||
+        l.observacao?.toLowerCase().includes(term)
+
+      // Busca em lotes de 12 meses; para quando encontrar 6 meses seguidos sem
+      // nenhuma transação (indica que chegou ao limite do histórico do usuário).
+      const LOTE            = 12
+      const MAX_VAZIOS_SEQ  = 6
+      const accumulated: Lancamento[] = []
+      let vaziosSequenciais = 0
+      let offset            = 1
+
+      while (vaziosSequenciais < MAX_VAZIOS_SEQ && !ctrl.signal.aborted) {
+        const lote = Array.from({ length: LOTE }, (_, j) => mesAdjacente(mes, dir * (offset + j)))
+        offset += LOTE
+
+        const resultados = await Promise.all(
+          lote.map(m =>
+            fetchLancamentos({ mes: m, ...filtrosBase }, ctrl.signal).catch(() => [] as Lancamento[])
+          )
+        )
+        if (ctrl.signal.aborted) break
+
+        for (const dados of resultados) {
+          if (dados.length === 0) {
+            vaziosSequenciais++
+          } else {
+            vaziosSequenciais = 0
+            accumulated.push(...dados.filter(matchTerm))
+          }
+        }
+
+        setBuscaMesesVistos(v => v + LOTE)
+        setBuscaResultados([...accumulated].sort((a, b) => a.data.localeCompare(b.data)))
+      }
+
+      if (!ctrl.signal.aborted) setCarregandoBusca(false)
+    }, 400)
+    return () => { clearTimeout(timer); ctrl.abort(); pararBuscaRef.current = null }
+  }, [pesquisa, escopoPesquisa, mes, filtContas, filtCats, filtStatus])
+
+  const limparPesquisa = () => { setPesquisa(''); setEscopoPesquisa('MES_ATUAL') }
 
   const abrirNovo = (tipo: 'DESPESA' | 'RECEITA' | 'TRANSFERENCIA' = 'DESPESA') => {
     setTipoNovo(tipo); setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
@@ -370,17 +464,6 @@ export default function LancamentosPage() {
     toast(`${ids.length} lançamento(s) excluído(s)!`)
   }
 
-  // Totais do mês filtrado — exclui transferências
-  const totais = useMemo(() => {
-    const isTransf = (l: Lancamento) =>
-      !!l.id_par_transferencia ||
-      l.descricao?.startsWith('[Transf.') ||
-      l.categoria_nome === 'Transferências'
-    const receitas = lancamentos.filter(l => l.tipo === 'RECEITA' && !isTransf(l)).reduce((s, l) => s + l.valor, 0)
-    const despesas = lancamentos.filter(l => l.tipo === 'DESPESA' && !isTransf(l)).reduce((s, l) => s + l.valor, 0)
-    return { receitas, despesas, resultado: receitas - despesas }
-  }, [lancamentos])
-
   // Recálculo de saldo_acumulado conforme filtros ativos:
   // - Filtro de UMA conta (sem categoria): usa saldo histórico da conta como base
   // - Filtro de categoria (com ou sem conta): saldo parcial — acumula só os lançamentos filtrados a partir de zero
@@ -409,6 +492,30 @@ export default function LancamentosPage() {
       return { ...l, saldo_acumulado: acum }
     })
   }, [lancamentos, filtContas, filtCats, contas, saldoBaseConta])
+
+  // lancamentosParaExibir: aplica filtro de texto + escopo de busca (deve vir após lancamentosComSaldoCorrigido)
+  const lancamentosParaExibir = useMemo(() => {
+    if (!pesquisa) return lancamentosComSaldoCorrigido
+    const term = pesquisa.toLowerCase()
+    const match = (l: Lancamento) =>
+      l.descricao?.toLowerCase().includes(term) ||
+      l.categoria_nome?.toLowerCase().includes(term) ||
+      l.conta_nome?.toLowerCase().includes(term) ||
+      l.observacao?.toLowerCase().includes(term)
+    if (escopoPesquisa === 'MES_ATUAL') return lancamentosComSaldoCorrigido.filter(match)
+    return buscaResultados
+  }, [pesquisa, escopoPesquisa, lancamentosComSaldoCorrigido, buscaResultados])
+
+  // Totais do mês/busca — exclui transferências
+  const totais = useMemo(() => {
+    const isTransf = (l: Lancamento) =>
+      !!l.id_par_transferencia ||
+      l.descricao?.startsWith('[Transf.') ||
+      l.categoria_nome === 'Transferências'
+    const receitas = lancamentosParaExibir.filter(l => l.tipo === 'RECEITA' && !isTransf(l)).reduce((s, l) => s + l.valor, 0)
+    const despesas = lancamentosParaExibir.filter(l => l.tipo === 'DESPESA' && !isTransf(l)).reduce((s, l) => s + l.valor, 0)
+    return { receitas, despesas, resultado: receitas - despesas }
+  }, [lancamentosParaExibir])
 
   // Saldo por data calculado no frontend — 2 modos:
   const saldoPorData = useMemo(() => {
@@ -461,7 +568,7 @@ export default function LancamentosPage() {
   return (
     <div className="p-5">
       {/* ── Sticky: topbar + filtros + calendário ── */}
-      <div className="sticky top-0 z-20 -mx-5 px-5 pt-4 pb-2" style={{ background: '#0d1220', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+      <div ref={stickyRef} className="sticky top-0 z-20 -mx-5 px-5 pt-4 pb-2" style={{ background: '#0d1220', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
         {/* Topbar */}
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>Lançamentos</h1>
@@ -532,8 +639,48 @@ export default function LancamentosPage() {
         </div>
 
         </div>
-        {/* Calendário */}
-        <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} />
+        {/* Pesquisa */}
+        <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 flex-1 rounded-lg px-3 py-1.5 border min-w-0"
+            style={{ background: '#131825', borderColor: pesquisa ? 'rgba(77,166,255,0.4)' : 'rgba(255,255,255,0.1)' }}>
+            <Search size={13} style={{ color: '#8b92a8', flexShrink: 0 }} />
+            <input
+              type="text"
+              value={pesquisa}
+              onChange={e => setPesquisa(e.target.value)}
+              placeholder="Pesquisar lançamentos..."
+              className="flex-1 bg-transparent text-[12px] text-white placeholder-[#4a5168] focus:outline-none min-w-0"
+            />
+            {pesquisa && (
+              <button onClick={limparPesquisa} className="flex-shrink-0 opacity-60 hover:opacity-100 transition-opacity">
+                <X size={12} style={{ color: '#8b92a8' }} />
+              </button>
+            )}
+          </div>
+          {pesquisa && (
+            <div className="flex gap-1 flex-shrink-0">
+              {(['MES_ATUAL', 'MESES_ANTERIORES', 'PROXIMOS_MESES'] as const).map(e => {
+                const labels = { MES_ATUAL: 'Mês atual', MESES_ANTERIORES: 'Meses anteriores', PROXIMOS_MESES: 'Próximos meses' }
+                const ativo = escopoPesquisa === e
+                return (
+                  <button key={e} onClick={() => setEscopoPesquisa(e)}
+                    className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all whitespace-nowrap"
+                    style={{
+                      background: ativo ? 'rgba(77,166,255,0.15)' : 'transparent',
+                      borderColor: ativo ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.1)',
+                      color: ativo ? '#4da6ff' : '#8b92a8',
+                    }}>
+                    {labels[e]}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+        {/* Calendário — oculto em busca multi-mês */}
+        {!buscaMultiMes && (
+          <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} onSelectDia={handleSelectDia} />
+        )}
       </div>
 
       <Toast msg={feedback} />
@@ -552,26 +699,76 @@ export default function LancamentosPage() {
         ))}
       </div>
 
-      {loading && <p className="text-[13px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>}
-      {error   && <p className="text-[13px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
+      {loading && !buscaMultiMes && <p className="text-[13px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>}
+      {carregandoBusca && (
+        <div className="flex items-center justify-center gap-3 py-4">
+          <span className="text-[13px]" style={{ color: '#8b92a8' }}>
+            Pesquisando{buscaMesesVistos > 0 ? ` (${buscaMesesVistos} meses, ${buscaResultados.length} encontrado${buscaResultados.length !== 1 ? 's' : ''})` : ''}…
+          </span>
+          <button
+            onClick={() => pararBuscaRef.current?.()}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all hover:bg-red-400/10"
+            style={{ borderColor: 'rgba(248,113,113,0.4)', color: '#f87171' }}
+          >
+            <X size={11} /> Parar
+          </button>
+        </div>
+      )}
+      {error && !buscaMultiMes && <p className="text-[13px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
 
-      {!loading && !error && (
+      {!(loading && !buscaMultiMes) && !error && (
         <>
-          {lancamentos.length === 0 ? (
+          {/* Contador — só aparece após a busca concluir */}
+          {pesquisa && !carregandoBusca && (() => {
+            const textoEscopo =
+              escopoPesquisa === 'MESES_ANTERIORES'
+                ? `nos últimos ${buscaMesesVistos} meses verificados${buscaParada ? ' (interrompida)' : ''}`
+                : escopoPesquisa === 'PROXIMOS_MESES'
+                ? `nos próximos ${buscaMesesVistos} meses verificados${buscaParada ? ' (interrompida)' : ''}`
+                : 'neste mês'
+            return (
+              <p className="text-[11px] mb-3 mt-1" style={{ color: '#8b92a8' }}>
+                {lancamentosParaExibir.length} resultado{lancamentosParaExibir.length !== 1 ? 's' : ''} para &ldquo;{pesquisa}&rdquo; {textoEscopo}
+              </p>
+            )
+          })()}
+
+          {/* Estado vazio — só aparece após a busca concluir */}
+          {!carregandoBusca && lancamentosParaExibir.length === 0 && (
             <div className="text-center py-16">
-              <p className="text-[13px] mb-3" style={{ color: '#8b92a8' }}>Nenhum lançamento em {mesLabel(mes)}.</p>
-              <button onClick={() => abrirNovo()} className="text-[12px] underline underline-offset-2" style={{ color: '#00c896' }}>
-                Criar primeiro lançamento
-              </button>
+              {pesquisa ? (
+                <p className="text-[13px]" style={{ color: '#8b92a8' }}>
+                  Nenhum resultado para &ldquo;{pesquisa}&rdquo;
+                  {escopoPesquisa === 'MESES_ANTERIORES' ? ` nos últimos ${buscaMesesVistos} meses`
+                   : escopoPesquisa === 'PROXIMOS_MESES'  ? ` nos próximos ${buscaMesesVistos} meses`
+                   : ' neste mês'}.
+                </p>
+              ) : (
+                <>
+                  <p className="text-[13px] mb-3" style={{ color: '#8b92a8' }}>Nenhum lançamento em {mesLabel(mes)}.</p>
+                  <button onClick={() => abrirNovo()} className="text-[12px] underline underline-offset-2" style={{ color: '#00c896' }}>
+                    Criar primeiro lançamento
+                  </button>
+                </>
+              )}
             </div>
-          ) : (
+          )}
+
+          {/* Grid — aparece com resultados parciais mesmo durante a busca */}
+          {lancamentosParaExibir.length > 0 && (
             <>
               {/* ── Tabela desktop ── */}
               <div className="hidden md:block space-y-4">
-                {agruparPorData(lancamentosComSaldoCorrigido).map(([data, grupo]) => (
-                  <div key={data} data-date={data} style={{ scrollMarginTop: 8 }} className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
+                {agruparPorData(lancamentosParaExibir).map(([data, grupo]) => (
+                  <div key={data} data-date={data}
+                    className="bg-[#1a1f2e] rounded-xl overflow-hidden"
+                    style={{
+                      border: data === diaFocado ? '1.5px solid rgba(77,166,255,0.65)' : '1px solid rgba(255,255,255,0.1)',
+                      boxShadow: data === diaFocado ? '0 0 0 3px rgba(77,166,255,0.13), 0 4px 20px rgba(77,166,255,0.09)' : undefined,
+                    }}>
                     {/* Cabeçalho do grupo de data */}
-                    <div className="flex items-center gap-3 px-4 py-2 border-b border-white/10 bg-white/[0.03]">
+                    <div className="flex items-center gap-3 px-4 py-2 border-b border-white/10"
+                      style={{ background: data === diaFocado ? 'rgba(77,166,255,0.12)' : 'rgba(255,255,255,0.03)' }}>
                       {/* Check selecionar todos do dia */}
                       {(() => {
                         const idsGrupo = grupo.map(l => l.id)
@@ -786,7 +983,7 @@ export default function LancamentosPage() {
                       )
                     })}
                     {/* Rodapé do grupo com saldo do dia — alinhado com coluna Valor */}
-                    {saldoPorData.has(data) && (
+                    {!buscaMultiMes && saldoPorData.has(data) && (
                       <div className="grid gap-2 px-4 py-2 border-t border-white/5 items-center"
                         style={{ gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px', background: 'rgba(255,255,255,0.015)' }}>
                         <span/><span/>
@@ -805,9 +1002,15 @@ export default function LancamentosPage() {
 
               {/* ── Cards mobile ── */}
               <div className="md:hidden space-y-4">
-                {agruparPorData(lancamentosComSaldoCorrigido).map(([data, grupo]) => (
-                  <div key={data} data-date={data} style={{ scrollMarginTop: 8 }}>
-                    <div className="flex items-center gap-2 px-1 mb-2">
+                {agruparPorData(lancamentosParaExibir).map(([data, grupo]) => (
+                  <div key={data} data-date={data}
+                    style={{
+                      border: data === diaFocado ? '1.5px solid rgba(77,166,255,0.55)' : '1.5px solid transparent',
+                      borderRadius: 12,
+                      boxShadow: data === diaFocado ? '0 0 0 2px rgba(77,166,255,0.1), 0 4px 16px rgba(77,166,255,0.08)' : undefined,
+                    }}>
+                    <div className="flex items-center gap-2 px-1 mb-2"
+                      style={data === diaFocado ? { background: 'rgba(77,166,255,0.1)', borderRadius: '10px 10px 0 0', padding: '6px 4px' } : undefined}>
                       <p className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
                         {fmtDataLabel(data)}
                       </p>
@@ -900,7 +1103,7 @@ export default function LancamentosPage() {
                       })}
                     </div>
                     {/* Rodapé mobile com saldo do dia */}
-                    {saldoPorData.has(data) && (
+                    {!buscaMultiMes && saldoPorData.has(data) && (
                       <div className="flex items-center gap-2 px-2 pt-2 mt-1 border-t border-white/5">
                         <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: '#4a5168' }}>
                           Saldo do dia

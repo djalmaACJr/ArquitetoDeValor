@@ -44,7 +44,7 @@ export interface FiltrosLancamento {
 
 interface OpResult { ok: boolean; erro: string | null }
 
-async function fetchLancamentos(filtros: FiltrosLancamento, signal?: AbortSignal): Promise<Lancamento[]> {
+export async function fetchLancamentos(filtros: FiltrosLancamento, signal?: AbortSignal): Promise<Lancamento[]> {
   const params = new URLSearchParams({ mes: filtros.mes, saldo: 'true' })
 
   // Server-side: API aceita só 1 valor por filtro hoje. Para múltiplos,
@@ -84,7 +84,7 @@ async function fetchLancamentos(filtros: FiltrosLancamento, signal?: AbortSignal
   return lista
 }
 
-function mesAdjacente(mes: string, delta: number): string {
+export function mesAdjacente(mes: string, delta: number): string {
   const [ano, m] = mes.split('-').map(Number)
   const d = new Date(ano, m - 1 + delta, 1)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
