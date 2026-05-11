@@ -205,17 +205,19 @@ export default function LancamentosPage() {
     const [ano, m] = mes.split('-').map(Number)
     const ultimoDiaMesAnterior = new Date(ano, m - 1, 0).toISOString().split('T')[0]
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) return
-      supabase.rpc('fn_saldos_contas_ate_data', { p_data: ultimoDiaMesAnterior })
-        .then(({ data }) => {
-          if (data) {
-            const mapa: Record<string, number> = {}
-            ;(data as { conta_id: string; saldo: number }[]).forEach(r => {
-              mapa[r.conta_id] = r.saldo
-            })
-            setSaldoBaseConta(mapa)
-          }
-        })
+      if (!session?.user?.id) return
+      supabase.schema('arqvalor').rpc('fn_saldos_contas_ate_data', {
+        p_user_id: session.user.id,
+        p_data:    ultimoDiaMesAnterior,
+      }).then(({ data }) => {
+        if (data) {
+          const mapa: Record<string, number> = {}
+          ;(data as { conta_id: string; saldo: number }[]).forEach(r => {
+            mapa[r.conta_id] = r.saldo
+          })
+          setSaldoBaseConta(mapa)
+        }
+      })
     })
   }, [filtContas, mes])
 

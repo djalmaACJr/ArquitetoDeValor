@@ -333,6 +333,9 @@ export function useDashboard(
   return {
     contas,
     pendentes, proximas, proximasRaw,
+    // Todas as transações do mês exibido (qualquer status) — usado para
+    // calcular saldo dia-a-dia (ex.: detecção de dias negativos).
+    doMesRaw: fase1Q.data?.doMesRaw ?? ([] as Transacao[]),
     resumo, despesasCat, receitasCat,
     historico, pagos, pendentesStatus, projecoes,
     loading:          fase1Q.isLoading,

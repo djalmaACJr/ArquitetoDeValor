@@ -12,7 +12,8 @@ interface Props {
   mes:             string
   lembretes:       Lembrete[]
   contas:          Conta[]
-  diasNegativos?:  Set<string>
+  /** Map data (YYYY-MM-DD) → lista de contas com saldo negativo nesse dia. */
+  diasNegativos?:  Map<string, { nome: string; saldo: number }[]>
   onEditar:        (l: Lembrete) => void
   onExcluir:       (id: string) => void
   onToggle:        (id: string, status: 'PENDENTE' | 'CONCLUIDO') => void
@@ -74,7 +75,7 @@ export default function CalendarioDashboard({
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#4da6ff' }} title="Fechamento" />
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#f87171' }} title="Pagamento" />
           {diasNegativos && diasNegativos.size > 0 && (
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#fb923c' }} title="Saldo negativo projetado" />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#fb923c' }} title="Saldo negativo em alguma conta" />
           )}
         </div>
       </div>
@@ -103,7 +104,7 @@ export default function CalendarioDashboard({
           const lembs       = lembretesPorDia.get(ds) ?? []
           const evs         = eventosDia(dia)
           const aberto      = diaAberto === ds
-          const negativo    = diasNegativos?.has(ds) ?? false
+          const negativo    = (diasNegativos?.get(ds)?.length ?? 0) > 0
           const temEv       = lembs.length > 0 || evs.length > 0 || negativo
           const concl       = lembs.length > 0 && lembs.every(l => l.status === 'CONCLUIDO')
 
@@ -271,18 +272,19 @@ export default function CalendarioDashboard({
             </div>
           ))}
 
-          {/* Alerta saldo negativo */}
-          {diaAberto && diasNegativos?.has(diaAberto) && (
-            <div className="flex items-center gap-1.5 py-1 px-1.5 rounded"
+          {/* Alerta saldo negativo — uma linha por conta negativa */}
+          {diaAberto && (diasNegativos?.get(diaAberto) ?? []).map((info, i) => (
+            <div key={`neg-${i}`}
+              className="flex items-center gap-1.5 py-1 px-1.5 rounded"
               style={{ background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.2)' }}>
               <AlertTriangle size={9} style={{ color: '#fb923c', flexShrink: 0 }} />
-              <span className="text-[10px]" style={{ color: '#fb923c' }}>
-                Saldo negativo projetado
+              <span className="flex-1 text-[10px] truncate" style={{ color: '#fb923c' }}>
+                {info.nome}: {info.saldo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
               </span>
             </div>
-          )}
+          ))}
 
-          {lembrsDiaAberto.length === 0 && evsDiaAberto.length === 0 && !diasNegativos?.has(diaAberto ?? '') && (
+          {lembrsDiaAberto.length === 0 && evsDiaAberto.length === 0 && (diasNegativos?.get(diaAberto ?? '')?.length ?? 0) === 0 && (
             <span className="text-[10px]" style={{ color: '#4a5168' }}>Sem eventos neste dia.</span>
           )}
         </div>

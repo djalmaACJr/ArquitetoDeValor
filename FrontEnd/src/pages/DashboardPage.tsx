@@ -769,53 +769,50 @@ function CardUltimasAlteracoes({ contas, onEditar }: { contas: Conta[]; onEditar
 }
 
 // -- Card de contas com saldo dinâmico ------------------------------
-function CardContas({ contas, oculto, mes, modo, setModo }: {
+function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw }: {
   contas: Conta[];
   oculto: boolean;
   mes: string;
   historico: { mes: string; saldo_mes?: number }[];
   modo: 'hoje' | 'fim';
   setModo: (m: 'hoje' | 'fim') => void;
+  /** Saldo PAGO no fim do mês anterior (vindo do RPC fn_saldos_contas_ate_data). */
+  saldoBaseMes: Record<string, number>;
+  /** Todas as transações do mês exibido (qualquer status). */
+  doMesRaw: Transacao[];
 }) {
   const navigate = useNavigate()
   const mesAtualStr = new Date().toISOString().slice(0, 7)
   const isMesAtual = mes === mesAtualStr
 
-  // Lógica de exibição para contas individuais
-  const [saldosPorConta, setSaldosPorConta] = useState<Record<string, number>>({})
-
-  useEffect(() => {
-    const mesAtualStr2 = new Date().toISOString().slice(0, 7)
+  // Saldo na data-alvo calculado client-side: parte do saldo PAGO no fim do
+  // mês anterior (RPC) e aplica as transações do mês até a data-alvo.
+  //
+  // Regra de status:
+  //   • "Até hoje" (mês atual) ou meses passados → só PAGO (saldo real).
+  //   • "Até fim do mês" (atual) ou meses futuros → inclui PENDENTE+PROJECAO
+  //     (projeção de saldo final). Com isso a opção do dropdown muda valor.
+  const dataAlvo = (() => {
     const hoje = new Date().toISOString().split('T')[0]
-    const [anoS, mS] = mes.split('-').map(Number)
-    const ultimoDia = new Date(anoS, mS, 0).toISOString().split('T')[0]
+    const [y, m] = mes.split('-').map(Number)
+    const ultimoDia = new Date(y, m, 0).toISOString().split('T')[0]
+    if (isMesAtual) return modo === 'hoje' ? hoje : ultimoDia
+    return ultimoDia
+  })()
+  const incluirPlanejado = (mes > mesAtualStr) || (isMesAtual && modo === 'fim')
 
-    // Data correta conforme mês e modo
-    let dataAlvo: string
-    if (mes === mesAtualStr2) {
-      dataAlvo = modo === 'hoje' ? hoje : ultimoDia
-    } else {
-      dataAlvo = ultimoDia
+  const getSaldoConta = (c: Conta): number => {
+    const base = saldoBaseMes[c.conta_id]
+    if (base === undefined) return c.saldo_atual // fallback enquanto RPC carrega
+    let s = base
+    for (const tx of doMesRaw) {
+      if (tx.conta_id !== c.conta_id) continue
+      if (tx.data > dataAlvo) continue
+      if (!incluirPlanejado && tx.status !== 'PAGO') continue
+      s += tx.tipo === 'RECEITA' ? tx.valor : -tx.valor
     }
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) return
-      supabase.rpc('fn_saldos_contas_ate_data', { p_data: dataAlvo })
-        .then(({ data, error }) => {
-          log('[saldos RPC]', { dataAlvo, data, error })
-          if (data) {
-            const mapa: Record<string, number> = {}
-            ;(data as { conta_id: string; saldo: number }[]).forEach(r => {
-              mapa[r.conta_id] = r.saldo
-            })
-            setSaldosPorConta(mapa)
-          }
-        })
-    })
-  }, [mes, modo])
-
-  const getSaldoConta = (conta: Conta) =>
-    saldosPorConta[conta.conta_id] ?? conta.saldo_atual
+    return s
+  }
 
   const gruposDash = [
     {
@@ -929,7 +926,7 @@ export default function DashboardPage() {
     setLancamentoEditando(tx)
   }
 
-  const { contas, pendentes, proximas, proximasRaw, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch, prefetchMesSeguinte, prefetchMesAnterior } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
+  const { contas, pendentes, proximas, doMesRaw, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch, prefetchMesSeguinte, prefetchMesAnterior } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -971,56 +968,80 @@ export default function DashboardPage() {
   const totalPendentes = pendentes.reduce((s, t) => s + (t.tipo === 'DESPESA' ? -t.valor : t.valor), 0)
   const totalProximas  = proximas.reduce((s, t)  => s + (t.tipo === 'DESPESA' ? -t.valor : t.valor), 0)
 
-  // Projeção de saldo negativo por dia — exclui apenas CARTAO e INVESTIMENTO
+  // Saldo das contas no fim do mês anterior ao mês exibido — usado como
+  // base para projeção dia-a-dia da detecção de saldo negativo.
+  // RPC `fn_saldos_contas_ate_data(p_user_id, p_data)` retorna saldo PAGO por
+  // conta na data informada (defesa em profundidade: ainda valida por user_id).
+  const [saldoBaseMes, setSaldoBaseMes] = useState<Record<string, number>>({})
+  useEffect(() => {
+    const [y, m] = mes.split('-').map(Number)
+    if (Number.isNaN(y) || Number.isNaN(m)) return
+    const ultimoDiaAnterior = new Date(y, m - 1, 0).toISOString().split('T')[0]
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session?.user?.id) return
+      supabase.schema('arqvalor').rpc('fn_saldos_contas_ate_data', {
+        p_user_id: session.user.id,
+        p_data:    ultimoDiaAnterior,
+      }).then(({ data, error }) => {
+        if (error) { log('[saldoBaseMes] erro:', error); return }
+        const mapa: Record<string, number> = {}
+        ;(data as { conta_id: string; saldo: number }[] ?? []).forEach(r => {
+          mapa[r.conta_id] = r.saldo
+        })
+        setSaldoBaseMes(mapa)
+      })
+    })
+  }, [mes])
+
+  // Alerta de saldo negativo — para TODOS os dias do mês exibido.
+  // Considera contas correntes (CORRENTE + REMUNERACAO) ativas; aplica todas
+  // as transações do mês dia a dia (qualquer status) sobre o saldo do fim do
+  // mês anterior e marca em quais contas o saldo ficou negativo a cada dia.
   const diasNegativos = useMemo(() => {
-    const hoje = new Date().toISOString().split('T')[0]
-    const mesAtual = new Date().toISOString().slice(0, 7)
-    if (mes < mesAtual) return new Set<string>()
+    const vazio = new Map<string, { nome: string; saldo: number }[]>()
+    const correntes = contas.filter(c =>
+      ['CORRENTE', 'REMUNERACAO'].includes(c.tipo) && c.ativa
+    )
+    if (correntes.length === 0) return vazio
+    // Aguarda o RPC retornar antes de avaliar — caso contrário todas as contas
+    // partiriam de saldo 0 e qualquer despesa virara "negativo" momentaneamente.
+    if (Object.keys(saldoBaseMes).length === 0) return vazio
 
-    // Inclui CORRENTE, REMUNERACAO e CARTEIRA (qualquer conta de saldo real)
-    const bancarias = contas.filter(c => !['CARTAO', 'INVESTIMENTO'].includes(c.tipo) && c.ativa)
-
-    log('[diasNegativos] contas elegíveis:', bancarias.map(c => `${c.nome}(${c.tipo}) saldo=${c.saldo_atual}`))
-    log('[diasNegativos] proximasRaw.length:', proximasRaw.length)
-
-    if (bancarias.length === 0) return new Set<string>()
-
-    const contaIds = new Set(bancarias.map(c => c.conta_id))
+    const contaIds = new Set(correntes.map(c => c.conta_id))
     const saldos: Record<string, number> = {}
-    for (const c of bancarias) saldos[c.conta_id] = c.saldo_atual
+    for (const c of correntes) {
+      saldos[c.conta_id] = saldoBaseMes[c.conta_id] ?? 0
+    }
 
-    const txPorDia = new Map<string, { conta_id: string; tipo: string; valor: number; nome?: string }[]>()
-    for (const tx of proximasRaw) {
+    const txPorDia = new Map<string, Transacao[]>()
+    for (const tx of doMesRaw) {
       if (!contaIds.has(tx.conta_id)) continue
       const arr = txPorDia.get(tx.data) ?? []
-      arr.push({ conta_id: tx.conta_id, tipo: tx.tipo, valor: tx.valor, nome: tx.descricao })
+      arr.push(tx)
       txPorDia.set(tx.data, arr)
     }
 
-    log('[diasNegativos] txPorDia dates:', Array.from(txPorDia.keys()).sort())
-
-    const [anoM, mesM] = mes.split('-').map(Number)
-    const ultimoDia = `${mes}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2, '0')}`
-
-    const datesOrdenadas = Array.from(txPorDia.keys())
-      .filter(d => d > hoje && d <= ultimoDia)
-      .sort()
-
-    const negativos = new Set<string>()
+    const datesOrdenadas = Array.from(txPorDia.keys()).sort()
+    const resultado = new Map<string, { nome: string; saldo: number }[]>()
     for (const ds of datesOrdenadas) {
+      // Registra quais contas tiveram movimento NESTE dia — só elas podem
+      // gerar alerta hoje. Sem isso, uma conta que ficou negativa em dia
+      // anterior e não voltou ao positivo marcaria todos os dias seguintes.
+      const contasComMovimento = new Set<string>()
       for (const tx of txPorDia.get(ds) ?? []) {
         if (tx.tipo === 'RECEITA') saldos[tx.conta_id] += tx.valor
         else if (tx.tipo === 'DESPESA') saldos[tx.conta_id] -= tx.valor
+        contasComMovimento.add(tx.conta_id)
       }
-      const saldoNegativo = bancarias.find(c => saldos[c.conta_id] < 0)
-      if (saldoNegativo) {
-        log(`[diasNegativos] ${ds}: ${saldoNegativo.nome} ficou negativo (${saldos[saldoNegativo.conta_id]})`)
-        negativos.add(ds)
-      }
+      const contasNegativas = correntes
+        .filter(c => contasComMovimento.has(c.conta_id) && saldos[c.conta_id] < 0)
+        .map(c => ({ nome: c.nome, saldo: saldos[c.conta_id] }))
+      if (contasNegativas.length > 0) resultado.set(ds, contasNegativas)
     }
-    log('[diasNegativos] dias negativos:', Array.from(negativos))
-    return negativos
-  }, [contas, proximasRaw, mes])
+    log('[diasNegativos] mes=', mes, 'detalhes=',
+      Array.from(resultado.entries()).map(([d, cs]) => `${d}: ${cs.map(c => `${c.nome}(${c.saldo.toFixed(2)})`).join(', ')}`))
+    return resultado
+  }, [contas, doMesRaw, saldoBaseMes, mes])
 
   return (
     <div className="p-4 md:p-5 max-w-[1400px] mx-auto">
@@ -1147,7 +1168,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Linha 5: contas */}
-          <CardContas contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo}/>
+          <CardContas contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo} saldoBaseMes={saldoBaseMes} doMesRaw={doMesRaw}/>
         </div>
       )}
       {/* Drawer de edicao de lancamento */}

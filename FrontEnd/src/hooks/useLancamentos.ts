@@ -145,7 +145,15 @@ export function useLancamentos(filtros: FiltrosLancamento) {
   }, [filtros.mes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const carregar = async () => {
-    await qc.invalidateQueries({ queryKey: qk.lancamentos(filtros) })
+    // Invalida o extrato (filtro atual) e também o dashboard/histórico —
+    // DrawerLancamento e outros caminhos chamam apiMutate direto, então o
+    // refetch após uma mudança precisa propagar para todas as visões que
+    // consomem transações (dashboard-fase1, transacoes-mes).
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: qk.lancamentos(filtros) }),
+      qc.invalidateQueries({ queryKey: ['dashboard-fase1'] }),
+      qc.invalidateQueries({ queryKey: ['transacoes-mes'] }),
+    ])
   }
 
   // Atualização local — atualiza o cache do TanStack diretamente sem refetch
@@ -164,9 +172,14 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     )
   }
 
-  // Invalida TODAS as queries de lançamentos (qualquer filtro) — usado quando
-  // a mudança pode afetar outros meses/filtros.
-  const invalidarTudo = () => qc.invalidateQueries({ queryKey: ['lancamentos'] })
+  // Invalida TODAS as queries de transações — extrato + dashboard + histórico.
+  // Sem invalidar dashboard-fase1/transacoes-mes, o dashboard fica em cache
+  // (staleTime 60s) e cálculos como diasNegativos não enxergam a mudança.
+  const invalidarTudo = () => Promise.all([
+    qc.invalidateQueries({ queryKey: ['lancamentos'] }),
+    qc.invalidateQueries({ queryKey: ['dashboard-fase1'] }),
+    qc.invalidateQueries({ queryKey: ['transacoes-mes'] }),
+  ])
 
   const criar = async (payload: Partial<Lancamento>): Promise<OpResult> => {
     const res = await apiMutate('/transacoes', 'POST', payload)
