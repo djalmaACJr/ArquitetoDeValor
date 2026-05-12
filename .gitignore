@@ -24,5 +24,6 @@ tests/backup_data/
 
 #reports dos testes automatizados
 FrontEnd/e2e/fixtures/auth.json
+FrontEnd/e2e/e2e/
 FrontEnd/e2e/report/
 FrontEnd/e2e/test-results/
