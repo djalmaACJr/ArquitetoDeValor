@@ -8,7 +8,7 @@ import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
 import { apiFetch, apiMutate } from '../../lib/api'
 import { formatBRL } from '../../lib/utils'
-import { buscarSugestoes, salvarSugestao, type SugestaoLancamento } from '../../hooks/useAssistente'
+import { buscarSugestoes, buscarTodasSugestoes, salvarSugestao, type SugestaoLancamento } from '../../hooks/useAssistente'
 // Logger desativado — reativar removendo o comentário desta linha e dos log() abaixo
 // import { log } from '../../lib/logger'
 import {
@@ -816,6 +816,26 @@ export default function DrawerLancamento({
               onFocus={() => { if (sugestoes.length > 0) setSugestoesAbertas(true) }}
               onBlur={() => { setTimeout(() => setSugestoesAbertas(false), 150) }}
               onKeyDown={e => {
+                // Ctrl+Espaço → abre o assistente (lista todos se termo curto, ou exibe resultado atual)
+                if (e.ctrlKey && e.key === ' ') {
+                  e.preventDefault()
+                  if (!editando) {
+                    if (sugestoes.length > 0) {
+                      setSugestoesAbertas(true)
+                    } else {
+                      const termo = form.descricao.trim()
+                      const busca = termo.length >= 2
+                        ? buscarSugestoes(termo)
+                        : buscarTodasSugestoes()
+                      busca.then(lista => {
+                        setSugestoes(lista)
+                        setSugestaoIdx(0)
+                        if (lista.length > 0) setSugestoesAbertas(true)
+                      })
+                    }
+                  }
+                  return
+                }
                 if (e.key === 'Escape') { setSugestoesAbertas(false); return }
                 if (!sugestoesAbertas || sugestoes.length === 0) return
                 if (e.key === 'ArrowDown') {
@@ -857,7 +877,7 @@ export default function DrawerLancamento({
                     Sugestões do assistente ({sugestoes.length})
                   </span>
                   <span className="ml-auto text-[9px]" style={{ color: '#4a5168' }}>
-                    ↑↓ navegar · Enter selecionar · Esc fechar
+                    ↑↓ navegar · Enter selecionar · Esc fechar · Ctrl+␣ abrir
                   </span>
                 </div>
                 <div ref={sugestoesListRef}>

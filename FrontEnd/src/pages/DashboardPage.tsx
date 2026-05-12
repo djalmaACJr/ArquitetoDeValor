@@ -423,7 +423,7 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
       {
         type: 'line' as const,
         label: 'Resultado',
-        data: oculto ? historico.map(() => null) : historico.map(h => h.total_entradas - h.total_saidas),
+        data: historico.map(h => h.total_entradas - h.total_saidas),
         borderColor: '#f97316',
         backgroundColor: 'rgba(249,115,22,0.1)',
         borderWidth: 2,
@@ -513,12 +513,10 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
               if (desProj  > 0) linhas.push(`    🔵 Projeções:  ${formatBRL(desProj)}`)
             }
 
-            if (!oculto) {
-              const resultado = (recPagas + recPend + recProj) - (desPagas + desPend + desProj)
-              if (temReceita || temDespesa) linhas.push('')
-              linhas.push(`  Resultado: ${resultado >= 0 ? '+' : ''}${formatBRL(resultado)}`)
-              if (saldo !== null) linhas.push(`  Saldo:     ${formatBRL(saldo)}`)
-            }
+            const resultado = (recPagas + recPend + recProj) - (desPagas + desPend + desProj)
+            if (temReceita || temDespesa) linhas.push('')
+            linhas.push(`  Resultado: ${resultado >= 0 ? '+' : ''}${formatBRL(resultado)}`)
+            if (!oculto && saldo !== null) linhas.push(`  Saldo:     ${formatBRL(saldo)}`)
 
             return linhas
           },
@@ -643,11 +641,14 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
             cutout: '68%', 
             plugins: { 
               legend: { display: false }, 
-              tooltip: { 
-                callbacks: { 
-                  label: ctx => ` ${formatBRL(ctx.parsed)}` 
-                } 
-              } 
+              tooltip: {
+                callbacks: {
+                  label: ctx => {
+                    const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : '0.0'
+                    return ` ${formatBRL(ctx.parsed)} (${pct}%)`
+                  }
+                }
+              }
             } 
           }}
         />
@@ -659,6 +660,7 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
             <div className="flex-1 h-[3px] rounded-full bg-gray-100 dark:bg-gray-700">
               <div className="h-full rounded-full" style={{ width: `${total > 0 ? (d.total/total)*100 : 0}%`, background: cores[i] }}/>
             </div>
+            <span className="w-[34px] text-right text-gray-400">{total > 0 ? ((d.total / total) * 100).toFixed(1) : '0.0'}%</span>
             <span className="w-[50px] text-right font-semibold text-gray-700 dark:text-gray-200">{formatBRL(d.total)}</span>
           </div>
         ))}
@@ -1152,18 +1154,18 @@ export default function DashboardPage() {
           {/* Linha 4: donuts */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <GraficoDonut
-              titulo="Despesas por categoria"
-              subtitulo={mesLabel(mes)}
-              total={resumo?.total_saidas ?? 0}
-              dados={despesasCat}
-              corCentro="#ff6b4a"
-            />
-            <GraficoDonut
               titulo="Receitas por categoria"
               subtitulo={mesLabel(mes)}
               total={resumo?.total_entradas ?? 0}
               dados={receitasCat}
               corCentro="#00c896"
+            />
+            <GraficoDonut
+              titulo="Despesas por categoria"
+              subtitulo={mesLabel(mes)}
+              total={resumo?.total_saidas ?? 0}
+              dados={despesasCat}
+              corCentro="#ff6b4a"
             />
           </div>
 

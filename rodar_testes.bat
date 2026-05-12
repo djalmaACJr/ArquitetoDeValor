@@ -14,24 +14,28 @@ echo   2. Contas
 echo   3. Categorias
 echo   4. Transacoes
 echo   5. Transferencias
-echo   6. Limpar (com backup e restore)
-echo   7. Backup manual
-echo   8. Restore manual
-echo   9. Configurar nivel de logs
+echo   6. Lembretes
+echo   7. Assistente de Lancamentos
+echo   8. Limpar (com backup e restore)
+echo   9. Backup manual
+echo  10. Restore manual
+echo  11. Configurar nivel de logs
 echo   0. Sair
 echo.
-set /p OPC="Digite a opcao (0-9): "
+set /p OPC="Digite a opcao (0-11): "
 
-if "%OPC%"=="0" goto FIM
-if "%OPC%"=="1" goto OPC1
-if "%OPC%"=="2" goto OPC2
-if "%OPC%"=="3" goto OPC3
-if "%OPC%"=="4" goto OPC4
-if "%OPC%"=="5" goto OPC5
-if "%OPC%"=="6" goto OPC6
-if "%OPC%"=="7" goto OPC7
-if "%OPC%"=="8" goto OPC8
-if "%OPC%"=="9" goto OPC9
+if "%OPC%"=="0"  goto FIM
+if "%OPC%"=="1"  goto OPC1
+if "%OPC%"=="2"  goto OPC2
+if "%OPC%"=="3"  goto OPC3
+if "%OPC%"=="4"  goto OPC4
+if "%OPC%"=="5"  goto OPC5
+if "%OPC%"=="6"  goto OPC6
+if "%OPC%"=="7"  goto OPC7
+if "%OPC%"=="8"  goto OPC8
+if "%OPC%"=="9"  goto OPC9
+if "%OPC%"=="10" goto OPC10
+if "%OPC%"=="11" goto OPC11
 echo Opcao invalida.
 goto MENU
 
@@ -60,37 +64,47 @@ call :RUNMOD
 goto PAUSA
 
 :OPC6
+set TESTFILE=tests/05_lembretes.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC7
+set TESTFILE=tests/06_assistente.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC8
 echo.
 echo ATENCAO: Este teste apagara todos os dados.
 echo Um backup sera feito antes e restore depois.
 echo.
 set /p CONF="Tem certeza? (S/N): "
-if /i "%CONF%"=="S" goto CONF6
+if /i "%CONF%"=="S" goto CONF8
 goto MENU
-:CONF6
+:CONF8
 call backup.bat
 if errorlevel 1 goto PAUSA
 call limpar_test.bat
 call restore.bat
 goto PAUSA
 
-:OPC7
+:OPC9
 echo.
 echo Fazendo backup manual...
 call backup.bat
 goto PAUSA
 
-:OPC8
+:OPC10
 echo.
 echo ATENCAO: Vai recriar dados a partir do ultimo backup.
 set /p CONF="Tem certeza? (S/N): "
-if /i "%CONF%"=="S" goto CONF8
+if /i "%CONF%"=="S" goto CONF10
 goto MENU
-:CONF8
+:CONF10
 call restore.bat
 goto PAUSA
 
-:OPC9
+:OPC11
 echo.
 echo   1 - DEBUG    2 - INFO    3 - ERROR    4 - NONE
 set /p NL="Nivel (1-4): "

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
-import { User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown, Pencil } from 'lucide-react'
+import { User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown, Pencil, Sparkles, ArrowRight } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { apiMutate } from '../lib/api'
 import { useFiltrosSalvos } from '../hooks/useFiltrosSalvos'
+import { useSugestoes } from '../hooks/useAssistente'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { STATUS_LABEL } from '../lib/utils'
@@ -157,6 +158,27 @@ export default function PerfilPage() {
   const { categorias } = useCategorias()
 
   const [filtroExpandido, setFiltroExpandido] = useState<string | null>(null)
+
+  // ── Assistente de Lançamentos ────────────────────────────────
+  const { sugestoes, carregando: carregandoAss, editar: editarAss, excluir: excluirAss, excluirTodas: excluirTodasAss } =
+    useSugestoes()
+  const [editandoAss,    setEditandoAss]    = useState<string | null>(null)
+  const [editandoAssDesc, setEditandoAssDesc] = useState('')
+  const [salvandoAss,    setSalvandoAss]    = useState(false)
+
+  const iniciarEdicaoAss = (id: string, descricao: string) => {
+    setEditandoAss(id)
+    setEditandoAssDesc(descricao)
+  }
+
+  const confirmarEdicaoAss = async (id: string) => {
+    const d = editandoAssDesc.trim()
+    if (d.length < 2) return
+    setSalvandoAss(true)
+    await editarAss(id, d)
+    setSalvandoAss(false)
+    setEditandoAss(null)
+  }
 
   const PAGINA_LABEL: Record<string, string> = {
     extrato:    'Extrato',
@@ -385,6 +407,134 @@ export default function PerfilPage() {
                   className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors"
                 >
                   Remover todos ({filtros.length})
+                </button>
+              </div>
+            </>
+          )}
+        </Secao>
+
+        {/* ── Seção: Assistente de Lançamentos ─────────────── */}
+        <Secao titulo="Assistente de Lançamentos" icone={<Sparkles size={15}/>}>
+          {carregandoAss ? (
+            <p className="text-[12px] text-white/40">Carregando…</p>
+          ) : sugestoes.length === 0 ? (
+            <p className="text-[12px] text-white/40 leading-relaxed">
+              Nenhum padrão registrado. Os padrões são criados automaticamente ao salvar lançamentos.
+            </p>
+          ) : (
+            <>
+              <div className="space-y-0.5">
+                {sugestoes.map(s => {
+                  const editando     = editandoAss === s.id
+                  const catNome      = categorias.find(c => c.id === s.categoria_id)?.descricao
+                  const contaOrigem  = contas.find(c => c.conta_id === s.conta_origem_id)?.nome
+                  const contaDestino = contas.find(c => c.conta_id === s.conta_destino_id)?.nome
+
+                  return (
+                    <div key={s.id}>
+                      {editando ? (
+                        /* ── Modo edição ── */
+                        <div className="flex items-center gap-2 px-2 py-1.5">
+                          {s.is_transferencia && (
+                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                              style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>
+                              Transf.
+                            </span>
+                          )}
+                          <input
+                            autoFocus
+                            value={editandoAssDesc}
+                            onChange={e => setEditandoAssDesc(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter')  confirmarEdicaoAss(s.id)
+                              if (e.key === 'Escape') setEditandoAss(null)
+                            }}
+                            className="flex-1 text-[12px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
+                            style={{ color: '#e8eaf0' }}
+                            maxLength={200}
+                          />
+                          <button
+                            onClick={() => confirmarEdicaoAss(s.id)}
+                            disabled={editandoAssDesc.trim().length < 2 || salvandoAss}
+                            title="Salvar"
+                            className="w-5 h-5 flex items-center justify-center rounded hover:bg-av-green/10 flex-shrink-0 disabled:opacity-40"
+                            style={{ color: '#00c896' }}
+                          >
+                            <Check size={12}/>
+                          </button>
+                          <button
+                            onClick={() => setEditandoAss(null)}
+                            title="Cancelar"
+                            className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/5 flex-shrink-0"
+                            style={{ color: '#8b92a8' }}
+                          >
+                            <X size={12}/>
+                          </button>
+                        </div>
+                      ) : (
+                        /* ── Modo normal ── */
+                        <div className="group px-2 py-1.5 rounded-lg hover:bg-white/[0.03]">
+                          <div className="flex items-center gap-2">
+                            {s.is_transferencia && (
+                              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                                style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>
+                                Transf.
+                              </span>
+                            )}
+                            <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>
+                              {s.descricao}
+                            </span>
+                            <button
+                              onClick={() => iniciarEdicaoAss(s.id, s.descricao)}
+                              title="Editar descrição"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 flex-shrink-0"
+                              style={{ color: '#8b92a8' }}
+                            >
+                              <Pencil size={11}/>
+                            </button>
+                            <button
+                              onClick={() => excluirAss(s.id)}
+                              title="Excluir padrão"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-red-400/10 flex-shrink-0"
+                              style={{ color: '#f87171' }}
+                            >
+                              <X size={12}/>
+                            </button>
+                          </div>
+
+                          {/* Metadados: conta e categoria */}
+                          {(catNome || contaOrigem) && (
+                            <div className="flex items-center gap-2 mt-0.5 pl-0.5 flex-wrap">
+                              {contaOrigem && (
+                                <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                                  {contaOrigem}
+                                  {contaDestino && (
+                                    <>
+                                      <ArrowRight size={9} className="inline mx-0.5"/>
+                                      {contaDestino}
+                                    </>
+                                  )}
+                                </span>
+                              )}
+                              {catNome && (
+                                <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                                  {contaOrigem ? '·' : ''} {catNome}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="flex justify-end pt-3 mt-2 border-t border-white/8">
+                <button
+                  onClick={excluirTodasAss}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  Remover todos ({sugestoes.length})
                 </button>
               </div>
             </>

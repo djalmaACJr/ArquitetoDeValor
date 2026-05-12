@@ -16,6 +16,9 @@ export const qk = {
   // Lembretes — chave inclui mês para cache por período
   lembretes: (f: { mes?: string }) => ['lembretes', f] as const,
 
+  // Assistente — lista completa de padrões do usuário
+  assistente: () => ['assistente'] as const,
+
   // Dashboard — chave inclui mês e filtros para cache por visão
   dashboard: (
     mes: string,

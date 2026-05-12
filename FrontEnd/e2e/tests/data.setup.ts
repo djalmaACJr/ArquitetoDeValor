@@ -108,6 +108,12 @@ setup('criar dados basicos', async ({ page, request }) => {
   })
   console.log(cConta.ok() ? '  ✅ Conta básica criada' : `  ⚠️ Conta: ${cConta.status()}`)
 
+  const cConta2 = await request.post(api('/contas'), {
+    headers,
+    data: { nome: 'E2E Conta Poupança', tipo: 'CORRENTE', saldo_inicial: 0, cor: '#60a5fa', icone: '💳' },
+  })
+  console.log(cConta2.ok() ? '  ✅ Conta para transferências criada' : `  ⚠️ Conta 2: ${cConta2.status()}`)
+
   const cCat = await request.post(api('/categorias'), {
     headers,
     data: { descricao: 'E2E Salário', cor: '#00c896', icone: '💰' },

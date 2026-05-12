@@ -20,7 +20,15 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(xargs grep -l \"lembrete\")",
-      "Bash(powershell -command \"\\(Get-Content 'c:\\\\Pessoal\\\\ArquitetoDeValor\\\\FrontEnd\\\\src\\\\components\\\\ui\\\\DrawerLancamento.tsx'\\).Count\")"
+      "Bash(powershell -command \"\\(Get-Content 'c:\\\\Pessoal\\\\ArquitetoDeValor\\\\FrontEnd\\\\src\\\\components\\\\ui\\\\DrawerLancamento.tsx'\\).Count\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Pessoal\\\\ArquitetoDeValor\" -Recurse -Include \"*.md\" -Exclude \"node_modules\" -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object FullName)",
+      "Bash(Sort-Object)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Pessoal\\\\ArquitetoDeValor\" -File -Filter \"*.md\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Find /c/Pessoal/ArquitetoDeValor/FrontEnd/e2e/tests -name \"*.spec.ts\")",
+      "Bash(Sort)",
+      "Bash(supabase functions *)"
     ]
   }
 }
