@@ -1,6 +1,6 @@
 // e2e/tests/08_lembretes.spec.ts
 import { test, expect } from '@playwright/test'
-import { abrirNovoLancamento, preencherValor } from './helpers'
+import { abrirNovoLancamento } from './helpers'
 
 const HOJE = new Date().getDate()
 const DESCRICAO_TESTE = 'E2E Lembrete Teste'

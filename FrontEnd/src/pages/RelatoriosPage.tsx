@@ -121,6 +121,11 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
             {oculto ? '????' : formatBRL(grupo.total)}
           </span>
         </td>
+        <td className="px-3 py-2.5 text-right border-l border-white/5">
+          <span className="text-[11px] font-semibold" style={{ color: cor, opacity: 0.65 }}>
+            {oculto ? '????' : formatBRL(grupo.total / meses.length)}
+          </span>
+        </td>
         {meses.map(m => (
           <td key={m}
             className="px-3 py-2.5 text-right cursor-pointer hover:bg-white/5 transition-colors"
@@ -172,6 +177,11 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
                   {oculto ? '????' : formatBRL(sub.total)}
                 </span>
               </td>
+              <td className="px-3 py-2 text-right border-l border-white/5">
+                <span className="text-[11px]" style={{ color: '#8b92a8' }}>
+                  {oculto ? '????' : formatBRL(sub.total / meses.length)}
+                </span>
+              </td>
               {meses.map(m => (
                 <td key={m}
                   className="px-3 py-2 text-right cursor-pointer hover:bg-white/5 transition-colors"
@@ -204,6 +214,11 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
                       {oculto ? '????' : formatBRL(d.total)}
                     </span>
                   </td>
+                  <td className="px-3 py-1.5 text-right border-l border-white/5">
+                    <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                      {oculto ? '????' : formatBRL(d.total / meses.length)}
+                    </span>
+                  </td>
                   {meses.map(m => (
                     <td key={m} className="px-3 py-1.5 text-right">
                       <span className="text-[10px]" style={{ color: d.porMes[m] ? '#8b92a8' : '#2d3348' }}>
@@ -228,6 +243,11 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
           <td className="px-3 py-2 text-right">
             <span className="text-[12px] font-bold" style={{ color: cor }}>
               {oculto ? '????' : formatBRL(grupo.total)}
+            </span>
+          </td>
+          <td className="px-3 py-2 text-right border-l border-white/5">
+            <span className="text-[11px] font-bold" style={{ color: cor, opacity: 0.65 }}>
+              {oculto ? '????' : formatBRL(grupo.total / meses.length)}
             </span>
           </td>
           {meses.map(m => (
@@ -723,6 +743,10 @@ export default function RelatoriosPage() {
                       style={{ background: '#1a1f2e' }}>
                       <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Total</span>
                     </th>
+                    <th className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
+                      style={{ background: '#1a1f2e', minWidth: 96 }}>
+                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Média/mês</span>
+                    </th>
                     {meses.map(m => (
                       <th key={m} className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
                         style={{ minWidth: 100, background: '#1a1f2e' }}>
@@ -740,7 +764,7 @@ export default function RelatoriosPage() {
                     className="cursor-pointer hover:bg-white/[0.02] transition-colors"
                     onClick={() => setCredAberto(a => !a)}
                   >
-                    <td colSpan={2 + meses.length} className="px-4 pt-4 pb-2 sticky left-0">
+                    <td colSpan={3 + meses.length} className="px-4 pt-4 pb-2 sticky left-0">
                       <div className="flex items-center gap-2">
                         <span style={{ color: '#00c896' }}>
                           {credAberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
@@ -770,6 +794,12 @@ export default function RelatoriosPage() {
                         {oculto ? '????' : formatBRL(grandTotalEntradas)}
                       </span>
                     </td>
+                    <td className="px-3 text-right border-l border-white/5"
+                      style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
+                      <span className={`font-bold ${nivel === 1 ? 'text-[12px]' : 'text-[11px]'}`} style={{ color: '#00c896', opacity: 0.65 }}>
+                        {oculto ? '????' : formatBRL(grandTotalEntradas / meses.length)}
+                      </span>
+                    </td>
                     {meses.map(m => (
                       <td key={m} className="px-3 text-right"
                         style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
@@ -786,7 +816,7 @@ export default function RelatoriosPage() {
                     className="cursor-pointer hover:bg-white/[0.02] transition-colors"
                     onClick={() => setDebAberto(a => !a)}
                   >
-                    <td colSpan={2 + meses.length} className="px-4 pt-5 pb-2 sticky left-0">
+                    <td colSpan={3 + meses.length} className="px-4 pt-5 pb-2 sticky left-0">
                       <div className="flex items-center gap-2">
                         <span style={{ color: '#f87171' }}>
                           {debAberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
@@ -816,6 +846,12 @@ export default function RelatoriosPage() {
                         {oculto ? '????' : formatBRL(grandTotalDespesas)}
                       </span>
                     </td>
+                    <td className="px-3 text-right border-l border-white/5"
+                      style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
+                      <span className={`font-bold ${nivel === 1 ? 'text-[12px]' : 'text-[11px]'}`} style={{ color: '#f87171', opacity: 0.65 }}>
+                        {oculto ? '????' : formatBRL(grandTotalDespesas / meses.length)}
+                      </span>
+                    </td>
                     {meses.map(m => (
                       <td key={m} className="px-3 text-right"
                         style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
@@ -836,6 +872,11 @@ export default function RelatoriosPage() {
                     <td className="px-3 py-3 text-right border-t-2" style={{ borderColor: 'rgba(0,200,150,0.2)' }}>
                       <span className="text-[13px] font-bold" style={{ color: resultado >= 0 ? '#00c896' : '#f87171' }}>
                         {oculto ? '????' : formatBRL(resultado)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-right border-t-2 border-l border-white/5" style={{ borderColor: 'rgba(0,200,150,0.2)' }}>
+                      <span className="text-[12px] font-bold" style={{ color: resultado >= 0 ? '#00c896' : '#f87171', opacity: 0.65 }}>
+                        {oculto ? '????' : formatBRL(resultado / meses.length)}
                       </span>
                     </td>
                     {meses.map(m => {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Bell } from 'lucide-react'
+import { X, Bell, Check } from 'lucide-react'
 import { useLembretes } from '../../hooks/useLembretes'
 import type { Lembrete } from '../../types'
 
@@ -18,17 +18,16 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
 
   const [data,      setData]      = useState(dataInicial ?? hoje)
   const [descricao, setDescricao] = useState(descricaoInicial ?? '')
+  const [status,    setStatus]    = useState<'PENDENTE' | 'CONCLUIDO'>(lembrete?.status ?? 'PENDENTE')
   const [salvando,  setSalvando]  = useState(false)
   const [erro,      setErro]      = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Sincroniza campos ao abrir (edição ou novo). Os setState aqui são
-  // intencionais — resetam o form para o lembrete escolhido a cada abertura.
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!aberto) return
     setData(lembrete?.data ?? dataInicial ?? hoje)
     setDescricao(lembrete?.descricao ?? descricaoInicial ?? '')
+    setStatus(lembrete?.status ?? 'PENDENTE')
     setErro(null)
     setTimeout(() => inputRef.current?.focus(), 80)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -51,7 +50,7 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
     setErro(null)
     let res
     if (lembrete) {
-      res = await editar(lembrete.id, { data, descricao: descricao.trim() })
+      res = await editar(lembrete.id, { data, descricao: descricao.trim(), status })
     } else {
       res = await criar({ data, descricao: descricao.trim() })
     }
@@ -133,6 +132,23 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
               {descricao.length}/200
             </span>
           </div>
+
+          {/* Status — só ao editar */}
+          {lembrete && (
+            <button
+              type="button"
+              onClick={() => setStatus(s => s === 'CONCLUIDO' ? 'PENDENTE' : 'CONCLUIDO')}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all text-[12px] font-semibold w-fit"
+              style={{
+                background: status === 'CONCLUIDO' ? 'rgba(0,200,150,0.1)'  : 'rgba(255,255,255,0.04)',
+                border:     status === 'CONCLUIDO' ? '1px solid rgba(0,200,150,0.35)' : '1px solid rgba(255,255,255,0.1)',
+                color:      status === 'CONCLUIDO' ? '#00c896' : '#8b92a8',
+              }}
+            >
+              <Check size={13} />
+              {status === 'CONCLUIDO' ? 'Concluído' : 'Pendente'}
+            </button>
+          )}
 
           {/* Erro */}
           {erro && (

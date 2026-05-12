@@ -2,7 +2,7 @@ name: Frontend — Qualidade de Código
 
 on:
   push:
-    branches: [main]
+    branches: [develop]
     paths:
       - 'FrontEnd/**'
       - '.github/workflows/frontend-quality.yml'
