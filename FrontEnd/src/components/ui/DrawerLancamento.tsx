@@ -154,6 +154,7 @@ function formDeLanc(l: Lancamento, todasParcelas?: Lancamento[]): FormState {
     total_parcelas: String(l.total_parcelas ?? 2),
     tipo_recorrencia: frequencia,
     intervalo_recorrencia: String(intervalo),
+    criarLembrete: false,
   }
 }
 
