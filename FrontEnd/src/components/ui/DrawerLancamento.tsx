@@ -3,11 +3,12 @@
 // Usado em: LancamentosPage, DashboardPage, RelatoriosPage
 
 import { useState, useEffect, useRef } from 'react'
-import { Repeat2, Trash2, Zap } from 'lucide-react'
+import { Repeat2, Trash2, Zap, Sparkles } from 'lucide-react'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
 import { apiFetch, apiMutate } from '../../lib/api'
 import { formatBRL } from '../../lib/utils'
+import { buscarSugestoes, salvarSugestao, type SugestaoLancamento } from '../../hooks/useAssistente'
 // Logger desativado — reativar removendo o comentário desta linha e dos log() abaixo
 // import { log } from '../../lib/logger'
 import {
@@ -207,9 +208,35 @@ export default function DrawerLancamento({
   const [calcAberta,          setCalcAberta]          = useState(false)
   const [expandindo,          setExpandindo]          = useState(false)
   const [qtdAdicional,        setQtdAdicional]        = useState('3')
+  // "Salvar como padrão" — após salvar, registra/atualiza o lançamento como
+  // sugestão no Assistente. Vem marcado por padrão para facilitar o fluxo.
+  const [salvarPadrao,        setSalvarPadrao]        = useState(true)
+  const [sugestaoAplicada,    setSugestaoAplicada]    = useState(false)
+  // Lista de sugestões compatíveis com a descrição digitada — ordenadas por
+  // atualizado_em DESC. Mostradas em um dropdown abaixo do campo Descrição.
+  const [sugestoes,           setSugestoes]           = useState<SugestaoLancamento[]>([])
+  const [sugestoesAbertas,    setSugestoesAbertas]    = useState(false)
+  const [sugestaoIdx,         setSugestaoIdx]         = useState(0)
+  const sugestoesListRef = useRef<HTMLDivElement>(null)
 
   const set = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
   const hojeStr = new Date().toISOString().slice(0, 10)
+
+  // Persiste o lançamento atual como sugestão (somente em criação e com
+  // o checkbox marcado). Não bloqueia o fluxo se falhar.
+  const persistirPadrao = async () => {
+    if (editando || !salvarPadrao) return
+    if (form.descricao.trim().length < 2) return
+    try {
+      await salvarSugestao({
+        descricao:        form.descricao.trim(),
+        categoria_id:     form.categoria_id || null,
+        conta_origem_id:  form.conta_id     || null,
+        conta_destino_id: form.tipo === 'TRANSFERENCIA' ? (form.conta_destino_id || null) : null,
+        is_transferencia: form.tipo === 'TRANSFERENCIA',
+      })
+    } catch { /* erro silencioso — sugestão é opcional */ }
+  }
   const tipoRef              = useRef<HTMLDivElement>(null)
   const valorBtnRef          = useRef<HTMLButtonElement>(null)
   const descricaoRef         = useRef<HTMLInputElement>(null)
@@ -317,6 +344,60 @@ export default function DrawerLancamento({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lancamentoId, lancamentoProp, novoLancamento, tipoInicial, todasParcelas])
+
+  // Assistente — busca sugestões compatíveis com a descrição digitada
+  // (mín. 2 caracteres, debounce 400ms). O usuário escolhe via dropdown,
+  // garantindo controle quando há mais de um padrão. Só ativo em criação.
+  useEffect(() => {
+    if (editando) { setSugestoes([]); setSugestoesAbertas(false); return }
+    const termo = form.descricao.trim()
+    if (termo.length < 2) { setSugestoes([]); setSugestoesAbertas(false); setSugestaoAplicada(false); return }
+
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => {
+      buscarSugestoes(termo, ctrl.signal)
+        .then(lista => {
+          setSugestoes(lista)
+          // Só abre o dropdown se o campo Descrição ainda estiver com foco —
+          // evita reabrir depois que o usuário aplicou uma sugestão e o foco
+          // já passou para o próximo campo (Valor).
+          const focado = document.activeElement === descricaoRef.current
+          setSugestoesAbertas(focado && lista.length > 0)
+        })
+        .catch(() => { /* aborto ou erro silencioso */ })
+    }, 400)
+    return () => { clearTimeout(timer); ctrl.abort() }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.descricao, editando])
+
+  // Aplica uma sugestão escolhida pelo usuário: copia descricao + campos
+  // (categoria/conta/destino) e marca o indicador visual. Move o foco para o
+  // próximo campo natural (Valor) para o usuário continuar com o teclado.
+  const aplicarSugestao = (s: SugestaoLancamento) => {
+    setForm(f => ({
+      ...f,
+      descricao:        s.descricao,
+      tipo:             s.is_transferencia ? 'TRANSFERENCIA' : f.tipo,
+      categoria_id:     s.categoria_id     ?? '',
+      conta_id:         s.conta_origem_id  ?? '',
+      conta_destino_id: s.is_transferencia ? (s.conta_destino_id ?? '') : '',
+    }))
+    setSugestaoAplicada(true)
+    setSugestoesAbertas(false)
+    setSugestaoIdx(0)
+    // Próximo campo natural — abre a Calculadora automaticamente via onFocus.
+    setTimeout(() => valorBtnRef.current?.focus(), 0)
+  }
+
+  // Reseta o item destacado quando a lista muda.
+  useEffect(() => { setSugestaoIdx(0) }, [sugestoes])
+
+  // Mantém o item destacado visível no scroll.
+  useEffect(() => {
+    if (!sugestoesAbertas || !sugestoesListRef.current) return
+    const el = sugestoesListRef.current.children[sugestaoIdx] as HTMLElement | undefined
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [sugestaoIdx, sugestoesAbertas])
 
   // Buscar parâmetros reais quando mudar escopo para ESTE_E_SEGUINTES
   useEffect(() => {
@@ -464,6 +545,7 @@ export default function DrawerLancamento({
       if (res.ok) {
         const dadosResp = res.dados as { id?: string; id_debito?: string } | null
         const savedId = dadosResp?.id_debito ?? dadosResp?.id ?? editando?.id
+        await persistirPadrao()
         onSalvo?.(savedId)
         if (criarNovo) {
           criarNovoPreserved.current = { tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status }
@@ -499,6 +581,7 @@ export default function DrawerLancamento({
       if (res.ok) {
         const dadosResp = res.dados as { parcelas?: { id: string }[]; id?: string } | null
         const savedId = dadosResp?.parcelas?.[0]?.id ?? dadosResp?.id
+        await persistirPadrao()
         onSalvo?.(savedId)
         if (criarNovo) {
           criarNovoPreserved.current = { tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status }
@@ -560,6 +643,7 @@ export default function DrawerLancamento({
           lancamento_id: savedId,
         })
       }
+      await persistirPadrao()
       onSalvo?.(savedId)
       if (criarNovo) {
         criarNovoPreserved.current = { tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status }
@@ -645,6 +729,11 @@ export default function DrawerLancamento({
       setConfirmandoAntecip(false)
       setExpandindo(false)
       setErro(null)
+      setSalvarPadrao(true)   // volta ao default marcado
+      setSugestaoAplicada(false)
+      setSugestoes([])
+      setSugestoesAbertas(false)
+      setSugestaoIdx(0)
       ignorarFoco.current = false
     }
   }, [aberto])
@@ -725,11 +814,107 @@ export default function DrawerLancamento({
         {/* Descrição */}
         <Field label="Descrição *">
           <div className="relative">
-            <Input ref={descricaoRef} value={form.descricao} onChange={e => set({ descricao: e.target.value })}
+            <Input ref={descricaoRef} value={form.descricao}
+              onChange={e => set({ descricao: e.target.value })}
+              onFocus={() => { if (sugestoes.length > 0) setSugestoesAbertas(true) }}
+              onBlur={() => { setTimeout(() => setSugestoesAbertas(false), 150) }}
+              onKeyDown={e => {
+                if (e.key === 'Escape') { setSugestoesAbertas(false); return }
+                if (!sugestoesAbertas || sugestoes.length === 0) return
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setSugestaoIdx(i => Math.min(i + 1, sugestoes.length - 1))
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setSugestaoIdx(i => Math.max(i - 1, 0))
+                } else if (e.key === 'Enter') {
+                  e.preventDefault()
+                  const escolhida = sugestoes[sugestaoIdx]
+                  if (escolhida) aplicarSugestao(escolhida)
+                } else if (e.key === 'Tab') {
+                  // Tab também aplica a sugestão destacada e avança o foco.
+                  const escolhida = sugestoes[sugestaoIdx]
+                  if (escolhida) { e.preventDefault(); aplicarSugestao(escolhida) }
+                }
+              }}
               placeholder="Ex: Conta de luz, Salário..." maxLength={200} />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px]"
-              style={{ color: '#8b92a8' }}>{form.descricao.length}/200</span>
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px]"
+              style={{ color: '#8b92a8' }}>
+              {sugestaoAplicada && !editando && (
+                <Sparkles size={11} style={{ color: '#a78bfa' }} className="opacity-80"
+                  aria-label="Preenchido pelo assistente" />
+              )}
+              {form.descricao.length}/200
+            </span>
+
+            {/* Dropdown de sugestões (mais recente primeiro) */}
+            {!editando && sugestoesAbertas && sugestoes.length > 0 && (
+              <div
+                className="absolute left-0 right-0 mt-1 z-50 rounded-lg shadow-xl border"
+                style={{ background: '#1a1f2e', borderColor: 'rgba(167,139,250,0.35)', maxHeight: 240, overflowY: 'auto' }}
+                onMouseDown={e => e.preventDefault()}  // evita blur do input antes do click
+              >
+                <div className="px-3 py-1.5 border-b border-white/5 flex items-center gap-1.5">
+                  <Sparkles size={11} style={{ color: '#a78bfa' }} />
+                  <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#a78bfa' }}>
+                    Sugestões do assistente ({sugestoes.length})
+                  </span>
+                  <span className="ml-auto text-[9px]" style={{ color: '#4a5168' }}>
+                    ↑↓ navegar · Enter selecionar · Esc fechar
+                  </span>
+                </div>
+                <div ref={sugestoesListRef}>
+                {sugestoes.map((s, idx) => {
+                  const conta   = contas.find(c => c.conta_id === s.conta_origem_id)
+                  const destino = contas.find(c => c.conta_id === s.conta_destino_id)
+                  const cat     = categorias.find(c => c.id === s.categoria_id)
+                  const catPai  = cat?.id_pai ? categorias.find(c => c.id === cat.id_pai) : null
+                  const focado  = idx === sugestaoIdx
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onMouseEnter={() => setSugestaoIdx(idx)}
+                      onClick={() => aplicarSugestao(s)}
+                      className="w-full text-left px-3 py-2 transition-colors border-b border-white/5 last:border-0"
+                      style={{
+                        background: focado ? 'rgba(167,139,250,0.12)' : 'transparent',
+                        borderLeft: focado ? '2px solid #a78bfa' : '2px solid transparent',
+                      }}
+                    >
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-[12px] font-semibold flex-1 truncate" style={{ color: '#e8eaf0' }}>
+                          {s.descricao}
+                        </span>
+                        {s.is_transferencia && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded"
+                            style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa' }}>
+                            Transf.
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]" style={{ color: '#8b92a8' }}>
+                        {cat && (
+                          <span>
+                            {cat.icone ? `${cat.icone} ` : ''}{catPai ? `${catPai.descricao} / ` : ''}{cat.descricao}
+                          </span>
+                        )}
+                        {conta && (
+                          <span>· {conta.nome}{destino && s.is_transferencia ? ` → ${destino.nome}` : ''}</span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+                </div>
+              </div>
+            )}
           </div>
+          {sugestaoAplicada && !editando && (
+            <p className="text-[10px] mt-1" style={{ color: '#a78bfa' }}>
+              Sugestão aplicada — confira os campos antes de salvar.
+            </p>
+          )}
         </Field>
 
         {/* Valor */}
@@ -1105,6 +1290,23 @@ export default function DrawerLancamento({
                 (data deve ser futura)
               </span>
             )}
+          </label>
+        )}
+
+        {/* Salvar como padrão — registra descrição/categoria/conta(s) no
+            Assistente para preenchimento automático futuro. Só em criação. */}
+        {!editando && (
+          <label className="flex items-center gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={salvarPadrao}
+              onChange={e => setSalvarPadrao(e.target.checked)}
+              className="w-4 h-4 rounded accent-purple-400"
+            />
+            <Sparkles size={12} style={{ color: '#a78bfa' }} />
+            <span className="text-[12px]" style={{ color: '#a78bfa' }}>
+              Salvar como padrão (auto-preencher da próxima vez)
+            </span>
           </label>
         )}
 

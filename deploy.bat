@@ -16,10 +16,11 @@ echo   6 - versao
 echo   7 - limpar
 echo   8 - excluir_conta
 echo   9 - filtros
-echo  10 - Configurar nivel de logs
-echo  11 - Deploy com --debug (usar nesta maquina)
+echo  10 - assistente
+echo  11 - Configurar nivel de logs
+echo  12 - Deploy com --debug (usar nesta maquina)
 echo.
-set /p opcao="Digite a opcao desejada (1-11): "
+set /p opcao="Digite a opcao desejada (1-12): "
 
 if "%opcao%"=="1"  goto todos
 if "%opcao%"=="2"  goto contas
@@ -30,8 +31,9 @@ if "%opcao%"=="6"  goto versao
 if "%opcao%"=="7"  goto limpar
 if "%opcao%"=="8"  goto excluir_conta
 if "%opcao%"=="9"  goto filtros
-if "%opcao%"=="10" goto config_log
-if "%opcao%"=="11" goto debug_mode
+if "%opcao%"=="10" goto assistente
+if "%opcao%"=="11" goto config_log
+if "%opcao%"=="12" goto debug_mode
 echo Opcao invalida! & pause & exit /b
 
 :debug_mode
@@ -50,18 +52,20 @@ echo   6 - versao
 echo   7 - limpar
 echo   8 - excluir_conta
 echo   9 - filtros
+echo  10 - assistente
 echo.
-set /p mod_debug="Digite o modulo (1-9): "
+set /p mod_debug="Digite o modulo (1-10): "
 
-if "%mod_debug%"=="1" goto debug_todos
-if "%mod_debug%"=="2" goto debug_contas
-if "%mod_debug%"=="3" goto debug_categorias
-if "%mod_debug%"=="4" goto debug_transacoes
-if "%mod_debug%"=="5" goto debug_transferencias
-if "%mod_debug%"=="6" goto debug_versao
-if "%mod_debug%"=="7" goto debug_limpar
-if "%mod_debug%"=="8" goto debug_excluir_conta
-if "%mod_debug%"=="9" goto debug_filtros
+if "%mod_debug%"=="1"  goto debug_todos
+if "%mod_debug%"=="2"  goto debug_contas
+if "%mod_debug%"=="3"  goto debug_categorias
+if "%mod_debug%"=="4"  goto debug_transacoes
+if "%mod_debug%"=="5"  goto debug_transferencias
+if "%mod_debug%"=="6"  goto debug_versao
+if "%mod_debug%"=="7"  goto debug_limpar
+if "%mod_debug%"=="8"  goto debug_excluir_conta
+if "%mod_debug%"=="9"  goto debug_filtros
+if "%mod_debug%"=="10" goto debug_assistente
 echo Opcao invalida! & pause & exit /b
 
 :debug_contas
@@ -120,6 +124,13 @@ supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] filtros deployed
 goto fim
 
+:debug_assistente
+echo.
+echo [DEPLOY --debug] assistente...
+supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo --debug
+echo [OK] assistente deployed
+goto fim
+
 :debug_todos
 echo.
 echo [DEPLOY --debug] contas...
@@ -145,6 +156,9 @@ supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo --deb
 echo.
 echo [DEPLOY --debug] filtros...
 supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo --debug
+echo.
+echo [DEPLOY --debug] assistente...
+supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [OK] Todos os modulos deployados com --debug
 goto fim
@@ -233,6 +247,13 @@ supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo
 echo [OK] filtros deployed
 goto fim
 
+:assistente
+echo.
+echo [DEPLOY] assistente...
+supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo
+echo [OK] assistente deployed
+goto fim
+
 :todos
 echo.
 echo [DEPLOY] contas...
@@ -258,6 +279,9 @@ supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] filtros...
 supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo
+echo.
+echo [DEPLOY] assistente...
+supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [OK] Todos os modulos deployados
 goto fim

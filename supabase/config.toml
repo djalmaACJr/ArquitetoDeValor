@@ -456,3 +456,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/filtros/deno.json"
 entrypoint = "./functions/filtros/index.ts"
+
+[functions.assistente]
+enabled = true
+verify_jwt = false
+import_map = "./functions/assistente/deno.json"
+entrypoint = "./functions/assistente/index.ts"
