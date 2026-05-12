@@ -54,7 +54,7 @@ async function listar(
 
   const { data, error } = await q;
   if (error) return erro(error.message, 500);
-  return json(data ?? []);
+  return json({ dados: data ?? [] });
 }
 
 // ── POST /lembretes ───────────────────────────────────────────

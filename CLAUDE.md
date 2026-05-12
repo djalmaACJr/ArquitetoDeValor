@@ -63,8 +63,8 @@ Permite:
 |---|---|
 | `pages/` | `DashboardPage`, `LancamentosPage`, `ContasPage`, `CategoriasPage`, `RelatoriosPage`, `ImportExportPage`, `PerfilPage`, `LoginPage` |
 | `components/layout/` | `AppLayout`, `Sidebar` |
-| `components/ui/` | `DrawerLancamento`, `Calculadora`, `BotaoNovoLancamento`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion`, `shared` |
-| `hooks/` | `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useTheme` |
+| `components/ui/` | `DrawerLancamento`, `Calculadora`, `BotaoNovoLancamento`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion`, `ModalLembrete`, `CalendarioDashboard`, `shared` |
+| `hooks/` | `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useTheme` |
 | `context/` | `AuthContext`, `PageStateContext` (persiste filtros entre páginas) |
 | `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums), `queryKeys.ts` (chaves do React Query), `logger.ts` (log condicional dev-only) |
 | `types/index.ts` | Tipos compartilhados (`Conta`, `Transacao`, `Transferencia`, `Categoria`, …) — re-exporta enums de `lib/constants.ts` |
@@ -78,6 +78,8 @@ Permite:
 | `functions/categorias/` | CRUD de categorias hierárquicas |
 | `functions/transacoes/` | CRUD + recorrência + `POST /:id/antecipar` |
 | `functions/transferencias/` | Par débito + crédito atômico |
+| `functions/assistente/` | GET busca sugestões via ILIKE; POST upsert por descrição; DELETE remove padrão |
+| `functions/lembretes/` | CRUD de lembretes com filtro por mês e cascade por `lancamento_id` |
 | `functions/filtros/` | CRUD de filtros nomeados por página (Dashboard, Extrato, Relatórios) |
 | `functions/excluir_conta/` | Exclui todos os dados do usuário (chama `fn_excluir_dados_usuario`) |
 | `functions/version/` | Endpoint de versão (introspecção) |
@@ -88,8 +90,8 @@ Permite:
 
 | Pasta | Conteúdo |
 |---|---|
-| `tests/` | Jest API: `01_contas`, `02_categorias`, `03_transacoes`, `04_transferencias`, `99_limpar` |
-| `FrontEnd/e2e/tests/` | Playwright: contas, categorias, navegação, extrato, dashboard, relatórios |
+| `tests/` | Jest API: `01_contas`, `02_categorias`, `03_transacoes`, `04_transferencias`, `05_lembretes`, `06_assistente`, `99_limpar` |
+| `FrontEnd/e2e/tests/` | Playwright: contas, categorias, navegação, extrato, dashboard, relatórios, transferências, lembretes, assistente |
 
 ---
 
@@ -199,11 +201,13 @@ Antes da migration `20260505000001`, qualquer UPDATE em `transacoes` revalidava 
 | `02_categorias.test.ts` | CA-CAT01..13 |
 | `03_transacoes.test.ts` | CA-TX01..28 |
 | `04_transferencias.test.ts` | CA-TRF01..22 |
-| `99_limpar.test.ts` | Limpeza pós-suite |
+| `05_lembretes.test.ts` | CA-LEM01..11 |
+| `06_assistente.test.ts` | CA-ASS01..09 |
+| `99_limpar.test.ts` | CA-LIM01..11 (limpeza pós-suite) |
 
 ### E2E (Playwright) — `FrontEnd/e2e/tests/`
 
-`01_contas`, `02_categorias`, `03_navegacao`, `04_extrato`, `05_dashboard`, `06_relatorios` (+ `auth.setup.ts`, `data.setup.ts`).
+`01_contas`, `02_categorias`, `03_navegacao`, `04_extrato`, `05_dashboard`, `06_relatorios`, `07_transferencias`, `08_lembretes`, `09_assistente` (+ `auth.setup.ts`, `data.setup.ts`).
 Roda no Firefox; relatório HTML em `FrontEnd/e2e/report/`.
 
 ---

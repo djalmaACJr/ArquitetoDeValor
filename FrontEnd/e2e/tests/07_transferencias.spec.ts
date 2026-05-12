@@ -35,18 +35,22 @@ test.describe('Transferências (E2E)', () => {
     await drawer.getByPlaceholder(/conta de luz|sal[áa]rio/i).fill('E2E Transferência Teste')
     await preencherValor(page, drawer, '12345')
 
-    // Conta origem — primeiro SearchableSelect
+    // Conta origem — busca "Corrente" para selecionar E2E Conta Corrente
     const btnsSelect = drawer.getByRole('button').filter({ hasText: /selecione a conta/i })
     await btnsSelect.first().click()
-    await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
+    const buscaOrigem = drawer.getByPlaceholder('Buscar...')
+    await buscaOrigem.waitFor({ state: 'visible', timeout: 3000 })
+    await buscaOrigem.fill('Corrente')
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
     await page.waitForTimeout(200)
 
-    // Conta destino — segundo SearchableSelect (só aparece em transferência)
+    // Conta destino — busca "Poupança" para selecionar E2E Conta Poupança
     const btnDestino = drawer.getByRole('button').filter({ hasText: /selecione a conta destino/i })
     await btnDestino.first().click()
-    await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
+    const buscaDestino = drawer.getByPlaceholder('Buscar...')
+    await buscaDestino.waitFor({ state: 'visible', timeout: 3000 })
+    await buscaDestino.fill('Poupança')
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
     await page.waitForTimeout(200)
@@ -123,18 +127,22 @@ test.describe('Transferências (E2E)', () => {
     await drawer.getByPlaceholder(/conta de luz|sal[áa]rio/i).fill('E2E Transf Recorrente')
     await preencherValor(page, drawer, '5000')
 
-    // Conta origem
+    // Conta origem — busca "Corrente" para selecionar E2E Conta Corrente
     const btnsSelect = drawer.getByRole('button').filter({ hasText: /selecione a conta/i })
     await btnsSelect.first().click()
-    await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
+    const buscaOrigem = drawer.getByPlaceholder('Buscar...')
+    await buscaOrigem.waitFor({ state: 'visible', timeout: 3000 })
+    await buscaOrigem.fill('Corrente')
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
     await page.waitForTimeout(200)
 
-    // Conta destino
+    // Conta destino — busca "Poupança" para selecionar E2E Conta Poupança
     const btnDestino = drawer.getByRole('button').filter({ hasText: /selecione a conta destino/i })
     await btnDestino.first().click()
-    await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
+    const buscaDestino = drawer.getByPlaceholder('Buscar...')
+    await buscaDestino.waitFor({ state: 'visible', timeout: 3000 })
+    await buscaDestino.fill('Poupança')
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
     await page.waitForTimeout(200)

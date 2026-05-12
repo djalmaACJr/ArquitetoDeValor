@@ -30,6 +30,7 @@ Deno.serve(async (req: Request) => {
 
   if (m === "GET"    && !id) return buscar(c, params, userId);
   if (m === "POST"   && !id) return upsert(c, req, userId);
+  if (m === "PUT"    &&  id) return atualizar(c, req, id, userId);
   if (m === "DELETE" &&  id) return excluir(c, id, userId);
 
   return erro("Método não suportado", 405);
@@ -46,6 +47,22 @@ async function buscar(
   userId: string,
 ): Promise<Response> {
   const termo = (params.get("termo") ?? "").trim();
+  // Sem termo → retorna todos os padrões do usuário (para o gerenciador do perfil)
+  if (termo.length === 0) {
+    const limitParam = parseInt(params.get("limit") ?? "200", 10);
+    const limit = Math.min(
+      Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 200,
+      200,
+    );
+    const { data, error } = await c
+      .from("assistente_lancamentos")
+      .select("*")
+      .eq("user_id", userId)
+      .order("descricao", { ascending: true })
+      .limit(limit);
+    if (error) return erro(error.message, 500);
+    return json({ dados: data ?? [] });
+  }
   if (termo.length < 2) return json({ dados: [] });
 
   // Escapa wildcards LIKE no termo do usuário.
@@ -145,6 +162,43 @@ async function upsert(
     .single();
   if (error) return erro(error.message, 500);
   return json(criado, 201);
+}
+
+// ── PUT /assistente/:id ───────────────────────────────────────
+// Body: { descricao? } — atualiza apenas os campos enviados.
+async function atualizar(
+  c: SupabaseClient,
+  req: Request,
+  id: string,
+  userId: string,
+): Promise<Response> {
+  const body = await req.json().catch(() => ({}));
+  const descricao = body.descricao !== undefined
+    ? String(body.descricao).trim()
+    : undefined;
+
+  if (descricao !== undefined && (descricao.length < 2 || descricao.length > 200)) {
+    return erro("descricao deve ter entre 2 e 200 caracteres", 400);
+  }
+
+  const patch: Record<string, unknown> = {};
+  if (descricao !== undefined)          patch.descricao       = descricao;
+  if (body.categoria_id    !== undefined) patch.categoria_id    = body.categoria_id    || null;
+  if (body.conta_origem_id !== undefined) patch.conta_origem_id = body.conta_origem_id || null;
+
+  if (Object.keys(patch).length === 0) return erro("Nenhum campo para atualizar", 400);
+
+  const { data, error } = await c
+    .from("assistente_lancamentos")
+    .update(patch)
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select()
+    .maybeSingle();
+
+  if (error) return erro(error.message, 500);
+  if (!data)  return erro("Padrão não encontrado", 404);
+  return json(data);
 }
 
 // ── DELETE /assistente/:id ────────────────────────────────────

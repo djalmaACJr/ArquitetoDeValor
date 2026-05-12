@@ -2,7 +2,7 @@
 // Arquiteto de Valor — Testes automatizados
 // tests/limpar.test.ts
 //
-// Cobre critérios de aceite: CA-LIM01 a CA-LIM10
+// Cobre critérios de aceite: CA-LIM01 a CA-LIM11
 // ============================================================
 import { api, apiSemAuth } from "./setup";
 
@@ -60,13 +60,28 @@ async function transacaoExiste(id: string): Promise<boolean> {
 }
 
 // ── Suite de testes ───────────────────────────────────────────
-describe("Limpar — CA-LIM01 a CA-LIM10", () => {
+// ── Helper para limpar lembretes de teste ─────────────────────
+async function limparLembretesJest(): Promise<void> {
+  const mes = new Date().toISOString().slice(0, 7);
+  const { data } = await api(`/lembretes?mes=${mes}`);
+  const todos: any[] = data?.dados ?? [];
+  for (const l of todos.filter((l: any) => (l.descricao as string)?.startsWith("Lembrete Limpar"))) {
+    await api(`/lembretes/${l.id}`, "DELETE");
+  }
+}
+
+describe("Limpar — CA-LIM01 a CA-LIM11", () => {
 
   // Setup: cria dados para os testes de limpeza pontual (não usa limparTudo ainda)
   beforeAll(async () => {
+    await limparLembretesJest();
     contaId     = await criarContaTeste()
     categoriaId = await criarCategoriaTeste()
     transacaoId = await criarTransacaoTeste(contaId, categoriaId)
+  })
+
+  afterAll(async () => {
+    await limparLembretesJest();
   })
 
   // ── CA-LIM01 ─────────────────────────────────────────────────
@@ -212,5 +227,18 @@ describe("Limpar — CA-LIM01 a CA-LIM10", () => {
     logs.forEach(log => {
       expect(log.excluidos).toBeGreaterThanOrEqual(0)
     })
+  })
+
+  // ── CA-LIM11 ─────────────────────────────────────────────────
+  test("CA-LIM11 — POST + DELETE /lembretes cria e remove lembrete corretamente", async () => {
+    const { status: s1, data } = await api("/lembretes", "POST", {
+      data:      new Date().toISOString().split("T")[0],
+      descricao: "Lembrete Limpar Teste",
+    }) as { status: number; data: Record<string, unknown> }
+    expect(s1).toBe(201)
+
+    const id = data.id as string;
+    const { status: s2 } = await api(`/lembretes/${id}`, "DELETE")
+    expect(s2).toBe(204)
   })
 })
