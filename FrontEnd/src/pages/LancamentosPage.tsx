@@ -200,7 +200,6 @@ export default function LancamentosPage() {
   // Busca o saldo de cada conta até o último dia do mês ANTERIOR
   // para usar como base no recálculo do saldo_acumulado por conta
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (filtContas.length !== 1) { setSaldoBaseConta({}); return }
     const [ano, m] = mes.split('-').map(Number)
     const ultimoDiaMesAnterior = new Date(ano, m - 1, 0).toISOString().split('T')[0]
@@ -246,7 +245,7 @@ export default function LancamentosPage() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [navMes, drawerAberto])
+  }, [navMes, drawerAberto, prefetchAdj])
 
   // Status dropdown aberto — guarda também a posição (rect) do badge para
   // renderizar via portal e escapar do overflow:hidden do grupo de dia.
@@ -264,7 +263,6 @@ export default function LancamentosPage() {
   })
 
   // Limpar seleção ao trocar de mês
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setSelecionados(new Set()) }, [mes])
 
   // Destaque temporário do lançamento recém-criado/editado
@@ -311,7 +309,6 @@ export default function LancamentosPage() {
     stateAplicado.current = true
     if (state.novoLancamento) {
       const tipo = state.tipoInicial ?? 'DESPESA'
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTipoNovo(tipo); setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
     }
     if (state.limparOutrosFiltros) {

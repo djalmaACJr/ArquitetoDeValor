@@ -263,7 +263,6 @@ export default function DrawerLancamento({
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (novoLancamento) {
       const preserved = criarNovoPreserved.current
       criarNovoPreserved.current = null
@@ -368,7 +367,6 @@ export default function DrawerLancamento({
         .catch(() => { /* aborto ou erro silencioso */ })
     }, 400)
     return () => { clearTimeout(timer); ctrl.abort() }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.descricao, editando])
 
   // Aplica uma sugestão escolhida pelo usuário: copia descricao + campos
@@ -722,7 +720,6 @@ export default function DrawerLancamento({
   // Reset de estados voláteis quando o drawer fecha
   // (este componente fica montado entre aberturas — sem isso, calcAberta,
   // confirmandoExclusao etc. ficariam presos da sessão anterior)
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!aberto) {
       setCalcAberta(false)
@@ -738,7 +735,6 @@ export default function DrawerLancamento({
       ignorarFoco.current = false
     }
   }, [aberto])
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Foco no campo Tipo ao abrir o drawer (após animação)
   useEffect(() => {

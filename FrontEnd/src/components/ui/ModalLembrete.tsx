@@ -22,14 +22,18 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
   const [erro,      setErro]      = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Sincroniza campos ao abrir (edição ou novo)
+  // Sincroniza campos ao abrir (edição ou novo). Os setState aqui são
+  // intencionais — resetam o form para o lembrete escolhido a cada abertura.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!aberto) return
     setData(lembrete?.data ?? dataInicial ?? hoje)
     setDescricao(lembrete?.descricao ?? descricaoInicial ?? '')
     setErro(null)
     setTimeout(() => inputRef.current?.focus(), 80)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aberto, lembrete])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Fecha com Escape
   useEffect(() => {
