@@ -93,12 +93,12 @@ test.describe('Dashboard', () => {
     await expect(page.getByText('Lembretes', { exact: true })).toBeVisible({ timeout: 5_000 })
 
     // Verifica os dois toggles ("A partir de hoje" / "Todos")
-    await expect(page.getByText('A partir de hoje')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'A partir de hoje' })).toBeVisible()
     await expect(page.getByText('Todos', { exact: true })).toBeVisible()
 
     // Fecha pelo botão X no cabeçalho do painel
     const headerPainel = page.getByText('Lembretes', { exact: true }).locator('xpath=ancestor::div[2]')
     await headerPainel.locator('button').last().click()
-    await expect(page.getByText('A partir de hoje')).not.toBeVisible({ timeout: 3_000 })
+    await expect(page.getByRole('button', { name: 'A partir de hoje' })).not.toBeVisible({ timeout: 3_000 })
   })
 })

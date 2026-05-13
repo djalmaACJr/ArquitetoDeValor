@@ -35,7 +35,8 @@ export async function abrirNovoLancamento(page: Page, tipo: TipoLancamento = 'De
  */
 export async function preencherValor(page: Page, drawer: Locator, valor: string) {
   await drawer.getByRole('button', { name: 'Valor' }).click()
-  await page.waitForTimeout(200) // aguarda Calculadora montar e capturar foco
+  // Aguarda a Calculadora montar e ficar visível antes de digitar
+  await drawer.getByRole('button', { name: /^OK$/ }).waitFor({ state: 'visible', timeout: 5_000 })
 
   for (const ch of valor) {
     if (ch >= '0' && ch <= '9') {

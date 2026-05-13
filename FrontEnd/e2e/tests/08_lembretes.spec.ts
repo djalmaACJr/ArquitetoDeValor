@@ -91,15 +91,10 @@ test.describe('Lembretes', () => {
     const btnCheck = itemLembrete.locator('button[title="Concluído"]')
     await expect(btnCheck).toBeVisible({ timeout: 3_000 })
     await btnCheck.click()
-    await page.waitForTimeout(500)
 
-    // Descrição deve aparecer riscada (line-through)
+    // Aguarda re-render após atualização da API + React Query refetch (sem timeout fixo)
     const textoLembrete = page.getByText(DESCRICAO_TESTE).first()
-    await expect(textoLembrete).toBeVisible()
-    const style = await textoLembrete.getAttribute('style') ?? ''
-    const hasLineThrough = style.includes('line-through') ||
-      await textoLembrete.evaluate((el) => getComputedStyle(el).textDecoration.includes('line-through'))
-    expect(hasLineThrough).toBe(true)
+    await expect(textoLembrete).toHaveAttribute('style', /line-through/, { timeout: 8_000 })
   })
 
   // ── E2E-LEM06 ───────────────────────────────────────────────
@@ -129,12 +124,9 @@ test.describe('Lembretes', () => {
     // Botão diz "Atualizar" ao editar
     await dialog.getByRole('button', { name: /atualizar/i }).click()
     await expect(dialog).not.toBeVisible({ timeout: 8_000 })
-    await page.waitForTimeout(500)
 
-    // Verifica no painel que a descrição mudou
-    const botaoDiaApos = page.locator('button').filter({ hasText: new RegExp(`^${HOJE}$`) }).first()
-    await botaoDiaApos.click()
-    await expect(page.getByText('E2E Lembrete Editado').first()).toBeVisible({ timeout: 5_000 })
+    // Painel do dia permanece aberto após fechar o modal — aguarda texto atualizado aparecer
+    await expect(page.getByText('E2E Lembrete Editado').first()).toBeVisible({ timeout: 8_000 })
   })
 
   // ── E2E-LEM07 ───────────────────────────────────────────────
