@@ -218,6 +218,80 @@ Quando `total_parcelas > 1` é informado, gera-se uma série inteira de pares (c
 
 ---
 
+## 🔔 Lembretes
+
+### Conceito
+
+Lembretes são avisos pessoais com data, descrição e status. Podem ser avulsos ou vinculados a um lançamento futuro.
+
+### Tabela `lembretes`
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | UUID | PK |
+| `user_id` | UUID | FK `usuarios` (cascade DELETE) |
+| `data` | DATE | obrigatória |
+| `descricao` | TEXT | 1..200 caracteres |
+| `status` | TEXT | `PENDENTE` \| `CONCLUIDO` (default `PENDENTE`) |
+| `lancamento_id` | UUID | FK `transacoes` (cascade DELETE, nullable) |
+| `criado_em` | TIMESTAMPTZ | `now()` |
+| `atualizado_em` | TIMESTAMPTZ | gerenciado por trigger |
+
+### Regras
+
+- RLS por `user_id = auth.uid()`.
+- Endpoint `/lembretes`: `GET` (listar — filtros por `?mes=`, `?ano=`, `?status=`), `POST` (criar), `PUT /:id` (atualizar), `DELETE /:id`.
+- Quando `lancamento_id` é informado, o lembrete é excluído automaticamente (cascade) se o lançamento for deletado.
+- Componente `ModalLembrete` e `CalendarioDashboard` exibem lembretes no Dashboard por mês.
+
+---
+
+## 🤖 Assistente de Lançamentos
+
+### Conceito
+
+Armazena "lançamentos padrão" do usuário para sugestão automática ao digitar uma descrição. Dado um prefixo, retorna o registro com descrição mais semelhante e `atualizado_em` mais recente.
+
+### Tabela `assistente_lancamentos`
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | UUID | PK |
+| `user_id` | UUID | FK `usuarios` (cascade DELETE) |
+| `descricao` | TEXT | 2..200 caracteres |
+| `categoria_id` | UUID | FK `categorias` (ON DELETE SET NULL, nullable) |
+| `conta_origem_id` | UUID | FK `contas` (ON DELETE SET NULL, nullable) |
+| `conta_destino_id` | UUID | FK `contas` (ON DELETE SET NULL, nullable) |
+| `is_transferencia` | BOOLEAN | `DEFAULT FALSE` |
+| `criado_em` | TIMESTAMPTZ | `now()` |
+| `atualizado_em` | TIMESTAMPTZ | gerenciado por trigger |
+
+### Regras
+
+- RLS por `user_id = auth.uid()`.
+- Constraint `chk_assistente_transf`: quando `is_transferencia = TRUE`, `conta_origem_id` e `conta_destino_id` são obrigatórios e distintos.
+- Índice único em `(user_id, lower(descricao))` — garante unicidade case-insensitive e suporta upsert por descrição.
+- Endpoint `/assistente`:
+  - `GET ?q=<termo>` — busca por ILIKE `%termo%` na descrição, ordena por `atualizado_em DESC`, retorna até 5 sugestões.
+  - `POST` — upsert (insert ou update) pelo par `(user_id, lower(descricao))`.
+  - `DELETE /:id` — remove padrão específico.
+- O frontend chama automaticamente o POST após salvar um lançamento com sucesso, para manter os padrões atualizados.
+
+---
+
+## 👁️ Preferências do usuário
+
+### `ocultar_valores`
+
+Coluna `ocultar_valores BOOLEAN NOT NULL DEFAULT false` na tabela `usuarios`.
+
+- Controla se os valores monetários ficam mascarados na UI (Dashboard, Contas, Relatórios).
+- Lido e gravado diretamente via Supabase client (schema `arqvalor`) no hook `useOcultarValores` — sem passar por Edge Function.
+- Componente `BotaoOcultar` padroniza o botão Ocultar/Mostrar em todas as páginas que exibem valores.
+- Migration: `20260513000001_ocultar_valores_usuario.sql`.
+
+---
+
 ## 🔖 Filtros salvos
 
 ### Conceito
@@ -304,6 +378,9 @@ Tabela `arqvalor.auditoria` registra ações sensíveis:
 | `intervalo_recorrencia` | ≥ 1 |
 | `dia_fechamento` / `dia_pagamento` | 1..31 |
 | `nome` (filtro salvo) | 1..50 |
+| `descricao` (lembrete) | 1..200 |
+| `status` (lembrete) | `PENDENTE` \| `CONCLUIDO` |
+| `descricao` (assistente) | 2..200 |
 | `status` | `PAGO` \| `PENDENTE` \| `PROJECAO` |
 | `frequencia` (API) | `DIARIA` \| `SEMANAL` \| `MENSAL` \| `ANUAL` |
 | `tipo_recorrencia` (banco) | `PARCELA` \| `PROJECAO` |

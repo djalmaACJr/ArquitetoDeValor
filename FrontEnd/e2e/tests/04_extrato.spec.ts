@@ -122,6 +122,17 @@ test.describe('Extrato (Lançamentos)', () => {
     expect(mesAposVoltar).toBe(mes)
   })
 
+  // ── E2E-EX14 ─────────────────────────────────────────────────
+  test('E2E-EX14 — botão atualizar recarrega lançamentos sem erro', async ({ page }) => {
+    const btnAtualizar = page.locator('button[title="Atualizar lançamentos"]')
+    await expect(btnAtualizar).toBeVisible({ timeout: 8_000 })
+    await btnAtualizar.click()
+    // Aguarda possível spinner e verifica que os filtros continuam presentes
+    await page.waitForTimeout(800)
+    await expect(page.getByRole('button', { name: /todos status/i })).toBeVisible()
+    await expect(page.locator('text=Erro')).not.toBeVisible()
+  })
+
   // ── E2E-EX09 ─────────────────────────────────────────────────
   test('E2E-EX09 — criar lançamento recorrente e verificar indicador de parcela', async ({ page }) => {
     await abrirNovoLancamento(page)

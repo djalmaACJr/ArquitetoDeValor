@@ -133,6 +133,16 @@ test.describe('Contas', () => {
     await expect(page.getByText('E2E Conta Desativar', { exact: true })).not.toBeVisible({ timeout: 10_000 })
   })
 
+  test('E2E-CT07 — ocultar/mostrar valores nas contas', async ({ page }) => {
+    const btnOcultar = page.getByRole('button', { name: /ocultar/i })
+    await expect(btnOcultar).toBeVisible({ timeout: 8_000 })
+    await btnOcultar.click()
+    await expect(page.getByRole('button', { name: /mostrar/i })).toBeVisible({ timeout: 3_000 })
+    // Restaura para não interferir em outros testes
+    await page.getByRole('button', { name: /mostrar/i }).click()
+    await expect(page.getByRole('button', { name: /ocultar/i })).toBeVisible({ timeout: 3_000 })
+  })
+
   test('E2E-CT06 — limpar contas de teste', async ({ page }) => {
     // Excluir E2E Cartão Teste
     for (const nome of ['E2E Cartão Teste', 'E2E Conta Teste']) {

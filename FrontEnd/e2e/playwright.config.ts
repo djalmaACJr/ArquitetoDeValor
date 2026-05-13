@@ -26,6 +26,14 @@ export default defineConfig({
     locale: 'pt-BR',
   },
 
+  // Em CI, o Playwright sobe o servidor Vite automaticamente
+  webServer: process.env.CI ? {
+    command: 'npm run dev',
+    url: 'http://localhost:5173',
+    timeout: 60_000,
+    reuseExistingServer: false,
+  } : undefined,
+
   projects: [
     // Setup: faz login uma vez e salva sessão
     {

@@ -82,4 +82,23 @@ test.describe('Dashboard', () => {
     const mesAposVoltar = (await calBtnApos.textContent())?.trim()
     expect(mesAposVoltar).toBe(mesSelecionado)
   })
+
+  test('E2E-DB07 — botão de lista abre painel com todos os lembretes', async ({ page }) => {
+    // Botão no cabeçalho do calendário (title="Todos os lembretes")
+    const btnLista = page.getByTitle('Todos os lembretes')
+    await expect(btnLista).toBeVisible({ timeout: 8_000 })
+    await btnLista.click()
+
+    // Painel abre — título "Lembretes" fica visível
+    await expect(page.getByText('Lembretes', { exact: true })).toBeVisible({ timeout: 5_000 })
+
+    // Verifica os dois toggles ("A partir de hoje" / "Todos")
+    await expect(page.getByText('A partir de hoje')).toBeVisible()
+    await expect(page.getByText('Todos', { exact: true })).toBeVisible()
+
+    // Fecha pelo botão X no cabeçalho do painel
+    const headerPainel = page.getByText('Lembretes', { exact: true }).locator('xpath=ancestor::div[2]')
+    await headerPainel.locator('button').last().click()
+    await expect(page.getByText('A partir de hoje')).not.toBeVisible({ timeout: 3_000 })
+  })
 })

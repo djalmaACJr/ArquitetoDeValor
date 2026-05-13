@@ -66,6 +66,16 @@ test.describe('Relatórios', () => {
     await expect(page.getByRole('button', { name: /exportar/i })).toBeVisible()
   })
 
+  test('E2E-REL07 — ocultar/mostrar valores no relatório', async ({ page }) => {
+    const btnOcultar = page.getByRole('button', { name: /ocultar/i })
+    await expect(btnOcultar).toBeVisible({ timeout: 8_000 })
+    await btnOcultar.click()
+    await expect(page.getByRole('button', { name: /mostrar/i })).toBeVisible({ timeout: 3_000 })
+    // Restaura
+    await page.getByRole('button', { name: /mostrar/i }).click()
+    await expect(page.getByRole('button', { name: /ocultar/i })).toBeVisible({ timeout: 3_000 })
+  })
+
   test('E2E-REL06 — filtros persistem ao navegar entre páginas', async ({ page }) => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
     await expect(page.getByText('Créditos', { exact: true })).toBeVisible()

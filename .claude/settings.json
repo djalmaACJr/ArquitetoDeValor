@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-Content \"c:\\\\Pessoal\\\\ArquitetoDeValor\\\\ARCHITECTURE.md\")",
+      "Bash(Select-Object -First 100)",
+      "Bash(head -100 \"/mnt/c/Pessoal/ArquitetoDeValor/ARCHITECTURE.md\")",
+      "Read(//mnt/c/Pessoal/ArquitetoDeValor/**)"
+    ]
+  }
+}

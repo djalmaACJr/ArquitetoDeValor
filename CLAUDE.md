@@ -25,6 +25,9 @@ Permite:
 - Transferências entre contas (par débito + crédito)
 - Organização hierárquica por categorias
 - Dashboard, relatórios, importação/exportação Excel
+- Lembretes/alertas vinculáveis a lançamentos futuros
+- Filtros salvos por página (Dashboard, Extrato, Relatórios)
+- Assistente de lançamentos (sugestão automática por descrição)
 
 ---
 
@@ -63,8 +66,8 @@ Permite:
 |---|---|
 | `pages/` | `DashboardPage`, `LancamentosPage`, `ContasPage`, `CategoriasPage`, `RelatoriosPage`, `ImportExportPage`, `PerfilPage`, `LoginPage` |
 | `components/layout/` | `AppLayout`, `Sidebar` |
-| `components/ui/` | `DrawerLancamento`, `Calculadora`, `BotaoNovoLancamento`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion`, `ModalLembrete`, `CalendarioDashboard`, `shared` |
-| `hooks/` | `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useTheme` |
+| `components/ui/` | `DrawerLancamento`, `Calculadora`, `BotaoNovoLancamento`, `BotaoOcultar`, `FiltrosLancamentos`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion`, `ModalLembrete`, `CalendarioDashboard`, `shared` |
+| `hooks/` | `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useOcultarValores`, `useTheme` |
 | `context/` | `AuthContext`, `PageStateContext` (persiste filtros entre páginas) |
 | `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums), `queryKeys.ts` (chaves do React Query), `logger.ts` (log condicional dev-only) |
 | `types/index.ts` | Tipos compartilhados (`Conta`, `Transacao`, `Transferencia`, `Categoria`, …) — re-exporta enums de `lib/constants.ts` |
@@ -105,7 +108,7 @@ Permite:
 - **Status** — `PAGO` | `PENDENTE` | `PROJECAO`
 - **Recorrência** — `DIARIA` | `SEMANAL` | `MENSAL` | `ANUAL`
   - Quando recorrente: `id_recorrencia` + `nr_parcela` + `total_parcelas` + `tipo_recorrencia` (`PARCELA` ou `PROJECAO`)
-  - Constraint do banco: os 3 campos devem estar **todos presentes ou todos nulos**
+  - Constraint do banco: os 4 campos devem estar **todos presentes ou todos nulos**
 - **Edição/exclusão** com escopo: `SOMENTE_ESTE` | `ESTE_E_SEGUINTES` | `TODOS`
 - **Antecipação** (`POST /transacoes/:id/antecipar`): consolida parcelas seguintes na atual, preserva `valor_projetado`
 
@@ -207,7 +210,7 @@ Antes da migration `20260505000001`, qualquer UPDATE em `transacoes` revalidava 
 
 ### E2E (Playwright) — `FrontEnd/e2e/tests/`
 
-`01_contas`, `02_categorias`, `03_navegacao`, `04_extrato`, `05_dashboard`, `06_relatorios`, `07_transferencias`, `08_lembretes`, `09_assistente` (+ `auth.setup.ts`, `data.setup.ts`).
+`00_cadastro`, `01_contas`, `02_categorias`, `03_navegacao`, `04_extrato`, `05_dashboard`, `06_relatorios`, `07_transferencias`, `08_lembretes`, `09_assistente` (+ `auth.setup.ts`, `data.setup.ts`).
 Roda no Firefox; relatório HTML em `FrontEnd/e2e/report/`.
 
 ---
@@ -226,7 +229,7 @@ Roda no Firefox; relatório HTML em `FrontEnd/e2e/report/`.
 ### ❌ Não deve
 
 - Criar lógica duplicada (sempre olhar o `_shared/utils.ts` antes)
-- Acessar tabelas diretamente do frontend — sempre via Edge Function
+- Acessar tabelas de domínio diretamente do frontend — sempre via Edge Function. **Exceção**: `arqvalor.usuarios` (perfil/preferências) pode ser lida/escrita diretamente via Supabase client, conforme padrão já em `PerfilPage` e `useOcultarValores`
 - Ignorar RLS ou usar `service_role` em código de usuário
 - Quebrar o par débito + crédito de transferências
 - Editar/excluir categoria com `protegida = true`

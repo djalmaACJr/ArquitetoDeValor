@@ -59,8 +59,8 @@ Sistema cliente-servidor 100% serverless:
 |---|---|
 | `pages/` | Composição de UI por rota — sem regra de negócio |
 | `components/layout/` | `AppLayout`, `Sidebar` — chrome da aplicação |
-| `components/ui/` | Componentes reusáveis (`DrawerLancamento`, `Calculadora`, `MultiSelect`, `BotaoNovoLancamento`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, …) |
-| `hooks/` | Lógica de negócio + estado — todos baseados em `@tanstack/react-query` (`useLancamentos`, `useDashboard`, `useContas`, `useCategorias`, `useFiltrosSalvos`, `useAuth`, `useTheme`) |
+| `components/ui/` | Componentes reusáveis (`DrawerLancamento`, `Calculadora`, `MultiSelect`, `BotaoNovoLancamento`, `BotaoOcultar`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `ModalLembrete`, `CalendarioDashboard`, …) |
+| `hooks/` | Lógica de negócio + estado — todos baseados em `@tanstack/react-query` (`useLancamentos`, `useDashboard`, `useContas`, `useCategorias`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useOcultarValores`, `useAuth`, `useTheme`) |
 | `context/` | `AuthContext` (sessão), `PageStateContext` (filtros persistidos entre páginas) |
 | `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums centralizados), `queryKeys.ts` (chaves React Query), `logger.ts` (log condicional dev-only) |
 | `types/` | Contratos TypeScript compartilhados — re-exporta enums de `constants.ts` |
@@ -108,6 +108,8 @@ supabase/functions/
 ├── categorias/index.ts
 ├── transacoes/index.ts        # + version.ts
 ├── transferencias/index.ts
+├── lembretes/index.ts          # CRUD de lembretes (avulsos ou vinculados a lançamentos)
+├── assistente/index.ts         # sugestões de lançamento por ILIKE na descrição
 ├── filtros/index.ts            # CRUD de filtros nomeados (Dashboard/Extrato/Relatórios)
 ├── excluir_conta/index.ts      # apaga todos os dados do usuário (chama fn_excluir_dados_usuario)
 ├── version/index.ts            # /version — endpoint de introspecção
@@ -192,7 +194,7 @@ Tudo vive em **`arqvalor`** — `search_path` é configurado nas migrations. Ext
 ### Tabelas
 
 #### `usuarios`
-`id (PK = auth.uid)`, `email UNIQUE`, `nome`, `criado_em`.
+`id (PK = auth.uid)`, `email UNIQUE`, `nome`, `ocultar_valores BOOLEAN NOT NULL DEFAULT false`, `criado_em`.
 
 #### `contas`
 `id`, `user_id → usuarios`, `nome (1..100)`, `tipo (tipo_conta)`, `saldo_inicial NUMERIC(15,2)`, `icone`, `cor (#RRGGBB)`, `ativa`, `dia_fechamento (1..31)`, `dia_pagamento (1..31)`, `criado_em`, `atualizado_em`.
@@ -235,6 +237,19 @@ Restrições: `length(trim(nome)) > 0`, `length(trim(pagina)) > 0`.
 Índice: `(user_id, pagina)`.
 Tabela criada por `20260505000004_filtros_salvos.sql`.
 
+#### `lembretes`
+`id`, `user_id → usuarios` (cascade DELETE), `data DATE`, `descricao (1..200)`, `status` (`PENDENTE` | `CONCLUIDO`), `lancamento_id → transacoes` (cascade DELETE, nullable), `criado_em`, `atualizado_em`.
+Índice: `(user_id, data)`.
+Trigger `trg_atualizar_lembrete` mantém `atualizado_em`.
+Tabela criada por `20260511000001_lembretes.sql`.
+
+#### `assistente_lancamentos`
+`id`, `user_id → usuarios` (cascade DELETE), `descricao (2..200)`, `categoria_id → categorias` (ON DELETE SET NULL, nullable), `conta_origem_id → contas` (ON DELETE SET NULL, nullable), `conta_destino_id → contas` (ON DELETE SET NULL, nullable), `is_transferencia BOOLEAN NOT NULL DEFAULT FALSE`, `criado_em`, `atualizado_em`.
+Constraint `chk_assistente_transf`: quando `is_transferencia = TRUE`, `conta_origem_id` e `conta_destino_id` são obrigatórios e distintos.
+Índice único: `(user_id, lower(descricao))` — base do upsert por descrição.
+Trigger `trg_assistente_atualizado_em` mantém `atualizado_em`.
+Tabela criada por `20260511000002_assistente_lancamentos.sql`.
+
 ### Funções
 
 | Função | Tipo | Papel |
@@ -252,15 +267,20 @@ Tabela criada por `20260505000004_filtros_salvos.sql`.
 ### Triggers
 
 ```
-trg_contas_atualizado_em        BEFORE UPDATE  contas
-trg_categorias_atualizado_em    BEFORE UPDATE  categorias
-trg_transacoes_atualizado_em    BEFORE UPDATE  transacoes
-trg_preservar_valor_projetado   BEFORE UPDATE  transacoes
-trg_validar_isolamento_usuario  BEFORE I/U     transacoes
-trg_bloquear_exclusao_conta     BEFORE DELETE  contas
-trg_bloquear_exclusao_categoria BEFORE DELETE  categorias
-trg_sincronizar_usuario         AFTER  INSERT  auth.users   (SECURITY DEFINER)
-trg_remover_usuario             BEFORE DELETE  auth.users   (SECURITY DEFINER)
+trg_contas_atualizado_em              BEFORE UPDATE  contas
+trg_categorias_atualizado_em          BEFORE UPDATE  categorias
+trg_transacoes_atualizado_em          BEFORE UPDATE  transacoes
+trg_preservar_valor_projetado         BEFORE UPDATE  transacoes
+trg_validar_isolamento_usuario        BEFORE I/U     transacoes
+trg_bloquear_exclusao_conta           BEFORE DELETE  contas
+trg_bloquear_exclusao_categoria       BEFORE DELETE  categorias
+trg_proteger_categoria                BEFORE U/D     categorias    (bloqueia edição além de cor/icone e DELETE de protegidas)
+trg_cascata_inativar_subcategorias    AFTER  UPDATE  categorias    (inativa filhas quando pai inativado)
+trg_bloquear_exclusao_transf_avulsa   BEFORE DELETE  transacoes    (força uso de /transferencias para pares protegidos)
+trg_atualizar_lembrete                BEFORE UPDATE  lembretes
+trg_assistente_atualizado_em          BEFORE UPDATE  assistente_lancamentos
+trg_sincronizar_usuario               AFTER  INSERT  auth.users    (SECURITY DEFINER)
+trg_remover_usuario                   BEFORE DELETE  auth.users    (SECURITY DEFINER)
 ```
 
 ### Views
@@ -287,10 +307,21 @@ Auditoria tem apenas `USING` (somente leitura para o dono).
 
 Em `supabase/migrations/`:
 
-- `20260403000001_criacao.sql` — schema, ENUMs, tabelas, funções, triggers, views, RLS
+- `20260403000001_criacao.sql` — schema, ENUMs, tabelas base, funções, triggers, views, RLS
 - `20260403000002_criacao_usuario.sql` — usuário `arqvalor_api` + grants
 - `20260403000003_sincronizar_usuarios.sql` — sync `auth.users`, seed de contas/categorias
 - `20260403000005_grants_gerais.sql` — grants gerais
+- `20260429000006_excluir_conta_usuario.sql` — função `fn_excluir_dados_usuario` + endpoint `excluir_conta`
+- `20260429000007_corrigir_security_invoker_views.sql` — `SECURITY INVOKER` nas views para respeitar RLS
+- `20260429000008_schema_completo_protecoes.sql` — `dia_fechamento`/`dia_pagamento` em contas, `protegida` em categorias, `intervalo_recorrencia` em transações, triggers de proteção
+- `20260505000001_fix_trigger_validar_isolamento.sql` — restringe revalidação de isolamento a INSERT e UPDATE com mudança de `conta_id`/`categoria_id`
+- `20260505000002_garantir_ativa_categorias.sql` — corrige seed para marcar categorias raiz como ativas
+- `20260505000003_cascata_inativar_subcategorias.sql` — trigger `trg_cascata_inativar_subcategorias`
+- `20260505000004_filtros_salvos.sql` — tabela `filtros_salvos` + RLS
+- `20260507000001_fix_security_warnings.sql` — corrige avisos de segurança do Supabase (search_path, SECURITY DEFINER)
+- `20260511000001_lembretes.sql` — tabela `lembretes` + RLS + trigger `trg_atualizar_lembrete`
+- `20260511000002_assistente_lancamentos.sql` — tabela `assistente_lancamentos` + RLS + índices + trigger
+- `20260513000001_ocultar_valores_usuario.sql` — coluna `ocultar_valores BOOLEAN` em `usuarios`
 
 **Todas idempotentes** (`IF NOT EXISTS`, `CREATE OR REPLACE`, blocos `DO/EXCEPTION`, `DROP POLICY/TRIGGER IF EXISTS`).
 
@@ -325,5 +356,10 @@ Em `supabase/migrations/`:
 
 - Jest roda contra Supabase real usando `TEST_EMAIL`/`TEST_PASSWORD`.
 - Suite `99_limpar` chama `functions/limpar` para zerar dados ao fim.
-- E2E precisa do frontend rodando em `http://localhost:5173`; auth state em `FrontEnd/fixtures/auth.json` é gerado por `auth.setup.ts`.
-- CI executa testes API via GitHub Actions (`.github/workflows/tests.yml`).
+- E2E roda no Firefox via Playwright; em CI o `playwright.config.ts` sobe o Vite dev server automaticamente (`webServer`); localmente basta `npm run test:e2e`.
+- Auth state em `FrontEnd/e2e/fixtures/auth.json` é gerado por `auth.setup.ts` (não commitar).
+- CI usa 4 workflows GitHub Actions:
+  - `.github/workflows/backend-api-tests.yml` — testes Jest (push/PR develop)
+  - `.github/workflows/frontend-lint.yml` — ESLint (push/PR develop)
+  - `.github/workflows/frontend-quality.yml` — build + TypeScript (push/PR develop)
+  - `.github/workflows/frontend-e2e.yml` — Playwright Firefox (push/PR develop, mudanças em `FrontEnd/**`)

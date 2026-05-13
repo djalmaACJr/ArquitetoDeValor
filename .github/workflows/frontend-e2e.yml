@@ -1,0 +1,53 @@
+name: Frontend — Testes E2E (Playwright)
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'FrontEnd/**'
+      - '.github/workflows/frontend-e2e.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'FrontEnd/**'
+
+jobs:
+  e2e:
+    name: Playwright — Firefox
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: FrontEnd
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: FrontEnd/package-lock.json
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Instalar browser Firefox (Playwright)
+        run: npx playwright install --with-deps firefox
+
+      - name: Rodar testes E2E
+        run: npm run test:e2e
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          E2E_BASE_URL: http://localhost:5173
+
+      - name: Salvar relatório Playwright
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_number }}
+          path: FrontEnd/e2e/report/
+          if-no-files-found: ignore
+          retention-days: 7
