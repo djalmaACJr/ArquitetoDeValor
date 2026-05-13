@@ -28,7 +28,12 @@
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(Find /c/Pessoal/ArquitetoDeValor/FrontEnd/e2e/tests -name \"*.spec.ts\")",
       "Bash(Sort)",
-      "Bash(supabase functions *)"
+      "Bash(supabase functions *)",
+      "Bash(python -c \"import docx; print\\('python-docx ok'\\)\")",
+      "Bash(pandoc --version)",
+      "Bash(node -e \"require\\('fs'\\)\")",
+      "Bash(node -e \"require\\('docx'\\)\")",
+      "Bash(node _gen_spec.js)"
     ]
   }
 }
