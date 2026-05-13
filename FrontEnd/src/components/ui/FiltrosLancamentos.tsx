@@ -5,6 +5,7 @@
 // Os campos extras (comSaldo, incluirTransf, etc.) ficam fora — cada página
 // renderiza separadamente — mas são serializados junto no FiltroSalvo via
 // prop `extras`.
+import type { ReactNode } from 'react'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
 import { MultiSelect } from './MultiSelect'
@@ -30,6 +31,8 @@ interface Props {
   classNameContas?: string
   classNameCats?:   string
   classNameStatus?: string
+  /** Nó renderizado entre o filtro de status e o botão de filtros salvos. */
+  slotAposStatus?: ReactNode
 }
 
 export function FiltrosLancamentos({
@@ -40,6 +43,7 @@ export function FiltrosLancamentos({
   classNameContas = 'w-40',
   classNameCats   = 'w-44',
   classNameStatus = 'w-36',
+  slotAposStatus,
 }: Props) {
   const { contas }     = useContas()
   const { categorias } = useCategorias()
@@ -94,6 +98,8 @@ export function FiltrosLancamentos({
         onChange={setFiltStatus}
         options={STATUS_OPCOES}
       />
+
+      {slotAposStatus}
 
       <FiltrosSalvosBtn
         pagina={pagina}

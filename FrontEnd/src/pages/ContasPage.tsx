@@ -2,8 +2,10 @@
 import { useState } from 'react'
 import { Plus, Pencil, X as XIcon } from 'lucide-react'
 import { useContas } from '../hooks/useContas'
+import { useOcultarValores } from '../hooks/useOcultarValores'
 import { formatBRL } from '../lib/utils'
 import { IconeConta } from '../components/ui/IconeConta'
+import { BotaoOcultar } from '../components/ui/BotaoOcultar'
 import {
   Drawer, ColorPicker, Field, Input, SelectDark,
   Toggle, BtnSalvar, BtnCancelar, Toast, ModalExcluir,
@@ -81,8 +83,8 @@ function AcaoBtn({ onClick, title, danger = false, children }: {
   )
 }
 
-function LinhaConta({ conta, onEditar, onExcluir }: {
-  conta: Conta; onEditar: () => void; onExcluir: () => void
+function LinhaConta({ conta, oculto, onEditar, onExcluir }: {
+  conta: Conta; oculto: boolean; onEditar: () => void; onExcluir: () => void
 }) {
   return (
     <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/10 bg-[#1a1f2e]">
@@ -96,7 +98,7 @@ function LinhaConta({ conta, onEditar, onExcluir }: {
       <div className="text-right flex-shrink-0 mr-1">
         <p className="text-[12px] font-bold"
           style={{ color: conta.saldo_atual >= 0 ? '#00c896' : '#f87171' }}>
-          {formatBRL(conta.saldo_atual)}
+          {oculto ? '??????' : formatBRL(conta.saldo_atual)}
         </p>
         <p className="text-[9px]" style={{ color: '#8b92a8' }}>saldo atual</p>
       </div>
@@ -111,6 +113,7 @@ function LinhaConta({ conta, onEditar, onExcluir }: {
 
 export default function ContasPage() {
   const { contas, loading, error, criar, editar, excluir } = useContas()
+  const { oculto, toggle: toggleOculto } = useOcultarValores()
 
   // Ordem dos grupos — reordenável pelo usuário
   const [ordemGrupos, setOrdemGrupos] = useState<Grupo[]>(GRUPOS_INICIAL)
@@ -193,11 +196,14 @@ export default function ContasPage() {
     <div className="p-5">
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>Contas</h1>
-        <button onClick={abrirNova}
-          className="flex items-center gap-1.5 bg-av-green text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
-          style={{ color: '#0a0f1a' }}>
-          <Plus size={14} /> Nova conta
-        </button>
+        <div className="flex items-center gap-2">
+          <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+          <button onClick={abrirNova}
+            className="flex items-center gap-1.5 bg-av-green text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
+            style={{ color: '#0a0f1a' }}>
+            <Plus size={14} /> Nova conta
+          </button>
+        </div>
       </div>
 
       <Toast msg={feedback} />
@@ -247,14 +253,14 @@ export default function ContasPage() {
                       style={{ color: '#8b92a8' }}>▶</button>
                     <span className="text-[11px] font-bold ml-1"
                       style={{ color: total >= 0 ? g.cor : '#f87171' }}>
-                      {formatBRL(total)}
+                      {oculto ? '??????' : formatBRL(total)}
                     </span>
                   </div>
                 </div>
 
                 {/* Linhas de conta */}
                 {lista.map(c => (
-                  <LinhaConta key={c.conta_id} conta={c}
+                  <LinhaConta key={c.conta_id} conta={c} oculto={oculto}
                     onEditar={() => abrirEditar(c)}
                     onExcluir={() => setContaExcluir(c)} />
                 ))}

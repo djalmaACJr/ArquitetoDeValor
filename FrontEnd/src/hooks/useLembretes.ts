@@ -17,14 +17,16 @@ async function fetchLembretes(filtros: { mes?: string }): Promise<Lembrete[]> {
   return res.dados ?? []
 }
 
-export function useLembretes(filtros: { mes?: string } = {}) {
+export function useLembretes(filtros: { mes?: string; enabled?: boolean } = {}) {
   const qc = useQueryClient()
+  const { enabled = true, ...filtroQuery } = filtros
 
   const { data: lembretes = [], isLoading: loading, error } = useQuery({
-    queryKey: qk.lembretes(filtros),
-    queryFn:  () => fetchLembretes(filtros),
+    queryKey: qk.lembretes(filtroQuery),
+    queryFn:  () => fetchLembretes(filtroQuery),
     staleTime: 30_000,
     retry: false,
+    enabled,
   })
 
   const invalidar = () => qc.invalidateQueries({ queryKey: ['lembretes'] })

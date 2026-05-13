@@ -1,7 +1,7 @@
 // src/pages/DashboardPage.tsx
 import { useState, useEffect, useCallback, memo, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, EyeOff, ChevronDown, ChevronRight, RefreshCw, History } from 'lucide-react'
+import { ChevronDown, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { log } from '../lib/logger'
 import { mesLabel, formatBRL, formatData, CORES_CATEGORIA } from '../lib/utils'
@@ -19,6 +19,8 @@ import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import CalendarioDashboard from '../components/ui/CalendarioDashboard'
 import ModalLembrete from '../components/ui/ModalLembrete'
 import { useLembretes } from '../hooks/useLembretes'
+import { useOcultarValores } from '../hooks/useOcultarValores'
+import { BotaoOcultar } from '../components/ui/BotaoOcultar'
 import type { Lembrete } from '../types'
 
 // -- Icone de conta inline (sem dependencia externa) ------
@@ -854,7 +856,9 @@ function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw
         )}
       </div>
       {gruposDash.map(grupo => {
-        const contasGrupo = contas.filter(c => grupo.tipos.includes(c.tipo) && c.ativa)
+        const contasGrupo = contas
+          .filter(c => grupo.tipos.includes(c.tipo) && c.ativa)
+          .sort((a, b) => getSaldoConta(b) - getSaldoConta(a) || a.nome.localeCompare(b.nome, 'pt-BR'))
         if (contasGrupo.length === 0) return null
         const totalGrupo = contasGrupo.reduce((s, c) => s + getSaldoConta(c), 0)
         return (
@@ -892,6 +896,202 @@ function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw
   )
 }
 
+// -- Painel todos os lembretes ----------------------------
+const MESES_ABR = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+
+function labelMesAbr(ym: string) {
+  const [y, m] = ym.split('-').map(Number)
+  return `${MESES_ABR[m - 1]} ${y}`
+}
+
+function PainelTodosLembretes({
+  lembretes, loading, onFechar, onEditar, onExcluir, onToggle, onNovo,
+}: {
+  lembretes: Lembrete[]
+  loading: boolean
+  onFechar: () => void
+  onEditar: (l: Lembrete) => void
+  onExcluir: (id: string) => void
+  onToggle: (id: string, status: 'PENDENTE' | 'CONCLUIDO') => void
+  onNovo: () => void
+}) {
+  const hoje = new Date().toISOString().split('T')[0]
+  const [verTodos, setVerTodos] = useState(false)
+
+  const sorted = [...lembretes].sort((a, b) => a.data.localeCompare(b.data))
+  const filtrados = verTodos ? sorted : sorted.filter(l => l.data >= hoje)
+
+  const porMes = filtrados.reduce<Record<string, Lembrete[]>>((acc, l) => {
+    const mes = l.data.slice(0, 7)
+    if (!acc[mes]) acc[mes] = []
+    acc[mes].push(l)
+    return acc
+  }, {})
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(2px)' }}
+      onClick={onFechar}
+    >
+      <div
+        className="rounded-xl border border-white/10 flex flex-col"
+        style={{ background: '#141929', width: 340, maxHeight: '80vh' }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/8 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <Bell size={13} style={{ color: '#f0b429' }} />
+            <span className="text-[13px] font-semibold" style={{ color: '#e8eaf0' }}>Lembretes</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {/* Toggle */}
+            <div className="flex rounded-lg overflow-hidden border border-white/10 text-[10px] font-semibold">
+              {([false, true] as const).map((v, i) => (
+                <button
+                  key={String(v)}
+                  onClick={() => setVerTodos(v)}
+                  className="px-2 py-1 transition-colors"
+                  style={{
+                    background: verTodos === v ? 'rgba(240,180,41,0.15)' : 'transparent',
+                    color: verTodos === v ? '#f0b429' : '#8b92a8',
+                    borderRight: i === 0 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                  }}
+                >
+                  {v ? 'Todos' : 'A partir de hoje'}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={onNovo}
+              className="w-5 h-5 flex items-center justify-center rounded transition-all hover:opacity-80"
+              title="Novo lembrete"
+              style={{ background: 'rgba(240,180,41,0.15)', border: '1px solid rgba(240,180,41,0.3)' }}
+            >
+              <Plus size={10} style={{ color: '#f0b429' }} />
+            </button>
+            <button
+              onClick={onFechar}
+              className="w-5 h-5 flex items-center justify-center rounded"
+              style={{ color: '#8b92a8' }}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 p-2 space-y-3">
+          {loading ? (
+            <div className="flex items-center justify-center py-10">
+              <span className="text-[12px]" style={{ color: '#4a5168' }}>Carregando...</span>
+            </div>
+          ) : filtrados.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-2">
+              <Bell size={24} style={{ color: '#4a5168' }} />
+              <span className="text-[12px]" style={{ color: '#4a5168' }}>
+                {verTodos ? 'Nenhum lembrete cadastrado.' : 'Nenhum lembrete a partir de hoje.'}
+              </span>
+              {!verTodos && (
+                <button
+                  onClick={() => setVerTodos(true)}
+                  className="text-[11px] underline"
+                  style={{ color: '#f0b429' }}
+                >
+                  Ver todos
+                </button>
+              )}
+            </div>
+          ) : (
+            Object.entries(porMes).map(([mes, lembs]) => (
+              <div key={mes}>
+                <div
+                  className="text-[10px] font-semibold uppercase tracking-wider px-1 pb-1 mb-1"
+                  style={{ color: '#4a5168', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                >
+                  {labelMesAbr(mes)}
+                </div>
+                <div className="space-y-1">
+                  {lembs.map(l => {
+                    const passado   = l.data < hoje
+                    const concluido = l.status === 'CONCLUIDO'
+                    return (
+                      <div
+                        key={l.id}
+                        className="flex items-center gap-1.5 py-1.5 px-2 rounded"
+                        style={{
+                          background: concluido
+                            ? 'rgba(255,255,255,0.02)'
+                            : passado
+                            ? 'rgba(248,113,113,0.05)'
+                            : 'rgba(240,180,41,0.06)',
+                          border: `1px solid ${
+                            concluido
+                              ? 'rgba(255,255,255,0.05)'
+                              : passado
+                              ? 'rgba(248,113,113,0.1)'
+                              : 'rgba(240,180,41,0.1)'
+                          }`,
+                          opacity: concluido ? 0.55 : 1,
+                        }}
+                      >
+                        <span
+                          className="text-[10px] font-mono flex-shrink-0 w-[32px]"
+                          style={{ color: passado && !concluido ? '#f87171' : '#4a5168' }}
+                        >
+                          {new Date(`${l.data}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                        </span>
+                        <Bell size={8} style={{ color: concluido ? '#4a5168' : '#f0b429', flexShrink: 0 }} />
+                        <span
+                          className="flex-1 text-[11px] truncate"
+                          style={{
+                            color: concluido ? '#4a5168' : '#e8eaf0',
+                            textDecoration: concluido ? 'line-through' : 'none',
+                          }}
+                        >
+                          {l.descricao}
+                        </span>
+                        <div className="flex items-center gap-0.5 flex-shrink-0">
+                          <button
+                            onClick={() => onToggle(l.id, l.status === 'CONCLUIDO' ? 'PENDENTE' : 'CONCLUIDO')}
+                            className="w-4 h-4 flex items-center justify-center rounded"
+                            title={l.status === 'CONCLUIDO' ? 'Marcar pendente' : 'Marcar concluído'}
+                            style={{
+                              background: concluido ? 'rgba(0,200,150,0.15)' : 'rgba(255,255,255,0.06)',
+                              border: `1px solid ${concluido ? 'rgba(0,200,150,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                            }}
+                          >
+                            <Check size={8} style={{ color: concluido ? '#00c896' : '#4a5168' }} />
+                          </button>
+                          <button
+                            onClick={() => onEditar(l)}
+                            className="w-4 h-4 flex items-center justify-center rounded"
+                            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+                          >
+                            <Pencil size={8} style={{ color: '#8b92a8' }} />
+                          </button>
+                          <button
+                            onClick={() => onExcluir(l.id)}
+                            className="w-4 h-4 flex items-center justify-center rounded"
+                            style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.15)' }}
+                          >
+                            <Trash2 size={8} style={{ color: '#f87171' }} />
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // -- Dashboard Page ----------------------------------------
 export default function DashboardPage() {
   const navigate = useNavigate()
@@ -906,17 +1106,19 @@ export default function DashboardPage() {
   const setFiltCats     = (v: string[])       => setPgState({ filtCats: v })
   const setFiltStatus   = (v: string[])       => setPgState({ filtStatus: v })
   const setModo         = (v: 'hoje' | 'fim') => setPgState({ modo: v })
-  const [oculto, setOculto] = useState(false)
+  const { oculto, toggle: toggleOculto } = useOcultarValores()
 
 
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
   const [editandoId,         setEditandoId]         = useState<string | null>(null)
   const [refreshing,         setRefreshing]         = useState(false)
-  const [modalLembreteAberto, setModalLembreteAberto] = useState(false)
-  const [lembreteEditando,    setLembreteEditando]    = useState<Lembrete | null>(null)
-  const [dataInicialLembrete, setDataInicialLembrete] = useState<string | undefined>(undefined)
+  const [modalLembreteAberto,  setModalLembreteAberto]  = useState(false)
+  const [lembreteEditando,     setLembreteEditando]     = useState<Lembrete | null>(null)
+  const [dataInicialLembrete,  setDataInicialLembrete]  = useState<string | undefined>(undefined)
+  const [painelTodosAberto,    setPainelTodosAberto]    = useState(false)
 
   const { lembretes, editar: editarLembrete, excluir: excluirLembrete } = useLembretes({ mes })
+  const { lembretes: todosLembretes, loading: loadingTodos } = useLembretes({ enabled: painelTodosAberto })
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -1045,6 +1247,24 @@ export default function DashboardPage() {
     return resultado
   }, [contas, doMesRaw, saldoBaseMes, mes])
 
+  // Dias com última parcela de recorrência do tipo PROJEÇÃO no mês exibido.
+  const ultimasParcelas = useMemo(() => {
+    const mapa = new Map<string, { descricao: string; valor: number; tipo: string }[]>()
+    for (const tx of doMesRaw) {
+      if (
+        tx.tipo_recorrencia === 'PROJECAO' &&
+        tx.nr_parcela !== null &&
+        tx.total_parcelas !== null &&
+        tx.nr_parcela === tx.total_parcelas
+      ) {
+        const lista = mapa.get(tx.data) ?? []
+        lista.push({ descricao: tx.descricao, valor: tx.valor, tipo: tx.tipo })
+        mapa.set(tx.data, lista)
+      }
+    }
+    return mapa
+  }, [doMesRaw])
+
   return (
     <div className="p-4 md:p-5 max-w-[1400px] mx-auto">
       {/* Topbar */}
@@ -1067,15 +1287,7 @@ export default function DashboardPage() {
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''}/>
           </button>
 
-          {/* Botao ocultar valores */}
-          <button
-            onClick={() => setOculto(o => !o)}
-            title={oculto ? 'Mostrar valores' : 'Ocultar valores'}
-            className="flex items-center gap-1.5 text-[12px] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
-          >
-            {oculto ? <EyeOff size={14}/> : <Eye size={14}/>}
-            {oculto ? 'Mostrar' : 'Ocultar'}
-          </button>
+          <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
 
           <MonthPicker
             value={mes}
@@ -1104,10 +1316,12 @@ export default function DashboardPage() {
               lembretes={lembretes}
               contas={contas}
               diasNegativos={diasNegativos}
+              ultimasParcelas={ultimasParcelas}
               onEditar={l => { setLembreteEditando(l); setModalLembreteAberto(true) }}
               onExcluir={id => excluirLembrete(id)}
               onToggle={(id, novoStatus) => editarLembrete(id, { status: novoStatus })}
               onNovoNoDia={data => { setLembreteEditando(null); setDataInicialLembrete(data); setModalLembreteAberto(true) }}
+              onAbrirTodosLembretes={() => setPainelTodosAberto(true)}
             />
             <div className="flex-1 min-w-[300px] flex flex-col gap-3">
               <CardResultados resumo={resumo}/>
@@ -1198,6 +1412,26 @@ export default function DashboardPage() {
         dataInicial={dataInicialLembrete}
         onSalvo={() => { setModalLembreteAberto(false); setLembreteEditando(null) }}
       />
+      {painelTodosAberto && (
+        <PainelTodosLembretes
+          lembretes={todosLembretes}
+          loading={loadingTodos}
+          onFechar={() => setPainelTodosAberto(false)}
+          onEditar={l => {
+            setPainelTodosAberto(false)
+            setLembreteEditando(l)
+            setModalLembreteAberto(true)
+          }}
+          onExcluir={id => excluirLembrete(id)}
+          onToggle={(id, novoStatus) => editarLembrete(id, { status: novoStatus })}
+          onNovo={() => {
+            setPainelTodosAberto(false)
+            setLembreteEditando(null)
+            setDataInicialLembrete(undefined)
+            setModalLembreteAberto(true)
+          }}
+        />
+      )}
     </div>
   )
 }

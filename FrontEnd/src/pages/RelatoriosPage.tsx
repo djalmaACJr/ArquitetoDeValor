@@ -7,8 +7,10 @@ import { apiFetch } from '../lib/api'
 import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
 import { useCategorias } from '../hooks/useCategorias'
+import { useOcultarValores } from '../hooks/useOcultarValores'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { MonthPicker } from '../components/ui/MonthPicker'
+import { BotaoOcultar } from '../components/ui/BotaoOcultar'
 
 // -- Tipos -----------------------------------------------------
 interface Lancamento {
@@ -281,7 +283,7 @@ export default function RelatoriosPage() {
   const [loading,     setLoading]     = useState(false)
   const lancamentos    = pgState.lancamentos as Lancamento[]
   const buscado        = pgState.buscado
-  const [oculto,      setOculto]      = useState(false)
+  const { oculto, toggle: toggleOculto } = useOcultarValores()
   const [credAberto,  setCredAberto]  = useState(true)
   const [debAberto,   setDebAberto]   = useState(true)
   const [nivel,       setNivel]       = useState<1|2|3>(3)
@@ -585,13 +587,7 @@ export default function RelatoriosPage() {
           <h1 className="text-[18px] font-bold" style={{ color: '#e8eaf0' }}>Relatório por categoria</h1>
           <p className="text-[11px] mt-0.5" style={{ color: '#8b92a8' }}>Receitas e despesas agrupadas por categoria</p>
         </div>
-        <button
-          onClick={() => setOculto(v => !v)}
-          className="text-[11px] px-3 py-1.5 rounded-lg border transition-all"
-          style={{ borderColor: 'rgba(255,255,255,0.1)', color: '#8b92a8' }}
-        >
-          {oculto ? '👁 Mostrar' : '🙈 Ocultar'}
-        </button>
+        <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
       </div>
 
       {/* Filtros */}

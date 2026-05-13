@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Bell, CreditCard, Check, Trash2, Pencil, X, Plus, AlertTriangle } from 'lucide-react'
+import { Bell, CreditCard, Check, Trash2, Pencil, X, Plus, AlertTriangle, Flag, List } from 'lucide-react'
 import type { Lembrete, Conta } from '../../types'
 
 const DOW_ABR = ['D','S','T','Q','Q','S','S']
@@ -8,20 +8,30 @@ const MESES_NOME = [
   'Jul','Ago','Set','Out','Nov','Dez',
 ]
 
+export interface UltimaParcela {
+  descricao: string
+  valor:     number
+  tipo:      string
+}
+
 interface Props {
   mes:             string
   lembretes:       Lembrete[]
   contas:          Conta[]
   /** Map data (YYYY-MM-DD) → lista de contas com saldo negativo nesse dia. */
   diasNegativos?:  Map<string, { nome: string; saldo: number }[]>
+  /** Map data (YYYY-MM-DD) → lista de transações recorrentes com última parcela PROJEÇÃO nesse dia. */
+  ultimasParcelas?: Map<string, UltimaParcela[]>
   onEditar:        (l: Lembrete) => void
   onExcluir:       (id: string) => void
   onToggle:        (id: string, status: 'PENDENTE' | 'CONCLUIDO') => void
   onNovoNoDia?:    (data: string) => void
+  onAbrirTodosLembretes?: () => void
 }
 
 export default function CalendarioDashboard({
-  mes, lembretes, contas, diasNegativos, onEditar, onExcluir, onToggle, onNovoNoDia,
+  mes, lembretes, contas, diasNegativos, ultimasParcelas,
+  onEditar, onExcluir, onToggle, onNovoNoDia, onAbrirTodosLembretes,
 }: Props) {
   const [diaAberto, setDiaAberto] = useState<string | null>(null)
 
@@ -57,8 +67,9 @@ export default function CalendarioDashboard({
     return `${ano}-${String(m).padStart(2,'0')}-${String(dia).padStart(2,'0')}`
   }
 
-  const lembrsDiaAberto = diaAberto ? (lembretesPorDia.get(diaAberto) ?? []) : []
-  const evsDiaAberto    = diaAberto ? eventosDia(parseInt(diaAberto.split('-')[2])) : []
+  const lembrsDiaAberto    = diaAberto ? (lembretesPorDia.get(diaAberto) ?? []) : []
+  const evsDiaAberto       = diaAberto ? eventosDia(parseInt(diaAberto.split('-')[2])) : []
+  const temUltimasParcelas = (ultimasParcelas?.size ?? 0) > 0
 
   return (
     <div
@@ -76,6 +87,19 @@ export default function CalendarioDashboard({
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#f87171' }} title="Pagamento" />
           {diasNegativos && diasNegativos.size > 0 && (
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#fb923c' }} title="Saldo negativo em alguma conta" />
+          )}
+          {temUltimasParcelas && (
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#c084fc' }} title="Última parcela (projeção)" />
+          )}
+          {onAbrirTodosLembretes && (
+            <button
+              onClick={onAbrirTodosLembretes}
+              className="w-5 h-5 flex items-center justify-center rounded transition-all hover:opacity-80 ml-0.5"
+              title="Todos os lembretes"
+              style={{ background: 'rgba(240,180,41,0.1)', border: '1px solid rgba(240,180,41,0.2)' }}
+            >
+              <List size={10} style={{ color: '#f0b429' }} />
+            </button>
           )}
         </div>
       </div>
@@ -97,16 +121,17 @@ export default function CalendarioDashboard({
         {celulas.map((dia, idx) => {
           if (!dia) return <div key={`b${idx}`} style={{ height: 28 }} />
 
-          const ds          = dataStr(dia)
-          const ehHoje      = ds === hoje
-          const dow         = new Date(`${ds}T12:00:00`).getDay()
-          const fimSem      = dow === 0 || dow === 6
-          const lembs       = lembretesPorDia.get(ds) ?? []
-          const evs         = eventosDia(dia)
-          const aberto      = diaAberto === ds
-          const negativo    = (diasNegativos?.get(ds)?.length ?? 0) > 0
-          const temEv       = lembs.length > 0 || evs.length > 0 || negativo
-          const concl       = lembs.length > 0 && lembs.every(l => l.status === 'CONCLUIDO')
+          const ds              = dataStr(dia)
+          const ehHoje          = ds === hoje
+          const dow             = new Date(`${ds}T12:00:00`).getDay()
+          const fimSem          = dow === 0 || dow === 6
+          const lembs           = lembretesPorDia.get(ds) ?? []
+          const evs             = eventosDia(dia)
+          const aberto          = diaAberto === ds
+          const negativo        = (diasNegativos?.get(ds)?.length ?? 0) > 0
+          const ultimaParc      = (ultimasParcelas?.get(ds)?.length ?? 0) > 0
+          const temEv           = lembs.length > 0 || evs.length > 0 || negativo || ultimaParc
+          const concl           = lembs.length > 0 && lembs.every(l => l.status === 'CONCLUIDO')
 
           return (
             <button
@@ -117,11 +142,15 @@ export default function CalendarioDashboard({
                 height: 28,
                 background: aberto
                   ? 'rgba(240,180,41,0.15)'
+                  : ultimaParc && !ehHoje
+                  ? 'rgba(192,132,252,0.08)'
                   : negativo && !ehHoje
                   ? 'rgba(251,146,60,0.08)'
                   : 'transparent',
                 border: aberto
                   ? '1px solid rgba(240,180,41,0.35)'
+                  : ultimaParc && !ehHoje
+                  ? '1px solid rgba(192,132,252,0.3)'
                   : negativo && !ehHoje
                   ? '1px solid rgba(251,146,60,0.3)'
                   : '1px solid transparent',
@@ -176,6 +205,9 @@ export default function CalendarioDashboard({
                   )}
                   {negativo && (
                     <span className="w-1 h-1 rounded-full" style={{ background: '#fb923c' }} />
+                  )}
+                  {ultimaParc && (
+                    <span className="w-1 h-1 rounded-full" style={{ background: '#c084fc' }} />
                   )}
                 </div>
               )}
@@ -272,7 +304,7 @@ export default function CalendarioDashboard({
             </div>
           ))}
 
-          {/* Alerta saldo negativo — uma linha por conta negativa */}
+          {/* Alerta saldo negativo */}
           {diaAberto && (diasNegativos?.get(diaAberto) ?? []).map((info, i) => (
             <div key={`neg-${i}`}
               className="flex items-center gap-1.5 py-1 px-1.5 rounded"
@@ -284,7 +316,28 @@ export default function CalendarioDashboard({
             </div>
           ))}
 
-          {lembrsDiaAberto.length === 0 && evsDiaAberto.length === 0 && (diasNegativos?.get(diaAberto ?? '')?.length ?? 0) === 0 && (
+          {/* Últimas parcelas PROJEÇÃO */}
+          {diaAberto && (ultimasParcelas?.get(diaAberto) ?? []).map((up, i) => (
+            <div key={`up-${i}`}
+              className="flex items-center gap-1.5 py-1 px-1.5 rounded"
+              style={{ background: 'rgba(192,132,252,0.08)', border: '1px solid rgba(192,132,252,0.2)' }}>
+              <Flag size={9} style={{ color: '#c084fc', flexShrink: 0 }} />
+              <span className="flex-1 text-[10px] truncate" style={{ color: '#c084fc' }}>
+                Últ. parcela: {up.descricao}
+              </span>
+              <span
+                className="text-[9px] font-semibold flex-shrink-0"
+                style={{ color: up.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}
+              >
+                {up.tipo === 'RECEITA' ? '+' : '-'}
+                {up.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              </span>
+            </div>
+          ))}
+
+          {lembrsDiaAberto.length === 0 && evsDiaAberto.length === 0
+            && (diasNegativos?.get(diaAberto ?? '')?.length ?? 0) === 0
+            && (ultimasParcelas?.get(diaAberto ?? '')?.length ?? 0) === 0 && (
             <span className="text-[10px]" style={{ color: '#4a5168' }}>Sem eventos neste dia.</span>
           )}
         </div>

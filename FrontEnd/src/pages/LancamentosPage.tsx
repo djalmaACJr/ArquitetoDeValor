@@ -6,7 +6,7 @@ import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import ModalLembrete from '../components/ui/ModalLembrete'
-import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X } from 'lucide-react'
+import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X, RefreshCw } from 'lucide-react'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { useLancamentos, fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
@@ -355,14 +355,26 @@ export default function LancamentosPage() {
   const hoje = useMemo(() => new Date().toISOString().split('T')[0], [])
 
   // ── Pesquisa ──────────────────────────────────────────────────
-  const [pesquisa,         setPesquisa]         = useState('')
-  const [escopoPesquisa,   setEscopoPesquisa]   = useState<'MES_ATUAL' | 'MESES_ANTERIORES' | 'PROXIMOS_MESES'>('MES_ATUAL')
-  const [buscaResultados,  setBuscaResultados]  = useState<Lancamento[]>([])
-  const [carregandoBusca,  setCarregandoBusca]  = useState(false)
-  const [buscaParada,      setBuscaParada]      = useState(false)
+  const [refreshing,        setRefreshing]        = useState(false)
+  const [pesquisa,          setPesquisa]          = useState('')
+  const [escopoPesquisa,    setEscopoPesquisa]    = useState<'MES_ATUAL' | 'MESES_ANTERIORES' | 'PROXIMOS_MESES'>('MES_ATUAL')
+  const [buscaResultados,   setBuscaResultados]   = useState<Lancamento[]>([])
+  const [carregandoBusca,   setCarregandoBusca]   = useState(false)
+  const [buscaParada,       setBuscaParada]       = useState(false)
+  const [buscaNonce,        setBuscaNonce]        = useState(0)
   const pararBuscaRef = useRef<(() => void) | null>(null)
 
   const buscaMultiMes = pesquisa.length > 0 && escopoPesquisa !== 'MES_ATUAL'
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    if (buscaMultiMes) {
+      setBuscaNonce(n => n + 1)
+    } else {
+      await carregar()
+    }
+    setTimeout(() => setRefreshing(false), 600)
+  }
 
   const [buscaMesesVistos, setBuscaMesesVistos] = useState(0)
 
@@ -424,7 +436,7 @@ export default function LancamentosPage() {
       if (!ctrl.signal.aborted) setCarregandoBusca(false)
     }, 400)
     return () => { clearTimeout(timer); ctrl.abort(); pararBuscaRef.current = null }
-  }, [pesquisa, escopoPesquisa, mes, filtContas, filtCats, filtStatus])
+  }, [pesquisa, escopoPesquisa, mes, filtContas, filtCats, filtStatus, buscaNonce])
 
   const limparPesquisa = () => { setPesquisa(''); setEscopoPesquisa('MES_ATUAL') }
 
@@ -600,6 +612,24 @@ export default function LancamentosPage() {
           extrasFiltroAtivo={!comSaldo}
           onAplicarExtras={d => setComSaldo((d.comSaldo as boolean) ?? true)}
           onLimparExtras={() => setComSaldo(true)}
+          slotAposStatus={
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing || loading}
+              title={buscaMultiMes ? 'Repetir pesquisa' : 'Atualizar lançamentos'}
+              className="flex items-center justify-center border rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
+              style={{
+                width: 34, height: 34,
+                color: '#8b92a8',
+                background: 'rgba(255,255,255,0.03)',
+                borderColor: 'rgba(255,255,255,0.1)',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.22)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.1)' }}
+            >
+              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+            </button>
+          }
         />
 
         {/* Toggle moderno — incluir saldo anterior */}

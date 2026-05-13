@@ -15,10 +15,14 @@ async function fetchContas(): Promise<Conta[]> {
 export function useContas() {
   const qc = useQueryClient()
 
-  const { data: contas = [], isLoading: loading, error } = useQuery({
+  const { data: contasRaw = [], isLoading: loading, error } = useQuery({
     queryKey: qk.contas(),
     queryFn:  fetchContas,
   })
+
+  const contas = [...contasRaw].sort((a, b) =>
+    b.saldo_atual - a.saldo_atual || a.nome.localeCompare(b.nome, 'pt-BR')
+  )
 
   const carregar = async () => { await qc.invalidateQueries({ queryKey: qk.contas() }) }
 

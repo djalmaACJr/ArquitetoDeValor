@@ -32,7 +32,6 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
     setTimeout(() => inputRef.current?.focus(), 80)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aberto, lembrete])
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Fecha com Escape
   useEffect(() => {
