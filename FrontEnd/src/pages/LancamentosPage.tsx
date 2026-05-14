@@ -6,7 +6,7 @@ import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import ModalLembrete from '../components/ui/ModalLembrete'
-import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X, RefreshCw } from 'lucide-react'
+import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X, RefreshCw, FileDown } from 'lucide-react'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { useLancamentos, fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
@@ -290,6 +290,34 @@ export default function LancamentosPage() {
     return () => { if (destaqueTimerRef.current) clearTimeout(destaqueTimerRef.current) }
   }, [])
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
+
+  const exportarXlsx = async () => {
+    if (lancamentosParaExibir.length === 0) return
+    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
+    const rows = lancamentosParaExibir.map(l => {
+      const isTransf = !!l.id_par_transferencia
+      return {
+        'Data':       l.data.split('-').reverse().join('/'),
+        'Tipo':       isTransf ? 'TRANSFERÊNCIA' : l.tipo,
+        'Descrição':  isTransf ? (l.descricao?.replace(/^\[Transf\. (saída|entrada)\] /, '') ?? '') : (l.descricao ?? ''),
+        'Categoria':  l.categoria_pai_nome ? `${l.categoria_pai_nome} / ${l.categoria_nome}` : (l.categoria_nome ?? ''),
+        'Conta':      l.conta_nome ?? '',
+        'Valor':      l.tipo === 'RECEITA' ? l.valor : -l.valor,
+        'Status':     STATUS_LABEL[l.status] ?? l.status,
+        'Parcela':    l.nr_parcela && l.total_parcelas ? `${l.nr_parcela}/${l.total_parcelas}` : '',
+        'Observação': l.observacao ?? '',
+      }
+    })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = [
+      { wch: 12 }, { wch: 14 }, { wch: 36 }, { wch: 26 },
+      { wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 32 },
+    ]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Extrato')
+    const nome = buscaMultiMes ? 'extrato_busca' : `extrato_${mes}`
+    XLSX.writeFile(wb, `${nome}.xlsx`)
+  }
 
   const abrirEditar = (l: Lancamento) => {
     // Para transferência, garantir que editamos pela perna de saída
@@ -618,7 +646,34 @@ export default function LancamentosPage() {
         {/* Topbar */}
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>Lançamentos</h1>
-          <BotaoNovoLancamento onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportarXlsx}
+              disabled={lancamentosParaExibir.length === 0}
+              title="Exportar extrato como XLSX"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[12px] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{
+                borderColor: 'rgba(255,255,255,0.12)',
+                color: '#8b92a8',
+                background: 'rgba(255,255,255,0.03)',
+              }}
+              onMouseEnter={e => {
+                if (lancamentosParaExibir.length === 0) return
+                const el = e.currentTarget as HTMLElement
+                el.style.borderColor = 'rgba(0,200,150,0.45)'
+                el.style.color = '#00c896'
+              }}
+              onMouseLeave={e => {
+                const el = e.currentTarget as HTMLElement
+                el.style.borderColor = 'rgba(255,255,255,0.12)'
+                el.style.color = '#8b92a8'
+              }}
+            >
+              <FileDown size={14} />
+              <span className="hidden sm:inline">Exportar XLS</span>
+            </button>
+            <BotaoNovoLancamento onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
+          </div>
         </div>
         {/* Filtros — tudo em uma linha */}
         <div className="flex flex-wrap gap-2 mb-2 items-center">

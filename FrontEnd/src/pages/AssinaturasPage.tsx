@@ -86,54 +86,18 @@ function detectarRecorrencias(lancamentos: Lancamento[], hoje: string): Recorren
     l.tipo === 'DESPESA' && !isTransf(l) && l.status !== 'PROJECAO',
   )
 
-  // ── Pass 1: explicit id_recorrencia ──
-  const byRecorr = new Map<string, Lancamento[]>()
+  // Agrupa por categoria + descrição normalizada (ignora id_recorrencia)
+  const grupos = new Map<string, Lancamento[]>()
   for (const l of base) {
-    if (!l.id_recorrencia) continue
-    const arr = byRecorr.get(l.id_recorrencia) ?? []
+    const key = (l.categoria_id ?? '__') + '||' + normalizarNome(l.descricao)
+    const arr = grupos.get(key) ?? []
     arr.push(l)
-    byRecorr.set(l.id_recorrencia, arr)
+    grupos.set(key, arr)
   }
 
-  const jaUsados = new Set<string>()
   const resultado: Recorrencia[] = []
 
-  for (const [, items] of byRecorr) {
-    if (items.length < 2) {
-      // Marca como usados para não processar no Pass 2, mas não exibe
-      items.forEach(l => jaUsados.add(l.id))
-      continue
-    }
-    const sorted = [...items].sort((a, b) => a.data.localeCompare(b.data))
-    const valorMedio = sorted.reduce((s, l) => s + l.valor, 0) / sorted.length
-    const ultima = sorted[sorted.length - 1]
-    sorted.forEach(l => jaUsados.add(l.id))
-    resultado.push({
-      id: 'r_' + (ultima.id_recorrencia ?? ultima.id),
-      nome: ultima.descricao || 'Recorrência',
-      categoria: ultima.categoria_nome || ultima.categoria_pai_nome || 'Outros',
-      categoriaId: ultima.categoria_id,
-      valorMedio,
-      valorMensal: valorMedio,
-      frequencia: 'MENSAL',
-      ultimaCobranca: ultima.data,
-      ocorrencias: items.length,
-      status: detectarStatus(sorted, hoje),
-      lancamentos: sorted,
-    })
-  }
-
-  // ── Pass 2: pattern detection ──
-  const byNome = new Map<string, Lancamento[]>()
-  for (const l of base) {
-    if (jaUsados.has(l.id)) continue
-    const key = normalizarNome(l.descricao) + '||' + (l.categoria_id ?? '__')
-    const arr = byNome.get(key) ?? []
-    arr.push(l)
-    byNome.set(key, arr)
-  }
-
-  for (const [, items] of byNome) {
+  for (const [, items] of grupos) {
     if (items.length < 2) continue
     const sorted = [...items].sort((a, b) => a.data.localeCompare(b.data))
 
@@ -150,7 +114,7 @@ function detectarRecorrencias(lancamentos: Lancamento[], hoje: string): Recorren
 
     const ultima = sorted[sorted.length - 1]
     resultado.push({
-      id: 'a_' + normalizarNome(ultima.descricao) + '_' + (ultima.categoria_id ?? ''),
+      id: (ultima.categoria_id ?? '') + '_' + normalizarNome(ultima.descricao),
       nome: ultima.descricao || 'Sem descrição',
       categoria: ultima.categoria_nome || ultima.categoria_pai_nome || 'Outros',
       categoriaId: ultima.categoria_id,

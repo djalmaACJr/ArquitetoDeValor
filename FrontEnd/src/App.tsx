@@ -13,6 +13,7 @@ import LancamentosPage from './pages/LancamentosPage'
 import ImportExportPage from './pages/ImportExportPage'
 import ComparativoMensalPage from './pages/ComparativoMensalPage'
 import AssinaturasPage from './pages/AssinaturasPage'
+import ProjecaoEconomiaPage from './pages/ProjecaoEconomiaPage'
 import { PageStateProvider } from './context/PageStateContext'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="relatorios"   element={<RelatoriosPage/>}/>
             <Route path="comparativo"  element={<ComparativoMensalPage/>}/>
             <Route path="assinaturas" element={<AssinaturasPage/>}/>
+            <Route path="projecao"    element={<ProjecaoEconomiaPage/>}/>
             <Route path="importexport" element={<ImportExportPage/>}/>
             <Route path="perfil"       element={<PerfilPage/>}/>
           </Route>

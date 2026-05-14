@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, List, CreditCard, Tag,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
-  ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2,
+  ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2, TrendingUp,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
@@ -106,7 +106,8 @@ const navRelatorios: NavItem[] = [
     children: [
       { to: '/relatorios',   icon: <FileText size={13}/>,   label: 'Resumo geral' },
       { to: '/comparativo',  icon: <GitCompare size={13}/>, label: 'Comparativo Períodos' },
-      { to: '/assinaturas',  icon: <Repeat2 size={13}/>,    label: 'Assinaturas' },
+      { to: '/assinaturas',  icon: <Repeat2 size={13}/>,    label: 'Gastos Recorrentes' },
+      { to: '/projecao',     icon: <TrendingUp size={13}/>, label: 'Projeção de Economia' },
     ],
   },
 ]
