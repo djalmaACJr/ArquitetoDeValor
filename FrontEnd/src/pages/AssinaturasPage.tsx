@@ -36,13 +36,33 @@ function mesAtual(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+/**
+ * Normaliza descrição de lançamento para agrupar recorrências, descartando
+ * pequenas variações típicas de extratos importados.
+ *
+ * Remove (na ordem):
+ *  1. Prefixos de transferência ([Transf. saída/entrada])
+ *  2. Acentos (NFD + diacríticos)
+ *  3. Parcelas: "- 3/12", " 3 de 12", " 3/12" no fim
+ *  4. Datas: "15/10/2026", "15/10", "10/24"
+ *  5. IDs/CPFs/cartões: sequências numéricas com 4+ dígitos
+ *  6. Marcadores "#1234", "*1234", "nº 1234"
+ *  7. Pontuação: `.,;:|()[]{}*_/\\-`
+ *  8. Espaços múltiplos
+ */
 function normalizarNome(desc: string | null | undefined): string {
   if (!desc) return '__sem__'
   return desc
+    .replace(/^\[Transf\. (saída|entrada)\]\s*/i, '')
     .toLowerCase()
-    .replace(/\s*-\s*\d+\/\d+/g, '')
-    .replace(/\s+\d+\/\d+/g, '')
-    .replace(/\s*#\d+\s*/g, ' ')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')           // acentos
+    .replace(/\s*-\s*\d+\s*\/\s*\d+/g, ' ')                     // - 3/12
+    .replace(/\s+\d+\s*de\s*\d+/g, ' ')                         // 3 de 12
+    .replace(/\s+\d+\s*\/\s*\d+\b/g, ' ')                       // 3/12 final
+    .replace(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, ' ')        // datas DD/MM[/AAAA]
+    .replace(/\b(?:n[º°]?\.?\s*|#|\*)\s*\d+/g, ' ')             // #1234, *1234, nº 1234
+    .replace(/\b\d{4,}\b/g, ' ')                                // IDs/CPFs/cartões (4+ dígitos)
+    .replace(/[.,;:|()[\]{}*_/\\-]+/g, ' ')                     // pontuação
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -51,11 +71,16 @@ function diasEntre(d1: string, d2: string): number {
   return (new Date(d2 + 'T12:00:00').getTime() - new Date(d1 + 'T12:00:00').getTime()) / 86_400_000
 }
 
+/**
+ * Detecta frequência a partir da média de intervalo entre lançamentos.
+ * Janelas alargadas porque importações de extrato têm dia de cobrança
+ * variável (boleto cai em dia útil, débito em dia do vencimento, etc).
+ */
 function detectarFrequencia(avg: number): Frequencia | null {
-  if (avg >= 5  && avg <= 10)  return 'SEMANAL'
-  if (avg >= 25 && avg <= 36)  return 'MENSAL'
-  if (avg >= 80 && avg <= 105) return 'TRIMESTRAL'
-  if (avg >= 335 && avg <= 395) return 'ANUAL'
+  if (avg >= 4   && avg <= 11)  return 'SEMANAL'      // 7 ± 3 dias
+  if (avg >= 22  && avg <= 40)  return 'MENSAL'       // 30 ± 8 dias
+  if (avg >= 75  && avg <= 110) return 'TRIMESTRAL'   // 90 ± 15 dias
+  if (avg >= 330 && avg <= 400) return 'ANUAL'        // 365 ± 30 dias
   return null
 }
 
@@ -78,7 +103,38 @@ function detectarStatus(sorted: Lancamento[], hoje: string): StatusRec {
   return 'ATIVA'
 }
 
-function detectarRecorrencias(lancamentos: Lancamento[], hoje: string): Recorrencia[] {
+/**
+ * Detecta recorrências (assinaturas, mensalidades, contas fixas) a partir do
+ * histórico de transações.
+ *
+ * IMPORTANTE: ignora intencionalmente o campo `id_recorrencia` do banco.
+ * Detecção é puramente baseada em padrão semântico (categoria + descrição
+ * normalizada + cadência temporal), porque a maioria das transações vem
+ * por importação de extrato e não está atrelada a uma série recorrente.
+ *
+ * Critérios para considerar recorrência:
+ *  - ≥ 2 lançamentos no mesmo grupo (categoria + descrição normalizada)
+ *  - Intervalo médio bate com SEMANAL/MENSAL/TRIMESTRAL/ANUAL
+ *    (fallback MENSAL para séries longas com cadência irregular)
+ *  - Variação de valor < 20% (ou < 50% para séries ≥ 5 ocorrências)
+ */
+/** Linha de debug — grupos descartados pela detecção (inspeção via DevTools) */
+interface DebugRejeitado {
+  chave:         string
+  exemplo:       string        // primeira descrição do grupo (não normalizada)
+  categoria:     string
+  ocorrencias:   number
+  avgDias:       number | null
+  valorMedio:    number
+  maxVarPct:     number
+  motivo:        'so_um' | 'freq_invalida' | 'valor_variavel_demais'
+}
+
+function detectarRecorrencias(
+  lancamentos: Lancamento[],
+  hoje: string,
+  debug?: DebugRejeitado[],
+): Recorrencia[] {
   const isTransf = (l: Lancamento) =>
     !!l.id_par_transferencia || l.categoria_nome === 'Transferências'
 
@@ -97,20 +153,50 @@ function detectarRecorrencias(lancamentos: Lancamento[], hoje: string): Recorren
 
   const resultado: Recorrencia[] = []
 
-  for (const [, items] of grupos) {
-    if (items.length < 2) continue
+  const pushDebug = (chave: string, items: Lancamento[], info: Omit<DebugRejeitado, 'chave'|'exemplo'|'categoria'|'ocorrencias'>) => {
+    if (!debug) return
+    debug.push({
+      chave,
+      exemplo:     items[0].descricao,
+      categoria:   items[0].categoria_nome || items[0].categoria_pai_nome || '(sem)',
+      ocorrencias: items.length,
+      ...info,
+    })
+  }
+
+  for (const [chave, items] of grupos) {
+    if (items.length < 2) {
+      pushDebug(chave, items, {
+        avgDias: null, valorMedio: items[0].valor, maxVarPct: 0, motivo: 'so_um',
+      })
+      continue
+    }
     const sorted = [...items].sort((a, b) => a.data.localeCompare(b.data))
 
     const intervals: number[] = []
     for (let i = 1; i < sorted.length; i++) intervals.push(diasEntre(sorted[i - 1].data, sorted[i].data))
     const avgDias = intervals.reduce((a, b) => a + b, 0) / intervals.length
-    const freq = detectarFrequencia(avgDias)
-    if (!freq) continue
 
     const valores = sorted.map(l => l.valor)
     const valorMedio = valores.reduce((a, b) => a + b, 0) / valores.length
     const maxVar = Math.max(...valores.map(v => Math.abs(v - valorMedio) / valorMedio))
-    if (maxVar > 0.20 && items.length < 4) continue
+
+    // Fallback MENSAL: séries longas com cadência irregular (entre 20 e 50 dias)
+    // ainda assim costumam ser cobranças mensais (boleto pulado, antecipado, etc).
+    let freq = detectarFrequencia(avgDias)
+    if (!freq && items.length >= 4 && avgDias >= 20 && avgDias <= 50) freq = 'MENSAL'
+    if (!freq) {
+      pushDebug(chave, items, { avgDias, valorMedio, maxVarPct: maxVar * 100, motivo: 'freq_invalida' })
+      continue
+    }
+
+    // Tolerância de variação: mais permissiva quando há histórico extenso
+    // (contas variáveis como luz/água com 5+ meses ainda são recorrências válidas)
+    const limiteVar = items.length >= 5 ? 0.50 : 0.20
+    if (maxVar > limiteVar && items.length < 4) {
+      pushDebug(chave, items, { avgDias, valorMedio, maxVarPct: maxVar * 100, motivo: 'valor_variavel_demais' })
+      continue
+    }
 
     const ultima = sorted[sorted.length - 1]
     resultado.push({
@@ -220,7 +306,25 @@ export default function AssinaturasPage() {
   useEffect(() => { carregar() }, [carregar])
 
   // ── Derived ──────────────────────────────────────────────────
-  const recorrencias = useMemo(() => detectarRecorrencias(lancamentos, hoje), [lancamentos, hoje])
+  const recorrencias = useMemo(() => {
+    const rejeitados: DebugRejeitado[] = []
+    const resultado = detectarRecorrencias(lancamentos, hoje, rejeitados)
+    // Expõe diagnóstico no console: ordenado por (frequencia inválida > so_um) e por nº de ocorrências
+    if (typeof window !== 'undefined') {
+      const ordenados = rejeitados
+        .filter(r => r.motivo !== 'so_um')   // remove ruído de itens únicos
+        .sort((a, b) => b.ocorrencias - a.ocorrencias)
+      ;(window as unknown as { __assinaturasDebug: unknown }).__assinaturasDebug = {
+        detectadas: resultado.length,
+        rejeitados: rejeitados.length,
+        rejeitadosSemUnicos: ordenados.length,
+        candidatos: ordenados,
+        todos: rejeitados,
+        hint: 'Filtre por motivo: candidatos.filter(c => c.motivo === "freq_invalida")',
+      }
+    }
+    return resultado
+  }, [lancamentos, hoje])
 
   const kpis = useMemo(() => {
     const totalMensal = recorrencias.reduce((s, r) => s + r.valorMensal, 0)
