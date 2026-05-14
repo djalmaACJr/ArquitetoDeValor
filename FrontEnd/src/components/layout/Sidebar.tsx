@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, List, CreditCard, Tag,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
-  ChevronLeft, ChevronRight, Settings,
+  ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
@@ -77,11 +77,17 @@ export function IconeConta({
   )
 }
 
-interface NavItem {
+interface NavChild {
   to:    string
   icon:  React.ReactNode
   label: string
-  soon?: boolean
+}
+interface NavItem {
+  to:       string
+  icon:     React.ReactNode
+  label:    string
+  soon?:    boolean
+  children?: NavChild[]
 }
 
 const navPrincipal: NavItem[] = [
@@ -94,8 +100,71 @@ const navCadastros: NavItem[] = [
 ]
 const navFerramentas: NavItem[] = [
   { to: '/importexport', icon: <ArrowLeftRight size={15}/>, label: 'Ferramentas' },
-  { to: '/relatorios', icon: <FileText size={15}/>,       label: 'Relatórios' },
+  {
+    to: '/relatorios',
+    icon: <FileText size={15}/>,
+    label: 'Relatórios',
+    children: [
+      { to: '/relatorios',  icon: <FileText size={13}/>,   label: 'Resumo geral' },
+      { to: '/comparativo', icon: <GitCompare size={13}/>, label: 'Comparativo Períodos' },
+    ],
+  },
 ]
+
+function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChild[] }; collapsed: boolean }) {
+  const { pathname } = useLocation()
+  const anyActive = item.children.some(c => pathname === c.to || pathname.startsWith(c.to + '/'))
+  const [open, setOpen] = useState(anyActive)
+
+  if (collapsed) {
+    return (
+      <NavLink
+        to={item.to}
+        title={item.label}
+        className={`flex items-center justify-center px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
+          anyActive ? 'bg-av-green/15 text-av-green font-medium' : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
+        }`}
+      >
+        {item.icon}
+      </NavLink>
+    )
+  }
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={`w-full flex items-center gap-2 px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
+          anyActive ? 'bg-av-green/10 text-av-green' : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
+        }`}
+      >
+        {item.icon}
+        <span className="flex-1 text-left">{item.label}</span>
+        {open ? <ChevronDown size={11}/> : <ChevronRight size={11}/>}
+      </button>
+      {open && (
+        <div className="ml-3 border-l border-blue-400/15 pl-2 mb-1">
+          {item.children.map(child => (
+            <NavLink
+              key={child.to}
+              to={child.to}
+              className={({ isActive }) =>
+                `flex items-center gap-2 px-2 py-[6px] rounded-lg text-[12px] mb-[1px] transition-colors ${
+                  isActive
+                    ? 'bg-av-green/15 text-av-green font-medium'
+                    : 'text-white/50 hover:bg-blue-400/8 hover:text-white/80'
+                }`
+              }
+            >
+              {child.icon}
+              <span className="flex-1">{child.label}</span>
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]; collapsed: boolean }) {
   return (
@@ -103,35 +172,39 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
       {!collapsed && (
         <p className="text-[10px] uppercase tracking-widest text-blue-400/50 px-2 mb-1">{label}</p>
       )}
-      {items.map(item => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.to === '/'}
-          title={collapsed ? item.label : undefined}
-          className={({ isActive }) =>
-            `flex items-center gap-2 px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
-              collapsed ? 'justify-center' : ''
-            } ${
-              isActive
-                ? 'bg-av-green/15 text-av-green font-medium'
-                : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
-            }`
-          }
-        >
-          {item.icon}
-          {!collapsed && (
-            <>
-              <span className="flex-1">{item.label}</span>
-              {item.soon && (
-                <span className="text-[9px] px-[6px] py-[2px] rounded-full bg-av-amber/15 text-av-amber">
-                  em breve
-                </span>
-              )}
-            </>
-          )}
-        </NavLink>
-      ))}
+      {items.map(item =>
+        item.children && item.children.length > 0 ? (
+          <NavExpandable key={item.to} item={item as NavItem & { children: NavChild[] }} collapsed={collapsed} />
+        ) : (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.to === '/'}
+            title={collapsed ? item.label : undefined}
+            className={({ isActive }) =>
+              `flex items-center gap-2 px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
+                collapsed ? 'justify-center' : ''
+              } ${
+                isActive
+                  ? 'bg-av-green/15 text-av-green font-medium'
+                  : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
+              }`
+            }
+          >
+            {item.icon}
+            {!collapsed && (
+              <>
+                <span className="flex-1">{item.label}</span>
+                {item.soon && (
+                  <span className="text-[9px] px-[6px] py-[2px] rounded-full bg-av-amber/15 text-av-amber">
+                    em breve
+                  </span>
+                )}
+              </>
+            )}
+          </NavLink>
+        )
+      )}
     </div>
   )
 }

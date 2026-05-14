@@ -2,6 +2,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react'
 import { ChevronDown, ChevronRight, Download, RefreshCw, Filter, Pencil } from 'lucide-react'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
+import ParetoChart from '../components/relatorios/ParetoChart'
 
 import { apiFetch } from '../lib/api'
 import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
@@ -287,6 +288,7 @@ export default function RelatoriosPage() {
   const [credAberto,  setCredAberto]  = useState(true)
   const [debAberto,   setDebAberto]   = useState(true)
   const [nivel,       setNivel]       = useState<1|2|3>(3)
+  const [vistaPareto, setVistaPareto] = useState(false)
   const drillRef    = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [lancamentoEditando, setLancamentoEditando] = useState<any | null>(null)
@@ -576,6 +578,45 @@ export default function RelatoriosPage() {
     return [...map.values()].sort((a, b) => b.total - a.total)
   }, [lancamentosDrill])
 
+  // Dados para a análise Pareto (totais por subcategoria, mesmos filtros do relatório)
+  const dadosPareto = useMemo(() => {
+    if (!buscado || lancamentos.length === 0) return { receitas: [], despesas: [] }
+
+    const isTransfP = (l: Lancamento) =>
+      !!l.id_par_transferencia ||
+      l.descricao?.startsWith('[Transf.') ||
+      l.categoria_nome === 'Transferências'
+
+    const catsSel = filtCats.length > 0
+      ? new Set(filtCats.flatMap(id => {
+          const cat = categorias.find(c => c.id === id)
+          if (!cat) return [id]
+          if (!cat.id_pai) return [cat.id, ...categorias.filter(c => c.id_pai === cat.id).map(c => c.id)]
+          return [cat.id]
+        }))
+      : null
+
+    let lista = lancamentos
+    if (!incluirTransf) lista = lista.filter(l => !isTransfP(l))
+    if (filtStatus.length > 0) lista = lista.filter(l => filtStatus.includes(l.status))
+    if (filtContas.length > 0) lista = lista.filter(l => filtContas.includes(l.conta_id))
+    if (catsSel)               lista = lista.filter(l => catsSel.has(l.categoria_id ?? ''))
+    lista = lista.filter(l => meses.includes(l.data.slice(0, 7)))
+
+    const recMap  = new Map<string, { categoria_id: string | null; categoria_nome: string; total: number }>()
+    const despMap = new Map<string, { categoria_id: string | null; categoria_nome: string; total: number }>()
+
+    for (const l of lista) {
+      const key  = l.categoria_id ?? '__sem__'
+      const nome = l.categoria_nome ?? 'Sem categoria'
+      const map  = l.tipo === 'RECEITA' ? recMap : despMap
+      if (!map.has(key)) map.set(key, { categoria_id: l.categoria_id, categoria_nome: nome, total: 0 })
+      map.get(key)!.total += l.valor
+    }
+
+    return { receitas: [...recMap.values()], despesas: [...despMap.values()] }
+  }, [lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias])
+
   // Reset expansão ao trocar de drill-down
   useEffect(() => { setExpandidosDrill(new Set()) }, [drillDown])
 
@@ -700,32 +741,70 @@ export default function RelatoriosPage() {
             ))}
           </div>
 
-          {/* Controle de detalhamento */}
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Detalhamento</span>
-            {([
-              { n: 1 as const, label: 'Resumo',     title: 'Só Crédito / Débito / Resultado' },
-              { n: 2 as const, label: 'Categorias', title: 'Categorias pai sem subcategorias' },
-              { n: 3 as const, label: 'Completo',   title: 'Tudo, incluindo subcategorias'    },
-            ]).map(({ n, label, title }) => (
-              <button
-                key={n}
-                title={title}
-                onClick={() => { setNivel(n); setCredAberto(n > 1); setDebAberto(n > 1) }}
-                className="px-3 py-1 rounded-lg text-[11px] font-semibold transition-all border"
-                style={{
-                  background:   nivel === n ? 'rgba(0,200,150,0.12)' : 'transparent',
-                  borderColor:  nivel === n ? 'rgba(0,200,150,0.4)'  : 'rgba(255,255,255,0.08)',
-                  color:        nivel === n ? '#00c896'               : '#8b92a8',
-                }}
-              >
-                {label}
-              </button>
-            ))}
+          {/* Seletor de visualização */}
+          <div className="flex items-center gap-4 mb-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Visualização</span>
+              {([
+                { id: false, label: 'Tabela' },
+                { id: true,  label: 'Pareto' },
+              ] as const).map(({ id, label }) => (
+                <button
+                  key={String(id)}
+                  onClick={() => setVistaPareto(id)}
+                  className="px-3 py-1 rounded-lg text-[11px] font-semibold transition-all border"
+                  style={{
+                    background:  vistaPareto === id ? 'rgba(0,200,150,0.12)' : 'transparent',
+                    borderColor: vistaPareto === id ? 'rgba(0,200,150,0.4)'  : 'rgba(255,255,255,0.08)',
+                    color:       vistaPareto === id ? '#00c896'               : '#8b92a8',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Controle de detalhamento — visível apenas na vista Tabela */}
+            {!vistaPareto && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Detalhamento</span>
+                {([
+                  { n: 1 as const, label: 'Resumo',     title: 'Só Crédito / Débito / Resultado' },
+                  { n: 2 as const, label: 'Categorias', title: 'Categorias pai sem subcategorias' },
+                  { n: 3 as const, label: 'Completo',   title: 'Tudo, incluindo subcategorias'    },
+                ]).map(({ n, label, title }) => (
+                  <button
+                    key={n}
+                    title={title}
+                    onClick={() => { setNivel(n); setCredAberto(n > 1); setDebAberto(n > 1) }}
+                    className="px-3 py-1 rounded-lg text-[11px] font-semibold transition-all border"
+                    style={{
+                      background:   nivel === n ? 'rgba(0,200,150,0.12)' : 'transparent',
+                      borderColor:  nivel === n ? 'rgba(0,200,150,0.4)'  : 'rgba(255,255,255,0.08)',
+                      color:        nivel === n ? '#00c896'               : '#8b92a8',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
+          {/* Vista Pareto */}
+          {vistaPareto && (
+            <ParetoChart
+              receitas={dadosPareto.receitas}
+              despesas={dadosPareto.despesas}
+              oculto={oculto}
+              onClickCategoria={(catId, catNome) =>
+                setDrillDown({ titulo: `${catNome} — Pareto`, categoria_id: catId, categoria_nome: catNome, mes: null })
+              }
+            />
+          )}
+
           {/* Tabela principal */}
-          <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden">
+          {!vistaPareto && <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden">
             <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
               <table className="w-full border-collapse" style={{ minWidth: 600 }}>
                 {/* Cabecalho */}
@@ -889,7 +968,7 @@ export default function RelatoriosPage() {
                 </tbody>
               </table>
             </div>
-          </div>
+          </div>}
         </>
       )}
 
