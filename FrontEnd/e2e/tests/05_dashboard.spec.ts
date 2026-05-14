@@ -44,6 +44,9 @@ test.describe('Dashboard', () => {
     const btnOcultar = page.getByRole('button', { name: /ocultar/i })
     await btnOcultar.click()
     await expect(page.getByRole('button', { name: /mostrar/i })).toBeVisible()
+    // Restaura para não interferir em outros testes
+    await page.getByRole('button', { name: /mostrar/i }).click()
+    await expect(page.getByRole('button', { name: /ocultar/i })).toBeVisible()
   })
 
   test('E2E-DB04 — filtro de conta altera o gráfico', async ({ page }) => {
