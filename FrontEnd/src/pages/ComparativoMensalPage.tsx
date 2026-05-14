@@ -8,10 +8,11 @@ import {
 import { Bar, Line } from 'react-chartjs-2'
 import type { ChartData, ChartOptions } from 'chart.js'
 import {
-  TrendingUp, TrendingDown, Minus, RefreshCw, Download, X,
+  TrendingUp, TrendingDown, Minus, RefreshCw, Download, X, Pencil,
   AlertTriangle, CheckCircle, Info, ArrowUpRight, ArrowDownRight,
 } from 'lucide-react'
 import { apiFetch } from '../lib/api'
+import DrawerLancamento from '../components/ui/DrawerLancamento'
 import { formatBRL, mesLabel, mesAtual } from '../lib/utils'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
 import { useOcultarValores } from '../hooks/useOcultarValores'
@@ -271,7 +272,8 @@ export default function ComparativoMensalPage() {
   const [busca,       setBusca]       = useState(() => _saved?.busca ?? '')
   const [sortCat,     setSortCat]     = useState<{ col: SortCol; dir: 1 | -1 }>(() => _saved?.sortCat ?? { col: 'variacao', dir: -1 })
   // drill-down: não persiste — o usuário clica novamente; os dados ficam em cache
-  const [drillDown, setDrillDown] = useState<{ catKey: string; nome: string; periodo: 'inicial' | 'final' } | null>(null)
+  const [drillDown,   setDrillDown]   = useState<{ catKey: string; nome: string; periodo: 'inicial' | 'final' } | null>(null)
+  const [editandoId,  setEditandoId]  = useState<string | null>(null)
   const drillDownRef = useRef<HTMLDivElement>(null)
   const { oculto, toggle: toggleOculto } = useOcultarValores()
 
@@ -1003,7 +1005,7 @@ export default function ComparativoMensalPage() {
                   <table className="w-full border-collapse">
                     <thead className="sticky top-0 z-10" style={{ background: '#1a1f2e' }}>
                       <tr>
-                        {(['Data', 'Descrição', 'Tipo', 'Valor'] as const).map(h => (
+                        {(['Data', 'Descrição', 'Tipo', 'Valor', ''] as const).map(h => (
                           <th key={h} className={`px-4 py-2.5 border-b border-white/5 ${h === 'Valor' ? 'text-right' : 'text-left'}`}>
                             <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{h}</span>
                           </th>
@@ -1037,6 +1039,16 @@ export default function ComparativoMensalPage() {
                               {oculto ? '••••' : formatBRL(l.valor)}
                             </span>
                           </td>
+                          <td className="px-3 py-2.5 text-center">
+                            <button
+                              onClick={() => setEditandoId(l.id)}
+                              className="p-1 rounded-md transition-colors hover:bg-blue-400/10"
+                              style={{ color: '#4a5168' }}
+                              title="Editar lançamento"
+                            >
+                              <Pencil size={12} />
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1060,6 +1072,7 @@ export default function ComparativoMensalPage() {
                             )
                           })()}
                         </td>
+                        <td />
                       </tr>
                     </tfoot>
                   </table>
@@ -1068,6 +1081,16 @@ export default function ComparativoMensalPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Drawer de edição de lançamento */}
+      {editandoId && (
+        <DrawerLancamento
+          lancamentoId={editandoId}
+          onFechar={() => setEditandoId(null)}
+          onSalvo={() => { setEditandoId(null); buscar() }}
+          onExcluido={() => { setEditandoId(null); buscar() }}
+        />
       )}
     </div>
   )

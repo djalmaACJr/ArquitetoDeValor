@@ -12,6 +12,7 @@ import CategoriasPage from './pages/CategoriasPage'
 import LancamentosPage from './pages/LancamentosPage'
 import ImportExportPage from './pages/ImportExportPage'
 import ComparativoMensalPage from './pages/ComparativoMensalPage'
+import AssinaturasPage from './pages/AssinaturasPage'
 import { PageStateProvider } from './context/PageStateContext'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -47,7 +48,8 @@ export default function App() {
             <Route path="contas"      element={<ContasPage/>}/>
             <Route path="categorias"  element={<CategoriasPage/>}/>
             <Route path="relatorios"   element={<RelatoriosPage/>}/>
-            <Route path="comparativo" element={<ComparativoMensalPage/>}/>
+            <Route path="comparativo"  element={<ComparativoMensalPage/>}/>
+            <Route path="assinaturas" element={<AssinaturasPage/>}/>
             <Route path="importexport" element={<ImportExportPage/>}/>
             <Route path="perfil"       element={<PerfilPage/>}/>
           </Route>

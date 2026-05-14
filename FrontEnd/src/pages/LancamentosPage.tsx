@@ -362,9 +362,20 @@ export default function LancamentosPage() {
   const [carregandoBusca,   setCarregandoBusca]   = useState(false)
   const [buscaParada,       setBuscaParada]       = useState(false)
   const [buscaNonce,        setBuscaNonce]        = useState(0)
+  const [buscaLimiteExtra,   setBuscaLimiteExtra]   = useState(0)
+  const [buscaAtingiuLimite, setBuscaAtingiuLimite] = useState(false)
+  const buscaDesdeRef = useRef(0)
   const pararBuscaRef = useRef<(() => void) | null>(null)
 
-  const buscaMultiMes = pesquisa.length > 0 && escopoPesquisa !== 'MES_ATUAL'
+  // Reseta extensão de período ao trocar critérios de busca
+  useEffect(() => {
+    buscaDesdeRef.current = 0
+    setBuscaLimiteExtra(0)
+    setBuscaAtingiuLimite(false)
+  }, [pesquisa, escopoPesquisa, mes, filtContas, filtCats, filtStatus])
+
+  const temFiltroAtivo = filtContas.length > 0 || filtCats.length > 0 || filtStatus.length > 0
+  const buscaMultiMes = (pesquisa.length > 0 || temFiltroAtivo) && escopoPesquisa !== 'MES_ATUAL'
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -379,15 +390,20 @@ export default function LancamentosPage() {
   const [buscaMesesVistos, setBuscaMesesVistos] = useState(0)
 
   useEffect(() => {
-    if (!pesquisa || escopoPesquisa === 'MES_ATUAL') {
+    if ((!pesquisa && !temFiltroAtivo) || escopoPesquisa === 'MES_ATUAL') {
       setBuscaResultados([])
       setBuscaMesesVistos(0)
       setCarregandoBusca(false)
+      setBuscaAtingiuLimite(false)
       return
     }
+    const extending = buscaDesdeRef.current > 0
+    if (!extending) {
+      setBuscaResultados([])
+      setBuscaMesesVistos(0)
+    }
     setCarregandoBusca(true)
-    setBuscaResultados([])
-    setBuscaMesesVistos(0)
+    setBuscaAtingiuLimite(false)
     setBuscaParada(false)
     const term = pesquisa.toLowerCase()
     const ctrl = new AbortController()
@@ -401,15 +417,21 @@ export default function LancamentosPage() {
         l.conta_nome?.toLowerCase().includes(term) ||
         l.observacao?.toLowerCase().includes(term)
 
-      // Busca em lotes de 12 meses; para quando encontrar 6 meses seguidos sem
-      // nenhuma transação (indica que chegou ao limite do histórico do usuário).
-      const LOTE            = 12
-      const MAX_VAZIOS_SEQ  = 6
+      // Com texto: para após 6 meses consecutivos sem resultado (heurística de fim de histórico).
+      // Sem texto (só filtros): varre até MAX_MESES_FILTRO meses para não perder lacunas na conta/categoria.
+      const LOTE             = 12
+      const MAX_VAZIOS_SEQ   = 6
+      const MAX_MESES_FILTRO = 60 + buscaLimiteExtra
       const accumulated: Lancamento[] = []
       let vaziosSequenciais = 0
-      let offset            = 1
+      let totalMeses        = 0
+      let offset            = buscaDesdeRef.current + 1
 
-      while (vaziosSequenciais < MAX_VAZIOS_SEQ && !ctrl.signal.aborted) {
+      const deveParar = () => term
+        ? vaziosSequenciais >= MAX_VAZIOS_SEQ
+        : totalMeses >= MAX_MESES_FILTRO
+
+      while (!deveParar() && !ctrl.signal.aborted) {
         const lote = Array.from({ length: LOTE }, (_, j) => mesAdjacente(mes, dir * (offset + j)))
         offset += LOTE
 
@@ -421,6 +443,7 @@ export default function LancamentosPage() {
         if (ctrl.signal.aborted) break
 
         for (const dados of resultados) {
+          totalMeses++
           if (dados.length === 0) {
             vaziosSequenciais++
           } else {
@@ -433,12 +456,21 @@ export default function LancamentosPage() {
         setBuscaResultados([...accumulated].sort((a, b) => a.data.localeCompare(b.data)))
       }
 
-      if (!ctrl.signal.aborted) setCarregandoBusca(false)
+      if (!ctrl.signal.aborted) {
+        setBuscaAtingiuLimite(!term && totalMeses >= MAX_MESES_FILTRO)
+        setCarregandoBusca(false)
+      }
     }, 400)
     return () => { clearTimeout(timer); ctrl.abort(); pararBuscaRef.current = null }
-  }, [pesquisa, escopoPesquisa, mes, filtContas, filtCats, filtStatus, buscaNonce])
+  }, [pesquisa, escopoPesquisa, mes, filtContas, filtCats, filtStatus, buscaNonce, buscaLimiteExtra])
 
   const limparPesquisa = () => { setPesquisa(''); setEscopoPesquisa('MES_ATUAL') }
+
+  const buscarMais = () => {
+    buscaDesdeRef.current = buscaMesesVistos
+    setBuscaAtingiuLimite(false)
+    setBuscaLimiteExtra(e => e + 60)
+  }
 
   const abrirNovo = (tipo: 'DESPESA' | 'RECEITA' | 'TRANSFERENCIA' = 'DESPESA') => {
     setTipoNovo(tipo); setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
@@ -508,6 +540,7 @@ export default function LancamentosPage() {
 
   // lancamentosParaExibir: aplica filtro de texto + escopo de busca (deve vir após lancamentosComSaldoCorrigido)
   const lancamentosParaExibir = useMemo(() => {
+    if (buscaMultiMes) return buscaResultados
     if (!pesquisa) return lancamentosComSaldoCorrigido
     const term = pesquisa.toLowerCase()
     const match = (l: Lancamento) =>
@@ -515,9 +548,8 @@ export default function LancamentosPage() {
       l.categoria_nome?.toLowerCase().includes(term) ||
       l.conta_nome?.toLowerCase().includes(term) ||
       l.observacao?.toLowerCase().includes(term)
-    if (escopoPesquisa === 'MES_ATUAL') return lancamentosComSaldoCorrigido.filter(match)
-    return buscaResultados
-  }, [pesquisa, escopoPesquisa, lancamentosComSaldoCorrigido, buscaResultados])
+    return lancamentosComSaldoCorrigido.filter(match)
+  }, [buscaMultiMes, pesquisa, lancamentosComSaldoCorrigido, buscaResultados])
 
   // Totais do mês/busca — exclui transferências
   const totais = useMemo(() => {
@@ -680,7 +712,7 @@ export default function LancamentosPage() {
               type="text"
               value={pesquisa}
               onChange={e => setPesquisa(e.target.value)}
-              placeholder="Pesquisar lançamentos..."
+              placeholder="Pesquisar por descrição, categoria ou conta…"
               className="flex-1 bg-transparent text-[12px] text-white placeholder-[#4a5168] focus:outline-none min-w-0"
             />
             {pesquisa && (
@@ -689,7 +721,7 @@ export default function LancamentosPage() {
               </button>
             )}
           </div>
-          {pesquisa && (
+          {(pesquisa || temFiltroAtivo) && (
             <div className="flex gap-1 flex-shrink-0">
               {(['MES_ATUAL', 'MESES_ANTERIORES', 'PROXIMOS_MESES'] as const).map(e => {
                 const labels = { MES_ATUAL: 'Mês atual', MESES_ANTERIORES: 'Meses anteriores', PROXIMOS_MESES: 'Próximos meses' }
@@ -751,19 +783,35 @@ export default function LancamentosPage() {
       {!(loading && !buscaMultiMes) && !error && (
         <>
           {/* Contador — só aparece após a busca concluir */}
-          {pesquisa && !carregandoBusca && (() => {
-            const textoEscopo =
-              escopoPesquisa === 'MESES_ANTERIORES'
-                ? `nos últimos ${buscaMesesVistos} meses verificados${buscaParada ? ' (interrompida)' : ''}`
-                : escopoPesquisa === 'PROXIMOS_MESES'
-                ? `nos próximos ${buscaMesesVistos} meses verificados${buscaParada ? ' (interrompida)' : ''}`
-                : 'neste mês'
+          {buscaMultiMes && !carregandoBusca && buscaMesesVistos > 0 && (() => {
+            const direcao = escopoPesquisa === 'PROXIMOS_MESES' ? 'próximos' : 'últimos'
+            const sufixo  = buscaParada ? ' (interrompida)' : ''
+            const textoEscopo = escopoPesquisa === 'MES_ATUAL' ? 'neste mês'
+              : `nos ${direcao} ${buscaMesesVistos} meses verificados${sufixo}`
             return (
-              <p className="text-[11px] mb-3 mt-1" style={{ color: '#8b92a8' }}>
-                {lancamentosParaExibir.length} resultado{lancamentosParaExibir.length !== 1 ? 's' : ''} para &ldquo;{pesquisa}&rdquo; {textoEscopo}
+              <p className="text-[11px] mb-2 mt-1" style={{ color: '#8b92a8' }}>
+                {lancamentosParaExibir.length} resultado{lancamentosParaExibir.length !== 1 ? 's' : ''}
+                {pesquisa ? <> para &ldquo;{pesquisa}&rdquo;</> : null}
+                {' '}{textoEscopo}
               </p>
             )
           })()}
+
+          {/* Botão "Buscar mais" — só para filtros sem texto, ao atingir o limite */}
+          {!carregandoBusca && buscaAtingiuLimite && !pesquisa && (
+            <div className="flex items-center gap-2 mb-3">
+              <button
+                onClick={buscarMais}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-medium transition-all hover:bg-blue-400/10"
+                style={{ borderColor: 'rgba(77,166,255,0.35)', color: '#4da6ff' }}
+              >
+                <Search size={11} /> Buscar mais 5 anos anteriores
+              </button>
+              <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                ({buscaMesesVistos} meses verificados)
+              </span>
+            </div>
+          )}
 
           {/* Estado vazio — só aparece após a busca concluir */}
           {!carregandoBusca && lancamentosParaExibir.length === 0 && (
@@ -774,6 +822,13 @@ export default function LancamentosPage() {
                   {escopoPesquisa === 'MESES_ANTERIORES' ? ` nos últimos ${buscaMesesVistos} meses`
                    : escopoPesquisa === 'PROXIMOS_MESES'  ? ` nos próximos ${buscaMesesVistos} meses`
                    : ' neste mês'}.
+                </p>
+              ) : buscaMultiMes ? (
+                <p className="text-[13px]" style={{ color: '#8b92a8' }}>
+                  Nenhum lançamento encontrado com os filtros selecionados
+                  {escopoPesquisa === 'MESES_ANTERIORES' ? ` nos últimos ${buscaMesesVistos} meses`
+                   : escopoPesquisa === 'PROXIMOS_MESES'  ? ` nos próximos ${buscaMesesVistos} meses`
+                   : ''}.
                 </p>
               ) : (
                 <>

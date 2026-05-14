@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, List, CreditCard, Tag,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
-  ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare,
+  ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
@@ -98,17 +98,20 @@ const navCadastros: NavItem[] = [
   { to: '/contas',     icon: <CreditCard size={15}/>, label: 'Contas' },
   { to: '/categorias', icon: <Tag size={15}/>,        label: 'Categorias' },
 ]
-const navFerramentas: NavItem[] = [
-  { to: '/importexport', icon: <ArrowLeftRight size={15}/>, label: 'Ferramentas' },
+const navRelatorios: NavItem[] = [
   {
     to: '/relatorios',
     icon: <FileText size={15}/>,
     label: 'Relatórios',
     children: [
-      { to: '/relatorios',  icon: <FileText size={13}/>,   label: 'Resumo geral' },
-      { to: '/comparativo', icon: <GitCompare size={13}/>, label: 'Comparativo Períodos' },
+      { to: '/relatorios',   icon: <FileText size={13}/>,   label: 'Resumo geral' },
+      { to: '/comparativo',  icon: <GitCompare size={13}/>, label: 'Comparativo Períodos' },
+      { to: '/assinaturas',  icon: <Repeat2 size={13}/>,    label: 'Assinaturas' },
     ],
   },
+]
+const navFerramentas: NavItem[] = [
+  { to: '/importexport', icon: <ArrowLeftRight size={15}/>, label: 'Ferramentas' },
 ]
 
 function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChild[] }; collapsed: boolean }) {
@@ -251,6 +254,8 @@ export default function Sidebar() {
       <NavGroup label="Principal"   items={navPrincipal}   collapsed={collapsed} />
       <div className="h-px bg-blue-400/15 my-2" />
       <NavGroup label="Cadastros"   items={navCadastros}   collapsed={collapsed} />
+      <div className="h-px bg-blue-400/15 my-2" />
+      <NavGroup label="Relatórios"  items={navRelatorios}  collapsed={collapsed} />
       <div className="h-px bg-blue-400/15 my-2" />
       <NavGroup label="Ferramentas" items={navFerramentas} collapsed={collapsed} />
 
