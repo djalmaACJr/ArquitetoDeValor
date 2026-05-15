@@ -13,7 +13,7 @@ import { formatBRL, mesLabel } from '../lib/utils'
 ChartJS.register(ArcElement, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, Filler)
 
 // ── Types ────────────────────────────────────────────────────────
-type Frequencia = 'SEMANAL' | 'MENSAL' | 'TRIMESTRAL' | 'ANUAL'
+type Frequencia = 'SEMANAL' | 'QUINZENAL' | 'MENSAL' | 'TRIMESTRAL' | 'ANUAL'
 type StatusRec  = 'ATIVA' | 'NOVA' | 'SUSPEITA_INATIVIDADE' | 'AUMENTO_RECENTE'
 
 interface Recorrencia {
@@ -71,13 +71,22 @@ function diasEntre(d1: string, d2: string): number {
   return (new Date(d2 + 'T12:00:00').getTime() - new Date(d1 + 'T12:00:00').getTime()) / 86_400_000
 }
 
+/** Mediana de uma lista numérica (não destrutiva). */
+function mediana(nums: number[]): number {
+  if (nums.length === 0) return 0
+  const ord = [...nums].sort((a, b) => a - b)
+  const m = Math.floor(ord.length / 2)
+  return ord.length % 2 === 0 ? (ord[m - 1] + ord[m]) / 2 : ord[m]
+}
+
 /**
  * Detecta frequência a partir da média de intervalo entre lançamentos.
  * Janelas alargadas porque importações de extrato têm dia de cobrança
  * variável (boleto cai em dia útil, débito em dia do vencimento, etc).
  */
 function detectarFrequencia(avg: number): Frequencia | null {
-  if (avg >= 4   && avg <= 11)  return 'SEMANAL'      // 7 ± 3 dias
+  if (avg >= 4   && avg <= 10)  return 'SEMANAL'      // 7 ± 3 dias
+  if (avg >= 11  && avg <= 19)  return 'QUINZENAL'    // 14 ± 5 dias (cobre psicóloga, mercado quinzenal)
   if (avg >= 22  && avg <= 40)  return 'MENSAL'       // 30 ± 8 dias
   if (avg >= 75  && avg <= 110) return 'TRIMESTRAL'   // 90 ± 15 dias
   if (avg >= 330 && avg <= 400) return 'ANUAL'        // 365 ± 30 dias
@@ -86,6 +95,7 @@ function detectarFrequencia(avg: number): Frequencia | null {
 
 function valorParaMensal(v: number, f: Frequencia): number {
   if (f === 'SEMANAL')    return v * 52 / 12
+  if (f === 'QUINZENAL')  return v * 2
   if (f === 'TRIMESTRAL') return v / 3
   if (f === 'ANUAL')      return v / 12
   return v
@@ -177,9 +187,21 @@ function detectarRecorrencias(
     for (let i = 1; i < sorted.length; i++) intervals.push(diasEntre(sorted[i - 1].data, sorted[i].data))
     const avgDias = intervals.reduce((a, b) => a + b, 0) / intervals.length
 
+    // Valor "típico" = mediana (robusto contra outliers como compra simbólica
+    // de R$ 8 ou pacote adiantado de R$ 600 numa série de R$ 100).
+    // Filtra valores fora da banda [0.25× ... 3× da mediana] do cálculo de
+    // variação. Em séries pequenas (< 4) mantém o critério estrito anterior.
     const valores = sorted.map(l => l.valor)
+    const valorMediano = mediana(valores)
     const valorMedio = valores.reduce((a, b) => a + b, 0) / valores.length
-    const maxVar = Math.max(...valores.map(v => Math.abs(v - valorMedio) / valorMedio))
+
+    const valoresParaVariacao = items.length >= 4 && valorMediano > 0
+      ? valores.filter(v => v >= valorMediano * 0.25 && v <= valorMediano * 3)
+      : valores
+    const baseVar = items.length >= 4 ? valorMediano : valorMedio
+    const maxVar = baseVar > 0
+      ? Math.max(...valoresParaVariacao.map(v => Math.abs(v - baseVar) / baseVar))
+      : 0
 
     // Fallback MENSAL: séries longas com cadência irregular (entre 20 e 50 dias)
     // ainda assim costumam ser cobranças mensais (boleto pulado, antecipado, etc).
@@ -190,13 +212,26 @@ function detectarRecorrencias(
       continue
     }
 
-    // Tolerância de variação: mais permissiva quando há histórico extenso
-    // (contas variáveis como luz/água com 5+ meses ainda são recorrências válidas)
-    const limiteVar = items.length >= 5 ? 0.50 : 0.20
-    if (maxVar > limiteVar && items.length < 4) {
+    // Tolerância de variação escalonada por tamanho da série:
+    //  ≥20 ocorrências → sem limite (ex.: supermercado — claramente recorrente
+    //                                mesmo variando muito entre compras)
+    //  ≥ 5 ocorrências → 50%  (contas variáveis como luz/água)
+    //  ≥ 4 ocorrências → 30%
+    //  < 4 ocorrências → 20%  (estrito)
+    const limiteVar =
+      items.length >= 20 ? Infinity :
+      items.length >= 5  ? 0.50 :
+      items.length >= 4  ? 0.30 :
+                           0.20
+    if (maxVar > limiteVar) {
       pushDebug(chave, items, { avgDias, valorMedio, maxVarPct: maxVar * 100, motivo: 'valor_variavel_demais' })
       continue
     }
+
+    // Valor representativo: mediana para séries longas (≥4), média para curtas.
+    // A mediana ignora picos isolados (pacote adiantado, compra extra) e
+    // representa melhor o "valor típico" da assinatura.
+    const valorRepresentativo = items.length >= 4 ? valorMediano : valorMedio
 
     const ultima = sorted[sorted.length - 1]
     resultado.push({
@@ -204,8 +239,8 @@ function detectarRecorrencias(
       nome: ultima.descricao || 'Sem descrição',
       categoria: ultima.categoria_nome || ultima.categoria_pai_nome || 'Outros',
       categoriaId: ultima.categoria_id,
-      valorMedio,
-      valorMensal: valorParaMensal(valorMedio, freq),
+      valorMedio: valorRepresentativo,
+      valorMensal: valorParaMensal(valorRepresentativo, freq),
       frequencia: freq,
       ultimaCobranca: ultima.data,
       ocorrencias: items.length,
@@ -224,7 +259,7 @@ const CHART_COLORS = [
 ]
 
 const FREQ_LABEL: Record<Frequencia, string> = {
-  SEMANAL: 'Semanal', MENSAL: 'Mensal', TRIMESTRAL: 'Trimestral', ANUAL: 'Anual',
+  SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal', TRIMESTRAL: 'Trimestral', ANUAL: 'Anual',
 }
 
 const STATUS_INFO: Record<StatusRec, { label: string; color: string; bg: string }> = {
