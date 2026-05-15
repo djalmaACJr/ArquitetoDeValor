@@ -218,14 +218,16 @@ function detectarRecorrencias(
     // Tolerância de variação escalonada por tamanho da série:
     //  ≥20 ocorrências → sem limite (ex.: supermercado — claramente recorrente
     //                                mesmo variando muito entre compras)
-    //  ≥ 5 ocorrências → 50%  (contas variáveis como luz/água)
-    //  ≥ 4 ocorrências → 30%
-    //  < 4 ocorrências → 20%  (estrito)
+    //  ≥10 ocorrências → 75%  (gastos variáveis recorrentes: transporte, alimentação)
+    //  ≥ 5 ocorrências → 60%  (contas variáveis como luz/água)
+    //  ≥ 4 ocorrências → 50%
+    //  < 4 ocorrências → 25%  (estrito)
     const limiteVar =
       items.length >= 20 ? Infinity :
-      items.length >= 5  ? 0.50 :
-      items.length >= 4  ? 0.30 :
-                           0.20
+      items.length >= 10 ? 0.75 :
+      items.length >= 5  ? 0.60 :
+      items.length >= 4  ? 0.50 :
+                           0.25
     if (maxVar > limiteVar) {
       pushDebug(chave, items, { avgDias, valorMedio, maxVarPct: maxVar * 100, motivo: 'valor_variavel_demais' })
       continue

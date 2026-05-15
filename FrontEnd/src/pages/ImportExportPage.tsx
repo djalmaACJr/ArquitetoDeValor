@@ -154,10 +154,10 @@ function Section({ titulo, subtitulo, icon: Icon, cor, children, defaultOpen = t
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
       <button
         onClick={() => setAberto(a => !a)}
-        className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+        className="w-full flex items-center justify-between px-3 py-3 sm:px-5 sm:py-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
       >
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${cor}20` }}>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${cor}20` }}>
             <Icon size={16} style={{ color: cor }} />
           </div>
           <div className="text-left">
@@ -165,9 +165,9 @@ function Section({ titulo, subtitulo, icon: Icon, cor, children, defaultOpen = t
             <p className="text-[11px] text-gray-400">{subtitulo}</p>
           </div>
         </div>
-        {aberto ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+        {aberto ? <ChevronUp size={16} className="text-gray-400 flex-shrink-0" /> : <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />}
       </button>
-      {aberto && <div className="px-5 pb-5 border-t border-gray-100 dark:border-gray-700 pt-4">{children}</div>}
+      {aberto && <div className="px-3 pb-4 sm:px-5 sm:pb-5 border-t border-gray-100 dark:border-gray-700 pt-4">{children}</div>}
     </div>
   )
 }
@@ -285,7 +285,7 @@ function SecaoLimpeza() {
   ]
 
   return (
-    <Section titulo="Limpar dados" subtitulo="Remove transações, categorias e contas do banco" icon={Trash2} cor="#ff6b4a">
+    <Section titulo="Limpar dados" subtitulo="Remove transações, categorias e contas do banco" icon={Trash2} cor="#ff6b4a" defaultOpen={false}>
       <div className="space-y-3">
 
         {/* Seleção do modo */}
@@ -485,7 +485,7 @@ function SecaoExport() {
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
             Período das transações
           </p>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <div>
               <p className="text-[10px] text-gray-400 mb-1">De</p>
               <MonthPicker value={mesInicio} onChange={setMesInicio} />
@@ -503,7 +503,7 @@ function SecaoExport() {
           <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
             O que exportar
           </p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {[
               { label: 'Contas', sub: 'Todas as contas', checked: exportarContas, set: setExportarContas, cor: '#4da6ff' },
               { label: 'Categorias', sub: 'Com hierarquia', checked: exportarCategorias, set: setExportarCategorias, cor: '#a78bfa' },
@@ -1575,7 +1575,7 @@ function SecaoImport() {
 
             {/* Grid editável — transações */}
             {modo === 'transacoes' && <div>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
                   Grid de revisão — edite os dados antes de importar
                 </p>
@@ -1594,7 +1594,7 @@ function SecaoImport() {
               {/* Paginação para grandes arquivos */}
               {grid.length > 100 && (
                 <div className="bg-blue-400/5 border border-blue-400/20 rounded-lg p-3 mb-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="text-[11px] font-semibold text-blue-400">
                         📊 Arquivo grande detectado ({grid.length} registros)
@@ -1756,7 +1756,7 @@ function SecaoImport() {
               </p>
             )}
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button onClick={resetar}
                 className="px-4 py-2 rounded-lg text-[13px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                 Cancelar
@@ -1808,7 +1808,7 @@ function SecaoImport() {
             </div>
 
             {/* Métricas */}
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
                 { label: 'Linhas', value: `${progressoInfo.atual} / ${progressoInfo.total}`, color: '#e8eaf0' },
                 { label: 'Status', value: 'Analisando...', color: '#4da6ff' },
@@ -1871,7 +1871,7 @@ function SecaoImport() {
             </div>
 
             {/* Métricas */}
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
                 { label: 'Processados', value: `${progressoInfo.atual} / ${progressoInfo.total}`, color: '#e8eaf0' },
                 { label: 'Importados', value: progressoInfo.ok, color: '#00c896' },
@@ -2433,7 +2433,7 @@ function SecaoRestore() {
 // ══════════════════════════════════════════════════════════════════
 export default function ImportExportPage() {
   return (
-    <div className="p-5 max-w-[860px]">
+    <div className="px-3 py-4 sm:px-5 sm:py-5 w-full sm:max-w-[860px]">
       <div className="mb-5">
         <h1 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">Ferramentas</h1>
         <p className="text-[12px] text-gray-400 mt-0.5">Backup, restore, exportação, importação e limpeza de dados</p>
