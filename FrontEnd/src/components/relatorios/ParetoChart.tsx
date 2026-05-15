@@ -2,7 +2,7 @@
 import { useMemo } from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import { formatBRL } from '../../lib/utils'
-import { calcularParetto, getCorParetto, type ResumoParetto } from '../../lib/paretoAnalysis'
+import { calcularParetto, type ResumoParetto } from '../../lib/paretoAnalysis'
 
 interface ParetoChartProps {
   receitas: Array<{ categoria_id: string | null; categoria_nome: string; total: number }>
@@ -128,6 +128,8 @@ function CardResumoParetto({
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {/* ícone de tendência usado no card de tipo */}
+      <span className="sr-only"><Icon size={0}/></span>
       {/* Card 1: % de categorias que causam 80% */}
       <div className="bg-[#1a1f2e] border border-white/10 rounded-lg px-4 py-3">
         <p className="text-[9px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>

@@ -293,6 +293,7 @@ export default function LancamentosPage() {
 
   const exportarXlsx = async () => {
     if (lancamentosParaExibir.length === 0) return
+    // @ts-expect-error CDN dynamic import sem declarações de tipo
     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
     const rows = lancamentosParaExibir.map(l => {
       const isTransf = !!l.id_par_transferencia
@@ -841,8 +842,7 @@ export default function LancamentosPage() {
           {buscaMultiMes && !carregandoBusca && buscaMesesVistos > 0 && (() => {
             const direcao = escopoPesquisa === 'PROXIMOS_MESES' ? 'próximos' : 'últimos'
             const sufixo  = buscaParada ? ' (interrompida)' : ''
-            const textoEscopo = escopoPesquisa === 'MES_ATUAL' ? 'neste mês'
-              : `nos ${direcao} ${buscaMesesVistos} meses verificados${sufixo}`
+            const textoEscopo = `nos ${direcao} ${buscaMesesVistos} meses verificados${sufixo}`
             return (
               <p className="text-[11px] mb-2 mt-1" style={{ color: '#8b92a8' }}>
                 {lancamentosParaExibir.length} resultado{lancamentosParaExibir.length !== 1 ? 's' : ''}

@@ -500,14 +500,11 @@ export default function ComparativoMensalPage() {
   }, [buscado, tableCats, inicioA, fimA, inicioB, fimB, resumoA, resumoB])
 
   // ── Chart data ─────────────────────────────────────────────────────────────
-  const labA = periodoLabel(inicioA, fimA)
-  const labB = periodoLabel(inicioB, fimB)
-
   const chartBarComp = useMemo((): ChartData<'bar'> => ({
     labels: ['Receitas', 'Despesas', 'Saldo'],
     datasets: [
       {
-        label: 'Período inicial',
+        label: periodoLabel(inicioA, fimA),
         data: [resumoA.totalReceitas, resumoA.totalDespesas, resumoA.resultado],
         backgroundColor: ['rgba(0,200,150,0.55)', 'rgba(248,113,113,0.55)', 'rgba(77,166,255,0.55)'],
         borderColor:     ['#00c896', '#f87171', '#4da6ff'],

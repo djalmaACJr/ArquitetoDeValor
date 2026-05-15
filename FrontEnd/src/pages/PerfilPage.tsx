@@ -1,17 +1,46 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import type { FormEvent } from 'react'
-import { User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown, Pencil, Sparkles, ArrowRight } from 'lucide-react'
+import {
+  User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown,
+  Pencil, Sparkles, ArrowRight, Wand2, RefreshCw, Search, ChevronLeft, ChevronRight,
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { apiMutate } from '../lib/api'
 import { useFiltrosSalvos } from '../hooks/useFiltrosSalvos'
-import { useSugestoes } from '../hooks/useAssistente'
+import { useSugestoes, salvarSugestao } from '../hooks/useAssistente'
+import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { STATUS_LABEL } from '../lib/utils'
+import { qk } from '../lib/queryKeys'
 
 type Feedback = { tipo: 'ok' | 'erro'; msg: string }
+
+type SugestaoSugerida = {
+  key:            string
+  descricao:      string
+  categoria_id:   string | null
+  categoria_nome: string | null
+  conta_id:       string | null
+  conta_nome:     string | null
+  ocorrencias:    number
+}
+
+const ITEMS_PER_PAGE = 15
+
+function normDesc(d: string | null | undefined): string {
+  if (!d) return ''
+  return d
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b\d{4,}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 function Secao({ titulo, icone, children }: {
   titulo: string
@@ -52,9 +81,7 @@ export default function PerfilPage() {
 
   // ── Nome ────────────────────────────────────────────────────
   const [nome, setNome]         = useState(nomeAtual)
-
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (user) setNome(user.user_metadata?.nome ?? user.email?.split('@')[0] ?? '')
   }, [user])
   const [fbNome, setFbNome]     = useState<Feedback | null>(null)
@@ -65,17 +92,11 @@ export default function PerfilPage() {
     if (!nome.trim()) return
     setFbNome(null)
     setLoadNome(true)
-
     const { error } = await supabase.auth.updateUser({ data: { nome: nome.trim() } })
-
     if (!error) {
-      await supabase
-        .schema('arqvalor')
-        .from('usuarios')
-        .update({ nome: nome.trim() })
-        .eq('id', user!.id)
+      await supabase.schema('arqvalor').from('usuarios')
+        .update({ nome: nome.trim() }).eq('id', user!.id)
     }
-
     setLoadNome(false)
     setFbNome(error
       ? { tipo: 'erro', msg: 'Não foi possível atualizar o nome.' }
@@ -93,7 +114,6 @@ export default function PerfilPage() {
   const salvarSenha = async (e: FormEvent) => {
     e.preventDefault()
     setFbSenha(null)
-
     if (novaSenha.length < 6) {
       setFbSenha({ tipo: 'erro', msg: 'A nova senha deve ter pelo menos 6 caracteres.' })
       return
@@ -102,49 +122,34 @@ export default function PerfilPage() {
       setFbSenha({ tipo: 'erro', msg: 'As senhas não coincidem.' })
       return
     }
-
     setLoadSenha(true)
-
-    // Verifica senha atual
-    const { error: errLogin } = await supabase.auth.signInWithPassword({
-      email: emailAtual,
-      password: senhaAtual,
-    })
-
+    const { error: errLogin } = await supabase.auth.signInWithPassword({ email: emailAtual, password: senhaAtual })
     if (errLogin) {
       setLoadSenha(false)
       setFbSenha({ tipo: 'erro', msg: 'Senha atual incorreta.' })
       return
     }
-
     const { error } = await supabase.auth.updateUser({ password: novaSenha })
-
     setLoadSenha(false)
-
     if (error) {
       setFbSenha({ tipo: 'erro', msg: 'Não foi possível atualizar a senha.' })
     } else {
       setFbSenha({ tipo: 'ok', msg: 'Senha atualizada com sucesso.' })
-      setSenhaAtual('')
-      setNovaSenha('')
-      setConfirmar('')
+      setSenhaAtual(''); setNovaSenha(''); setConfirmar('')
     }
   }
 
   // ── Filtros salvos ──────────────────────────────────────────
   const { filtros, carregando: carregandoFiltros, renomear: renomearFiltro, excluir: excluirFiltro, excluirTodos } =
     useFiltrosSalvos()
-
   const [editandoId,   setEditandoId]   = useState<string | null>(null)
   const [editandoNome, setEditandoNome] = useState('')
   const [salvandoNome, setSalvandoNome] = useState(false)
+  const [filtroExpandido, setFiltroExpandido] = useState<string | null>(null)
 
   const iniciarEdicao = (id: string, nomeAtual: string) => {
-    setEditandoId(id)
-    setEditandoNome(nomeAtual)
-    setFiltroExpandido(null)
+    setEditandoId(id); setEditandoNome(nomeAtual); setFiltroExpandido(null)
   }
-
   const confirmarEdicao = async (id: string) => {
     const n = editandoNome.trim()
     if (!n) return
@@ -157,20 +162,19 @@ export default function PerfilPage() {
   const { contas }     = useContas()
   const { categorias } = useCategorias()
 
-  const [filtroExpandido, setFiltroExpandido] = useState<string | null>(null)
-
   // ── Assistente de Lançamentos ────────────────────────────────
+  const qc = useQueryClient()
   const { sugestoes, carregando: carregandoAss, editar: editarAss, excluir: excluirAss, excluirTodas: excluirTodasAss } =
     useSugestoes()
-  const [editandoAss,    setEditandoAss]    = useState<string | null>(null)
+  const [editandoAss,     setEditandoAss]     = useState<string | null>(null)
   const [editandoAssDesc, setEditandoAssDesc] = useState('')
-  const [salvandoAss,    setSalvandoAss]    = useState(false)
+  const [salvandoAss,     setSalvandoAss]     = useState(false)
+  const [buscaAss,        setBuscaAss]        = useState('')
+  const [paginaAss,       setPaginaAss]       = useState(0)
 
   const iniciarEdicaoAss = (id: string, descricao: string) => {
-    setEditandoAss(id)
-    setEditandoAssDesc(descricao)
+    setEditandoAss(id); setEditandoAssDesc(descricao)
   }
-
   const confirmarEdicaoAss = async (id: string) => {
     const d = editandoAssDesc.trim()
     if (d.length < 2) return
@@ -180,40 +184,132 @@ export default function PerfilPage() {
     setEditandoAss(null)
   }
 
+  const sugestoesFiltradas = useMemo(() => {
+    if (!buscaAss.trim()) return sugestoes
+    const t = buscaAss.toLowerCase()
+    return sugestoes.filter(s =>
+      s.descricao.toLowerCase().includes(t) ||
+      (contas.find(c => c.conta_id === s.conta_origem_id)?.nome ?? '').toLowerCase().includes(t) ||
+      (categorias.find(c => c.id === s.categoria_id)?.descricao ?? '').toLowerCase().includes(t),
+    )
+  }, [sugestoes, buscaAss, contas, categorias])
+
+  const totalPaginas  = Math.max(1, Math.ceil(sugestoesFiltradas.length / ITEMS_PER_PAGE))
+  const paginaSegura  = Math.min(paginaAss, totalPaginas - 1)
+  const sugestoesPage = sugestoesFiltradas.slice(paginaSegura * ITEMS_PER_PAGE, (paginaSegura + 1) * ITEMS_PER_PAGE)
+
+  const mudarBusca = (v: string) => { setBuscaAss(v); setPaginaAss(0) }
+
+  // ── Análise de padrões ───────────────────────────────────────
+  const [analisando,   setAnalisando]   = useState(false)
+  const [sugeridas,    setSugeridas]    = useState<SugestaoSugerida[] | null>(null)
+  const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
+  const [salvandoSug,  setSalvandoSug]  = useState(false)
+  const [resultadoSug, setResultadoSug] = useState<{ ok: number; fail: number } | null>(null)
+
+  const analisarPadroes = async () => {
+    setAnalisando(true)
+    try {
+      const d = new Date()
+      const mesBase = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const meses = Array.from({ length: 12 }, (_, i) => mesAdjacente(mesBase, -i))
+      const resultados = await Promise.all(
+        meses.map(m => fetchLancamentos({ mes: m, status_ids: ['PAGO', 'PENDENTE'] }).catch(() => [] as Lancamento[])),
+      )
+      const base = resultados.flat().filter(l =>
+        l.status !== 'PROJECAO' && !l.id_par_transferencia && l.categoria_nome !== 'Transferências',
+      )
+
+      const grupos = new Map<string, Lancamento[]>()
+      for (const l of base) {
+        const key = normDesc(l.descricao) + '||' + (l.categoria_id ?? '') + '||' + l.conta_id
+        const arr = grupos.get(key) ?? []
+        arr.push(l)
+        grupos.set(key, arr)
+      }
+
+      const existentes = new Set(sugestoes.map(s => s.descricao.toLowerCase().trim()))
+      const novas: SugestaoSugerida[] = []
+
+      for (const [key, items] of grupos) {
+        if (items.length < 2) continue
+        const freq = new Map<string, number>()
+        for (const l of items) freq.set(l.descricao, (freq.get(l.descricao) ?? 0) + 1)
+        const descTop = [...freq.entries()].sort((a, b) => b[1] - a[1])[0][0]
+        if (existentes.has(descTop.toLowerCase().trim())) continue
+        const ex = items[0]
+        novas.push({
+          key,
+          descricao:      descTop,
+          categoria_id:   ex.categoria_id,
+          categoria_nome: ex.categoria_nome ?? ex.categoria_pai_nome ?? null,
+          conta_id:       ex.conta_id,
+          conta_nome:     ex.conta_nome ?? null,
+          ocorrencias:    items.length,
+        })
+      }
+
+      novas.sort((a, b) => {
+        const desc = a.descricao.localeCompare(b.descricao)
+        if (desc !== 0) return desc
+        const cn = (a.conta_nome ?? '').localeCompare(b.conta_nome ?? '')
+        if (cn !== 0) return cn
+        return (a.categoria_nome ?? '').localeCompare(b.categoria_nome ?? '')
+      })
+      setSugeridas(novas)
+      setSelecionadas(new Set(novas.map(s => s.key)))
+      setResultadoSug(null)
+    } finally {
+      setAnalisando(false)
+    }
+  }
+
+  const adicionarSelecionadas = async () => {
+    if (!sugeridas) return
+    const lista = sugeridas.filter(s => selecionadas.has(s.key))
+    if (!lista.length) return
+    setSalvandoSug(true)
+    let ok = 0, fail = 0
+    for (const s of lista) {
+      const r = await salvarSugestao({
+        descricao:        s.descricao,
+        categoria_id:     s.categoria_id,
+        conta_origem_id:  s.conta_id,
+        is_transferencia: false,
+      })
+      if (r.ok) ok++; else fail++
+    }
+    await qc.invalidateQueries({ queryKey: qk.assistente() })
+    setSalvandoSug(false)
+    setResultadoSug({ ok, fail })
+    setSugeridas(prev => prev?.filter(s => !selecionadas.has(s.key)) ?? [])
+    setSelecionadas(new Set())
+  }
+
+  // ── Filtros: metadados ──────────────────────────────────────
   const PAGINA_LABEL: Record<string, string> = {
-    extrato:    'Extrato',
-    relatorios: 'Relatórios',
-    dashboard:  'Dashboard',
+    extrato: 'Extrato', relatorios: 'Relatórios', dashboard: 'Dashboard',
   }
 
   function detalhesFiltro(dados: Record<string, unknown>): { label: string; valor: string }[] {
     const linhas: { label: string; valor: string }[] = []
     const ids = (key: string) => (dados[key] as string[] | undefined) ?? []
-
     const contaIds = ids('filtContas')
-    if (contaIds.length) {
-      const nomes = contaIds.map(id => contas.find(c => c.conta_id === id)?.nome ?? id)
-      linhas.push({ label: 'Contas', valor: nomes.join(', ') })
-    }
-
+    if (contaIds.length)
+      linhas.push({ label: 'Contas', valor: contaIds.map(id => contas.find(c => c.conta_id === id)?.nome ?? id).join(', ') })
     const catIds = ids('filtCats')
-    if (catIds.length) {
-      const nomes = catIds.map(id => categorias.find(c => c.id === id)?.descricao ?? id)
-      linhas.push({ label: 'Categorias', valor: nomes.join(', ') })
-    }
-
+    if (catIds.length)
+      linhas.push({ label: 'Categorias', valor: catIds.map(id => categorias.find(c => c.id === id)?.descricao ?? id).join(', ') })
     const statusIds = ids('filtStatus')
-    if (statusIds.length) {
+    if (statusIds.length)
       linhas.push({ label: 'Status', valor: statusIds.map(s => STATUS_LABEL[s] ?? s).join(', ') })
-    }
-
     if (dados.incluirTransf === true)  linhas.push({ label: 'Transferências', valor: 'Incluídas' })
     if (dados.comSaldo === false)      linhas.push({ label: 'Saldo anterior', valor: 'Desativado' })
-
     return linhas
   }
 
   // ── Exclusão de conta ───────────────────────────────────────
+  const [zonaPerigo,   setZonaPerigo]   = useState(false)
   const [modalExcluir, setModalExcluir] = useState(false)
   const [confirmText,  setConfirmText]  = useState('')
   const [loadExcluir,  setLoadExcluir]  = useState(false)
@@ -238,373 +334,437 @@ export default function PerfilPage() {
   const btn   = 'px-4 py-2 rounded-lg text-[12px] font-semibold transition-colors disabled:opacity-50'
 
   return (
-    <div className="p-5 max-w-lg mx-auto">
+    <div className="p-5 max-w-5xl mx-auto">
       <div className="mb-6">
         <h1 className="text-[17px] font-bold text-white">Meu Perfil</h1>
         <p className="text-[12px] text-white/40 mt-0.5">{emailAtual}</p>
       </div>
 
-      <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
 
-        {/* ── Seção: Nome ───────────────────────────────────── */}
-        <Secao titulo="Dados pessoais" icone={<User size={15}/>}>
-          <form onSubmit={salvarNome} className="space-y-3">
-            <div>
-              <label className={label}>Nome de exibição</label>
-              <input
-                type="text" required value={nome}
-                onChange={e => setNome(e.target.value)}
-                className={input}
-                placeholder="Seu nome"
-              />
-            </div>
-            <div>
-              <label className={label}>E-mail</label>
-              <input
-                type="email" disabled value={emailAtual}
-                className={`${input} opacity-40 cursor-not-allowed`}
-              />
-              <p className="text-[11px] text-white/25 mt-1">O e-mail não pode ser alterado por aqui.</p>
-            </div>
-            <div className="flex justify-end pt-1">
-              <button
-                type="submit" disabled={loadNome || nome.trim() === nomeAtual}
-                className={`${btn} bg-av-green text-av-dark hover:bg-av-green/90`}
-              >
-                {loadNome ? 'Salvando...' : 'Salvar nome'}
-              </button>
-            </div>
-            <Alerta fb={fbNome}/>
-          </form>
-        </Secao>
+        {/* ── Coluna esquerda ───────────────────────────────── */}
+        <div className="flex flex-col gap-4">
 
-        {/* ── Seção: Filtros salvos ────────────────────────── */}
-        <Secao titulo="Filtros salvos" icone={<Bookmark size={15}/>}>
-          {carregandoFiltros ? (
-            <p className="text-[12px] text-white/40">Carregando…</p>
-          ) : filtros.length === 0 ? (
-            <p className="text-[12px] text-white/40">Nenhum filtro salvo.</p>
-          ) : (
-            <>
-              <div className="space-y-0.5">
-                {filtros.map(f => {
-                  const expandido = filtroExpandido === f.id
-                  const editando  = editandoId === f.id
-                  const detalhes  = detalhesFiltro(f.dados)
-                  return (
-                    <div key={f.id}>
-                      {/* ── Modo edição ── */}
-                      {editando ? (
-                        <div className="flex items-center gap-2 px-2 py-1.5">
-                          <span
-                            className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
-                            style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
-                          >
-                            {PAGINA_LABEL[f.pagina] ?? f.pagina}
-                          </span>
-                          <input
-                            autoFocus
-                            value={editandoNome}
-                            onChange={e => setEditandoNome(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') confirmarEdicao(f.id)
-                              if (e.key === 'Escape') setEditandoId(null)
-                            }}
-                            className="flex-1 text-[12px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
-                            style={{ color: '#e8eaf0' }}
-                            maxLength={50}
-                          />
-                          <button
-                            onClick={() => confirmarEdicao(f.id)}
-                            disabled={!editandoNome.trim() || salvandoNome}
-                            title="Salvar nome"
-                            className="w-5 h-5 flex items-center justify-center rounded hover:bg-av-green/10 flex-shrink-0 disabled:opacity-40"
-                            style={{ color: '#00c896' }}
-                          >
-                            <Check size={12}/>
-                          </button>
-                          <button
-                            onClick={() => setEditandoId(null)}
-                            title="Cancelar"
-                            className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/5 flex-shrink-0"
-                            style={{ color: '#8b92a8' }}
-                          >
-                            <X size={12}/>
-                          </button>
-                        </div>
-                      ) : (
-                        /* ── Modo normal ── */
-                        <div
-                          className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] group cursor-pointer"
-                          onClick={() => setFiltroExpandido(expandido ? null : f.id)}
-                        >
-                          <span
-                            className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
-                            style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
-                          >
-                            {PAGINA_LABEL[f.pagina] ?? f.pagina}
-                          </span>
-                          <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>
-                            {f.nome}
-                          </span>
-                          <ChevronDown
-                            size={12}
-                            className="flex-shrink-0 transition-transform"
-                            style={{
-                              color: '#4a5168',
-                              transform: expandido ? 'rotate(180deg)' : 'rotate(0deg)',
-                            }}
-                          />
-                          <button
-                            onClick={e => { e.stopPropagation(); iniciarEdicao(f.id, f.nome) }}
-                            title="Renomear filtro"
-                            className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 flex-shrink-0"
-                            style={{ color: '#8b92a8' }}
-                          >
-                            <Pencil size={11}/>
-                          </button>
-                          <button
-                            onClick={e => { e.stopPropagation(); excluirFiltro(f.id) }}
-                            title="Excluir filtro"
-                            className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-red-400/10 flex-shrink-0"
-                            style={{ color: '#f87171' }}
-                          >
-                            <X size={12}/>
-                          </button>
-                        </div>
-                      )}
-
-                      {/* ── Detalhes expandidos ── */}
-                      {expandido && !editando && (
-                        <div className="mx-2 mb-1 px-3 py-2 rounded-lg"
-                          style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}
-                        >
-                          {detalhes.length === 0 ? (
-                            <p className="text-[11px]" style={{ color: '#4a5168' }}>Sem filtros específicos definidos.</p>
-                          ) : (
-                            <div className="space-y-1">
-                              {detalhes.map(d => (
-                                <div key={d.label} className="flex gap-2">
-                                  <span className="text-[10px] font-semibold w-24 flex-shrink-0" style={{ color: '#8b92a8' }}>
-                                    {d.label}
-                                  </span>
-                                  <span className="text-[11px]" style={{ color: '#c5cad8' }}>
-                                    {d.valor}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+          {/* Dados pessoais */}
+          <Secao titulo="Dados pessoais" icone={<User size={15}/>}>
+            <form onSubmit={salvarNome} className="space-y-3">
+              <div>
+                <label className={label}>Nome de exibição</label>
+                <input type="text" required value={nome} onChange={e => setNome(e.target.value)}
+                  className={input} placeholder="Seu nome"/>
               </div>
-              <div className="flex justify-end pt-3 mt-2 border-t border-white/8">
-                <button
-                  onClick={excluirTodos}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors"
-                >
-                  Remover todos ({filtros.length})
+              <div>
+                <label className={label}>E-mail</label>
+                <input type="email" disabled value={emailAtual}
+                  className={`${input} opacity-40 cursor-not-allowed`}/>
+                <p className="text-[11px] text-white/25 mt-1">O e-mail não pode ser alterado por aqui.</p>
+              </div>
+              <div className="flex justify-end pt-1">
+                <button type="submit" disabled={loadNome || nome.trim() === nomeAtual}
+                  className={`${btn} bg-av-green text-av-dark hover:bg-av-green/90`}>
+                  {loadNome ? 'Salvando...' : 'Salvar nome'}
                 </button>
               </div>
-            </>
-          )}
-        </Secao>
+              <Alerta fb={fbNome}/>
+            </form>
+          </Secao>
 
-        {/* ── Seção: Assistente de Lançamentos ─────────────── */}
-        <Secao titulo="Assistente de Lançamentos" icone={<Sparkles size={15}/>}>
-          {carregandoAss ? (
-            <p className="text-[12px] text-white/40">Carregando…</p>
-          ) : sugestoes.length === 0 ? (
-            <p className="text-[12px] text-white/40 leading-relaxed">
-              Nenhum padrão registrado. Os padrões são criados automaticamente ao salvar lançamentos.
-            </p>
-          ) : (
-            <>
-              <div className="space-y-0.5">
-                {sugestoes.map(s => {
-                  const editando     = editandoAss === s.id
-                  const catNome      = categorias.find(c => c.id === s.categoria_id)?.descricao
-                  const contaOrigem  = contas.find(c => c.conta_id === s.conta_origem_id)?.nome
-                  const contaDestino = contas.find(c => c.conta_id === s.conta_destino_id)?.nome
-
-                  return (
-                    <div key={s.id}>
-                      {editando ? (
-                        /* ── Modo edição ── */
-                        <div className="flex items-center gap-2 px-2 py-1.5">
-                          {s.is_transferencia && (
-                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
-                              style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>
-                              Transf.
-                            </span>
-                          )}
-                          <input
-                            autoFocus
-                            value={editandoAssDesc}
-                            onChange={e => setEditandoAssDesc(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter')  confirmarEdicaoAss(s.id)
-                              if (e.key === 'Escape') setEditandoAss(null)
-                            }}
-                            className="flex-1 text-[12px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
-                            style={{ color: '#e8eaf0' }}
-                            maxLength={200}
-                          />
-                          <button
-                            onClick={() => confirmarEdicaoAss(s.id)}
-                            disabled={editandoAssDesc.trim().length < 2 || salvandoAss}
-                            title="Salvar"
-                            className="w-5 h-5 flex items-center justify-center rounded hover:bg-av-green/10 flex-shrink-0 disabled:opacity-40"
-                            style={{ color: '#00c896' }}
-                          >
-                            <Check size={12}/>
-                          </button>
-                          <button
-                            onClick={() => setEditandoAss(null)}
-                            title="Cancelar"
-                            className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/5 flex-shrink-0"
-                            style={{ color: '#8b92a8' }}
-                          >
-                            <X size={12}/>
-                          </button>
-                        </div>
-                      ) : (
-                        /* ── Modo normal ── */
-                        <div className="group px-2 py-1.5 rounded-lg hover:bg-white/[0.03]">
-                          <div className="flex items-center gap-2">
-                            {s.is_transferencia && (
-                              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
-                                style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>
-                                Transf.
-                              </span>
-                            )}
-                            <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>
-                              {s.descricao}
-                            </span>
-                            <button
-                              onClick={() => iniciarEdicaoAss(s.id, s.descricao)}
-                              title="Editar descrição"
-                              className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 flex-shrink-0"
-                              style={{ color: '#8b92a8' }}
-                            >
-                              <Pencil size={11}/>
-                            </button>
-                            <button
-                              onClick={() => excluirAss(s.id)}
-                              title="Excluir padrão"
-                              className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-red-400/10 flex-shrink-0"
-                              style={{ color: '#f87171' }}
-                            >
-                              <X size={12}/>
-                            </button>
-                          </div>
-
-                          {/* Metadados: conta e categoria */}
-                          {(catNome || contaOrigem) && (
-                            <div className="flex items-center gap-2 mt-0.5 pl-0.5 flex-wrap">
-                              {contaOrigem && (
-                                <span className="text-[10px]" style={{ color: '#4a5168' }}>
-                                  {contaOrigem}
-                                  {contaDestino && (
-                                    <>
-                                      <ArrowRight size={9} className="inline mx-0.5"/>
-                                      {contaDestino}
-                                    </>
-                                  )}
-                                </span>
-                              )}
-                              {catNome && (
-                                <span className="text-[10px]" style={{ color: '#4a5168' }}>
-                                  {contaOrigem ? '·' : ''} {catNome}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+          {/* Alterar senha */}
+          <Secao titulo="Alterar senha" icone={<Lock size={15}/>}>
+            <form onSubmit={salvarSenha} className="space-y-3">
+              <div>
+                <label className={label}>Senha atual</label>
+                <input type="password" required value={senhaAtual} onChange={e => setSenhaAtual(e.target.value)}
+                  className={input} placeholder="••••••••"/>
               </div>
-              <div className="flex justify-end pt-3 mt-2 border-t border-white/8">
-                <button
-                  onClick={excluirTodasAss}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors"
-                >
-                  Remover todos ({sugestoes.length})
+              <div>
+                <label className={label}>Nova senha</label>
+                <input type="password" required value={novaSenha} onChange={e => setNovaSenha(e.target.value)}
+                  className={input} placeholder="Mínimo 6 caracteres"/>
+              </div>
+              <div>
+                <label className={label}>Confirmar nova senha</label>
+                <input type="password" required value={confirmar} onChange={e => setConfirmar(e.target.value)}
+                  className={input} placeholder="••••••••"/>
+              </div>
+              <div className="flex justify-end pt-1">
+                <button type="submit" disabled={loadSenha}
+                  className={`${btn} bg-blue-500/20 text-blue-300 hover:bg-blue-500/30`}>
+                  {loadSenha ? 'Atualizando...' : 'Atualizar senha'}
                 </button>
               </div>
-            </>
-          )}
-        </Secao>
+              <Alerta fb={fbSenha}/>
+            </form>
+          </Secao>
 
-        {/* ── Seção: Alterar senha ──────────────────────────── */}
-        <Secao titulo="Alterar senha" icone={<Lock size={15}/>}>
-          <form onSubmit={salvarSenha} className="space-y-3">
-            <div>
-              <label className={label}>Senha atual</label>
-              <input
-                type="password" required value={senhaAtual}
-                onChange={e => setSenhaAtual(e.target.value)}
-                className={input}
-                placeholder="••••••••"
-              />
-            </div>
-            <div>
-              <label className={label}>Nova senha</label>
-              <input
-                type="password" required value={novaSenha}
-                onChange={e => setNovaSenha(e.target.value)}
-                className={input}
-                placeholder="Mínimo 6 caracteres"
-              />
-            </div>
-            <div>
-              <label className={label}>Confirmar nova senha</label>
-              <input
-                type="password" required value={confirmar}
-                onChange={e => setConfirmar(e.target.value)}
-                className={input}
-                placeholder="••••••••"
-              />
-            </div>
-            <div className="flex justify-end pt-1">
-              <button
-                type="submit" disabled={loadSenha}
-                className={`${btn} bg-blue-500/20 text-blue-300 hover:bg-blue-500/30`}
-              >
-                {loadSenha ? 'Atualizando...' : 'Atualizar senha'}
-              </button>
-            </div>
-            <Alerta fb={fbSenha}/>
-          </form>
-        </Secao>
-
-        {/* ── Seção: Zona de perigo ─────────────────────────── */}
-        <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5">
-          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-red-500/15">
-            <span className="text-red-400/70"><Trash2 size={15}/></span>
-            <h2 className="text-[13px] font-semibold text-red-400">Zona de perigo</h2>
+          {/* Zona de perigo */}
+          <div className="bg-red-500/5 border border-red-500/20 rounded-2xl overflow-hidden">
+            <button type="button"
+              onClick={() => setZonaPerigo(v => !v)}
+              className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-red-500/5 transition-colors">
+              <div className="flex items-center gap-2">
+                <span className="text-red-400/70"><Trash2 size={14}/></span>
+                <span className="text-[12px] font-semibold text-red-400">Zona de perigo</span>
+              </div>
+              <ChevronDown size={13} className="transition-transform flex-shrink-0"
+                style={{ color: '#f87171', transform: zonaPerigo ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
+            </button>
+            {zonaPerigo && (
+              <div className="px-4 pb-4 border-t border-red-500/15 pt-3">
+                <p className="text-[11px] text-white/35 mb-3 leading-relaxed">
+                  Remove permanentemente <strong className="text-red-400/60">todos</strong> os dados: lançamentos, contas, categorias e histórico. Ação irreversível.
+                </p>
+                <button type="button"
+                  onClick={() => { setModalExcluir(true); setConfirmText(''); setErroExcluir('') }}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
+                  Excluir minha conta
+                </button>
+              </div>
+            )}
           </div>
-          <p className="text-[12px] text-white/40 mb-4 leading-relaxed">
-            Excluir sua conta remove permanentemente todos os seus dados: lançamentos, contas, categorias e histórico.
-            Esta ação <span className="text-red-400 font-semibold">não pode ser desfeita</span>.
-          </p>
-          <button
-            type="button"
-            onClick={() => { setModalExcluir(true); setConfirmText(''); setErroExcluir('') }}
-            className="px-4 py-2 rounded-lg text-[12px] font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
-          >
-            Excluir minha conta
-          </button>
+
         </div>
 
-      </div>
+        {/* ── Coluna direita ────────────────────────────────── */}
+        <div className="flex flex-col gap-4">
 
-      {/* ── Modal de confirmação ───────────────────────────────── */}
+          {/* Filtros salvos */}
+          <Secao titulo="Filtros salvos" icone={<Bookmark size={15}/>}>
+            {carregandoFiltros ? (
+              <p className="text-[12px] text-white/40">Carregando…</p>
+            ) : filtros.length === 0 ? (
+              <p className="text-[12px] text-white/40">Nenhum filtro salvo.</p>
+            ) : (
+              <>
+                <div className="space-y-0.5">
+                  {filtros.map(f => {
+                    const expandido = filtroExpandido === f.id
+                    const editando  = editandoId === f.id
+                    const detalhes  = detalhesFiltro(f.dados)
+                    return (
+                      <div key={f.id}>
+                        {editando ? (
+                          <div className="flex items-center gap-2 px-2 py-1.5">
+                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                              style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}>
+                              {PAGINA_LABEL[f.pagina] ?? f.pagina}
+                            </span>
+                            <input autoFocus value={editandoNome} onChange={e => setEditandoNome(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') confirmarEdicao(f.id)
+                                if (e.key === 'Escape') setEditandoId(null)
+                              }}
+                              className="flex-1 text-[12px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
+                              style={{ color: '#e8eaf0' }} maxLength={50}/>
+                            <button onClick={() => confirmarEdicao(f.id)} disabled={!editandoNome.trim() || salvandoNome}
+                              title="Salvar nome"
+                              className="w-5 h-5 flex items-center justify-center rounded hover:bg-av-green/10 flex-shrink-0 disabled:opacity-40"
+                              style={{ color: '#00c896' }}><Check size={12}/></button>
+                            <button onClick={() => setEditandoId(null)} title="Cancelar"
+                              className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/5 flex-shrink-0"
+                              style={{ color: '#8b92a8' }}><X size={12}/></button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] group cursor-pointer"
+                            onClick={() => setFiltroExpandido(expandido ? null : f.id)}>
+                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                              style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}>
+                              {PAGINA_LABEL[f.pagina] ?? f.pagina}
+                            </span>
+                            <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>{f.nome}</span>
+                            <ChevronDown size={12} className="flex-shrink-0 transition-transform"
+                              style={{ color: '#4a5168', transform: expandido ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
+                            <button onClick={e => { e.stopPropagation(); iniciarEdicao(f.id, f.nome) }} title="Renomear filtro"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 flex-shrink-0"
+                              style={{ color: '#8b92a8' }}><Pencil size={11}/></button>
+                            <button onClick={e => { e.stopPropagation(); excluirFiltro(f.id) }} title="Excluir filtro"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-red-400/10 flex-shrink-0"
+                              style={{ color: '#f87171' }}><X size={12}/></button>
+                          </div>
+                        )}
+                        {expandido && !editando && (
+                          <div className="mx-2 mb-1 px-3 py-2 rounded-lg"
+                            style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            {detalhes.length === 0 ? (
+                              <p className="text-[11px]" style={{ color: '#4a5168' }}>Sem filtros específicos definidos.</p>
+                            ) : (
+                              <div className="space-y-1">
+                                {detalhes.map(d => (
+                                  <div key={d.label} className="flex gap-2">
+                                    <span className="text-[10px] font-semibold w-24 flex-shrink-0" style={{ color: '#8b92a8' }}>{d.label}</span>
+                                    <span className="text-[11px]" style={{ color: '#c5cad8' }}>{d.valor}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="flex justify-end pt-3 mt-2 border-t border-white/8">
+                  <button onClick={excluirTodos}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
+                    Remover todos ({filtros.length})
+                  </button>
+                </div>
+              </>
+            )}
+          </Secao>
+
+          {/* Assistente de Lançamentos */}
+          <Secao titulo="Assistente de Lançamentos" icone={<Sparkles size={15}/>}>
+
+            {/* Toolbar: busca + analisar */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="relative flex-1">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: '#4a5168' }}/>
+                <input
+                  type="text" value={buscaAss} onChange={e => mudarBusca(e.target.value)}
+                  placeholder="Buscar padrão…"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg pl-7 pr-3 py-1.5 text-[12px] placeholder-white/20 focus:outline-none focus:border-white/20 transition-colors"
+                  style={{ color: '#c5cad8' }}
+                />
+              </div>
+              <button onClick={analisarPadroes} disabled={analisando}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-50 flex-shrink-0"
+                style={{ background: 'rgba(167,139,250,0.10)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.20)' }}>
+                {analisando
+                  ? <><RefreshCw size={12} className="animate-spin"/> Analisando…</>
+                  : <><Wand2 size={12}/> Analisar</>
+                }
+              </button>
+            </div>
+
+            {carregandoAss ? (
+              <p className="text-[12px] text-white/40">Carregando…</p>
+            ) : sugestoes.length === 0 ? (
+              <p className="text-[12px] text-white/40 leading-relaxed">
+                Nenhum padrão registrado. Os padrões são criados automaticamente ao salvar lançamentos.
+              </p>
+            ) : (
+              <>
+                {/* Lista */}
+                <div className="space-y-0.5 max-h-[260px] overflow-y-auto pr-0.5">
+                  {sugestoesPage.map(s => {
+                    const editando     = editandoAss === s.id
+                    const catNome      = categorias.find(c => c.id === s.categoria_id)?.descricao
+                    const contaOrigem  = contas.find(c => c.conta_id === s.conta_origem_id)?.nome
+                    const contaDestino = contas.find(c => c.conta_id === s.conta_destino_id)?.nome
+                    return (
+                      <div key={s.id}>
+                        {editando ? (
+                          <div className="flex items-center gap-2 px-2 py-1.5">
+                            {s.is_transferencia && (
+                              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                                style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>Transf.</span>
+                            )}
+                            <input autoFocus value={editandoAssDesc} onChange={e => setEditandoAssDesc(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter')  confirmarEdicaoAss(s.id)
+                                if (e.key === 'Escape') setEditandoAss(null)
+                              }}
+                              className="flex-1 text-[12px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
+                              style={{ color: '#e8eaf0' }} maxLength={200}/>
+                            <button onClick={() => confirmarEdicaoAss(s.id)}
+                              disabled={editandoAssDesc.trim().length < 2 || salvandoAss} title="Salvar"
+                              className="w-5 h-5 flex items-center justify-center rounded hover:bg-av-green/10 flex-shrink-0 disabled:opacity-40"
+                              style={{ color: '#00c896' }}><Check size={12}/></button>
+                            <button onClick={() => setEditandoAss(null)} title="Cancelar"
+                              className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/5 flex-shrink-0"
+                              style={{ color: '#8b92a8' }}><X size={12}/></button>
+                          </div>
+                        ) : (
+                          <div className="group px-2 py-1.5 rounded-lg hover:bg-white/[0.03]">
+                            <div className="flex items-center gap-2">
+                              {s.is_transferencia && (
+                                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                                  style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>Transf.</span>
+                              )}
+                              <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>{s.descricao}</span>
+                              <button onClick={() => iniciarEdicaoAss(s.id, s.descricao)} title="Editar descrição"
+                                className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 flex-shrink-0"
+                                style={{ color: '#8b92a8' }}><Pencil size={11}/></button>
+                              <button onClick={() => excluirAss(s.id)} title="Excluir padrão"
+                                className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-red-400/10 flex-shrink-0"
+                                style={{ color: '#f87171' }}><X size={12}/></button>
+                            </div>
+                            {(catNome || contaOrigem) && (
+                              <div className="flex items-center gap-2 mt-0.5 pl-0.5 flex-wrap">
+                                {contaOrigem && (
+                                  <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                                    {contaOrigem}
+                                    {contaDestino && <><ArrowRight size={9} className="inline mx-0.5"/>{contaDestino}</>}
+                                  </span>
+                                )}
+                                {catNome && (
+                                  <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                                    {contaOrigem ? '· ' : ''}{catNome}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  {sugestoesFiltradas.length === 0 && buscaAss && (
+                    <p className="text-[12px] px-2 py-3 text-center" style={{ color: '#4a5168' }}>
+                      Nenhum padrão encontrado para "{buscaAss}".
+                    </p>
+                  )}
+                </div>
+
+                {/* Paginação + rodapé */}
+                <div className="flex items-center justify-between pt-3 mt-2 border-t border-white/8">
+                  {totalPaginas > 1 ? (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setPaginaAss(p => Math.max(0, p - 1))} disabled={paginaSegura === 0}
+                        className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/5 disabled:opacity-30"
+                        style={{ color: '#8b92a8' }}><ChevronLeft size={13}/></button>
+                      <span className="text-[11px] px-1 tabular-nums" style={{ color: '#4a5168' }}>
+                        {paginaSegura + 1} / {totalPaginas}
+                      </span>
+                      <button onClick={() => setPaginaAss(p => Math.min(totalPaginas - 1, p + 1))} disabled={paginaSegura === totalPaginas - 1}
+                        className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/5 disabled:opacity-30"
+                        style={{ color: '#8b92a8' }}><ChevronRight size={13}/></button>
+                      <span className="text-[11px] ml-1" style={{ color: '#4a5168' }}>
+                        ({sugestoesFiltradas.length} {buscaAss ? 'encontrado' : 'total'}{sugestoesFiltradas.length !== 1 ? 's' : ''})
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-[11px]" style={{ color: '#4a5168' }}>
+                      {sugestoesFiltradas.length} padrão{sugestoesFiltradas.length !== 1 ? 'ões' : ''}
+                      {buscaAss ? ' encontrado' : ''}
+                      {sugestoesFiltradas.length !== 1 && buscaAss ? 's' : ''}
+                    </span>
+                  )}
+                  <button onClick={excluirTodasAss}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
+                    Remover todos ({sugestoes.length})
+                  </button>
+                </div>
+              </>
+            )}
+          </Secao>
+
+        </div>{/* fim coluna direita */}
+      </div>{/* fim grid */}
+
+      {/* ── Modal de padrões sugeridos ────────────────────────── */}
+      {sugeridas !== null && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4">
+          <div className="w-full max-w-md rounded-2xl flex flex-col"
+            style={{ background: '#0f1929', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '85vh' }}>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-white/8 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <Wand2 size={15} style={{ color: '#a78bfa' }}/>
+                <span className="text-[14px] font-semibold text-white">Padrões detectados</span>
+                {sugeridas.length > 0 && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa' }}>
+                    {sugeridas.length}
+                  </span>
+                )}
+              </div>
+              <button onClick={() => { setSugeridas(null); setResultadoSug(null) }}
+                className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-white/5"
+                style={{ color: '#8b92a8' }}><X size={14}/></button>
+            </div>
+
+            {/* Feedback */}
+            {resultadoSug && (
+              <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-[12px] flex items-center gap-2"
+                style={{ background: 'rgba(0,200,150,0.08)', color: '#00c896' }}>
+                <Check size={13}/>
+                {resultadoSug.ok} padrão{resultadoSug.ok !== 1 ? 'ões' : ''} adicionado{resultadoSug.ok !== 1 ? 's' : ''}
+                {resultadoSug.fail > 0 && <span style={{ color: '#f87171' }}>· {resultadoSug.fail} falhou</span>}
+              </div>
+            )}
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-5 py-3">
+              {sugeridas.length === 0 ? (
+                <p className="text-[12px] text-center py-6" style={{ color: '#8b92a8' }}>
+                  {resultadoSug
+                    ? 'Todos os padrões selecionados foram adicionados.'
+                    : 'Nenhum padrão novo encontrado nos últimos 12 meses.'}
+                </p>
+              ) : (
+                <>
+                  <label className="flex items-center gap-2 px-2 py-2 mb-1 cursor-pointer rounded-lg hover:bg-white/[0.03]">
+                    <input type="checkbox"
+                      checked={selecionadas.size === sugeridas.length && sugeridas.length > 0}
+                      onChange={e => setSelecionadas(e.target.checked ? new Set(sugeridas.map(s => s.key)) : new Set())}
+                      className="accent-[#a78bfa] w-3.5 h-3.5"/>
+                    <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>Selecionar todos</span>
+                  </label>
+                  <div className="space-y-0.5">
+                    {sugeridas.map(s => (
+                      <label key={s.key}
+                        className="flex items-start gap-2.5 px-2 py-2 rounded-lg cursor-pointer hover:bg-white/[0.03]">
+                        <input type="checkbox" checked={selecionadas.has(s.key)}
+                          onChange={e => {
+                            const next = new Set(selecionadas)
+                            if (e.target.checked) next.add(s.key); else next.delete(s.key)
+                            setSelecionadas(next)
+                          }}
+                          className="accent-[#a78bfa] w-3.5 h-3.5 mt-0.5 flex-shrink-0"/>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[12px] truncate" style={{ color: '#e8eaf0' }}>{s.descricao}</span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                              style={{ background: 'rgba(167,139,250,0.10)', color: '#a78bfa' }}>
+                              {s.ocorrencias}×
+                            </span>
+                          </div>
+                          {(s.conta_nome || s.categoria_nome) && (
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {s.conta_nome && <span className="text-[10px]" style={{ color: '#4a5168' }}>{s.conta_nome}</span>}
+                              {s.conta_nome && s.categoria_nome && <span className="text-[10px]" style={{ color: '#4a5168' }}>·</span>}
+                              {s.categoria_nome && <span className="text-[10px]" style={{ color: '#4a5168' }}>{s.categoria_nome}</span>}
+                            </div>
+                          )}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            {sugeridas.length > 0 && (
+              <div className="flex items-center justify-between px-5 py-4 border-t border-white/8 flex-shrink-0">
+                <span className="text-[11px]" style={{ color: '#8b92a8' }}>
+                  {selecionadas.size} de {sugeridas.length} selecionado{selecionadas.size !== 1 ? 's' : ''}
+                </span>
+                <div className="flex gap-2">
+                  <button onClick={() => { setSugeridas(null); setResultadoSug(null) }}
+                    className="px-3 py-1.5 rounded-lg text-[12px] text-white/40 hover:text-white/70 transition-colors">
+                    Fechar
+                  </button>
+                  <button onClick={adicionarSelecionadas} disabled={selecionadas.size === 0 || salvandoSug}
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-colors disabled:opacity-40"
+                    style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.25)' }}>
+                    {salvandoSug
+                      ? <><RefreshCw size={12} className="animate-spin"/> Salvando…</>
+                      : <><Check size={12}/> Adicionar {selecionadas.size > 0 ? `${selecionadas.size} ` : ''}selecionado{selecionadas.size !== 1 ? 's' : ''}</>
+                    }
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal de confirmação de exclusão ──────────────────── */}
       {modalExcluir && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-[#0f1929] border border-white/10 rounded-2xl p-6 w-full max-w-sm">
@@ -615,33 +775,19 @@ export default function PerfilPage() {
             <p className="text-[12px] text-white/50 mb-4 leading-relaxed">
               Para confirmar, digite <span className="text-white font-semibold">EXCLUIR</span> no campo abaixo.
             </p>
-            <input
-              type="text"
-              value={confirmText}
-              onChange={e => setConfirmText(e.target.value)}
+            <input type="text" value={confirmText} onChange={e => setConfirmText(e.target.value)}
               placeholder="EXCLUIR"
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-red-500/50 transition-colors mb-3"
-            />
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-red-500/50 transition-colors mb-3"/>
             {erroExcluir && (
-              <p className="text-[12px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2 mb-3">
-                {erroExcluir}
-              </p>
+              <p className="text-[12px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2 mb-3">{erroExcluir}</p>
             )}
             <div className="flex gap-2 justify-end">
-              <button
-                type="button"
-                disabled={loadExcluir}
-                onClick={() => setModalExcluir(false)}
-                className="px-4 py-2 rounded-lg text-[12px] text-white/50 hover:text-white/80 transition-colors disabled:opacity-50"
-              >
+              <button type="button" disabled={loadExcluir} onClick={() => setModalExcluir(false)}
+                className="px-4 py-2 rounded-lg text-[12px] text-white/50 hover:text-white/80 transition-colors disabled:opacity-50">
                 Cancelar
               </button>
-              <button
-                type="button"
-                disabled={confirmText !== 'EXCLUIR' || loadExcluir}
-                onClick={excluirConta}
-                className="px-4 py-2 rounded-lg text-[12px] font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-40"
-              >
+              <button type="button" disabled={confirmText !== 'EXCLUIR' || loadExcluir} onClick={excluirConta}
+                className="px-4 py-2 rounded-lg text-[12px] font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-40">
                 {loadExcluir ? 'Excluindo...' : 'Excluir permanentemente'}
               </button>
             </div>

@@ -5,9 +5,11 @@ import {
   Chart as ChartJS, ArcElement, CategoryScale, LinearScale,
   BarElement, LineElement, PointElement, Tooltip, Legend, Filler,
 } from 'chart.js'
-import { Download, RefreshCw, Search, X, Pencil, ChevronDown } from 'lucide-react'
+import { Download, RefreshCw, Search, X, Pencil, ChevronDown, Tags, Check, AlertCircle } from 'lucide-react'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
+import { useCategorias } from '../hooks/useCategorias'
+import { apiMutate } from '../lib/api'
 import { formatBRL, mesLabel } from '../lib/utils'
 
 ChartJS.register(ArcElement, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, Filler)
@@ -205,8 +207,9 @@ function detectarRecorrencias(
 
     // Fallback MENSAL: séries longas com cadência irregular (entre 20 e 50 dias)
     // ainda assim costumam ser cobranças mensais (boleto pulado, antecipado, etc).
-    let freq = detectarFrequencia(avgDias)
-    if (!freq && items.length >= 4 && avgDias >= 20 && avgDias <= 50) freq = 'MENSAL'
+    const avgDiasArredondado = Math.round(avgDias)
+    let freq = detectarFrequencia(avgDiasArredondado)
+    if (!freq && items.length >= 4 && avgDiasArredondado >= 20 && avgDiasArredondado <= 50) freq = 'MENSAL'
     if (!freq) {
       pushDebug(chave, items, { avgDias, valorMedio, maxVarPct: maxVar * 100, motivo: 'freq_invalida' })
       continue
@@ -311,6 +314,49 @@ export default function AssinaturasPage() {
   const [recSelecionada, setRecSelecionada] = useState<Recorrencia | null>(null)
   const [editandoId, setEditandoId]         = useState<string | null>(null)
   const detalheRef = useRef<HTMLDivElement>(null)
+
+  // ── Reclassificação em massa ──────────────────────────────
+  const { categorias } = useCategorias()
+  const [reclassificando, setReclassificando] = useState<Recorrencia | null>(null)
+  const [novaDescricao,   setNovaDescricao]   = useState('')
+  const [novaCategoriaId, setNovaCategoriaId] = useState('')
+  const [progresso,       setProgresso]       = useState<{ atual: number; total: number } | null>(null)
+  const [erroRec,         setErroRec]         = useState<string | null>(null)
+
+  const abrirReclassificar = (r: Recorrencia) => {
+    setReclassificando(r)
+    setNovaDescricao(r.nome)
+    setNovaCategoriaId(r.categoriaId ?? '')
+    setErroRec(null)
+  }
+
+  const executarReclassificacao = async () => {
+    if (!reclassificando) return
+    const ids = reclassificando.lancamentos.map(l => l.id)
+    const descMudou = novaDescricao.trim() !== '' && novaDescricao.trim() !== reclassificando.nome
+    const catMudou  = novaCategoriaId !== '' && novaCategoriaId !== (reclassificando.categoriaId ?? '')
+    if (!descMudou && !catMudou) { setErroRec('Nenhuma alteração detectada.'); return }
+
+    setErroRec(null)
+    setProgresso({ atual: 0, total: ids.length })
+
+    const body: Record<string, unknown> = {}
+    if (descMudou) body.descricao    = novaDescricao.trim()
+    if (catMudou)  body.categoria_id = novaCategoriaId
+
+    let falhas = 0
+    for (let i = 0; i < ids.length; i++) {
+      const res = await apiMutate(`/transacoes/${ids[i]}?escopo=SOMENTE_ESTE`, 'PUT', body)
+      if (!res.ok) falhas++
+      setProgresso({ atual: i + 1, total: ids.length })
+    }
+
+    setReclassificando(null)
+    setProgresso(null)
+    _saved = null
+    await carregar(true)
+    if (falhas > 0) setErroRec(`${falhas} lançamento(s) não puderam ser atualizados.`)
+  }
 
   useEffect(() => {
     if (recSelecionada && detalheRef.current) {
@@ -750,13 +796,23 @@ export default function AssinaturasPage() {
                     {FREQ_LABEL[recSelecionada.frequencia]} · {formatBRL(recSelecionada.valorMensal)}/mês
                   </p>
                 </div>
-                <button
-                  onClick={() => setRecSelecionada(null)}
-                  className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-                  style={{ color: '#8b92a8' }}
-                >
-                  <X size={14} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={e => { e.stopPropagation(); abrirReclassificar(recSelecionada) }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-medium transition-all hover:border-purple-400/50 hover:text-purple-300"
+                    style={{ borderColor: 'rgba(167,139,250,0.35)', color: '#a78bfa' }}
+                    title="Reclassificar todos os lançamentos deste grupo"
+                  >
+                    <Tags size={12} /> Reclassificar em massa
+                  </button>
+                  <button
+                    onClick={() => setRecSelecionada(null)}
+                    className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                    style={{ color: '#8b92a8' }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -821,6 +877,139 @@ export default function AssinaturasPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* ── Modal reclassificação em massa ── */}
+      {reclassificando && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => { if (!progresso) setReclassificando(null) }} />
+          <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-5">
+
+            {/* Header */}
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(167,139,250,0.12)' }}>
+                <Tags size={16} style={{ color: '#a78bfa' }} />
+              </div>
+              <div>
+                <p className="text-[14px] font-semibold text-white">Reclassificar em massa</p>
+                <p className="text-[10px]" style={{ color: '#8b92a8' }}>
+                  {reclassificando.ocorrencias} lançamento{reclassificando.ocorrencias !== 1 ? 's' : ''} serão alterados
+                </p>
+              </div>
+            </div>
+
+            {/* Origem */}
+            <div className="rounded-xl p-3 mb-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <p className="text-[9px] font-semibold uppercase tracking-wider mb-2" style={{ color: '#4a5168' }}>Grupo atual</p>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-[12px] font-medium text-white">{reclassificando.nome}</p>
+                  <p className="text-[11px]" style={{ color: '#8b92a8' }}>{reclassificando.categoria}</p>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(167,139,250,0.12)', color: '#a78bfa' }}>
+                  {reclassificando.ocorrencias}×
+                </span>
+              </div>
+            </div>
+
+            {/* Campos */}
+            <div className="space-y-3 mb-5">
+              {/* Nova descrição */}
+              <div>
+                <label className="text-[11px] font-medium block mb-1.5" style={{ color: '#8b92a8' }}>
+                  Nova descrição
+                </label>
+                <input
+                  type="text"
+                  value={novaDescricao}
+                  onChange={e => setNovaDescricao(e.target.value)}
+                  disabled={!!progresso}
+                  className="w-full rounded-lg px-3 py-2 text-[13px] text-white focus:outline-none disabled:opacity-50"
+                  style={{ background: '#131825', border: '1px solid rgba(255,255,255,0.12)' }}
+                  onFocus={e => { (e.target as HTMLElement).style.borderColor = 'rgba(167,139,250,0.5)' }}
+                  onBlur={e  => { (e.target as HTMLElement).style.borderColor = 'rgba(255,255,255,0.12)' }}
+                />
+              </div>
+
+              {/* Nova categoria */}
+              <div>
+                <label className="text-[11px] font-medium block mb-1.5" style={{ color: '#8b92a8' }}>
+                  Nova categoria
+                </label>
+                <select
+                  value={novaCategoriaId}
+                  onChange={e => setNovaCategoriaId(e.target.value)}
+                  disabled={!!progresso}
+                  className="w-full rounded-lg px-3 py-2 text-[13px] focus:outline-none disabled:opacity-50"
+                  style={{
+                    background: '#131825', border: '1px solid rgba(255,255,255,0.12)',
+                    color: novaCategoriaId ? '#e8eaf0' : '#4a5168',
+                  }}
+                >
+                  <option value="">Manter categoria atual</option>
+                  {/* Pais */}
+                  {categorias.filter(c => !c.id_pai && c.ativa && !c.protegida).map(pai => (
+                    <optgroup key={pai.id} label={`${pai.icone ?? ''} ${pai.descricao}`.trim()}>
+                      <option value={pai.id}>{pai.icone ?? ''} {pai.descricao}</option>
+                      {categorias.filter(c => c.id_pai === pai.id && c.ativa).map(filho => (
+                        <option key={filho.id} value={filho.id}>
+                          &nbsp;&nbsp;{filho.icone ?? ''} {filho.descricao}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Progresso */}
+            {progresso && (
+              <div className="mb-4">
+                <div className="flex justify-between mb-1">
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Atualizando…</span>
+                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>{progresso.atual}/{progresso.total}</span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-200"
+                    style={{ width: `${(progresso.atual / progresso.total) * 100}%`, background: '#a78bfa' }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Erro */}
+            {erroRec && (
+              <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)' }}>
+                <AlertCircle size={13} style={{ color: '#f87171', flexShrink: 0 }} />
+                <p className="text-[11px]" style={{ color: '#f87171' }}>{erroRec}</p>
+              </div>
+            )}
+
+            {/* Botões */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setReclassificando(null)}
+                disabled={!!progresso}
+                className="flex-1 py-2.5 rounded-lg border text-[12px] font-semibold transition-all hover:border-white/20 disabled:opacity-50"
+                style={{ borderColor: 'rgba(255,255,255,0.1)', color: '#8b92a8' }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={executarReclassificacao}
+                disabled={!!progresso}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
+                style={{ background: '#a78bfa', color: '#0a0f1a' }}
+              >
+                {progresso
+                  ? <><span className="inline-block w-3 h-3 rounded-full border-2 border-[#0a0f1a]/40 border-t-[#0a0f1a] animate-spin" /> Atualizando…</>
+                  : <><Check size={13} /> Reclassificar {reclassificando.ocorrencias}×</>
+                }
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* DrawerLancamento para edição */}
