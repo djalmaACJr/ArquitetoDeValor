@@ -1,7 +1,7 @@
 // src/pages/DashboardPage.tsx
 import { useState, useEffect, useCallback, memo, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus } from 'lucide-react'
+import { ChevronDown, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus, Search } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { log } from '../lib/logger'
 import { mesLabel, formatBRL, formatData, CORES_CATEGORIA } from '../lib/utils'
@@ -614,59 +614,256 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
 })
 
 // -- Grafico donut de categoria ---------------------------
-const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dados }: {
+const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dados, topN = 5 }: {
   titulo: string; subtitulo: string; total: number
   dados: DespesaCategoria[]; corCentro: string
+  topN?: number
 }) {
-  const labels = dados.map(d => d.categoria_nome)
-  const values = dados.map(d => d.total)
-  const cores  = dados.map((_, i) => CORES_CATEGORIA[i % CORES_CATEGORIA.length])
+  const [expandido, setExpandido] = useState(false)
+  const [busca, setBusca] = useState('')
+
+  // Normaliza para busca: lowercase + sem acento. Mesmo padrão de outras telas.
+  const normalizar = (s: string) =>
+    s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  const dadosFiltrados = busca.trim()
+    ? dados.filter(d => normalizar(d.categoria_nome).includes(normalizar(busca.trim())))
+    : dados
+  const totalFiltrado = busca.trim()
+    ? dadosFiltrados.reduce((s, d) => s + d.total, 0)
+    : total
+
+  // Reseta busca ao fechar
+  const fechar = () => { setExpandido(false); setBusca('') }
+
+  // Soma das categorias mostradas (no donut/lista compacta). Se houver mais que
+  // topN, a soma das demais vira a fatia "Outros".
+  const tops    = dados.slice(0, topN)
+  const sobras  = dados.slice(topN)
+  const outros  = sobras.reduce((s, d) => s + d.total, 0)
+  const temOutros = sobras.length > 0
+
+  const labelsChart = temOutros ? [...tops.map(d => d.categoria_nome), 'Outros'] : tops.map(d => d.categoria_nome)
+  const valuesChart = temOutros ? [...tops.map(d => d.total),       outros]      : tops.map(d => d.total)
+  const coresChart  = temOutros
+    ? [...tops.map((_, i) => CORES_CATEGORIA[i % CORES_CATEGORIA.length]), '#8b92a8']
+    : tops.map((_, i) => CORES_CATEGORIA[i % CORES_CATEGORIA.length])
+
+  const formatPct = (v: number) => total > 0 ? ((v / total) * 100).toFixed(1) : '0.0'
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-      <p className="text-[13px] font-semibold text-gray-700 dark:text-gray-200 mb-0.5">{titulo}</p>
-      <p className="text-[11px] text-gray-400 mb-3">{subtitulo} · total {formatBRL(total)}</p>
-      <div style={{ position: 'relative', width: '100%', height: '250px', marginBottom: '1rem' }}>
+      {/* Cabeçalho — deixa claro que mostra Top N de M */}
+      <div className="flex items-center justify-between mb-0.5">
+        <p className="text-[13px] font-semibold text-gray-700 dark:text-gray-200">{titulo}</p>
+        {dados.length > topN && (
+          <button
+            onClick={() => setExpandido(true)}
+            className="text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors hover:bg-blue-500/20"
+            style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
+            title="Ver todas as categorias"
+          >
+            Ver todas ({dados.length})
+          </button>
+        )}
+      </div>
+      <p className="text-[11px] text-gray-400 mb-3">
+        {subtitulo} · total {formatBRL(total)}
+        {dados.length > topN && <> · exibindo top {topN} de {dados.length}</>}
+      </p>
+
+      {/* Donut clicável — também abre a expansão */}
+      <div
+        style={{ position: 'relative', width: '100%', height: '250px', marginBottom: '1rem', cursor: dados.length > topN ? 'pointer' : 'default' }}
+        onClick={() => { if (dados.length > topN) setExpandido(true) }}
+      >
         <Doughnut
-          data={{ 
-            labels, 
-            datasets: [{ 
-              data: values, 
-              backgroundColor: cores, 
-              borderWidth: 0, 
-              hoverOffset: 4 
-            }] 
+          data={{
+            labels: labelsChart,
+            datasets: [{
+              data: valuesChart,
+              backgroundColor: coresChart,
+              borderWidth: 0,
+              hoverOffset: 4,
+            }],
           }}
-          options={{ 
-            responsive: true, 
+          options={{
+            responsive: true,
             maintainAspectRatio: false,
-            cutout: '68%', 
-            plugins: { 
-              legend: { display: false }, 
+            cutout: '68%',
+            plugins: {
+              legend: { display: false },
               tooltip: {
                 callbacks: {
-                  label: ctx => {
-                    const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : '0.0'
-                    return ` ${formatBRL(ctx.parsed)} (${pct}%)`
-                  }
-                }
-              }
-            } 
+                  label: ctx => ` ${formatBRL(ctx.parsed)} (${formatPct(ctx.parsed)}%)`,
+                },
+              },
+            },
           }}
         />
       </div>
+
+      {/* Lista compacta — apenas top N */}
       <div className="space-y-1.5">
-        {dados.map((d, i) => (
+        {tops.map((d, i) => (
           <div key={d.categoria_id} className="flex items-center gap-1.5 text-[11px]">
             <span className="w-[76px] text-gray-400 truncate">{d.categoria_nome}</span>
             <div className="flex-1 h-[3px] rounded-full bg-gray-100 dark:bg-gray-700">
-              <div className="h-full rounded-full" style={{ width: `${total > 0 ? (d.total/total)*100 : 0}%`, background: cores[i] }}/>
+              <div className="h-full rounded-full" style={{ width: `${total > 0 ? (d.total / total) * 100 : 0}%`, background: coresChart[i] }} />
             </div>
-            <span className="w-[34px] text-right text-gray-400">{total > 0 ? ((d.total / total) * 100).toFixed(1) : '0.0'}%</span>
+            <span className="w-[34px] text-right text-gray-400">{formatPct(d.total)}%</span>
             <span className="w-[50px] text-right font-semibold text-gray-700 dark:text-gray-200">{formatBRL(d.total)}</span>
           </div>
         ))}
+        {temOutros && (
+          <div className="flex items-center gap-1.5 text-[11px] pt-1 border-t border-white/5">
+            <span className="w-[76px] text-gray-500 italic truncate">Outros ({sobras.length})</span>
+            <div className="flex-1 h-[3px] rounded-full bg-gray-100 dark:bg-gray-700">
+              <div className="h-full rounded-full" style={{ width: `${total > 0 ? (outros / total) * 100 : 0}%`, background: '#8b92a8' }} />
+            </div>
+            <span className="w-[34px] text-right text-gray-400">{formatPct(outros)}%</span>
+            <span className="w-[50px] text-right font-semibold text-gray-500">{formatBRL(outros)}</span>
+          </div>
+        )}
       </div>
+
+      {/* Modal expandido — lista completa com valor e % */}
+      {expandido && (
+        <div
+          className="fixed inset-0 z-[150] flex items-center justify-center px-4"
+          onClick={fechar}
+        >
+          <div className="fixed inset-0 bg-black/60" />
+          <div
+            className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+              <div>
+                <p className="text-[14px] font-bold text-gray-800 dark:text-gray-100">{titulo} — todas as categorias</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  {subtitulo} ·{' '}
+                  {busca.trim()
+                    ? <>{dadosFiltrados.length} de {dados.length} categorias · subtotal {formatBRL(totalFiltrado)}</>
+                    : <>{dados.length} categorias · total {formatBRL(total)}</>
+                  }
+                </p>
+              </div>
+              <button
+                onClick={fechar}
+                className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                style={{ color: '#8b92a8' }}
+              >
+                <span className="text-lg">×</span>
+              </button>
+            </div>
+
+            {/* Campo de busca */}
+            <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-700">
+              <div
+                className="flex items-center gap-2 rounded-lg px-3 py-1.5 border"
+                style={{
+                  background: '#131825',
+                  borderColor: busca ? 'rgba(77,166,255,0.4)' : 'rgba(255,255,255,0.1)',
+                }}
+              >
+                <Search size={13} style={{ color: '#8b92a8' }} />
+                <input
+                  autoFocus
+                  type="text"
+                  value={busca}
+                  onChange={e => setBusca(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setBusca('') } }}
+                  placeholder="Buscar categoria..."
+                  className="flex-1 bg-transparent text-[12px] text-white placeholder-[#4a5168] focus:outline-none"
+                />
+                {busca && (
+                  <button
+                    onClick={() => setBusca('')}
+                    title="Limpar busca"
+                    className="p-0.5 rounded hover:bg-white/10 transition-colors"
+                  >
+                    <X size={12} style={{ color: '#8b92a8' }} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="overflow-y-auto px-5 pb-5">
+              {dados.length === 0 ? (
+                <p className="text-[12px] text-center text-gray-400 py-8">Nenhuma categoria neste período.</p>
+              ) : dadosFiltrados.length === 0 ? (
+                <p className="text-[12px] text-center text-gray-400 py-8">
+                  Nenhuma categoria encontrada para "{busca.trim()}".
+                </p>
+              ) : (
+                <table className="w-full border-collapse">
+                  <thead>
+                    {/* Cabeçalho sticky: bg sólido nas células (mais robusto que no thead/tr)
+                        e shadow inset embaixo para criar separação visual ao rolar */}
+                    <tr className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                      {(['#', 'Categoria', 'Valor', '%', 'Distribuição'] as const).map((h, i) => (
+                        <th
+                          key={h}
+                          className={
+                            'sticky top-0 z-10 bg-white dark:bg-gray-800 py-2 ' +
+                            (i === 0 ? 'text-left w-[30px] ' :
+                             i === 1 ? 'text-left ' :
+                             i === 2 ? 'text-right w-[100px] ' :
+                             i === 3 ? 'text-right w-[60px] ' :
+                                       'text-left pl-3 w-[120px] ')
+                          }
+                          style={{ boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.08), 0 1px 0 rgba(255,255,255,0.08)' }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dadosFiltrados.map((d) => {
+                      // Cor mantém o índice ORIGINAL da categoria no ranking
+                      // (para coerência visual com o donut, independente do filtro)
+                      const idxOriginal = dados.findIndex(x => x.categoria_id === d.categoria_id)
+                      const cor = CORES_CATEGORIA[idxOriginal % CORES_CATEGORIA.length]
+                      const pct = total > 0 ? (d.total / total) * 100 : 0
+                      return (
+                        <tr key={d.categoria_id} className="border-b border-gray-100 dark:border-gray-700/50 last:border-0">
+                          <td className="py-2 text-[11px] text-gray-400">{idxOriginal + 1}</td>
+                          <td className="py-2 text-[12px] text-gray-700 dark:text-gray-200">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: cor }} />
+                              <span>{d.categoria_nome}</span>
+                            </div>
+                          </td>
+                          <td className="py-2 text-right text-[12px] font-semibold text-gray-700 dark:text-gray-200">{formatBRL(d.total)}</td>
+                          <td className="py-2 text-right text-[11px] text-gray-500">{pct.toFixed(1)}%</td>
+                          <td className="py-2 pl-3">
+                            <div className="h-1.5 rounded-full bg-gray-100 dark:bg-gray-700">
+                              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: cor }} />
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-200 dark:border-gray-600">
+                      <td colSpan={2} className="py-2.5 text-[11px] font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                        {busca.trim() ? 'Subtotal' : 'Total'}
+                      </td>
+                      <td className="py-2.5 text-right text-[13px] font-bold text-gray-800 dark:text-gray-100">{formatBRL(totalFiltrado)}</td>
+                      <td className="py-2.5 text-right text-[11px] text-gray-500">
+                        {total > 0 ? ((totalFiltrado / total) * 100).toFixed(1) : '0.0'}%
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 })
@@ -1370,14 +1567,14 @@ export default function DashboardPage() {
             <GraficoDonut
               titulo="Receitas por categoria"
               subtitulo={mesLabel(mes)}
-              total={resumo?.total_entradas ?? 0}
+              total={receitasCat.reduce((s, d) => s + d.total, 0)}
               dados={receitasCat}
               corCentro="#00c896"
             />
             <GraficoDonut
               titulo="Despesas por categoria"
               subtitulo={mesLabel(mes)}
-              total={resumo?.total_saidas ?? 0}
+              total={despesasCat.reduce((s, d) => s + d.total, 0)}
               dados={despesasCat}
               corCentro="#ff6b4a"
             />

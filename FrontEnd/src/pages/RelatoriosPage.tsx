@@ -78,30 +78,27 @@ function gerarMeses(inicio: string, fim: string): string[] {
 
 
 // -- Linha expansivel -------------------------------------------
-function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
+function LinhaGrupo({
+  grupo, meses, oculto, onCelulaClick,
+  aberto, onToggleAberto, expandidosSubs, onToggleSub,
+}: {
   grupo: GrupoPai
   meses: string[]
   oculto: boolean
-  nivel?: number
   onCelulaClick: (catId: string | null, catNome: string, mes: string | null, titulo: string) => void
+  aberto: boolean
+  onToggleAberto: () => void
+  expandidosSubs: Set<string>
+  onToggleSub: (key: string) => void
 }) {
-  const [aberto, setAberto] = useState(nivel === 3)
-  const [expandidosSubs, setExpandidosSubs] = useState<Set<string>>(new Set())
   const cor = grupo.tipo === 'RECEITA' ? '#00c896' : '#f87171'
-
-  function toggleSub(key: string) {
-    setExpandidosSubs(prev => {
-      const n = new Set(prev)
-      if (n.has(key)) { n.delete(key) } else { n.add(key) }
-      return n
-    })
-  }
+  const toggleSub = onToggleSub
 
   return (
     <>
       {/* Linha pai — clica na linha toda para expandir/colapsar */}
       <tr
-        onClick={() => setAberto(a => !a)}
+        onClick={onToggleAberto}
         className="border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-pointer"
         style={{ background: 'rgba(255,255,255,0.02)' }}
       >
@@ -293,6 +290,17 @@ export default function RelatoriosPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [lancamentoEditando, setLancamentoEditando] = useState<any | null>(null)
   const [expandidosDrill,   setExpandidosDrill]    = useState<Set<string>>(new Set())
+
+  // Estado de expansão da tabela — mantido aqui (não nos componentes filhos)
+  // para que a exportação possa refletir exatamente o que está na tela.
+  const [gruposAbertos,  setGruposAbertos]  = useState<Set<string>>(new Set())
+  const [subsExpandidos, setSubsExpandidos] = useState<Set<string>>(new Set())
+  const toggleGrupo = useCallback((nome: string) => setGruposAbertos(prev => {
+    const n = new Set(prev); if (n.has(nome)) n.delete(nome); else n.add(nome); return n
+  }), [])
+  const toggleSub = useCallback((key: string) => setSubsExpandidos(prev => {
+    const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n
+  }), [])
   const [drillDown,   setDrillDown]   = useState<{
     titulo: string
     categoria_id: string | null
@@ -458,56 +466,8 @@ export default function RelatoriosPage() {
     return { grupos, totaisMes, grandTotalEntradas, grandTotalDespesas }
   }, [lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias])
 
-  const exportarExcel = useCallback(async () => {
-    if (!buscado || grupos.length === 0) return
-
-    // Monta linhas da planilha
-    const header = ['Categoria', 'Total', ...meses.map(m => mesLabel(m))]
-    const rows: (string | number)[][] = [header]
-
-    for (const grupo of grupos) {
-      // Linha do grupo pai
-      rows.push([
-        grupo.nome,
-        grupo.total,
-        ...meses.map(m => grupo.totalPorMes[m] ?? 0),
-      ])
-      if (grupo.aberto !== false) {
-        for (const sub of grupo.subcategorias) {
-          rows.push([
-            `  ${sub.categoria_nome}`,
-            sub.total,
-            ...meses.map(m => sub.porMes[m] ?? 0),
-          ])
-        }
-        // Linha de total do grupo
-        rows.push([
-          `Total - ${grupo.nome}`,
-          grupo.total,
-          ...meses.map(m => grupo.totalPorMes[m] ?? 0),
-        ])
-      }
-      rows.push([]) // linha em branco entre grupos
-    }
-
-    // Linha de totais gerais
-    rows.push(['TOTAL RECEITAS', grandTotalEntradas, ...meses.map(m => totaisMes[m]?.entradas ?? 0)])
-    rows.push(['TOTAL DESPESAS', grandTotalDespesas, ...meses.map(m => totaisMes[m]?.despesas ?? 0)])
-    rows.push(['RESULTADO', grandTotalEntradas - grandTotalDespesas, ...meses.map(m => (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0))])
-
-    // Gerar xlsx via SheetJS (mesmo CDN usado em Ferramentas)
-    // @ts-expect-error dynamic CDN import
-    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
-    const ws = XLSX.utils.aoa_to_sheet(rows)
-    ws['!cols'] = [
-      { wch: 35 },
-      { wch: 16 },
-      ...meses.map(() => ({ wch: 14 })),
-    ]
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Relatório')
-    XLSX.writeFile(wb, `relatorio_${inicio}_${fim}.xlsx`)
-    }, [buscado, grupos, meses, totaisMes, grandTotalEntradas, grandTotalDespesas, inicio, fim])
+  // Funções de exportação declaradas após `dadosPareto` para evitar
+  // referência forward — ver mais adiante no arquivo.
 
 
   const resultado = grandTotalEntradas - grandTotalDespesas
@@ -617,8 +577,168 @@ export default function RelatoriosPage() {
     return { receitas: [...recMap.values()], despesas: [...despMap.values()] }
   }, [lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias])
 
+  /**
+   * Exporta a TABELA conforme está visível na tela:
+   *  - Nível 1 (Resumo): só Total Receitas/Despesas/Resultado
+   *  - Nível 2 (Categorias): apenas grupos pai
+   *  - Nível 3 (Completo): grupos pai abertos (gruposAbertos) com subcategorias.
+   *    Subs expandidas (subsExpandidos) levam junto suas descrições.
+   *
+   * Estrutura: Categoria | Total | Média/mês | Jan | Fev | ... (igual à tela)
+   */
+  const exportarTabela = useCallback(async () => {
+    if (!buscado || grupos.length === 0) return
+
+    const nMeses = Math.max(meses.length, 1)
+    const media = (n: number) => n / nMeses
+
+    const header = ['Categoria', 'Total', 'Média/mês', ...meses.map(m => mesLabel(m))]
+    const rows: (string | number)[][] = [header]
+
+    if (nivel === 1) {
+      rows.push(['TOTAL RECEITAS', grandTotalEntradas, media(grandTotalEntradas), ...meses.map(m => totaisMes[m]?.entradas ?? 0)])
+      rows.push(['TOTAL DESPESAS', grandTotalDespesas, media(grandTotalDespesas), ...meses.map(m => totaisMes[m]?.despesas ?? 0)])
+      const resultado = grandTotalEntradas - grandTotalDespesas
+      rows.push(['RESULTADO', resultado, media(resultado), ...meses.map(m => (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0))])
+    } else {
+      for (const grupo of grupos) {
+        const grupoAberto = gruposAbertos.has(grupo.nome)
+        // Linha do grupo pai
+        rows.push([
+          grupo.nome,
+          grupo.total,
+          media(grupo.total),
+          ...meses.map(m => grupo.totalPorMes[m] ?? 0),
+        ])
+        // Subcategorias só no nível 3 E quando o grupo está aberto na tela
+        if (nivel === 3 && grupoAberto) {
+          for (const sub of grupo.subcategorias) {
+            rows.push([
+              `  ${sub.categoria_nome}`,
+              sub.total,
+              media(sub.total),
+              ...meses.map(m => sub.porMes[m] ?? 0),
+            ])
+            // Descrições só quando a sub está expandida na tela
+            const subKey = sub.categoria_id ?? sub.categoria_nome
+            if (subsExpandidos.has(subKey)) {
+              for (const d of [...sub.porDescricao].sort((a, b) => b.total - a.total)) {
+                rows.push([
+                  `    ${d.descricao}`,
+                  d.total,
+                  media(d.total),
+                  ...meses.map(m => d.porMes[m] ?? 0),
+                ])
+              }
+            }
+          }
+          // Linha total do grupo (resumo no fim do bloco)
+          rows.push([
+            `Total - ${grupo.nome}`,
+            grupo.total,
+            media(grupo.total),
+            ...meses.map(m => grupo.totalPorMes[m] ?? 0),
+          ])
+        }
+        rows.push([])
+      }
+      // Totais gerais
+      rows.push(['TOTAL RECEITAS', grandTotalEntradas, media(grandTotalEntradas), ...meses.map(m => totaisMes[m]?.entradas ?? 0)])
+      rows.push(['TOTAL DESPESAS', grandTotalDespesas, media(grandTotalDespesas), ...meses.map(m => totaisMes[m]?.despesas ?? 0)])
+      const resultado = grandTotalEntradas - grandTotalDespesas
+      rows.push(['RESULTADO', resultado, media(resultado), ...meses.map(m => (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0))])
+    }
+
+    // @ts-expect-error dynamic CDN import
+    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    ws['!cols'] = [
+      { wch: 38 },   // Categoria (mais larga p/ acomodar indentação de descrições)
+      { wch: 16 },   // Total
+      { wch: 14 },   // Média/mês
+      ...meses.map(() => ({ wch: 14 })),
+    ]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Relatório')
+    const sufixoNivel = nivel === 1 ? 'resumo' : nivel === 2 ? 'categorias' : 'completo'
+    XLSX.writeFile(wb, `relatorio_${sufixoNivel}_${inicio}_${fim}.xlsx`)
+  }, [buscado, grupos, meses, totaisMes, grandTotalEntradas, grandTotalDespesas, inicio, fim, nivel, gruposAbertos, subsExpandidos])
+
+  /**
+   * Exporta os dados da análise PARETO em 2 abas (Receitas / Despesas),
+   * com %, acumulado e marcação dos itens que compõem ~80%.
+   */
+  const exportarPareto = useCallback(async () => {
+    if (!buscado) return
+    const { calcularParetto } = await import('../lib/paretoAnalysis')
+    // @ts-expect-error dynamic CDN import
+    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
+
+    const wb = XLSX.utils.book_new()
+
+    const montarAba = (
+      lista: { categoria_id: string | null; categoria_nome: string; total: number }[],
+      tipo: 'RECEITA' | 'DESPESA',
+      nomeAba: string,
+    ) => {
+      const resumo = calcularParetto(lista, tipo)
+      if (resumo.quantidadeCategorias === 0) return
+
+      const header = ['#', 'Categoria', 'Valor', '%', '% Acumulado', 'Dentro 80%']
+      const rows: (string | number)[][] = [header]
+      const ultimoIdxAte80 = resumo.quantidadeAte80 - 1
+
+      resumo.itens.forEach((item, idx) => {
+        rows.push([
+          idx + 1,
+          item.categoria_nome,
+          item.total,
+          Number(item.percentual.toFixed(2)),
+          Number(item.percentualAcumulado.toFixed(2)),
+          idx <= ultimoIdxAte80 ? 'Sim' : 'Não',
+        ])
+      })
+      rows.push([])
+      rows.push(['', 'Total', resumo.total, 100, '', ''])
+      rows.push([])
+      rows.push(['', `${resumo.quantidadeAte80} de ${resumo.quantidadeCategorias} categorias respondem por ~80%`, '', '', '', ''])
+
+      const ws = XLSX.utils.aoa_to_sheet(rows)
+      ws['!cols'] = [
+        { wch: 5 }, { wch: 40 }, { wch: 16 }, { wch: 10 }, { wch: 14 }, { wch: 12 },
+      ]
+      XLSX.utils.book_append_sheet(wb, ws, nomeAba)
+    }
+
+    montarAba(dadosPareto.receitas, 'RECEITA', 'Pareto Receitas')
+    montarAba(dadosPareto.despesas, 'DESPESA', 'Pareto Despesas')
+
+    if (wb.SheetNames.length === 0) return
+    XLSX.writeFile(wb, `relatorio_pareto_${inicio}_${fim}.xlsx`)
+  }, [buscado, dadosPareto, inicio, fim])
+
+  /** Roteador: exporta a vista atualmente visível. */
+  const exportar = useCallback(() => {
+    if (vistaPareto) exportarPareto()
+    else             exportarTabela()
+  }, [vistaPareto, exportarPareto, exportarTabela])
+
   // Reset expansão ao trocar de drill-down
   useEffect(() => { setExpandidosDrill(new Set()) }, [drillDown])
+
+  // Sincroniza expansão dos grupos com o nível selecionado:
+  //  - Nível 3 (Completo): todos os grupos abertos por padrão
+  //  - Nível 2 (Categorias): todos fechados (subs nem aparecem)
+  //  - Nível 1 (Resumo): irrelevante (tabela não mostra grupos)
+  // Também limpa subs expandidas ao mudar nível ou ao re-buscar.
+  useEffect(() => {
+    if (nivel === 3) {
+      setGruposAbertos(new Set(grupos.map(g => g.nome)))
+    } else {
+      setGruposAbertos(new Set())
+    }
+    setSubsExpandidos(new Set())
+  }, [nivel, grupos])
 
   return (
     <div className="p-5 min-h-screen" style={{ background: '#0e1320' }}>
@@ -694,12 +814,17 @@ export default function RelatoriosPage() {
           <div className="flex items-center gap-2 ml-auto flex-wrap">
             {buscado && (
               <button
-                onClick={exportarExcel}
+                onClick={exportar}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all hover:opacity-90 border border-white/10"
                 style={{ color: '#4da6ff', background: 'rgba(77,166,255,0.08)' }}
-                title="Exportar para Excel (.xlsx)"
+                title={
+                  vistaPareto
+                    ? 'Exportar análise Pareto (Receitas + Despesas) para Excel'
+                    : `Exportar tabela (${nivel === 1 ? 'Resumo' : nivel === 2 ? 'Categorias' : 'Completo'}) para Excel`
+                }
               >
-                <Download size={13} /> Exportar
+                <Download size={13} />
+                {vistaPareto ? 'Exportar Pareto' : 'Exportar tabela'}
               </button>
             )}
             <button
@@ -850,7 +975,13 @@ export default function RelatoriosPage() {
                     </td>
                   </tr>
                   {credAberto && grupos.filter(g => g.tipo === 'RECEITA').map((g, i) => (
-                    <LinhaGrupo key={`${i}-${nivel}`} grupo={g} meses={meses} oculto={oculto} nivel={nivel}
+                    <LinhaGrupo
+                      key={`${i}-${nivel}`}
+                      grupo={g} meses={meses} oculto={oculto}
+                      aberto={gruposAbertos.has(g.nome)}
+                      onToggleAberto={() => toggleGrupo(g.nome)}
+                      expandidosSubs={subsExpandidos}
+                      onToggleSub={toggleSub}
                       onCelulaClick={(catId, catNome, mes, titulo) => setDrillDown({ titulo, categoria_id: catId, categoria_nome: catNome, mes })} />
                   ))}
                   {/* Total Créditos — sempre visível */}
@@ -902,7 +1033,13 @@ export default function RelatoriosPage() {
                     </td>
                   </tr>
                   {debAberto && grupos.filter(g => g.tipo === 'DESPESA').map((g, i) => (
-                    <LinhaGrupo key={`${i}-${nivel}`} grupo={g} meses={meses} oculto={oculto} nivel={nivel}
+                    <LinhaGrupo
+                      key={`${i}-${nivel}`}
+                      grupo={g} meses={meses} oculto={oculto}
+                      aberto={gruposAbertos.has(g.nome)}
+                      onToggleAberto={() => toggleGrupo(g.nome)}
+                      expandidosSubs={subsExpandidos}
+                      onToggleSub={toggleSub}
                       onCelulaClick={(catId, catNome, mes, titulo) => setDrillDown({ titulo, categoria_id: catId, categoria_nome: catNome, mes })} />
                   ))}
                   {/* Total Débitos — sempre visível */}

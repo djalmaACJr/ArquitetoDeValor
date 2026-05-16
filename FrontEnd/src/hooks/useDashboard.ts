@@ -15,29 +15,51 @@ function gerarUltimosMeses(ano: number, mes: number, n: number): string[] {
   return meses
 }
 
+/**
+ * Agrupa transações por categoria classificando cada categoria como RECEITA
+ * ou DESPESA pelo SALDO LÍQUIDO (somaReceitas − somaDespesas) naquele recorte.
+ *
+ * Motivo: o schema não tem categorias específicas de receita ou despesa — a
+ * mesma categoria pode receber lançamentos de ambos os tipos (ex.: "Salário"
+ * com estorno pontual, "Supermercado" com cashback). Aqui a categoria aparece
+ * em UM donut só, classificada pelo sinal do líquido.
+ *
+ * Regra:
+ *  - liquido > 0 → categoria classificada como RECEITA; total exibido = liquido.
+ *  - liquido < 0 → categoria classificada como DESPESA; total exibido = |liquido|.
+ *  - liquido = 0 → não entra em nenhum donut.
+ */
 function agruparPorCategoria(
   transacoes: Transacao[],
-  tipo: 'RECEITA' | 'DESPESA',
-  limite: number,
+  tipoDesejado: 'RECEITA' | 'DESPESA',
 ): DespesaCategoria[] {
-  const comCat = transacoes.filter(
-    t => t.tipo === tipo && t.categoria_id && t.categoria_nome,
-  )
-  const map = new Map<string, DespesaCategoria>()
-  comCat.forEach(t => {
-    const key = t.categoria_id!
-    const ex  = map.get(key)
-    if (ex) { ex.total += t.valor }
-    else {
-      map.set(key, {
-        categoria_id:    t.categoria_id!,
-        categoria_nome:  t.categoria_nome!,
-        categoria_icone: t.categoria_icone ?? '',
-        total:           t.valor,
-      })
+  interface Acc {
+    nome:  string; icone: string
+    somaR: number; somaD:  number
+  }
+  const map = new Map<string, Acc>()
+  for (const t of transacoes) {
+    if (!t.categoria_id || !t.categoria_nome) continue
+    const ex = map.get(t.categoria_id) ?? {
+      nome:  t.categoria_nome,
+      icone: t.categoria_icone ?? '',
+      somaR: 0, somaD: 0,
     }
-  })
-  return [...map.values()].sort((a, b) => b.total - a.total).slice(0, limite)
+    if (t.tipo === 'RECEITA') ex.somaR += t.valor
+    else                       ex.somaD += t.valor
+    map.set(t.categoria_id, ex)
+  }
+
+  const resultado: DespesaCategoria[] = []
+  for (const [id, v] of map) {
+    const liquido = v.somaR - v.somaD
+    if (tipoDesejado === 'RECEITA' && liquido > 0) {
+      resultado.push({ categoria_id: id, categoria_nome: v.nome, categoria_icone: v.icone, total: liquido })
+    } else if (tipoDesejado === 'DESPESA' && liquido < 0) {
+      resultado.push({ categoria_id: id, categoria_nome: v.nome, categoria_icone: v.icone, total: -liquido })
+    }
+  }
+  return resultado.sort((a, b) => b.total - a.total)
 }
 
 /** Parseia "YYYY-MM" com segurança — retorna null se inválido */
@@ -245,8 +267,8 @@ export function useDashboard(
       proximas:    todasPend.filter(t => t.data > hoje),
       proximasRaw: [...pendMes, ...pendProx].filter(t => t.data > hoje),
       resumo:      { mes, total_entradas: entradas, total_saidas: saidas },
-      despesasCat: agruparPorCategoria(doMes, 'DESPESA', 5),
-      receitasCat: agruparPorCategoria(doMes, 'RECEITA', 4),
+      despesasCat: agruparPorCategoria(doMes, 'DESPESA'),
+      receitasCat: agruparPorCategoria(doMes, 'RECEITA'),
     }
   }, [fase1Q.data, filtros, hoje, mes, parsed])
 

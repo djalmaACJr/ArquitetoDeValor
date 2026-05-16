@@ -275,6 +275,9 @@ export default function ComparativoMensalPage() {
   const [drillDown,   setDrillDown]   = useState<{ catKey: string; nome: string; periodo: 'inicial' | 'final' } | null>(null)
   const [editandoId,  setEditandoId]  = useState<string | null>(null)
   const drillDownRef = useRef<HTMLDivElement>(null)
+  // Insight ativo: destaca as catKeys do insight no grid e dá scroll
+  const [insightAtivo,  setInsightAtivo]  = useState<number | null>(null)
+  const tabelaRef       = useRef<HTMLDivElement>(null)
   const { oculto, toggle: toggleOculto } = useOcultarValores()
 
   // Scroll para o painel de drill-down ao abri-lo
@@ -390,45 +393,51 @@ export default function ComparativoMensalPage() {
   , [comparativo])
 
   // ── Insights ───────────────────────────────────────────────────────────────
+  // Cada insight carrega `catKeys` indicando quais categorias o motivaram —
+  // ao clicar, essas linhas ficam destacadas na tabela.
   const insights = useMemo(() => {
-    if (!buscado) return []
-    const items: { tipo: 'alerta' | 'positivo' | 'info'; texto: string }[] = []
+    if (!buscado) return [] as { tipo: 'alerta' | 'positivo' | 'info'; texto: string; catKeys: string[] }[]
+    const items: { tipo: 'alerta' | 'positivo' | 'info'; texto: string; catKeys: string[] }[] = []
     // B = 2º período (atual), A = 1º período (base) — variação = B vs A
     const vRes  = calcVariacao(resumoB.resultado,     resumoA.resultado)
     const vDesp = calcVariacao(resumoB.totalDespesas, resumoA.totalDespesas)
     const vRec  = calcVariacao(resumoB.totalReceitas, resumoA.totalReceitas)
 
+    const keysReceitas = comparativo.filter(c => c.tipo === 'RECEITA').map(c => c.catKey)
+    const keysDespesas = comparativo.filter(c => c.tipo === 'DESPESA').map(c => c.catKey)
+    const todasKeys    = [...keysReceitas, ...keysDespesas]
+
     if (resumoB.resultado > resumoA.resultado)
-      items.push({ tipo: 'positivo', texto: `Resultado líquido melhorou${vRes !== null ? ` ${vRes > 0 ? '+' : ''}${vRes.toFixed(1)}%` : ''} em relação ao Período inicial.` })
+      items.push({ tipo: 'positivo', texto: `Resultado líquido melhorou${vRes !== null ? ` ${vRes > 0 ? '+' : ''}${vRes.toFixed(1)}%` : ''} em relação ao Período inicial.`, catKeys: todasKeys })
     else if (resumoB.resultado < resumoA.resultado)
-      items.push({ tipo: 'alerta', texto: 'Resultado líquido piorou em relação ao Período inicial.' })
+      items.push({ tipo: 'alerta', texto: 'Resultado líquido piorou em relação ao Período inicial.', catKeys: todasKeys })
 
     if (vDesp !== null && vDesp > 5)
-      items.push({ tipo: 'alerta', texto: `Despesas totais aumentaram ${vDesp.toFixed(1)}% no Período final.` })
+      items.push({ tipo: 'alerta', texto: `Despesas totais aumentaram ${vDesp.toFixed(1)}% no Período final.`, catKeys: keysDespesas })
     else if (vDesp !== null && vDesp < -5)
-      items.push({ tipo: 'positivo', texto: `Despesas totais reduziram ${Math.abs(vDesp).toFixed(1)}% — ótima gestão!` })
+      items.push({ tipo: 'positivo', texto: `Despesas totais reduziram ${Math.abs(vDesp).toFixed(1)}% — ótima gestão!`, catKeys: keysDespesas })
 
     if (vRec !== null && vRec > 10)
-      items.push({ tipo: 'positivo', texto: `Receitas cresceram ${vRec.toFixed(1)}% no Período final — excelente!` })
+      items.push({ tipo: 'positivo', texto: `Receitas cresceram ${vRec.toFixed(1)}% no Período final — excelente!`, catKeys: keysReceitas })
     else if (vRec !== null && vRec < -10)
-      items.push({ tipo: 'alerta', texto: `Receitas reduziram ${Math.abs(vRec).toFixed(1)}% — atenção ao fluxo de caixa.` })
+      items.push({ tipo: 'alerta', texto: `Receitas reduziram ${Math.abs(vRec).toFixed(1)}% — atenção ao fluxo de caixa.`, catKeys: keysReceitas })
 
     comparativo.filter(c => c.tipo === 'DESPESA' && c.variacao !== null && c.variacao > 25)
       .sort((a, b) => (b.variacao ?? 0) - (a.variacao ?? 0)).slice(0, 3)
-      .forEach(c => items.push({ tipo: 'alerta', texto: `Os gastos com "${c.nome}" aumentaram ${c.variacao!.toFixed(0)}%.` }))
+      .forEach(c => items.push({ tipo: 'alerta', texto: `Os gastos com "${c.nome}" aumentaram ${c.variacao!.toFixed(0)}%.`, catKeys: [c.catKey] }))
 
     comparativo.filter(c => c.tipo === 'DESPESA' && c.variacao !== null && c.variacao < -15)
       .sort((a, b) => (a.variacao ?? 0) - (b.variacao ?? 0)).slice(0, 2)
-      .forEach(c => items.push({ tipo: 'positivo', texto: `A categoria "${c.nome}" teve redução de ${Math.abs(c.variacao!).toFixed(0)}%.` }))
+      .forEach(c => items.push({ tipo: 'positivo', texto: `A categoria "${c.nome}" teve redução de ${Math.abs(c.variacao!).toFixed(0)}%.`, catKeys: [c.catKey] }))
 
     const novas = comparativo.filter(c => c.tipo === 'DESPESA' && c.anterior === 0 && c.atual > 0)
     if (novas.length > 0)
-      items.push({ tipo: 'info', texto: `${novas.length} nova(s) categoria(s) de despesa surgiu no Período final.` })
+      items.push({ tipo: 'info', texto: `${novas.length} nova(s) categoria(s) de despesa surgiu no Período final.`, catKeys: novas.map(c => c.catKey) })
 
     if (resumoB.totalReceitas > 0) {
       const pct = (resumoB.totalDespesas / resumoB.totalReceitas) * 100
       if (pct > 90)
-        items.push({ tipo: 'alerta', texto: `Despesas representam ${pct.toFixed(0)}% das receitas no Período final.` })
+        items.push({ tipo: 'alerta', texto: `Despesas representam ${pct.toFixed(0)}% das receitas no Período final.`, catKeys: keysDespesas })
     }
     return items
   }, [buscado, resumoA, resumoB, comparativo])
@@ -467,37 +476,91 @@ export default function ComparativoMensalPage() {
   }
 
   // ── Export ─────────────────────────────────────────────────────────────────
+  // Espelha a visão atual: agrupamento Receitas/Despesas, ordem de classificação,
+  // filtro de busca, totais por grupo, resultado, e — se houver insight ativo —
+  // marca quais linhas estão destacadas.
   const exportar = useCallback(async () => {
     if (!buscado || tableCats.length === 0) return
     // @ts-expect-error CDN dynamic import
     const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
     const lA = periodoLabel(inicioA, fimA)
     const lB = periodoLabel(inicioB, fimB)
-    const rows: (string | number)[][] = [
-      ['Categoria', 'Tipo', lB, lA, 'Diferença', '% Variação'],
-      ...tableCats.map(c => [
-        c.nome, c.tipo === 'RECEITA' ? 'Receita' : 'Despesa',
-        c.atual, c.anterior, c.diferenca,
+
+    const insightAtual = insightAtivo !== null ? insights[insightAtivo] : null
+    const keysDestaque = insightAtual ? new Set(insightAtual.catKeys) : null
+
+    const header = ['Categoria', 'Tipo', lA, lB, 'Diferença', '% Variação']
+    if (keysDestaque) header.push('Destacado')
+
+    const rows: (string | number)[][] = [header]
+
+    const receitas = tableCats.filter(c => c.tipo === 'RECEITA')
+    const despesas = tableCats.filter(c => c.tipo === 'DESPESA')
+
+    const linhaCat = (c: CatComparativo): (string | number)[] => {
+      const linha: (string | number)[] = [
+        c.nome,
+        c.tipo === 'RECEITA' ? 'Receita' : 'Despesa',
+        c.anterior,
+        c.atual,
+        c.diferenca,
         c.variacao !== null ? c.variacao / 100 : 'Novo',
-      ]),
-      [],
-      ['Total Receitas', '', resumoB.totalReceitas, resumoA.totalReceitas,
-        resumoB.totalReceitas - resumoA.totalReceitas,
-        calcVariacao(resumoB.totalReceitas, resumoA.totalReceitas) !== null
-          ? (calcVariacao(resumoB.totalReceitas, resumoA.totalReceitas)! / 100) : 'N/A'],
-      ['Total Despesas', '', resumoB.totalDespesas, resumoA.totalDespesas,
-        resumoB.totalDespesas - resumoA.totalDespesas,
-        calcVariacao(resumoB.totalDespesas, resumoA.totalDespesas) !== null
-          ? (calcVariacao(resumoB.totalDespesas, resumoA.totalDespesas)! / 100) : 'N/A'],
-      ['Resultado', '', resumoB.resultado, resumoA.resultado,
-        resumoB.resultado - resumoA.resultado, ''],
-    ]
+      ]
+      if (keysDestaque) linha.push(keysDestaque.has(c.catKey) ? '★' : '')
+      return linha
+    }
+
+    const linhaSubtotal = (rowsGrupo: CatComparativo[], label: string): (string | number)[] => {
+      const sA = rowsGrupo.reduce((s, c) => s + c.anterior, 0)
+      const sB = rowsGrupo.reduce((s, c) => s + c.atual,    0)
+      const dif = sB - sA
+      const vVar = calcVariacao(sB, sA)
+      const linha: (string | number)[] = [label, '', sA, sB, dif, vVar !== null ? vVar / 100 : 'N/A']
+      if (keysDestaque) linha.push('')
+      return linha
+    }
+
+    // Receitas
+    if (receitas.length > 0) {
+      rows.push([`▼ Receitas (${receitas.length})`, '', '', '', '', ''])
+      receitas.forEach(c => rows.push(linhaCat(c)))
+      rows.push(linhaSubtotal(receitas, 'Total Receitas'))
+      rows.push([])
+    }
+
+    // Despesas
+    if (despesas.length > 0) {
+      rows.push([`▼ Despesas (${despesas.length})`, '', '', '', '', ''])
+      despesas.forEach(c => rows.push(linhaCat(c)))
+      rows.push(linhaSubtotal(despesas, 'Total Despesas'))
+      rows.push([])
+    }
+
+    // Resultado dos rows visíveis
+    if (receitas.length > 0 && despesas.length > 0) {
+      const sA = receitas.reduce((s, c) => s + c.anterior, 0) - despesas.reduce((s, c) => s + c.anterior, 0)
+      const sB = receitas.reduce((s, c) => s + c.atual,    0) - despesas.reduce((s, c) => s + c.atual,    0)
+      const dif = sB - sA
+      const vVar = calcVariacao(sB, sA)
+      const linhaR: (string | number)[] = ['Resultado', '', sA, sB, dif, vVar !== null ? vVar / 100 : 'N/A']
+      if (keysDestaque) linhaR.push('')
+      rows.push(linhaR)
+    }
+
+    // Insight ativo no rodapé (referência)
+    if (insightAtual) {
+      rows.push([])
+      rows.push([`Insight destacado: ${insightAtual.texto}`, '', '', '', '', ''])
+    }
+
     const ws = XLSX.utils.aoa_to_sheet(rows)
-    ws['!cols'] = [{ wch: 30 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 14 }]
+    const cols = [{ wch: 32 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 14 }]
+    if (keysDestaque) cols.push({ wch: 12 })
+    ws['!cols'] = cols
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Comparativo MoM')
+    XLSX.utils.book_append_sheet(wb, ws, 'Comparativo')
     XLSX.writeFile(wb, `comparativo_${inicioA}_${fimA}_vs_${inicioB}_${fimB}.xlsx`)
-  }, [buscado, tableCats, inicioA, fimA, inicioB, fimB, resumoA, resumoB])
+  }, [buscado, tableCats, inicioA, fimA, inicioB, fimB, insightAtivo, insights])
 
   // ── Chart data ─────────────────────────────────────────────────────────────
   const chartBarComp = useMemo((): ChartData<'bar'> => ({
@@ -795,12 +858,27 @@ export default function ComparativoMensalPage() {
 
           {/* Table + Insights */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden">
+            <div ref={tabelaRef} className="lg:col-span-2 bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden">
               <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <p className="text-[12px] font-bold" style={{ color: '#e8eaf0' }}>Análise por Categoria</p>
                   <p className="text-[10px]" style={{ color: '#4a5168' }}>
                     {tableCats.filter(c => c.tipo === 'RECEITA').length} receita · {tableCats.filter(c => c.tipo === 'DESPESA').length} despesa
+                    {insightAtivo !== null && insights[insightAtivo] && (
+                      <>
+                        {' · '}
+                        <span style={{ color: '#4da6ff' }}>
+                          {insights[insightAtivo].catKeys.length} em destaque
+                        </span>
+                        <button
+                          onClick={() => setInsightAtivo(null)}
+                          className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-semibold transition-colors hover:bg-white/10"
+                          style={{ color: '#8b92a8', border: '1px solid rgba(255,255,255,0.15)' }}
+                        >
+                          Limpar
+                        </button>
+                      </>
+                    )}
                   </p>
                 </div>
                 <input type="text" placeholder="Buscar categoria…" value={busca}
@@ -842,6 +920,8 @@ export default function ComparativoMensalPage() {
                           </td>
                         </tr>
                       )
+                      const insightAtual = insightAtivo !== null ? insights[insightAtivo] : null
+                      const keysDestaque = insightAtual ? new Set(insightAtual.catKeys) : null
                       const renderRow = (c: CatComparativo, i: number) => {
                         const melhorou = c.tipo === 'RECEITA' ? c.diferenca >= 0 : c.diferenca <= 0
                         const cor = c.variacao === null ? '#f0b429' : melhorou ? '#00c896' : '#f87171'
@@ -851,9 +931,15 @@ export default function ComparativoMensalPage() {
                           : Minus
                         const ativoAnterior = drillDown?.catKey === c.catKey && drillDown?.periodo === 'inicial'
                         const ativoAtual    = drillDown?.catKey === c.catKey && drillDown?.periodo === 'final'
+                        const destacado = keysDestaque?.has(c.catKey) ?? false
                         return (
                           <tr key={`${c.catKey}-${i}`}
-                            className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
+                            data-destaque-insight={destacado || undefined}
+                            className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors"
+                            style={destacado ? {
+                              background:  'rgba(77,166,255,0.12)',
+                              boxShadow:   'inset 3px 0 0 #4da6ff',
+                            } : undefined}>
                             <td className="px-4 py-2.5">
                               <span className="text-[11px]" style={{ color: '#e8eaf0' }}>{c.nome}</span>
                             </td>
@@ -902,6 +988,52 @@ export default function ComparativoMensalPage() {
                           </tr>
                         )
                       }
+                      // Subtotais por grupo (refletem os rows visíveis — respeita busca)
+                      // `tipoGrupo` define a regra de "melhorou":
+                      //   RECEITA → subiu é bom; DESPESA → subiu é ruim
+                      const renderSubtotal = (rows: CatComparativo[], cor: string, label: string, tipoGrupo: 'RECEITA' | 'DESPESA') => {
+                        const sA   = rows.reduce((s, c) => s + c.anterior, 0)
+                        const sB   = rows.reduce((s, c) => s + c.atual,    0)
+                        const dif  = sB - sA
+                        const vVar = calcVariacao(sB, sA)
+                        const melhorou = tipoGrupo === 'RECEITA' ? dif >= 0 : dif <= 0
+                        const corDif   = vVar === null ? '#f0b429' : melhorou ? '#00c896' : '#f87171'
+                        const TendIcon = dif > 0 ? TrendingUp : dif < 0 ? TrendingDown : Minus
+                        return (
+                          <tr style={{ background: `${cor}10`, borderTop: `1px solid ${cor}40` }}>
+                            <td className="px-4 py-2">
+                              <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: cor }}>
+                                {label}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <span className="text-[11px] font-bold" style={{ color: cor }}>
+                                {oculto ? '••••' : formatBRL(sA)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <span className="text-[11px] font-bold" style={{ color: cor }}>
+                                {oculto ? '••••' : formatBRL(sB)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              <span className="text-[11px] font-bold" style={{ color: corDif }}>
+                                {oculto ? '••••' : `${dif >= 0 ? '+' : ''}${formatBRL(dif)}`}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-right">
+                              {vVar === null
+                                ? <span className="text-[10px]" style={{ color: '#4a5168' }}>—</span>
+                                : <span className="text-[11px] font-bold" style={{ color: corDif }}>
+                                    {`${vVar >= 0 ? '+' : ''}${vVar.toFixed(1)}%`}
+                                  </span>}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <TendIcon size={13} style={{ color: corDif }} />
+                            </td>
+                          </tr>
+                        )
+                      }
                       return (
                         <>
                           {receitaRows.length > 0 && (
@@ -914,6 +1046,7 @@ export default function ComparativoMensalPage() {
                                 </td>
                               </tr>
                               {receitaRows.map((c, i) => renderRow(c, i))}
+                              {renderSubtotal(receitaRows, '#00c896', 'Total Receitas')}
                             </>
                           )}
                           {despesaRows.length > 0 && (
@@ -926,8 +1059,41 @@ export default function ComparativoMensalPage() {
                                 </td>
                               </tr>
                               {despesaRows.map((c, i) => renderRow(c, i))}
+                              {renderSubtotal(despesaRows, '#f87171', 'Total Despesas')}
                             </>
                           )}
+                          {/* Resultado líquido — só aparece se houver ambos os grupos */}
+                          {receitaRows.length > 0 && despesaRows.length > 0 && (() => {
+                            const sA = receitaRows.reduce((s, c) => s + c.anterior, 0) - despesaRows.reduce((s, c) => s + c.anterior, 0)
+                            const sB = receitaRows.reduce((s, c) => s + c.atual,    0) - despesaRows.reduce((s, c) => s + c.atual,    0)
+                            const dif = sB - sA
+                            const vVar = calcVariacao(sB, sA)
+                            const corR = sB >= 0 ? '#00c896' : '#f87171'
+                            return (
+                              <tr style={{ background: 'rgba(77,166,255,0.10)', borderTop: '2px solid rgba(77,166,255,0.35)' }}>
+                                <td className="px-4 py-2.5">
+                                  <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: '#4da6ff' }}>
+                                    Resultado
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2.5 text-right">
+                                  <span className="text-[11px] font-bold" style={{ color: '#4da6ff' }}>{oculto ? '••••' : formatBRL(sA)}</span>
+                                </td>
+                                <td className="px-4 py-2.5 text-right">
+                                  <span className="text-[11px] font-bold" style={{ color: '#4da6ff' }}>{oculto ? '••••' : formatBRL(sB)}</span>
+                                </td>
+                                <td className="px-4 py-2.5 text-right">
+                                  <span className="text-[11px] font-bold" style={{ color: corR }}>{oculto ? '••••' : `${dif >= 0 ? '+' : ''}${formatBRL(dif)}`}</span>
+                                </td>
+                                <td className="px-4 py-2.5 text-right">
+                                  {vVar === null
+                                    ? <span className="text-[10px]" style={{ color: '#4a5168' }}>—</span>
+                                    : <span className="text-[11px] font-bold" style={{ color: corR }}>{`${vVar >= 0 ? '+' : ''}${vVar.toFixed(1)}%`}</span>}
+                                </td>
+                                <td />
+                              </tr>
+                            )
+                          })()}
                         </>
                       )
                     })()}
@@ -958,12 +1124,44 @@ export default function ComparativoMensalPage() {
                     ins.tipo === 'alerta'   ? { bg: 'rgba(248,113,113,0.07)', cor: '#f87171', Icon: AlertTriangle }
                     : ins.tipo === 'positivo' ? { bg: 'rgba(0,200,150,0.07)',   cor: '#00c896', Icon: CheckCircle }
                     :                          { bg: 'rgba(77,166,255,0.07)',   cor: '#4da6ff', Icon: Info }
+                  const ativo = insightAtivo === i
+                  const clicavel = ins.catKeys.length > 0
                   return (
-                    <div key={i} className="flex gap-2.5 p-3 rounded-xl"
-                      style={{ background: cfg.bg, border: `1px solid ${cfg.cor}25` }}>
+                    <button
+                      type="button"
+                      key={i}
+                      disabled={!clicavel}
+                      onClick={() => {
+                        if (!clicavel) return
+                        const novoAtivo = ativo ? null : i
+                        setInsightAtivo(novoAtivo)
+                        // Scroll para a primeira categoria destacada
+                        if (novoAtivo !== null) {
+                          setTimeout(() => {
+                            const el = tabelaRef.current?.querySelector('[data-destaque-insight]')
+                            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                          }, 60)
+                        }
+                      }}
+                      className="w-full text-left flex gap-2.5 p-3 rounded-xl transition-all"
+                      title={clicavel ? 'Clique para destacar as categorias relacionadas' : undefined}
+                      style={{
+                        background: ativo ? `${cfg.cor}1A` : cfg.bg,
+                        border: `1px solid ${ativo ? cfg.cor : cfg.cor + '25'}`,
+                        cursor: clicavel ? 'pointer' : 'default',
+                        opacity: clicavel ? 1 : 0.85,
+                      }}
+                    >
                       <cfg.Icon size={14} style={{ color: cfg.cor, flexShrink: 0, marginTop: 1 }} />
-                      <p className="text-[11px] leading-relaxed" style={{ color: '#c5cad8' }}>{ins.texto}</p>
-                    </div>
+                      <p className="text-[11px] leading-relaxed flex-1" style={{ color: '#c5cad8' }}>
+                        {ins.texto}
+                        {clicavel && (
+                          <span className="ml-2 text-[9px] font-semibold" style={{ color: cfg.cor }}>
+                            {ativo ? '✓ Destacado' : `→ ${ins.catKeys.length} item${ins.catKeys.length > 1 ? 's' : ''}`}
+                          </span>
+                        )}
+                      </p>
+                    </button>
                   )
                 })}
               </div>
