@@ -3,9 +3,11 @@ import type { FormEvent } from 'react'
 import {
   User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown,
   Pencil, Sparkles, ArrowRight, Wand2, RefreshCw, Search, ChevronLeft, ChevronRight,
-  Palette,
+  Palette, Users,
 } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
+import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import type { MascoteNome } from '../components/ui/Mascote'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -70,6 +72,81 @@ function Alerta({ fb }: { fb: Feedback | null }) {
       {ok ? <Check size={13}/> : <AlertCircle size={13}/>}
       {fb.msg}
     </div>
+  )
+}
+
+/** Picker de mascote preferido — grade 2x2 de cards com a pose "hero" /
+ *  "sentado" de cada mascote. A escolha define qual personagem aparece
+ *  nos balões contextuais do Dashboard, Comparativo, etc. */
+function SecaoMascote() {
+  const { mascote, setMascote } = useMascotePreferido()
+
+  // Catálogo dos 4 mascotes — descrição + arquivo preferido para preview
+  const catalogo: Array<{
+    id: MascoteNome
+    label: string
+    descricao: string
+    poseDefault: string
+  }> = [
+    { id: 'sabio',      label: 'Sábio',      descricao: 'Sabedoria e visão de longo prazo.',                poseDefault: 'sentado' },
+    { id: 'engenheira', label: 'Engenheira', descricao: 'Estrutura, cálculo e disciplina.',                  poseDefault: 'pensando' },
+    { id: 'mago',       label: 'Mago Gato',  descricao: 'A magia dos juros compostos.',                      poseDefault: 'sentado' },
+    { id: 'raposa',     label: 'Raposa',     descricao: 'Astúcia estratégica de mercado.',                   poseDefault: 'sentado' },
+  ]
+
+  return (
+    <Secao titulo="Mascote preferido" icone={<Users size={15}/>}>
+      <p className="text-[15px] text-white/40 mb-3 leading-relaxed">
+        Quem aparece nos balões contextuais (Dashboard, Comparativo, etc.).
+        A escolha é salva na sua conta.
+      </p>
+      <div className="grid grid-cols-2 gap-2.5">
+        {catalogo.map(m => {
+          const ativo = m.id === mascote
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setMascote(m.id)}
+              className="text-left rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-av-green/40 p-2.5"
+              style={{
+                borderColor: ativo ? '#00c896' : 'rgba(255,255,255,0.10)',
+                background:  ativo ? 'rgba(0,200,150,0.08)' : 'rgba(255,255,255,0.03)',
+              }}
+              aria-pressed={ativo}
+              title={m.descricao}
+            >
+              <div className="flex items-start gap-2.5">
+                <img
+                  src={`/mascotes/${m.id}-${m.poseDefault}.png`}
+                  alt=""
+                  width={56}
+                  height={56}
+                  loading="lazy"
+                  className="object-contain flex-shrink-0 rounded-lg"
+                  style={{ maxWidth: 56, maxHeight: 72 }}
+                  onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden' }}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[15px] font-semibold text-white truncate">{m.label}</p>
+                  {ativo && (
+                    <p className="text-[12px] font-semibold uppercase tracking-wider mt-0.5" style={{ color: '#00c896' }}>
+                      ✓ Em uso
+                    </p>
+                  )}
+                  <p className="text-[13px] mt-1 leading-snug" style={{ color: '#8b92a8' }}>
+                    {m.descricao}
+                  </p>
+                </div>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-[13px] text-white/30 mt-3 leading-relaxed">
+        Preferência salva em <code>arqvalor.usuarios.mascote_preferido</code>.
+      </p>
+    </Secao>
   )
 }
 
@@ -509,6 +586,9 @@ export default function PerfilPage() {
 
           {/* Aparência */}
           <SecaoTema/>
+
+          {/* Mascote preferido */}
+          <SecaoMascote/>
 
           {/* Zona de perigo */}
           <div className="bg-red-500/5 border border-red-500/20 rounded-2xl overflow-hidden">

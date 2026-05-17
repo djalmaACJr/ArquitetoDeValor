@@ -20,13 +20,11 @@ from PIL import Image
 import numpy as np
 from scipy import ndimage
 
-# Canal-a-canal: quão próximo o pixel precisa estar de um tom detectado
-# para virar candidato. 24 captura checkers complexos do Sábio; cores
-# acidentalmente similares no personagem são restauradas via CC.
-TOL_TOM = 24
+# Canal-a-canal: tolerância para um pixel virar candidato a fundo.
+# 14 cobre variações de JPEG sem invadir cores escuras do personagem.
+TOL_TOM = 14
 
-# Quantos tons dominantes pegar do histograma das bordas. 16 cobre
-# checkers multitom + bordas pretas/brancas.
+# Quantos tons dominantes pegar do histograma das bordas.
 N_TONS = 16
 
 # Margem em pixels ao redor da bounding box do personagem.
@@ -75,14 +73,17 @@ def detectar_tons(arr: np.ndarray) -> list[tuple[int, int, int]]:
 
 
 def construir_mascara(arr: np.ndarray, tons: list[tuple[int, int, int]], tol: int) -> np.ndarray:
-    """Retorna máscara booleana: True onde o pixel está dentro da
-    tolerância de algum tom detectado."""
+    """Retorna máscara booleana de candidatos a fundo: pixels dentro da
+    tolerância de algum tom detectado nas bordas."""
     h, w, _ = arr.shape
     mask = np.zeros((h, w), dtype=bool)
+    r_ch = arr[:, :, 0].astype(np.int16)
+    g_ch = arr[:, :, 1].astype(np.int16)
+    b_ch = arr[:, :, 2].astype(np.int16)
     for (r, g, b) in tons:
-        delta_r = np.abs(arr[:, :, 0].astype(np.int16) - r)
-        delta_g = np.abs(arr[:, :, 1].astype(np.int16) - g)
-        delta_b = np.abs(arr[:, :, 2].astype(np.int16) - b)
+        delta_r = np.abs(r_ch - r)
+        delta_g = np.abs(g_ch - g)
+        delta_b = np.abs(b_ch - b)
         mask |= (delta_r <= tol) & (delta_g <= tol) & (delta_b <= tol)
     return mask
 
@@ -93,7 +94,6 @@ def mascara_de_fundo(mask: np.ndarray) -> np.ndarray:
     labels, n = ndimage.label(mask, structure=np.ones((3, 3), dtype=np.uint8))
     if n == 0:
         return mask
-    h, w = mask.shape
     # IDs das componentes que aparecem na borda
     bordas = np.concatenate([
         labels[0, :],  labels[-1, :],
@@ -104,6 +104,22 @@ def mascara_de_fundo(mask: np.ndarray) -> np.ndarray:
         return np.zeros_like(mask)
     fundo = np.isin(labels, list(ids_bordas))
     return fundo
+
+
+def engolir_pontos_perdidos(fundo: np.ndarray, max_diam: int = 5) -> np.ndarray:
+    """Aplica closing morfológico no fundo para "engolir" pontos isolados
+    de checker (max_diam px de diâmetro) que escaparam da detecção
+    por similaridade. Conservador: usa kernel 3x3 e itera max_diam vezes
+    — não amplia além disso, evitando invadir o personagem."""
+    if max_diam <= 0:
+        return fundo
+    # binary_closing(seed, struct, iterations) = dilate N + erode N.
+    # Fecha buracos no fundo de até `max_diam` px de diâmetro.
+    return ndimage.binary_closing(
+        fundo,
+        structure=np.ones((3, 3), dtype=bool),
+        iterations=max_diam,
+    )
 
 
 def processar(origem: Path, destino: Path) -> tuple[bool, str]:
@@ -117,9 +133,13 @@ def processar(origem: Path, destino: Path) -> tuple[bool, str]:
     tons = detectar_tons(arr)
     cand = construir_mascara(arr, tons, TOL_TOM)
     candidatos = int(cand.sum())
-    fundo = mascara_de_fundo(cand)
+    fundo_basico = mascara_de_fundo(cand)
+    # Closing engole pontos isolados de checker (~6px) sem fragmentar o
+    # personagem. Sem dilatar+filtrar componentes (que estava cortando
+    # partes legítimas em imagens onde o personagem aparece em pedaços).
+    fundo = engolir_pontos_perdidos(fundo_basico, max_diam=6)
     n_fundo = int(fundo.sum())
-    n_ilhas = candidatos - n_fundo
+    n_ilhas = candidatos - int(fundo_basico.sum())
 
     # Constroi RGBA: alpha=0 nos pixels de fundo conectado, opaco no resto
     rgba = np.dstack([arr, np.full((h, w), 255, dtype=np.uint8)])

@@ -21,6 +21,7 @@ import ParetoChart from '../components/relatorios/ParetoChart'
 import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
 import { useExpansaoCategoria } from '../lib/agrupamentoCategoria'
 import MascoteDica from '../components/ui/MascoteDica'
+import { useMascotePreferido } from '../hooks/useMascotePreferido'
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, LineElement,
@@ -295,6 +296,7 @@ export default function ComparativoMensalPage() {
   const expCat = useExpansaoCategoria()
   const expandidosCat = expCat.expandidos
   const { oculto, toggle: toggleOculto } = useOcultarValores()
+  const { mascote } = useMascotePreferido()
 
   // Scroll para o painel de drill-down ao abri-lo
   useEffect(() => {
@@ -1511,13 +1513,13 @@ export default function ComparativoMensalPage() {
               {buscado && insights.length > 0 && (
                 <div className="px-4 pt-4">
                   <MascoteDica
-                    nome="raposa"
+                    nome={mascote}
                     pose={
                       insights.some(i => i.tipo === 'alerta')   ? 'espantado'
                       : insights.some(i => i.tipo === 'positivo') ? 'feliz'
                       :                                            'curioso'
                     }
-                    size={72}
+                    size={96}
                     texto={
                       insights.some(i => i.tipo === 'alerta')
                         ? 'Detectei pontos de atenção no período final. Veja os alertas em vermelho — clique pra destacar as categorias responsáveis.'

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, memo, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MascoteDica from '../components/ui/MascoteDica'
+import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { ChevronDown, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus, Search } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { log } from '../lib/logger'
@@ -1350,6 +1351,7 @@ export default function DashboardPage() {
   }
 
   const { contas, pendentes, proximas, doMesRaw, ultimaTxPorConta, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch, prefetchMesSeguinte, prefetchMesAnterior } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
+  const { mascote } = useMascotePreferido()
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -1550,7 +1552,7 @@ export default function DashboardPage() {
               : r > 0                ? 'feliz'
               : r < 0                ? 'espantado'
               :                        'sentado'
-            return <MascoteDica nome="sabio" pose={pose} texto={texto} size={80} />
+            return <MascoteDica nome={mascote} pose={pose} texto={texto} size={96} />
           })()}
 
           {/* Linha 1: calendário + resultados + saldo */}
