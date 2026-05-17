@@ -172,22 +172,41 @@ function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChi
 
   return (
     <div>
-      <button
-        onClick={() => setOpen(v => !v)}
-        className={`w-full flex items-center gap-2 px-2 py-[7px] rounded-lg text-[17px] mb-[1px] transition-colors ${
-          anyActive ? 'bg-av-green/10 text-av-green' : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
-        }`}
-      >
-        {item.icon}
-        <span className="flex-1 text-left">{item.label}</span>
-        {open ? <ChevronDown size={11}/> : <ChevronRight size={11}/>}
-      </button>
+      {/* Linha do pai: NavLink (vai para o destino default — Resumo geral) com
+          um chevron-button separado à direita pra abrir/fechar o submenu.
+          Manter como link garante que ferramentas que buscam por `role="link"`
+          (testes E2E, navegação por teclado) continuem encontrando "Relatórios". */}
+      <div className="flex items-center gap-1">
+        <NavLink
+          to={item.to}
+          className={({ isActive }) =>
+            `flex-1 flex items-center gap-2 px-2 py-[7px] rounded-lg text-[17px] mb-[1px] transition-colors ${
+              isActive || anyActive
+                ? 'bg-av-green/10 text-av-green'
+                : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
+            }`
+          }
+        >
+          {item.icon}
+          <span className="flex-1 text-left">{item.label}</span>
+        </NavLink>
+        <button
+          onClick={() => setOpen(v => !v)}
+          title={open ? 'Recolher' : 'Expandir'}
+          className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-blue-400/8 transition-colors"
+          aria-expanded={open}
+          aria-label={open ? 'Recolher submenu' : 'Expandir submenu'}
+        >
+          {open ? <ChevronDown size={11}/> : <ChevronRight size={11}/>}
+        </button>
+      </div>
       {open && (
         <div className="ml-3 border-l border-blue-400/15 pl-2 mb-1">
           {item.children.map(child => (
             <NavLink
               key={child.to}
               to={child.to}
+              end={child.to === item.to}
               className={({ isActive }) =>
                 `flex items-center gap-2 px-2 py-[6px] rounded-lg text-[16px] mb-[1px] transition-colors ${
                   isActive
