@@ -78,7 +78,7 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <div className="flex items-center gap-2">
             <Bell size={15} style={{ color: '#f0b429' }} />
-            <span className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>
+            <span className="text-[18px] font-semibold" style={{ color: '#e8eaf0' }}>
               {lembrete ? 'Editar lembrete' : 'Novo lembrete'}
             </span>
           </div>
@@ -96,7 +96,7 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
         <div className="p-5 flex flex-col gap-4">
           {/* Data */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>
+            <label className="text-[15px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>
               Data
             </label>
             <input
@@ -104,14 +104,14 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
               value={data}
               onChange={e => setData(e.target.value)}
               className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-                text-[13px] outline-none focus:border-av-green transition-colors"
+                text-[17px] outline-none focus:border-av-green transition-colors"
               style={{ color: '#e8eaf0', colorScheme: 'dark' }}
             />
           </div>
 
           {/* Descrição */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>
+            <label className="text-[15px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>
               Descrição
             </label>
             <input
@@ -123,11 +123,11 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
               maxLength={200}
               placeholder="Descrição do lembrete…"
               className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-                text-[13px] outline-none focus:border-av-green transition-colors
+                text-[17px] outline-none focus:border-av-green transition-colors
                 placeholder:text-white/30"
               style={{ color: '#e8eaf0' }}
             />
-            <span className="text-right text-[10px]" style={{ color: '#8b92a8' }}>
+            <span className="text-right text-[14px]" style={{ color: '#8b92a8' }}>
               {descricao.length}/200
             </span>
           </div>
@@ -137,7 +137,7 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
             <button
               type="button"
               onClick={() => setStatus(s => s === 'CONCLUIDO' ? 'PENDENTE' : 'CONCLUIDO')}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all text-[12px] font-semibold w-fit"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all text-[16px] font-semibold w-fit"
               style={{
                 background: status === 'CONCLUIDO' ? 'rgba(0,200,150,0.1)'  : 'rgba(255,255,255,0.04)',
                 border:     status === 'CONCLUIDO' ? '1px solid rgba(0,200,150,0.35)' : '1px solid rgba(255,255,255,0.1)',
@@ -151,7 +151,7 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
 
           {/* Erro */}
           {erro && (
-            <p className="text-[12px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
+            <p className="text-[16px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
               style={{ color: '#f87171' }}>
               {erro}
             </p>
@@ -162,7 +162,7 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
         <div className="px-5 pb-5 flex gap-2 justify-end">
           <button
             onClick={onFechar}
-            className="px-4 py-2 rounded-lg border border-white/10 text-[12px] font-semibold
+            className="px-4 py-2 rounded-lg border border-white/10 text-[16px] font-semibold
               transition-all hover:border-white/30"
             style={{ color: '#8b92a8' }}
           >
@@ -171,7 +171,7 @@ export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial,
           <button
             onClick={salvar}
             disabled={salvando}
-            className="px-4 py-2 rounded-lg text-[12px] font-semibold
+            className="px-4 py-2 rounded-lg text-[16px] font-semibold
               transition-all hover:opacity-90 disabled:opacity-50"
             style={{ background: '#f0b429', color: '#1a1f2e' }}
           >

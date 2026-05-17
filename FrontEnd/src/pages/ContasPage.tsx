@@ -90,17 +90,17 @@ function LinhaConta({ conta, oculto, onEditar, onExcluir }: {
     <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/10 bg-[#1a1f2e]">
       <IconeConta icone={conta.icone} cor={conta.cor} size="md" />
       <div className="flex-1 min-w-0">
-        <p className="text-[13px] font-semibold truncate" style={{ color: '#e8eaf0' }}>{conta.nome}</p>
-        <p className="text-[10px] mt-0.5" style={{ color: '#8b92a8' }}>
+        <p className="text-[17px] font-semibold truncate" style={{ color: '#e8eaf0' }}>{conta.nome}</p>
+        <p className="text-[14px] mt-0.5" style={{ color: '#8b92a8' }}>
           {conta.tipo}{!conta.ativa ? ' · inativa' : ''}
         </p>
       </div>
       <div className="text-right flex-shrink-0 mr-1">
-        <p className="text-[12px] font-bold"
+        <p className="text-[16px] font-bold"
           style={{ color: conta.saldo_atual >= 0 ? '#00c896' : '#f87171' }}>
           {oculto ? '??????' : formatBRL(conta.saldo_atual)}
         </p>
-        <p className="text-[9px]" style={{ color: '#8b92a8' }}>saldo atual</p>
+        <p className="text-[13px]" style={{ color: '#8b92a8' }}>saldo atual</p>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
         <AcaoBtn onClick={onEditar} title="Editar"><Pencil size={12} /></AcaoBtn>
@@ -195,11 +195,11 @@ export default function ContasPage() {
   return (
     <div className="p-5">
       <div className="flex items-center justify-between mb-5">
-        <h1 className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>Contas</h1>
+        <h1 className="text-[21px] font-bold" style={{ color: '#e8eaf0' }}>Contas</h1>
         <div className="flex items-center gap-2">
           <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
           <button onClick={abrirNova}
-            className="flex items-center gap-1.5 bg-av-green text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
+            className="flex items-center gap-1.5 bg-av-green text-[16px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
             style={{ color: '#0a0f1a' }}>
             <Plus size={14} /> Nova conta
           </button>
@@ -208,8 +208,8 @@ export default function ContasPage() {
 
       <Toast msg={feedback} />
 
-      {loading && <p className="text-[13px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando contas...</p>}
-      {error   && <p className="text-[13px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
+      {loading && <p className="text-[17px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando contas...</p>}
+      {error   && <p className="text-[17px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
 
       {!loading && !error && contas.length > 0 && (
         /*
@@ -232,10 +232,10 @@ export default function ContasPage() {
                 <div className="flex items-center justify-between mb-0.5">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: g.cor }} />
-                    <span className="text-[10px] font-bold uppercase tracking-wide truncate" style={{ color: '#8b92a8' }}>
+                    <span className="text-[14px] font-bold uppercase tracking-wide truncate" style={{ color: '#8b92a8' }}>
                       {g.label}
                     </span>
-                    <span className="text-[10px] flex-shrink-0" style={{ color: '#8b92a8' }}>· {lista.length}</span>
+                    <span className="text-[14px] flex-shrink-0" style={{ color: '#8b92a8' }}>· {lista.length}</span>
                   </div>
                   <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
                     {/* Reordenar ◀ ▶ */}
@@ -243,15 +243,15 @@ export default function ContasPage() {
                       onClick={() => moverGrupo(idx, -1)}
                       disabled={isFirst}
                       title="Mover para a esquerda"
-                      className="w-5 h-5 rounded flex items-center justify-center text-[9px] transition-all disabled:opacity-20 hover:bg-white/5"
+                      className="w-5 h-5 rounded flex items-center justify-center text-[13px] transition-all disabled:opacity-20 hover:bg-white/5"
                       style={{ color: '#8b92a8' }}>◀</button>
                     <button
                       onClick={() => moverGrupo(idx, 1)}
                       disabled={isLast}
                       title="Mover para a direita"
-                      className="w-5 h-5 rounded flex items-center justify-center text-[9px] transition-all disabled:opacity-20 hover:bg-white/5"
+                      className="w-5 h-5 rounded flex items-center justify-center text-[13px] transition-all disabled:opacity-20 hover:bg-white/5"
                       style={{ color: '#8b92a8' }}>▶</button>
-                    <span className="text-[11px] font-bold ml-1"
+                    <span className="text-[15px] font-bold ml-1"
                       style={{ color: total >= 0 ? g.cor : '#f87171' }}>
                       {oculto ? '??????' : formatBRL(total)}
                     </span>
@@ -275,10 +275,10 @@ export default function ContasPage() {
         <div className="mt-6">
           <div className="flex items-center gap-2 mb-3">
             <span className="w-2 h-2 rounded-full bg-white/20" />
-            <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#8b92a8' }}>
+            <span className="text-[14px] font-bold uppercase tracking-wide" style={{ color: '#8b92a8' }}>
               Contas inativas
             </span>
-            <span className="text-[10px]" style={{ color: '#8b92a8' }}>· {contasInativas.length}</span>
+            <span className="text-[14px]" style={{ color: '#8b92a8' }}>· {contasInativas.length}</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 opacity-50">
             {contasInativas.map(c => (
@@ -288,8 +288,8 @@ export default function ContasPage() {
                   <IconeConta icone={c.icone} cor={c.cor} size="md" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-semibold truncate line-through" style={{ color: '#8b92a8' }}>{c.nome}</p>
-                  <p className="text-[10px]" style={{ color: '#8b92a8' }}>{c.tipo} · inativa</p>
+                  <p className="text-[17px] font-semibold truncate line-through" style={{ color: '#8b92a8' }}>{c.nome}</p>
+                  <p className="text-[14px]" style={{ color: '#8b92a8' }}>{c.tipo} · inativa</p>
                 </div>
                 <button
                   onClick={() => abrirEditar(c)}
@@ -306,8 +306,8 @@ export default function ContasPage() {
 
       {!loading && !error && contas.length === 0 && (
         <div className="text-center py-16">
-          <p className="text-[13px] mb-3" style={{ color: '#8b92a8' }}>Nenhuma conta cadastrada ainda.</p>
-          <button onClick={abrirNova} className="text-[12px] underline underline-offset-2"
+          <p className="text-[17px] mb-3" style={{ color: '#8b92a8' }}>Nenhuma conta cadastrada ainda.</p>
+          <button onClick={abrirNova} className="text-[16px] underline underline-offset-2"
             style={{ color: '#00c896' }}>Criar primeira conta</button>
         </div>
       )}
@@ -329,7 +329,7 @@ export default function ContasPage() {
           <div className="relative">
             <Input value={form.nome} onChange={e => set({ nome: e.target.value })}
               placeholder="Ex: Nubank, Sofisa..." maxLength={50} />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px]"
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[14px]"
               style={{ color: '#8b92a8' }}>{form.nome.length}/50</span>
           </div>
         </Field>
@@ -356,7 +356,7 @@ export default function ContasPage() {
                 }}
                 placeholder="Ex: 5"
               />
-              <p className="text-[10px] mt-1" style={{ color: '#8b92a8' }}>Dia 1 a 31</p>
+              <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>Dia 1 a 31</p>
             </Field>
             <Field label="Dia de pagamento">
               <Input
@@ -368,7 +368,7 @@ export default function ContasPage() {
                 }}
                 placeholder="Ex: 10"
               />
-              <p className="text-[10px] mt-1" style={{ color: '#8b92a8' }}>Dia 1 a 31</p>
+              <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>Dia 1 a 31</p>
             </Field>
           </div>
         )}
@@ -382,7 +382,7 @@ export default function ContasPage() {
             style={contaEditar ? { opacity: 0.5, cursor: 'not-allowed', color: '#e8eaf0' } : { color: '#e8eaf0' }}
           />
           {contaEditar && (
-            <p className="text-[10px] mt-1" style={{ color: '#8b92a8' }}>
+            <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>
               O saldo inicial não pode ser alterado. O saldo atual é calculado pelos lançamentos.
             </p>
           )}
@@ -399,7 +399,7 @@ export default function ContasPage() {
               )}
             </div>
             <div className="flex-1 flex flex-col gap-1.5">
-              <label className="cursor-pointer flex items-center gap-1.5 text-[11px] border border-white/10
+              <label className="cursor-pointer flex items-center gap-1.5 text-[15px] border border-white/10
                 rounded-lg px-2.5 py-1.5 hover:border-white/25 transition-colors" style={{ color: '#4da6ff' }}>
                 📁 Escolher imagem
                 <input type="file" accept="image/*" className="hidden"
@@ -427,12 +427,12 @@ export default function ContasPage() {
                 onChange={e => set({ icone: e.target.value })}
                 placeholder="ou emoji 🏦"
                 className="w-full bg-[#252d42] border border-white/10 rounded-lg px-2.5 py-1.5
-                  text-[13px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
+                  text-[17px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
                 style={{ color: '#e8eaf0' }}
               />
               {form.icone && (
                 <button onClick={() => set({ icone: '' })}
-                  className="text-[10px] text-left hover:text-red-400 transition-colors"
+                  className="text-[14px] text-left hover:text-red-400 transition-colors"
                   style={{ color: '#8b92a8' }}>✕ Remover ícone</button>
               )}
             </div>
@@ -451,13 +451,13 @@ export default function ContasPage() {
         )}
 
         {erro && (
-          <p className="text-[12px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
+          <p className="text-[16px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
             style={{ color: '#f87171' }}>{erro}</p>
         )}
 
         {contaEditar && (
           <button onClick={() => setContaExcluir(contaEditar)}
-            className="w-full py-2 text-[12px] font-semibold border border-red-400/20 rounded-lg
+            className="w-full py-2 text-[16px] font-semibold border border-red-400/20 rounded-lg
               hover:bg-red-400/10 transition-colors mt-2"
             style={{ color: '#f87171' }}>
             Excluir conta

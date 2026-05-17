@@ -31,7 +31,7 @@ function terminaComOp(expr: string) {
   return /[+\-×÷*/]$/.test(expr)
 }
 
-const BTN = 'flex items-center justify-center rounded-xl text-[15px] font-semibold transition-all active:scale-95 select-none cursor-pointer'
+const BTN = 'flex items-center justify-center rounded-xl text-[19px] font-semibold transition-all active:scale-95 select-none cursor-pointer'
 const BTN_NUM  = `${BTN} bg-[#252d42] hover:bg-[#2e3955]`
 const BTN_OP   = `${BTN} bg-[#1e2940] hover:bg-[#28354d] text-[#60a5fa]`
 const BTN_ACAO = `${BTN} bg-[#1a3347] hover:bg-[#1e3d54] text-[#34d399]`
@@ -213,7 +213,7 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
       {/* Display */}
       <div className="px-4 pt-3 pb-2 text-right select-none" style={{ minHeight: '64px' }}>
         {previewStr && (
-          <p className="text-[11px] mb-0.5" style={{ color: '#8b92a8' }}>= {previewStr}</p>
+          <p className="text-[15px] mb-0.5" style={{ color: '#8b92a8' }}>= {previewStr}</p>
         )}
         <p
           className="font-semibold leading-tight"
@@ -272,7 +272,7 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
         <button
           type="button"
           onMouseDown={e => { e.preventDefault(); onFechar() }}
-          className="rounded-xl text-[13px] font-medium py-2.5 transition-colors hover:bg-white/5"
+          className="rounded-xl text-[17px] font-medium py-2.5 transition-colors hover:bg-white/5"
           style={{ color: '#8b92a8', border: '1px solid rgba(255,255,255,0.08)' }}
         >
           Cancelar
@@ -280,7 +280,7 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
         <button
           type="button"
           onMouseDown={e => { e.preventDefault(); confirmar() }}
-          className="rounded-xl text-[13px] font-semibold py-2.5 bg-av-green hover:bg-av-green/90 transition-colors"
+          className="rounded-xl text-[17px] font-semibold py-2.5 bg-av-green hover:bg-av-green/90 transition-colors"
           style={{ color: '#0a0f1a' }}
         >
           OK

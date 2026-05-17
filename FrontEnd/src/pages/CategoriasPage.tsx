@@ -128,13 +128,13 @@ function PainelReclassificacao({
           style={{ borderColor: 'rgba(255,255,255,0.1)', color: '#8b92a8' }}>
           <ArrowLeft size={16} />
         </button>
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[17px] flex-shrink-0"
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[21px] flex-shrink-0"
           style={{ background: `${categoria.cor ?? '#888'}22` }}>
           {categoria.icone ?? '📂'}
         </div>
         <div className="flex-1 min-w-0">
-          <h2 className="text-[15px] font-bold" style={{ color: '#e8eaf0' }}>Reclassificar transações</h2>
-          <p className="text-[11px]" style={{ color: '#8b92a8' }}>
+          <h2 className="text-[19px] font-bold" style={{ color: '#e8eaf0' }}>Reclassificar transações</h2>
+          <p className="text-[15px]" style={{ color: '#8b92a8' }}>
             {categoria.descricao}
             {!loading && ` · ${transacoes.length} transaç${transacoes.length === 1 ? 'ão' : 'ões'} encontrada${transacoes.length === 1 ? '' : 's'}`}
           </p>
@@ -144,7 +144,7 @@ function PainelReclassificacao({
       {/* Barra de controles */}
       <div className="flex items-center gap-3 px-5 py-3 border-b flex-shrink-0 flex-wrap"
         style={{ borderColor: 'rgba(255,255,255,0.08)', background: '#111827' }}>
-        <span className="text-[12px] font-medium flex-shrink-0" style={{ color: '#8b92a8' }}>
+        <span className="text-[16px] font-medium flex-shrink-0" style={{ color: '#8b92a8' }}>
           Nova categoria:
         </span>
         <SelectDark value={catDestinoId} onChange={e => setCatDestinoId(e.target.value)}>
@@ -201,7 +201,7 @@ function PainelReclassificacao({
           <button
             onClick={reclassificarTodas}
             disabled={processando}
-            className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg transition-colors disabled:opacity-60 flex-shrink-0"
+            className="flex items-center gap-1.5 text-[16px] font-semibold px-3 py-1.5 rounded-lg transition-colors disabled:opacity-60 flex-shrink-0"
             style={{ background: '#00c896', color: '#0a0f1a' }}>
             <RefreshCw size={12} className={processando ? 'animate-spin' : ''} />
             {progresso ? `Processando ${progresso.feitos}/${progresso.total}...` : 'Reclassificar todas'}
@@ -210,7 +210,7 @@ function PainelReclassificacao({
         {processando && (
           <button
             onClick={() => { canceladoRef.current = true }}
-            className="text-[12px] px-3 py-1.5 rounded-lg border transition-colors flex-shrink-0"
+            className="text-[16px] px-3 py-1.5 rounded-lg border transition-colors flex-shrink-0"
             style={{ borderColor: 'rgba(248,113,113,0.3)', color: '#f87171' }}>
             Cancelar
           </button>
@@ -220,14 +220,14 @@ function PainelReclassificacao({
       {/* Lista */}
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {loading && (
-          <p className="text-[13px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>
+          <p className="text-[17px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>
         )}
         {erro && (
-          <p className="text-[13px] text-center py-12" style={{ color: '#f87171' }}>{erro}</p>
+          <p className="text-[17px] text-center py-12" style={{ color: '#f87171' }}>{erro}</p>
         )}
         {!loading && !erro && transacoes.length === 0 && (
           <div className="text-center py-16">
-            <p className="text-[13px]" style={{ color: '#8b92a8' }}>
+            <p className="text-[17px]" style={{ color: '#8b92a8' }}>
               Nenhuma transação encontrada nesta categoria.
             </p>
           </div>
@@ -240,31 +240,31 @@ function PainelReclassificacao({
                 style={{ borderColor: 'rgba(255,255,255,0.06)', background: '#1a1f2e' }}>
 
                 {/* Data */}
-                <span className="text-[11px] flex-shrink-0 w-[68px]" style={{ color: '#8b92a8' }}>
+                <span className="text-[15px] flex-shrink-0 w-[68px]" style={{ color: '#8b92a8' }}>
                   {formatData(t.data)}
                 </span>
 
                 {/* Descrição */}
-                <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>
+                <span className="flex-1 text-[16px] truncate" style={{ color: '#c5cad8' }}>
                   {t.descricao}
                 </span>
 
                 {/* Conta */}
                 {t.conta_nome && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 flex-shrink-0"
+                  <span className="text-[14px] px-1.5 py-0.5 rounded bg-white/5 flex-shrink-0"
                     style={{ color: '#8b92a8' }}>
                     {t.conta_nome}
                   </span>
                 )}
 
                 {/* Status */}
-                <span className="text-[10px] font-semibold flex-shrink-0 w-14 text-right"
+                <span className="text-[14px] font-semibold flex-shrink-0 w-14 text-right"
                   style={{ color: STATUS_COR[t.status] ?? '#8b92a8' }}>
                   {STATUS_LABEL[t.status] ?? t.status}
                 </span>
 
                 {/* Valor */}
-                <span className="text-[12px] font-semibold w-24 text-right flex-shrink-0"
+                <span className="text-[16px] font-semibold w-24 text-right flex-shrink-0"
                   style={{ color: t.tipo === 'RECEITA' ? '#4ade80' : '#f87171' }}>
                   {t.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(t.valor)}
                 </span>
@@ -274,7 +274,7 @@ function PainelReclassificacao({
                   onClick={() => reclassificarUm(t.id)}
                   disabled={!catDestinoId || processando}
                   title={catDest ? `Mover para: ${catDest.descricao}` : 'Selecione a nova categoria'}
-                  className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all disabled:opacity-30 flex-shrink-0 hover:bg-av-green/10"
+                  className="text-[15px] font-semibold px-2.5 py-1 rounded-lg border transition-all disabled:opacity-30 flex-shrink-0 hover:bg-av-green/10"
                   style={{ borderColor: 'rgba(0,200,150,0.3)', color: '#00c896' }}>
                   Mover
                 </button>
@@ -411,9 +411,9 @@ export default function CategoriasPage() {
     <div className="p-5 max-w-[860px]">
       {/* Topbar */}
       <div className="flex items-center justify-between mb-5">
-        <h1 className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>Categorias</h1>
+        <h1 className="text-[21px] font-bold" style={{ color: '#e8eaf0' }}>Categorias</h1>
         <button onClick={abrirNovo}
-          className="flex items-center gap-1.5 bg-av-green text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
+          className="flex items-center gap-1.5 bg-av-green text-[16px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
           style={{ color: '#0a0f1a' }}>
           <Plus size={14} /> Nova categoria
         </button>
@@ -425,11 +425,11 @@ export default function CategoriasPage() {
       <input value={busca} onChange={e => setBusca(e.target.value)}
         placeholder="Buscar categoria..."
         className="mb-4 w-full max-w-xs bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-          text-[13px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
+          text-[17px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
         style={{ color: '#e8eaf0' }} />
 
-      {loading && <p className="text-[13px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>}
-      {error   && <p className="text-[13px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
+      {loading && <p className="text-[17px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>}
+      {error   && <p className="text-[17px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
 
       {/* Lista hierárquica */}
       {!loading && !error && (
@@ -446,7 +446,7 @@ export default function CategoriasPage() {
                 <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/10 bg-[#1a1f2e] cursor-pointer select-none" onClick={() => subs.length > 0 && toggleExp(p.id)}>
 
                   {/* Ícone */}
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[17px] flex-shrink-0"
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[21px] flex-shrink-0"
                     style={{ background: `${p.cor ?? '#888'}22` }}>
                     {p.icone ?? '📂'}
                   </div>
@@ -454,18 +454,18 @@ export default function CategoriasPage() {
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[13px] font-semibold truncate" style={{ color: '#e8eaf0' }}>
+                      <span className="text-[17px] font-semibold truncate" style={{ color: '#e8eaf0' }}>
                         {p.descricao}
                       </span>
                       {p.protegida && (
                         <Shield size={11} style={{ color: '#7F77DD' }} className="flex-shrink-0" />
                       )}
                       {!p.ativa && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/5"
+                        <span className="text-[13px] font-bold px-1.5 py-0.5 rounded-full bg-white/5"
                           style={{ color: '#8b92a8' }}>Inativa</span>
                       )}
                     </div>
-                    <p className="text-[10px] mt-0.5" style={{ color: '#8b92a8' }}>
+                    <p className="text-[14px] mt-0.5" style={{ color: '#8b92a8' }}>
                       {subs.length} subcategoria{subs.length !== 1 ? 's' : ''}
                     </p>
                   </div>
@@ -501,17 +501,17 @@ export default function CategoriasPage() {
                       <div key={s.id}
                         className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-white/5 bg-[#252d42]/50">
 
-                        <div className="w-6 h-6 rounded-md flex items-center justify-center text-[13px] flex-shrink-0"
+                        <div className="w-6 h-6 rounded-md flex items-center justify-center text-[17px] flex-shrink-0"
                           style={{ background: `${s.cor ?? '#888'}22` }}>
                           {s.icone ?? '📂'}
                         </div>
 
-                        <span className="flex-1 text-[12px] font-medium truncate" style={{ color: '#c5cad8' }}>
+                        <span className="flex-1 text-[16px] font-medium truncate" style={{ color: '#c5cad8' }}>
                           {s.descricao}
                         </span>
 
                         {!s.ativa && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/5"
+                          <span className="text-[13px] font-bold px-1.5 py-0.5 rounded-full bg-white/5"
                             style={{ color: '#8b92a8' }}>Inativa</span>
                         )}
 
@@ -540,13 +540,13 @@ export default function CategoriasPage() {
 
           {categorias.length === 0 && !busca && (
             <div className="text-center py-16">
-              <p className="text-[13px] mb-3" style={{ color: '#8b92a8' }}>Nenhuma categoria cadastrada.</p>
-              <button onClick={abrirNovo} className="text-[12px] underline underline-offset-2"
+              <p className="text-[17px] mb-3" style={{ color: '#8b92a8' }}>Nenhuma categoria cadastrada.</p>
+              <button onClick={abrirNovo} className="text-[16px] underline underline-offset-2"
                 style={{ color: '#00c896' }}>Criar primeira categoria</button>
             </div>
           )}
           {categorias.length > 0 && paisFiltrados.length === 0 && (
-            <p className="text-[13px] text-center py-8" style={{ color: '#8b92a8' }}>Nenhuma encontrada.</p>
+            <p className="text-[17px] text-center py-8" style={{ color: '#8b92a8' }}>Nenhuma encontrada.</p>
           )}
         </div>
       )}
@@ -584,7 +584,7 @@ export default function CategoriasPage() {
           <div className="relative">
             <Input value={form.descricao} onChange={e => set({ descricao: e.target.value })}
               placeholder="Ex: Alimentação" maxLength={50} />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px]"
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[14px]"
               style={{ color: '#8b92a8' }}>{form.descricao.length}/50</span>
           </div>
         </Field>
@@ -610,7 +610,7 @@ export default function CategoriasPage() {
 
         {editando && !editando.protegida && (
           <button onClick={() => setExcluindo(editando)}
-            className="w-full py-2 text-[12px] font-semibold border border-red-400/20 rounded-lg
+            className="w-full py-2 text-[16px] font-semibold border border-red-400/20 rounded-lg
               hover:bg-red-400/10 transition-colors mt-2"
             style={{ color: '#f87171' }}>
             Excluir categoria
@@ -618,7 +618,7 @@ export default function CategoriasPage() {
         )}
 
         {erro && (
-          <p className="text-[12px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
+          <p className="text-[16px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
             style={{ color: '#f87171' }}>{erro}</p>
         )}
       </Drawer>

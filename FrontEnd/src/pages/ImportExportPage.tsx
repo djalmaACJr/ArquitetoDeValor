@@ -61,13 +61,6 @@ interface BackupPayload {
   transferencias?: TransacaoRaw[]
 }
 
-interface LinhaExportCategoria {
-  Categoria: string
-  Subcategoria: string
-  Ícone: string
-  Cor: string
-}
-
 interface LinhaImport {
   idx: number
   data: string
@@ -161,8 +154,8 @@ function Section({ titulo, subtitulo, icon: Icon, cor, children, defaultOpen = t
             <Icon size={16} style={{ color: cor }} />
           </div>
           <div className="text-left">
-            <p className="text-[14px] font-bold text-gray-800 dark:text-gray-100">{titulo}</p>
-            <p className="text-[11px] text-gray-400">{subtitulo}</p>
+            <p className="text-[18px] font-bold text-gray-800 dark:text-gray-100">{titulo}</p>
+            <p className="text-[15px] text-gray-400">{subtitulo}</p>
           </div>
         </div>
         {aberto ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
@@ -179,7 +172,7 @@ function Btn({ onClick, disabled, loading, cor = '#00c896', children }: {
     <button
       onClick={onClick}
       disabled={disabled || loading}
-      className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+      className="flex items-center gap-2 px-4 py-2 rounded-lg text-[17px] font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
       style={{ background: `${cor}20`, color: cor, border: `1px solid ${cor}40` }}
     >
       {loading && <Loader2 size={14} className="animate-spin" />}
@@ -190,7 +183,7 @@ function Btn({ onClick, disabled, loading, cor = '#00c896', children }: {
 
 function Tag({ cor, children }: { cor: string; children: React.ReactNode }) {
   return (
-    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+    <span className="text-[14px] font-semibold px-2 py-0.5 rounded-full"
       style={{ background: `${cor}20`, color: cor }}>{children}</span>
   )
 }
@@ -209,17 +202,17 @@ function ModalConfirmacao({ titulo, mensagem, onConfirmar, onCancelar, corBtn = 
             <AlertTriangle size={18} className="text-red-400" />
           </div>
           <div>
-            <p className="text-[15px] font-bold text-gray-800 dark:text-gray-100">{titulo}</p>
-            <div className="text-[13px] text-gray-500 dark:text-gray-400 mt-1">{mensagem}</div>
+            <p className="text-[19px] font-bold text-gray-800 dark:text-gray-100">{titulo}</p>
+            <div className="text-[17px] text-gray-500 dark:text-gray-400 mt-1">{mensagem}</div>
           </div>
         </div>
         <div className="flex justify-end gap-2 mt-5">
           <button onClick={onCancelar}
-            className="px-4 py-2 rounded-lg text-[13px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            className="px-4 py-2 rounded-lg text-[17px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
             Cancelar
           </button>
           <button onClick={onConfirmar}
-            className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white transition-colors"
+            className="px-4 py-2 rounded-lg text-[17px] font-semibold text-white transition-colors"
             style={{ background: corBtn }}>
             {labelBtn}
           </button>
@@ -309,25 +302,25 @@ function SecaoLimpeza() {
                   }}
                 />
                 <span
-                  className="text-[13px] font-semibold"
+                  className="text-[17px] font-semibold"
                   style={{ color: modo === op.valor ? '#ff6b4a' : '#8b92a8' }}
                 >
                   {op.titulo}
                 </span>
               </div>
-              <p className="text-[11px] text-gray-400 pl-5">{op.descricao}</p>
+              <p className="text-[15px] text-gray-400 pl-5">{op.descricao}</p>
             </button>
           ))}
         </div>
 
         {/* Aviso */}
-        <p className="text-[11px] text-red-400/70">⚠️ Esta ação é irreversível.</p>
+        <p className="text-[15px] text-red-400/70">⚠️ Esta ação é irreversível.</p>
 
         {/* Log */}
         {log.length > 0 && (
           <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-1.5">
             {log.map((l, i) => (
-              <div key={i} className="flex items-center gap-2 text-[12px]">
+              <div key={i} className="flex items-center gap-2 text-[16px]">
                 {l.tipo === 'ok'
                   ? <CheckCircle2 size={13} className="text-av-green flex-shrink-0" />
                   : <X size={13} className="text-red-400 flex-shrink-0" />}
@@ -381,55 +374,73 @@ function SecaoExport() {
   const exportar = async () => {
     setLoading(true)
     try {
-      // Importar SheetJS dinamicamente
-      // @ts-expect-error dynamic CDN import
-      const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
-      const wb = XLSX.utils.book_new()
+      const { exportToExcel } = await import('../lib/exportUtils')
+      type Sheet = import('../lib/exportUtils').ExportSheet
+      const sheets: Sheet[] = []
 
       // Aba: Contas
       if (exportarContas) {
-        const linhas = contas.map(c => ({
-          Nome: c.nome,
-          Tipo: c.tipo,
-          'Saldo Inicial': c.saldo_inicial ?? 0,
-          'Saldo Atual': c.saldo_atual ?? 0,
-          Ativa: c.ativa ? 'Sim' : 'Não',
-          Ícone: c.icone ?? '',
-          Cor: c.cor ?? '',
-        }))
-        const ws = XLSX.utils.json_to_sheet(linhas)
-        ws['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 14 }, { wch: 14 }, { wch: 8 }, { wch: 10 }, { wch: 10 }]
-        XLSX.utils.book_append_sheet(wb, ws, 'Contas')
+        sheets.push({
+          name: 'Contas',
+          title: 'Contas',
+          columns: [
+            { key: 'nome',  label: 'Nome',           type: 'text',     width: 25 },
+            { key: 'tipo',  label: 'Tipo',           type: 'text',     width: 15 },
+            { key: 'sIni', label: 'Saldo Inicial',  type: 'currency', width: 16 },
+            { key: 'sAtu', label: 'Saldo Atual',    type: 'currency', width: 16 },
+            { key: 'ativa', label: 'Ativa',          type: 'text',     width: 8,  align: 'center' },
+            { key: 'icone', label: 'Ícone',          type: 'text',     width: 10 },
+            { key: 'cor',   label: 'Cor',            type: 'text',     width: 10 },
+          ],
+          rows: contas.map(c => ({
+            nome:  c.nome,
+            tipo:  c.tipo,
+            sIni:  c.saldo_inicial ?? 0,
+            sAtu:  c.saldo_atual ?? 0,
+            ativa: c.ativa ? 'Sim' : 'Não',
+            icone: c.icone ?? '',
+            cor:   c.cor ?? '',
+          })),
+        })
       }
 
       // Aba: Categorias (com hierarquia)
       if (exportarCategorias) {
         const pais = categorias.filter(c => !c.id_pai)
-        const linhas: LinhaExportCategoria[] = []
+        type Row = import('../lib/exportUtils').ExportRow
+        const rows: Row[] = []
         pais.forEach(p => {
-          linhas.push({
-            Categoria: p.descricao,
-            Subcategoria: '',
-            Ícone: p.icone ?? '',
-            Cor: p.cor ?? '',
+          rows.push({
+            categoria: p.descricao,
+            sub:       '',
+            icone:     p.icone ?? '',
+            cor:       p.cor ?? '',
+            _style:    'group',
           })
           categorias.filter(s => s.id_pai === p.id).forEach(s => {
-            linhas.push({
-              Categoria: p.descricao,
-              Subcategoria: s.descricao,
-              Ícone: s.icone ?? '',
-              Cor: s.cor ?? '',
+            rows.push({
+              categoria: p.descricao,
+              sub:       s.descricao,
+              icone:     s.icone ?? '',
+              cor:       s.cor ?? '',
             })
           })
         })
-        const ws = XLSX.utils.json_to_sheet(linhas)
-        ws['!cols'] = [{ wch: 22 }, { wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 10 }]
-        XLSX.utils.book_append_sheet(wb, ws, 'Categorias')
+        sheets.push({
+          name: 'Categorias',
+          title: 'Categorias',
+          columns: [
+            { key: 'categoria', label: 'Categoria',    type: 'text', width: 22 },
+            { key: 'sub',       label: 'Subcategoria', type: 'text', width: 22 },
+            { key: 'icone',     label: 'Ícone',        type: 'text', width: 10 },
+            { key: 'cor',       label: 'Cor',          type: 'text', width: 10 },
+          ],
+          rows,
+        })
       }
 
       // Aba: Transações
       if (exportarTransacoes) {
-        // Busca mês a mês no intervalo selecionado (edge function suporta ?mes=YYYY-MM)
         const gerarMeses = (ini: string, fim: string) => {
           const meses: string[] = []
           let [a, m] = ini.split('-').map(Number)
@@ -446,28 +457,41 @@ function SecaoExport() {
         )
         const txs = resArr.flatMap(r => extrairLista<TransacaoRaw>(r.dados))
         const contaMap = Object.fromEntries(contas.map(c => [c.conta_id, c.nome]))
-        const linhas = txs
-          .map((t: TransacaoRaw) => {
-            const [a, m, d] = t.data.split('-')
-            // Remove prefixo "[Transf. saída] " / "[Transf. entrada] " da descrição
-            // para que o re-import via /transferencias não duplique o prefixo.
-            const descricao = (t.descricao ?? '').replace(/^\[Transf\. (saída|entrada)\] ?/, '')
-            return {
-              Data: `${d}/${m}/${a}`,
-              Descrição: descricao,
-              Valor: t.tipo === 'DESPESA' ? -Math.abs(t.valor) : Math.abs(t.valor),
-              Conta: contaMap[t.conta_id ?? ''] ?? t.conta_id,
-              Categoria: t.categoria_nome ?? t.categoria_pai_nome ?? '',
-              Observação: t.observacao ?? '',
-            }
-          })
-        const ws = XLSX.utils.json_to_sheet(linhas)
-        ws['!cols'] = [{ wch: 12 }, { wch: 35 }, { wch: 14 }, { wch: 20 }, { wch: 22 }, { wch: 10 }, { wch: 30 }]
-        XLSX.utils.book_append_sheet(wb, ws, 'Transações')
+        const rows = txs.map((t: TransacaoRaw) => {
+          const descricao = (t.descricao ?? '').replace(/^\[Transf\. (saída|entrada)\] ?/, '')
+          return {
+            data:       new Date(t.data + 'T12:00:00'),
+            descricao,
+            valor:      t.tipo === 'DESPESA' ? -Math.abs(t.valor) : Math.abs(t.valor),
+            conta:      String(contaMap[t.conta_id ?? ''] ?? t.conta_id ?? ''),
+            categoria:  String(t.categoria_nome ?? t.categoria_pai_nome ?? ''),
+            observacao: String(t.observacao ?? ''),
+          }
+        })
+        sheets.push({
+          name: 'Transações',
+          title: 'Transações',
+          subtitle: `${mesInicio} – ${mesFim}`,
+          columns: [
+            { key: 'data',       label: 'Data',       type: 'date',     width: 12 },
+            { key: 'descricao',  label: 'Descrição',  type: 'text',     width: 35 },
+            { key: 'valor',      label: 'Valor',      type: 'currency', width: 14 },
+            { key: 'conta',      label: 'Conta',      type: 'text',     width: 20 },
+            { key: 'categoria',  label: 'Categoria',  type: 'text',     width: 22 },
+            { key: 'observacao', label: 'Observação', type: 'text',     width: 30 },
+          ],
+          rows,
+        })
       }
 
-      const nomeArq = `arqvalor_export_${mesInicio}_${mesFim}.xlsx`
-      XLSX.writeFile(wb, nomeArq)
+      if (sheets.length === 0) {
+        alert('Nada selecionado para exportar.')
+        return
+      }
+      await exportToExcel({
+        filename: `arqvalor_export_${mesInicio}_${mesFim}`,
+        sheets,
+      })
     } catch (e) {
       alert(`Erro ao exportar: ${(e as Error).message}`)
     } finally {
@@ -482,17 +506,17 @@ function SecaoExport() {
       <div className="space-y-4">
         {/* Período */}
         <div>
-          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
+          <p className="text-[15px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
             Período das transações
           </p>
           <div className="flex items-center gap-3">
             <div>
-              <p className="text-[10px] text-gray-400 mb-1">De</p>
+              <p className="text-[14px] text-gray-400 mb-1">De</p>
               <MonthPicker value={mesInicio} onChange={setMesInicio} />
             </div>
             <span className="text-gray-400 mt-4">→</span>
             <div>
-              <p className="text-[10px] text-gray-400 mb-1">Até</p>
+              <p className="text-[14px] text-gray-400 mb-1">Até</p>
               <MonthPicker value={mesFim} onChange={setMesFim} />
             </div>
           </div>
@@ -500,7 +524,7 @@ function SecaoExport() {
 
         {/* O que exportar */}
         <div>
-          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
+          <p className="text-[15px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
             O que exportar
           </p>
           <div className="grid grid-cols-3 gap-2">
@@ -516,17 +540,17 @@ function SecaoExport() {
                   borderColor: item.checked ? `${item.cor}50` : 'rgba(255,255,255,0.08)',
                 }}>
                 <div className="flex items-center justify-between">
-                  <span className="text-[13px] font-semibold" style={{ color: item.checked ? item.cor : '#8b92a8' }}>
+                  <span className="text-[17px] font-semibold" style={{ color: item.checked ? item.cor : '#8b92a8' }}>
                     {item.label}
                   </span>
                   <input type="checkbox" checked={item.checked} onChange={e => item.set(e.target.checked)}
                     className="accent-av-green" />
                 </div>
-                <span className="text-[10px] text-gray-400">{item.sub}</span>
+                <span className="text-[14px] text-gray-400">{item.sub}</span>
               </label>
             ))}
           </div>
-          <p className="text-[10px] text-gray-400 mt-2">
+          <p className="text-[14px] text-gray-400 mt-2">
             * O arquivo sempre incluirá a aba "Modelo Importação" para referência
           </p>
         </div>
@@ -1210,7 +1234,7 @@ function SecaoImport() {
         {etapa === 'idle' && (
           <div className="space-y-3">
             {/* Seletor de modo */}
-            <div className="flex rounded-lg overflow-hidden border border-white/10 text-[12px] font-semibold">
+            <div className="flex rounded-lg overflow-hidden border border-white/10 text-[16px] font-semibold">
               {([
                 { value: 'transacoes', label: 'Transações' },
                 { value: 'contas',     label: 'Contas'     },
@@ -1243,17 +1267,17 @@ function SecaoImport() {
               onDrop={onDrop}
             >
               <FileSpreadsheet size={32} className="mx-auto mb-3" style={{ color: dragOver ? '#a78bfa' : '#4b5563' }} />
-              <p className="text-[14px] font-semibold mb-1" style={{ color: dragOver ? '#a78bfa' : '#d1d5db' }}>
+              <p className="text-[18px] font-semibold mb-1" style={{ color: dragOver ? '#a78bfa' : '#d1d5db' }}>
                 {dragOver ? 'Solte o arquivo aqui' : 'Arraste um arquivo ou clique para selecionar'}
               </p>
-              <p className="text-[11px] text-gray-400 mb-4">
+              <p className="text-[15px] text-gray-400 mb-4">
                 {modo === 'transacoes' && 'CSV ou XLSX — use a aba "Modelo Importação" como referência'}
                 {modo === 'contas' && 'XLSX com colunas: Nome | Tipo | Saldo Inicial (opcional: Ícone, Cor)'}
                 {modo === 'categorias' && 'XLSX com colunas: Categoria | Subcategoria (opcional: Ícone, Cor)'}
               </p>
               <button
                 onClick={e => { e.stopPropagation(); inputRef.current?.click() }}
-                className="px-5 py-2 rounded-lg text-[13px] font-semibold transition-colors"
+                className="px-5 py-2 rounded-lg text-[17px] font-semibold transition-colors"
                 style={{ background: '#a78bfa20', color: '#a78bfa', border: '1px solid #a78bfa40' }}
               >
                 Escolher arquivo
@@ -1262,7 +1286,7 @@ function SecaoImport() {
             </div>
             <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
               {modo === 'transacoes' && <>
-                <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
+                <p className="text-[15px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {[
                     { col: 'data', obrig: true },
@@ -1274,18 +1298,18 @@ function SecaoImport() {
                     { col: 'observacao', obrig: false },
                   ].map(col => (
                     <div key={col.col} className="flex items-center gap-1">
-                      <code className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                      <code className="text-[14px] px-1.5 py-0.5 rounded font-mono"
                         style={{ background: col.obrig ? '#a78bfa20' : '#ffffff10', color: col.obrig ? '#a78bfa' : '#8b92a8' }}>
                         {col.col}
                       </code>
-                      {col.obrig && <span className="text-[9px] text-red-400">*</span>}
+                      {col.obrig && <span className="text-[13px] text-red-400">*</span>}
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-gray-400">* obrigatório — valor negativo = DESPESA, positivo = RECEITA | datas no formato DD/MM/AAAA</p>
+                <p className="text-[14px] text-gray-400">* obrigatório — valor negativo = DESPESA, positivo = RECEITA | datas no formato DD/MM/AAAA</p>
               </>}
               {modo === 'contas' && <>
-                <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
+                <p className="text-[15px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {[
                     { col: 'nome', obrig: true },
@@ -1295,18 +1319,18 @@ function SecaoImport() {
                     { col: 'cor', obrig: false },
                   ].map(col => (
                     <div key={col.col} className="flex items-center gap-1">
-                      <code className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                      <code className="text-[14px] px-1.5 py-0.5 rounded font-mono"
                         style={{ background: col.obrig ? '#a78bfa20' : '#ffffff10', color: col.obrig ? '#a78bfa' : '#8b92a8' }}>
                         {col.col}
                       </code>
-                      {col.obrig && <span className="text-[9px] text-red-400">*</span>}
+                      {col.obrig && <span className="text-[13px] text-red-400">*</span>}
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-gray-400">Tipos válidos: CORRENTE | REMUNERACAO | CARTAO | INVESTIMENTO | CARTEIRA</p>
+                <p className="text-[14px] text-gray-400">Tipos válidos: CORRENTE | REMUNERACAO | CARTAO | INVESTIMENTO | CARTEIRA</p>
               </>}
               {modo === 'categorias' && <>
-                <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
+                <p className="text-[15px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {[
                     { col: 'categoria', obrig: true },
@@ -1315,15 +1339,15 @@ function SecaoImport() {
                     { col: 'cor', obrig: false },
                   ].map(col => (
                     <div key={col.col} className="flex items-center gap-1">
-                      <code className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                      <code className="text-[14px] px-1.5 py-0.5 rounded font-mono"
                         style={{ background: col.obrig ? '#a78bfa20' : '#ffffff10', color: col.obrig ? '#a78bfa' : '#8b92a8' }}>
                         {col.col}
                       </code>
-                      {col.obrig && <span className="text-[9px] text-red-400">*</span>}
+                      {col.obrig && <span className="text-[13px] text-red-400">*</span>}
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-gray-400">Subcategoria vazia = categoria pai | com valor = subcategoria filha</p>
+                <p className="text-[14px] text-gray-400">Subcategoria vazia = categoria pai | com valor = subcategoria filha</p>
               </>}
             </div>
 
@@ -1362,7 +1386,7 @@ function SecaoImport() {
                 const nomeArq = `modelo_importacao_${modo}.xlsx`
                 XLSX.writeFile(wb, nomeArq)
               }}
-              className="flex items-center gap-2 text-[12px] font-semibold px-3 py-2 rounded-lg transition-colors"
+              className="flex items-center gap-2 text-[16px] font-semibold px-3 py-2 rounded-lg transition-colors"
               style={{ background: 'rgba(167,139,250,0.08)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}
             >
               <Download size={13} /> Baixar modelo de importação
@@ -1382,7 +1406,7 @@ function SecaoImport() {
                 {linhasComProblema.length > 0 && <Tag cor="#ff6b4a">{linhasComProblema.length} com problema</Tag>}
                 {contasDesconhecidas.length > 0 && <Tag cor="#f0b429">{contasDesconhecidas.length} conta(s) nova(s)</Tag>}
                 {catsDesconhecidas.length > 0 && <Tag cor="#a78bfa">{catsDesconhecidas.length} categoria(s) nova(s)</Tag>}
-                {carregandoDedup && <span className="text-[11px] text-gray-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin"/> verificando duplicatas...</span>}
+                {carregandoDedup && <span className="text-[15px] text-gray-400 flex items-center gap-1"><Loader2 size={11} className="animate-spin"/> verificando duplicatas...</span>}
               </>}
               {modo === 'contas' && <>
                 <Tag cor="#00c896">{gridContas.length} lidas</Tag>
@@ -1399,7 +1423,7 @@ function SecaoImport() {
             {/* ── Grid de Contas ── */}
             {modo === 'contas' && (
               <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 max-h-[350px]">
-                <table className="w-full text-[11px]">
+                <table className="w-full text-[15px]">
                   <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
                     <tr>
                       <th className="px-2 py-2 w-8 text-center">✓</th>
@@ -1420,18 +1444,18 @@ function SecaoImport() {
                         </td>
                         <td className="px-2 py-1 whitespace-nowrap">
                           {l.problema
-                            ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-400/10 text-red-400">{l.problema}</span>
-                            : <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-400/10 text-green-400">OK</span>}
+                            ? <span className="text-[14px] font-semibold px-1.5 py-0.5 rounded-full bg-red-400/10 text-red-400">{l.problema}</span>
+                            : <span className="text-[14px] font-semibold px-1.5 py-0.5 rounded-full bg-green-400/10 text-green-400">OK</span>}
                         </td>
                         <td className="px-1 py-1">
                           <input type="text" value={l.nome}
                             onChange={e => setContaLinha(l.idx, { nome: e.target.value })}
-                            className="w-full min-w-[140px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-gray-300 outline-none" />
+                            className="w-full min-w-[140px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-gray-300 outline-none" />
                         </td>
                         <td className="px-1 py-1">
                           <select value={l.tipo}
                             onChange={e => setContaLinha(l.idx, { tipo: e.target.value })}
-                            className="bg-transparent border border-transparent hover:border-white/10 rounded px-1 py-0.5 text-[11px] text-gray-300 outline-none"
+                            className="bg-transparent border border-transparent hover:border-white/10 rounded px-1 py-0.5 text-[15px] text-gray-300 outline-none"
                             style={{ background: '#1a1f2e' }}>
                             {['CORRENTE','REMUNERACAO','CARTAO','INVESTIMENTO','CARTEIRA'].map(t => (
                               <option key={t} value={t}>{t}</option>
@@ -1441,7 +1465,7 @@ function SecaoImport() {
                         <td className="px-1 py-1 text-right">
                           <input type="number" step="0.01" value={l.saldo_inicial}
                             onChange={e => setContaLinha(l.idx, { saldo_inicial: parseFloat(e.target.value) || 0 })}
-                            className="w-[90px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-right text-gray-300 outline-none" />
+                            className="w-[90px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-right text-gray-300 outline-none" />
                         </td>
                       </tr>
                     ))}
@@ -1453,7 +1477,7 @@ function SecaoImport() {
             {/* ── Grid de Categorias ── */}
             {modo === 'categorias' && (
               <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 max-h-[350px]">
-                <table className="w-full text-[11px]">
+                <table className="w-full text-[15px]">
                   <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
                     <tr>
                       <th className="px-2 py-2 w-8 text-center">✓</th>
@@ -1473,18 +1497,18 @@ function SecaoImport() {
                         </td>
                         <td className="px-2 py-1 whitespace-nowrap">
                           {l.problema
-                            ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-400/10 text-red-400">{l.problema}</span>
-                            : <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-400/10 text-green-400">{l.subcategoria ? 'Subcategoria' : 'Pai'}</span>}
+                            ? <span className="text-[14px] font-semibold px-1.5 py-0.5 rounded-full bg-red-400/10 text-red-400">{l.problema}</span>
+                            : <span className="text-[14px] font-semibold px-1.5 py-0.5 rounded-full bg-green-400/10 text-green-400">{l.subcategoria ? 'Subcategoria' : 'Pai'}</span>}
                         </td>
                         <td className="px-1 py-1">
                           <input type="text" value={l.categoria}
                             onChange={e => setCatLinha(l.idx, { categoria: e.target.value })}
-                            className="w-full min-w-[130px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-gray-300 outline-none" />
+                            className="w-full min-w-[130px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-gray-300 outline-none" />
                         </td>
                         <td className="px-1 py-1">
                           <input type="text" value={l.subcategoria}
                             onChange={e => setCatLinha(l.idx, { subcategoria: e.target.value })}
-                            className="w-full min-w-[130px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-gray-300 outline-none"
+                            className="w-full min-w-[130px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-gray-300 outline-none"
                             placeholder="(vazio = categoria pai)" />
                         </td>
                       </tr>
@@ -1497,16 +1521,16 @@ function SecaoImport() {
             {/* Resolver contas */}
             {modo === 'transacoes' && contasDesconhecidas.length > 0 && (
               <div>
-                <p className="text-[12px] font-semibold text-gray-700 dark:text-gray-300 mb-2">Contas não encontradas — como proceder?</p>
+                <p className="text-[16px] font-semibold text-gray-700 dark:text-gray-300 mb-2">Contas não encontradas — como proceder?</p>
                 <div className="space-y-2">
                   {contasDesconhecidas.map(nome => (
                     <div key={nome} className="bg-amber-400/5 border border-amber-400/20 rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-[12px] font-semibold text-amber-400">"{nome}"</span>
+                        <span className="text-[16px] font-semibold text-amber-400">"{nome}"</span>
                         <div className="flex gap-1">
                           {(['criar', 'mapear'] as const).map(acao => (
                             <button key={acao} onClick={() => setResolucaoContas(r => ({ ...r, [nome]: { ...r[nome], acao } }))}
-                              className="px-2.5 py-1 rounded text-[11px] font-semibold transition-colors"
+                              className="px-2.5 py-1 rounded text-[15px] font-semibold transition-colors"
                               style={{
                                 background: resolucaoContas[nome]?.acao === acao ? '#f0b42920' : 'transparent',
                                 color: resolucaoContas[nome]?.acao === acao ? '#f0b429' : '#8b92a8',
@@ -1520,7 +1544,7 @@ function SecaoImport() {
                       {resolucaoContas[nome]?.acao === 'mapear' && (
                         <select value={resolucaoContas[nome]?.mapear_para ?? ''}
                           onChange={e => setResolucaoContas(r => ({ ...r, [nome]: { ...r[nome], mapear_para: e.target.value } }))}
-                          className="w-full bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-1.5 text-[12px] text-gray-200">
+                          className="w-full bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-1.5 text-[16px] text-gray-200">
                           <option value="">Selecionar conta...</option>
                           {contas.map((c: Conta) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
                         </select>
@@ -1534,19 +1558,19 @@ function SecaoImport() {
             {/* Resolver categorias */}
             {modo === 'transacoes' && catsDesconhecidas.length > 0 && (
               <div>
-                <p className="text-[12px] font-semibold text-gray-700 dark:text-gray-300 mb-2">Categorias não encontradas — como proceder?</p>
+                <p className="text-[16px] font-semibold text-gray-700 dark:text-gray-300 mb-2">Categorias não encontradas — como proceder?</p>
                 <div className="space-y-2">
                   {catsDesconhecidas.map(nome => (
                     <div key={nome} className="bg-purple-400/5 border border-purple-400/20 rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-[12px] font-semibold text-purple-400">"{nome}"</span>
+                          <span className="text-[16px] font-semibold text-purple-400">"{nome}"</span>
                           <Tag cor={resolucaoCats[nome]?.tipo === 'RECEITA' ? '#00c896' : '#ff6b4a'}>{resolucaoCats[nome]?.tipo}</Tag>
                         </div>
                         <div className="flex gap-1">
                           {(['criar', 'mapear'] as const).map(acao => (
                             <button key={acao} onClick={() => setResolucaoCats(r => ({ ...r, [nome]: { ...r[nome], acao } }))}
-                              className="px-2.5 py-1 rounded text-[11px] font-semibold transition-colors"
+                              className="px-2.5 py-1 rounded text-[15px] font-semibold transition-colors"
                               style={{
                                 background: resolucaoCats[nome]?.acao === acao ? '#a78bfa20' : 'transparent',
                                 color: resolucaoCats[nome]?.acao === acao ? '#a78bfa' : '#8b92a8',
@@ -1560,7 +1584,7 @@ function SecaoImport() {
                       {resolucaoCats[nome]?.acao === 'mapear' && (
                         <select value={resolucaoCats[nome]?.mapear_para ?? ''}
                           onChange={e => setResolucaoCats(r => ({ ...r, [nome]: { ...r[nome], mapear_para: e.target.value } }))}
-                          className="w-full bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-1.5 text-[12px] text-gray-200">
+                          className="w-full bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-1.5 text-[16px] text-gray-200">
                           <option value="">Selecionar categoria...</option>
                           {categorias.map(c => (
                             <option key={c.id} value={c.id}>{c.descricao}</option>
@@ -1576,16 +1600,16 @@ function SecaoImport() {
             {/* Grid editável — transações */}
             {modo === 'transacoes' && <div>
               <div className="flex items-center justify-between mb-2">
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
+                <p className="text-[15px] font-semibold text-gray-400 uppercase tracking-wide">
                   Grid de revisão — edite os dados antes de importar
                 </p>
                 <div className="flex gap-2">
                   <button onClick={() => toggleTodos(true)}
-                    className="text-[10px] px-2 py-1 rounded text-av-green bg-av-green/10 hover:bg-av-green/20 transition-colors">
+                    className="text-[14px] px-2 py-1 rounded text-av-green bg-av-green/10 hover:bg-av-green/20 transition-colors">
                     Marcar todos
                   </button>
                   <button onClick={() => toggleTodos(false)}
-                    className="text-[10px] px-2 py-1 rounded text-gray-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                    className="text-[14px] px-2 py-1 rounded text-gray-400 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                     Desmarcar todos
                   </button>
                 </div>
@@ -1596,10 +1620,10 @@ function SecaoImport() {
                 <div className="bg-blue-400/5 border border-blue-400/20 rounded-lg p-3 mb-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-[11px] font-semibold text-blue-400">
+                      <p className="text-[15px] font-semibold text-blue-400">
                         📊 Arquivo grande detectado ({grid.length} registros)
                       </p>
-                      <p className="text-[10px] text-blue-400/70">
+                      <p className="text-[14px] text-blue-400/70">
                         Exibindo {paginaAtual * 100 + 1}-{Math.min((paginaAtual + 1) * 100, grid.length)} de {grid.length}
                       </p>
                     </div>
@@ -1607,7 +1631,7 @@ function SecaoImport() {
                       <button
                         onClick={() => setPaginaAtual(Math.max(0, paginaAtual - 1))}
                         disabled={paginaAtual === 0}
-                        className="px-2 py-1 rounded text-[10px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-2 py-1 rounded text-[14px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{
                           background: paginaAtual === 0 ? 'transparent' : '#4da6ff20',
                           color: paginaAtual === 0 ? '#8b92a8' : '#4da6ff',
@@ -1616,13 +1640,13 @@ function SecaoImport() {
                       >
                         ← Anterior
                       </button>
-                      <span className="px-2 py-1 text-[10px] font-semibold text-gray-400">
+                      <span className="px-2 py-1 text-[14px] font-semibold text-gray-400">
                         Página {paginaAtual + 1} de {Math.ceil(grid.length / 100)}
                       </span>
                       <button
                         onClick={() => setPaginaAtual(Math.min(Math.ceil(grid.length / 100) - 1, paginaAtual + 1))}
                         disabled={paginaAtual >= Math.ceil(grid.length / 100) - 1}
-                        className="px-2 py-1 rounded text-[10px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-2 py-1 rounded text-[14px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{
                           background: paginaAtual >= Math.ceil(grid.length / 100) - 1 ? 'transparent' : '#4da6ff20',
                           color: paginaAtual >= Math.ceil(grid.length / 100) - 1 ? '#8b92a8' : '#4da6ff',
@@ -1637,7 +1661,7 @@ function SecaoImport() {
               )}
 
               <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 max-h-[400px]">
-                <table className="w-full text-[11px]" style={{ minWidth: 900 }}>
+                <table className="w-full text-[15px]" style={{ minWidth: 900 }}>
                   <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
                     <tr>
                       <th className="px-2 py-2 text-center w-8">✓</th>
@@ -1670,8 +1694,8 @@ function SecaoImport() {
                           {/* Situação */}
                           <td className="px-2 py-1 whitespace-nowrap">
                             {temProblema
-                              ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-400/10 text-red-400">{l.problema}</span>
-                              : <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-400/10 text-green-400">OK</span>
+                              ? <span className="text-[14px] font-semibold px-1.5 py-0.5 rounded-full bg-red-400/10 text-red-400">{l.problema}</span>
+                              : <span className="text-[14px] font-semibold px-1.5 py-0.5 rounded-full bg-green-400/10 text-green-400">OK</span>
                             }
                           </td>
 
@@ -1681,7 +1705,7 @@ function SecaoImport() {
                               type="text"
                               value={l.data}
                               onChange={e => setLinha(l.idx, { data: e.target.value })}
-                              className="w-[90px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-gray-300 outline-none"
+                              className="w-[90px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-gray-300 outline-none"
                             />
                           </td>
 
@@ -1691,7 +1715,7 @@ function SecaoImport() {
                               type="text"
                               value={l.descricao}
                               onChange={e => setLinha(l.idx, { descricao: e.target.value })}
-                              className="w-full min-w-[160px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-gray-300 outline-none"
+                              className="w-full min-w-[160px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-gray-300 outline-none"
                             />
                           </td>
 
@@ -1705,7 +1729,7 @@ function SecaoImport() {
                                 const v = Math.abs(parseFloat(e.target.value) || 0)
                                 setLinha(l.idx, { valor: v })
                               }}
-                              className="w-[90px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[11px] text-right outline-none"
+                              className="w-[90px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-right outline-none"
                               style={{ color: l.tipo === 'RECEITA' ? '#00c896' : '#ff6b4a' }}
                             />
                           </td>
@@ -1718,7 +1742,7 @@ function SecaoImport() {
                                 const conta = contas.find((c: Conta) => c.conta_id === e.target.value)
                                 if (conta) setLinha(l.idx, { conta_nome: conta.nome })
                               }}
-                              className="bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1 py-0.5 text-[11px] text-gray-300 outline-none max-w-[130px]"
+                              className="bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1 py-0.5 text-[15px] text-gray-300 outline-none max-w-[130px]"
                               style={{ background: '#1a1f2e' }}
                             >
                               <option value="">— selecionar —</option>
@@ -1734,7 +1758,7 @@ function SecaoImport() {
                                 const cat = categorias.find(c => c.id === e.target.value)
                                 if (cat) setLinha(l.idx, { categoria_nome: cat.descricao })
                               }}
-                              className="bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1 py-0.5 text-[11px] text-gray-300 outline-none max-w-[140px]"
+                              className="bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1 py-0.5 text-[15px] text-gray-300 outline-none max-w-[140px]"
                               style={{ background: '#1a1f2e' }}
                             >
                               <option value="">— selecionar —</option>
@@ -1751,14 +1775,14 @@ function SecaoImport() {
 
             {/* Aviso de pendências */}
             {modo === 'transacoes' && temPendenciaMapear && (
-              <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
+              <p className="text-[15px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
                 ⚠️ Selecione o destino para todas as entidades marcadas como "Usar existente"
               </p>
             )}
 
             <div className="flex gap-2">
               <button onClick={resetar}
-                className="px-4 py-2 rounded-lg text-[13px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                className="px-4 py-2 rounded-lg text-[17px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                 Cancelar
               </button>
               <Btn onClick={importar} cor="#a78bfa"
@@ -1783,11 +1807,11 @@ function SecaoImport() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Loader2 size={16} className="animate-spin text-blue-400" />
-                <span className="text-[13px] font-semibold" style={{ color: '#4da6ff' }}>
+                <span className="text-[17px] font-semibold" style={{ color: '#4da6ff' }}>
                   Analisando arquivo...
                 </span>
               </div>
-              <span className="text-[12px] font-bold" style={{ color: '#4da6ff' }}>
+              <span className="text-[16px] font-bold" style={{ color: '#4da6ff' }}>
                 {progresso}%
               </span>
             </div>
@@ -1816,22 +1840,22 @@ function SecaoImport() {
                 { label: 'ETA', value: progressoInfo.eta || '...', color: '#8b92a8' },
               ].map((m, i) => (
                 <div key={i} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 text-center">
-                  <p className="text-[10px] uppercase tracking-wide mb-0.5" style={{ color: '#8b92a8' }}>{m.label}</p>
-                  <p className="text-[13px] font-bold" style={{ color: m.color }}>{m.value}</p>
+                  <p className="text-[14px] uppercase tracking-wide mb-0.5" style={{ color: '#8b92a8' }}>{m.label}</p>
+                  <p className="text-[17px] font-bold" style={{ color: m.color }}>{m.value}</p>
                 </div>
               ))}
             </div>
 
             {/* Mensagem informativa */}
             <div className="bg-blue-400/5 border border-blue-400/20 rounded-lg p-3">
-              <p className="text-[11px] text-blue-400">
+              <p className="text-[15px] text-blue-400">
                 📊 Processando arquivo em blocos para melhor performance. A interface permanecerá responsiva.
               </p>
             </div>
 
             <button
               onClick={cancelar}
-              className="w-full py-2 rounded-lg text-[12px] font-semibold transition-colors"
+              className="w-full py-2 rounded-lg text-[16px] font-semibold transition-colors"
               style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
             >
               <X size={12} className="inline mr-1" /> Cancelar análise
@@ -1846,11 +1870,11 @@ function SecaoImport() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Loader2 size={16} className="animate-spin text-purple-400" />
-                <span className="text-[13px] font-semibold" style={{ color: '#a78bfa' }}>
+                <span className="text-[17px] font-semibold" style={{ color: '#a78bfa' }}>
                   Importando lançamentos...
                 </span>
               </div>
-              <span className="text-[12px] font-bold" style={{ color: '#a78bfa' }}>
+              <span className="text-[16px] font-bold" style={{ color: '#a78bfa' }}>
                 {progresso}%
               </span>
             </div>
@@ -1879,15 +1903,15 @@ function SecaoImport() {
                 { label: 'Velocidade', value: progressoInfo.velocidade || '...', color: '#4da6ff' },
               ].map((m, i) => (
                 <div key={i} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2 text-center">
-                  <p className="text-[10px] uppercase tracking-wide mb-0.5" style={{ color: '#8b92a8' }}>{m.label}</p>
-                  <p className="text-[13px] font-bold" style={{ color: m.color }}>{m.value}</p>
+                  <p className="text-[14px] uppercase tracking-wide mb-0.5" style={{ color: '#8b92a8' }}>{m.label}</p>
+                  <p className="text-[17px] font-bold" style={{ color: m.color }}>{m.value}</p>
                 </div>
               ))}
             </div>
 
             {/* ETA */}
             {progressoInfo.eta && progressoInfo.eta !== '...' && (
-              <p className="text-[11px] text-center" style={{ color: '#8b92a8' }}>
+              <p className="text-[15px] text-center" style={{ color: '#8b92a8' }}>
                 Tempo restante estimado: <span style={{ color: '#e8eaf0' }}>{progressoInfo.eta}</span>
               </p>
             )}
@@ -1896,7 +1920,7 @@ function SecaoImport() {
             {logTempoReal.length > 0 && (
               <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-2.5 max-h-[140px] overflow-y-auto space-y-1">
                 {logTempoReal.slice().reverse().map((l, i) => (
-                  <div key={i} className="flex items-start gap-1.5 text-[11px]">
+                  <div key={i} className="flex items-start gap-1.5 text-[15px]">
                     <span style={{ color: l.tipo === 'ok' ? '#00c896' : l.tipo === 'aviso' ? '#f0b429' : '#f87171', flexShrink: 0 }}>
                       {l.tipo === 'ok' ? '✓' : l.tipo === 'aviso' ? '⚠' : '✗'}
                     </span>
@@ -1910,7 +1934,7 @@ function SecaoImport() {
 
             <button
               onClick={cancelar}
-              className="w-full py-2 rounded-lg text-[12px] font-semibold transition-colors"
+              className="w-full py-2 rounded-lg text-[16px] font-semibold transition-colors"
               style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
             >
               <X size={12} className="inline mr-1" /> Cancelar importação
@@ -1923,7 +1947,7 @@ function SecaoImport() {
           <div className="space-y-3">
             <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 max-h-[200px] overflow-y-auto space-y-1.5">
               {log.map((l, i) => (
-                <div key={i} className="flex items-start gap-2 text-[12px]">
+                <div key={i} className="flex items-start gap-2 text-[16px]">
                   {l.tipo === 'ok'
                     ? <CheckCircle2 size={13} className="text-av-green flex-shrink-0 mt-0.5" />
                     : l.tipo === 'aviso'
@@ -2031,7 +2055,7 @@ function SecaoBackup() {
     <Section titulo="Backup completo" subtitulo="Salva todos os dados em um arquivo JSON" icon={Save} cor="#4da6ff">
       <div className="space-y-3">
         <div className="bg-blue-400/5 border border-blue-400/20 rounded-lg p-4">
-          <p className="text-[12px] font-semibold text-blue-400 mb-2">O backup inclui:</p>
+          <p className="text-[16px] font-semibold text-blue-400 mb-2">O backup inclui:</p>
           <ul className="space-y-1">
             {[
               'Todas as contas (ativas e inativas)',
@@ -2039,19 +2063,19 @@ function SecaoBackup() {
               'Todas as transações (sem limite de período)',
               'Todas as transferências',
             ].map((item, i) => (
-              <li key={i} className="flex items-center gap-2 text-[12px] text-gray-400">
+              <li key={i} className="flex items-center gap-2 text-[16px] text-gray-400">
                 <CheckCircle2 size={12} className="text-blue-400 flex-shrink-0" />
                 {item}
               </li>
             ))}
           </ul>
-          <p className="text-[11px] text-blue-400/60 mt-3">O arquivo JSON gerado pode ser usado para restaurar os dados via Restore.</p>
+          <p className="text-[15px] text-blue-400/60 mt-3">O arquivo JSON gerado pode ser usado para restaurar os dados via Restore.</p>
         </div>
 
         {log.length > 0 && (
           <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-1.5">
             {log.map((l, i) => (
-              <div key={i} className="flex items-center gap-2 text-[12px]">
+              <div key={i} className="flex items-center gap-2 text-[16px]">
                 {l.tipo === 'ok'
                   ? <CheckCircle2 size={13} className="text-av-green flex-shrink-0" />
                   : <X size={13} className="text-red-400 flex-shrink-0" />}
@@ -2320,13 +2344,13 @@ function SecaoRestore() {
             onDrop={onDrop}
           >
             <DatabaseBackup size={32} className="mx-auto mb-3" style={{ color: dragOver ? '#f0b429' : '#4b5563' }} />
-            <p className="text-[14px] font-semibold mb-1" style={{ color: dragOver ? '#f0b429' : '#d1d5db' }}>
+            <p className="text-[18px] font-semibold mb-1" style={{ color: dragOver ? '#f0b429' : '#d1d5db' }}>
               {dragOver ? 'Solte o arquivo aqui' : 'Arraste o arquivo de backup ou clique para selecionar'}
             </p>
-            <p className="text-[11px] text-gray-400 mb-4">Somente arquivos .json gerados pelo Arquiteto de Valor</p>
+            <p className="text-[15px] text-gray-400 mb-4">Somente arquivos .json gerados pelo Arquiteto de Valor</p>
             <button
               onClick={e => { e.stopPropagation(); inputRef.current?.click() }}
-              className="px-5 py-2 rounded-lg text-[13px] font-semibold transition-colors"
+              className="px-5 py-2 rounded-lg text-[17px] font-semibold transition-colors"
               style={{ background: '#f0b42920', color: '#f0b429', border: '1px solid #f0b42940' }}
             >
               Escolher arquivo
@@ -2339,7 +2363,7 @@ function SecaoRestore() {
         {etapa === 'confirmando' && payload && (
           <div className="space-y-3">
             <div className="bg-amber-400/5 border border-amber-400/20 rounded-lg p-4">
-              <p className="text-[12px] font-semibold text-amber-400 mb-3">Arquivo de backup carregado</p>
+              <p className="text-[16px] font-semibold text-amber-400 mb-3">Arquivo de backup carregado</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
                   ['Gerado em', new Date(payload.gerado_em).toLocaleString('pt-BR')],
@@ -2349,18 +2373,18 @@ function SecaoRestore() {
                   ['Transferências', payload.transferencias?.length ?? 0],
                 ].map(([k, v]) => (
                   <div key={String(k)} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
-                    <span className="text-[11px] text-gray-400">{k}</span>
-                    <span className="text-[12px] font-semibold text-amber-400">{String(v)}</span>
+                    <span className="text-[15px] text-gray-400">{k}</span>
+                    <span className="text-[16px] font-semibold text-amber-400">{String(v)}</span>
                   </div>
                 ))}
               </div>
-              <p className="text-[11px] text-amber-400/70 mt-3">
+              <p className="text-[15px] text-amber-400/70 mt-3">
                 ⚠️ Dados já existentes não serão duplicados — o restore verifica antes de criar.
               </p>
             </div>
             <div className="flex gap-2">
               <button onClick={resetar}
-                className="px-4 py-2 rounded-lg text-[13px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 transition-colors">
+                className="px-4 py-2 rounded-lg text-[17px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 transition-colors">
                 Cancelar
               </button>
               <Btn onClick={executarRestore} cor="#f0b429">
@@ -2376,9 +2400,9 @@ function SecaoRestore() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Loader2 size={16} className="animate-spin text-amber-400" />
-                <p className="text-[13px] text-gray-300">{progressoLabel}</p>
+                <p className="text-[17px] text-gray-300">{progressoLabel}</p>
               </div>
-              <span className="text-[12px] font-semibold text-amber-400">{progresso}%</span>
+              <span className="text-[16px] font-semibold text-amber-400">{progresso}%</span>
             </div>
             <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
               <div className="h-full bg-amber-400 rounded-full transition-all duration-300" style={{ width: `${progresso}%` }} />
@@ -2386,7 +2410,7 @@ function SecaoRestore() {
             {log.length > 0 && (
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 max-h-[160px] overflow-y-auto space-y-1">
                 {log.map((l, i) => (
-                  <div key={i} className="flex items-center gap-2 text-[11px]">
+                  <div key={i} className="flex items-center gap-2 text-[15px]">
                     {l.tipo === 'ok' ? <CheckCircle2 size={11} className="text-av-green flex-shrink-0" />
                       : l.tipo === 'aviso' ? <AlertTriangle size={11} className="text-amber-400 flex-shrink-0" />
                       : <X size={11} className="text-red-400 flex-shrink-0" />}
@@ -2397,7 +2421,7 @@ function SecaoRestore() {
             )}
             <button
               onClick={cancelar}
-              className="w-full py-2 rounded-lg text-[12px] font-semibold transition-colors"
+              className="w-full py-2 rounded-lg text-[16px] font-semibold transition-colors"
               style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
             >
               <X size={12} className="inline mr-1" /> Cancelar restore
@@ -2410,7 +2434,7 @@ function SecaoRestore() {
           <div className="space-y-3">
             <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 max-h-[200px] overflow-y-auto space-y-1.5">
               {log.map((l, i) => (
-                <div key={i} className="flex items-start gap-2 text-[12px]">
+                <div key={i} className="flex items-start gap-2 text-[16px]">
                   {l.tipo === 'ok' ? <CheckCircle2 size={13} className="text-av-green flex-shrink-0 mt-0.5" />
                     : l.tipo === 'aviso' ? <AlertTriangle size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
                     : <X size={13} className="text-red-400 flex-shrink-0 mt-0.5" />}
@@ -2435,8 +2459,8 @@ export default function ImportExportPage() {
   return (
     <div className="p-5 max-w-[860px]">
       <div className="mb-5">
-        <h1 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">Ferramentas</h1>
-        <p className="text-[12px] text-gray-400 mt-0.5">Backup, restore, exportação, importação e limpeza de dados</p>
+        <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Ferramentas</h1>
+        <p className="text-[16px] text-gray-400 mt-0.5">Backup, restore, exportação, importação e limpeza de dados</p>
       </div>
 
       <div className="space-y-3">

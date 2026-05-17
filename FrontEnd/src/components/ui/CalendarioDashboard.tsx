@@ -78,7 +78,7 @@ export default function CalendarioDashboard({
     >
       {/* Cabeçalho compacto */}
       <div className="flex items-center justify-between mb-2">
-        <span className="text-[12px] font-semibold" style={{ color: '#e8eaf0' }}>
+        <span className="text-[16px] font-semibold" style={{ color: '#e8eaf0' }}>
           {MESES_NOME[m - 1]} {ano}
         </span>
         <div className="flex items-center gap-1.5">
@@ -108,7 +108,7 @@ export default function CalendarioDashboard({
       <div className="grid grid-cols-7 mb-0.5">
         {DOW_ABR.map((d, i) => (
           <div key={i}
-            className="text-center text-[9px] font-semibold py-0.5"
+            className="text-center text-[13px] font-semibold py-0.5"
             style={{ color: i === 0 || i === 6 ? 'rgba(248,113,113,0.6)' : '#4a5168' }}
           >
             {d}
@@ -159,7 +159,7 @@ export default function CalendarioDashboard({
               {ehHoje ? (
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: 14,
                     lineHeight: 1,
                     fontWeight: 700,
                     color: '#0a0f1a',
@@ -177,7 +177,7 @@ export default function CalendarioDashboard({
               ) : (
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: 14,
                     lineHeight: 1,
                     fontWeight: temEv ? 600 : 400,
                     color: fimSem
@@ -222,7 +222,7 @@ export default function CalendarioDashboard({
           style={{ background: '#1a1f2e' }}>
 
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold" style={{ color: '#e8eaf0' }}>
+            <span className="text-[15px] font-semibold" style={{ color: '#e8eaf0' }}>
               {new Date(`${diaAberto}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
             </span>
             <div className="flex items-center gap-1">
@@ -251,7 +251,7 @@ export default function CalendarioDashboard({
               style={{ background: 'rgba(240,180,41,0.06)', border: '1px solid rgba(240,180,41,0.1)' }}>
               <Bell size={9} style={{ color: '#f0b429', flexShrink: 0 }} />
               <span
-                className="flex-1 text-[10px] truncate"
+                className="flex-1 text-[14px] truncate"
                 style={{
                   color: l.status === 'CONCLUIDO' ? '#4a5168' : '#e8eaf0',
                   textDecoration: l.status === 'CONCLUIDO' ? 'line-through' : 'none',
@@ -298,7 +298,7 @@ export default function CalendarioDashboard({
                 border:     ev.tipo === 'fechamento' ? '1px solid rgba(77,166,255,0.12)' : '1px solid rgba(248,113,113,0.12)',
               }}>
               <CreditCard size={9} style={{ color: ev.tipo === 'fechamento' ? '#4da6ff' : '#f87171', flexShrink: 0 }} />
-              <span className="text-[10px] truncate" style={{ color: '#e8eaf0' }}>
+              <span className="text-[14px] truncate" style={{ color: '#e8eaf0' }}>
                 {ev.tipo === 'fechamento' ? 'Fech.' : 'Pgto.'} {ev.conta.nome}
               </span>
             </div>
@@ -310,7 +310,7 @@ export default function CalendarioDashboard({
               className="flex items-center gap-1.5 py-1 px-1.5 rounded"
               style={{ background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.2)' }}>
               <AlertTriangle size={9} style={{ color: '#fb923c', flexShrink: 0 }} />
-              <span className="flex-1 text-[10px] truncate" style={{ color: '#fb923c' }}>
+              <span className="flex-1 text-[14px] truncate" style={{ color: '#fb923c' }}>
                 {info.nome}: {info.saldo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
               </span>
             </div>
@@ -322,11 +322,11 @@ export default function CalendarioDashboard({
               className="flex items-center gap-1.5 py-1 px-1.5 rounded"
               style={{ background: 'rgba(192,132,252,0.08)', border: '1px solid rgba(192,132,252,0.2)' }}>
               <Flag size={9} style={{ color: '#c084fc', flexShrink: 0 }} />
-              <span className="flex-1 text-[10px] truncate" style={{ color: '#c084fc' }}>
+              <span className="flex-1 text-[14px] truncate" style={{ color: '#c084fc' }}>
                 Últ. parcela: {up.descricao}
               </span>
               <span
-                className="text-[9px] font-semibold flex-shrink-0"
+                className="text-[13px] font-semibold flex-shrink-0"
                 style={{ color: up.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}
               >
                 {up.tipo === 'RECEITA' ? '+' : '-'}
@@ -338,7 +338,7 @@ export default function CalendarioDashboard({
           {lembrsDiaAberto.length === 0 && evsDiaAberto.length === 0
             && (diasNegativos?.get(diaAberto ?? '')?.length ?? 0) === 0
             && (ultimasParcelas?.get(diaAberto ?? '')?.length ?? 0) === 0 && (
-            <span className="text-[10px]" style={{ color: '#4a5168' }}>Sem eventos neste dia.</span>
+            <span className="text-[14px]" style={{ color: '#4a5168' }}>Sem eventos neste dia.</span>
           )}
         </div>
       )}

@@ -90,7 +90,7 @@ export default function CadastroPage() {
               <Logo />
             </div>
             <h1 className="text-2xl font-bold text-white">Arquiteto de Valor</h1>
-            <p className="text-[11px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
+            <p className="text-[15px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
           </div>
           <div className="bg-white/5 border border-av-green/30 rounded-2xl p-6 backdrop-blur-sm">
             <div className="w-12 h-12 rounded-full bg-av-green/10 border border-av-green/30 flex items-center justify-center mx-auto mb-4">
@@ -99,12 +99,12 @@ export default function CadastroPage() {
               </svg>
             </div>
             <h2 className="text-base font-semibold text-white mb-2">Conta criada!</h2>
-            <p className="text-[12px] text-white/50 mb-5 leading-relaxed">
+            <p className="text-[16px] text-white/50 mb-5 leading-relaxed">
               Verifique seu e-mail e clique no link de confirmação para ativar sua conta.
             </p>
             <button
               onClick={() => navigate('/login')}
-              className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[13px] hover:bg-av-green/90 transition-colors"
+              className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[17px] hover:bg-av-green/90 transition-colors"
             >
               Ir para o login
             </button>
@@ -126,68 +126,68 @@ export default function CadastroPage() {
             <Logo />
           </div>
           <h1 className="text-2xl font-bold text-white">Arquiteto de Valor</h1>
-          <p className="text-[11px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
+          <p className="text-[15px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
         </div>
 
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-sm">
           <h2 className="text-base font-semibold text-white mb-5">Criar nova conta</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-[12px] text-white/50 mb-1.5">Nome</label>
+              <label className="block text-[16px] text-white/50 mb-1.5">Nome</label>
               <input
                 type="text" required value={nome}
                 onChange={e => setNome(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors"
                 placeholder="Seu nome"
               />
             </div>
             <div>
-              <label className="block text-[12px] text-white/50 mb-1.5">Email</label>
+              <label className="block text-[16px] text-white/50 mb-1.5">Email</label>
               <input
                 type="email" required value={email}
                 onChange={e => setEmail(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors"
                 placeholder="seu@email.com"
               />
             </div>
             <div>
-              <label className="block text-[12px] text-white/50 mb-1.5">Senha</label>
+              <label className="block text-[16px] text-white/50 mb-1.5">Senha</label>
               <input
                 type="password" required value={password}
                 onChange={e => setPassword(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors"
                 placeholder="Mínimo 6 caracteres"
               />
             </div>
             <div>
-              <label className="block text-[12px] text-white/50 mb-1.5">Confirmar senha</label>
+              <label className="block text-[16px] text-white/50 mb-1.5">Confirmar senha</label>
               <input
                 type="password" required value={confirm}
                 onChange={e => setConfirm(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors"
                 placeholder="••••••••"
               />
             </div>
             {error && (
-              <p className="text-[12px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
+              <p className="text-[16px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
             )}
             <button
               type="submit" disabled={loading}
-              className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[13px] hover:bg-av-green/90 disabled:opacity-50 transition-colors mt-2"
+              className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[17px] hover:bg-av-green/90 disabled:opacity-50 transition-colors mt-2"
             >
               {loading ? 'Criando conta...' : 'Criar conta'}
             </button>
           </form>
 
           <div className="mt-4 pt-4 border-t border-white/8 text-center">
-            <span className="text-[12px] text-white/30">Já tem uma conta? </span>
-            <Link to="/login" className="text-[12px] text-av-green hover:text-av-green/80 transition-colors">
+            <span className="text-[16px] text-white/30">Já tem uma conta? </span>
+            <Link to="/login" className="text-[16px] text-av-green hover:text-av-green/80 transition-colors">
               Entrar
             </Link>
           </div>
         </div>
 
-        <p className="text-center text-[11px] text-white/20 mt-4">
+        <p className="text-center text-[15px] text-white/20 mt-4">
           Arquiteto de Valor · BLUEPRINT
         </p>
       </div>

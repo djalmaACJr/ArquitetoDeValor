@@ -89,8 +89,8 @@ export function Drawer({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 flex-shrink-0">
           <div>
-            <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>{titulo}</p>
-            {subtitulo && <p className="text-[11px] mt-0.5" style={{ color: '#8b92a8' }}>{subtitulo}</p>}
+            <p className="text-[18px] font-semibold" style={{ color: '#e8eaf0' }}>{titulo}</p>
+            {subtitulo && <p className="text-[15px] mt-0.5" style={{ color: '#8b92a8' }}>{subtitulo}</p>}
           </div>
           <button onClick={onClose}
             className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center
@@ -145,7 +145,7 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (c: 
         ))}
         <button onClick={() => setExpandido(e => !e)}
           className="w-8 h-8 rounded-lg border border-dashed border-white/20 flex items-center justify-center
-            text-[10px] font-bold transition-all hover:border-white/40"
+            text-[14px] font-bold transition-all hover:border-white/40"
           style={{ color: '#8b92a8' }}>
           {expandido ? '▲' : '···'}
         </button>
@@ -161,7 +161,7 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (c: 
           }}
           style={{ borderColor: hexValido ? 'rgba(255,255,255,0.1)' : '#f87171', color: '#e8eaf0' }}
           className="flex-1 bg-[#252d42] border rounded-lg px-2.5 py-1.5
-            text-[12px] font-mono outline-none focus:border-av-green transition-colors" />
+            text-[16px] font-mono outline-none focus:border-av-green transition-colors" />
         <div className="w-7 h-7 rounded-full border-2 border-white/10 flex-shrink-0"
           style={{ background: isHex(hexInput) ? hexInput : '#2d3436' }} />
       </div>
@@ -385,7 +385,7 @@ export function IconPicker({ value, onChange }: { value: string; onChange: (ic: 
         onChange={e => setBusca(e.target.value)}
         placeholder="Buscar por nome: casa, carro, saúde..."
         className="w-full bg-[#252d42] border border-white/10 rounded-lg px-2.5 py-1.5
-          text-[12px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
+          text-[16px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
         style={{ color: '#e8eaf0' }}
       />
 
@@ -394,7 +394,7 @@ export function IconPicker({ value, onChange }: { value: string; onChange: (ic: 
         {listaFiltrada.map(ic => (
           <button key={ic} onClick={() => { onChange(ic); setBusca('') }}
             title={ICONE_NOME[ic] ?? ic}
-            className={`w-8 h-8 rounded-lg text-[15px] flex items-center justify-center border transition-all
+            className={`w-8 h-8 rounded-lg text-[19px] flex items-center justify-center border transition-all
               ${ic === value ? 'border-av-green bg-av-green/10' : 'border-white/10 hover:border-white/25 bg-[#252d42]'}`}>
             {ic}
           </button>
@@ -402,13 +402,13 @@ export function IconPicker({ value, onChange }: { value: string; onChange: (ic: 
         {!buscaNorm && (
           <button onClick={() => setExpandido(e => !e)}
             className="w-8 h-8 rounded-lg border border-dashed border-white/20 flex items-center justify-center
-              text-[10px] font-bold transition-all hover:border-white/40"
+              text-[14px] font-bold transition-all hover:border-white/40"
             style={{ color: '#8b92a8' }}>
             {expandido ? '▲' : '···'}
           </button>
         )}
         {buscaNorm && listaFiltrada.length === 0 && (
-          <div className="col-span-9 text-[11px] py-2 text-center" style={{ color: '#8b92a8' }}>
+          <div className="col-span-9 text-[15px] py-2 text-center" style={{ color: '#8b92a8' }}>
             Nenhum ícone encontrado
           </div>
         )}
@@ -421,19 +421,19 @@ export function IconPicker({ value, onChange }: { value: string; onChange: (ic: 
           onChange={e => handleManual(e.target.value)}
           placeholder="Cole um emoji aqui  🔍"
           className="flex-1 bg-[#252d42] border border-white/10 rounded-lg px-2.5 py-1.5
-            text-[13px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
+            text-[17px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
           style={{ color: '#e8eaf0' }}
         />
         {value && (
           <div className="w-8 h-8 rounded-lg border border-av-green bg-av-green/10
-            flex items-center justify-center text-[18px] flex-shrink-0">
+            flex items-center justify-center text-[22px] flex-shrink-0">
             {value}
           </div>
         )}
       </div>
 
       {/* Dica para buscar emojis novos */}
-      <p className="text-[10px]" style={{ color: '#8b92a8' }}>
+      <p className="text-[14px]" style={{ color: '#8b92a8' }}>
         Não encontrou?{' '}
         <a href="https://emojipedia.org" target="_blank" rel="noopener noreferrer"
           className="underline underline-offset-2 hover:text-av-green transition-colors"
@@ -538,7 +538,7 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
         tabIndex={0}
         onClick={() => aberto ? fechar() : abrir()}
         onKeyDown={onKeyDownBotao}
-        className="w-full flex items-center justify-between bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-av-green transition-colors"
+        className="w-full flex items-center justify-between bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[17px] outline-none focus:border-av-green transition-colors"
         style={{ color: selecionada?.id ? '#e8eaf0' : '#ffffff50' }}
       >
         <span className="truncate">
@@ -546,7 +546,7 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
             ? `${selecionada.icone ?? ''} ${selecionada.label}`.trim()
             : placeholder}
         </span>
-        <span className="ml-2 flex-shrink-0" style={{ color: '#8b92a8', fontSize: 10 }}>{aberto ? '▴' : '▾'}</span>
+        <span className="ml-2 flex-shrink-0" style={{ color: '#8b92a8', fontSize: 14 }}>{aberto ? '▴' : '▾'}</span>
       </button>
 
       {aberto && (
@@ -557,7 +557,7 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
             onChange={e => { setBusca(e.target.value); setFocusIdx(0) }}
             onKeyDown={onKeyDownInput}
             placeholder="Buscar..."
-            className="w-full bg-[#252d42] border-b border-white/10 px-3 py-2 text-[12px] outline-none placeholder:text-white/30"
+            className="w-full bg-[#252d42] border-b border-white/10 px-3 py-2 text-[16px] outline-none placeholder:text-white/30"
             style={{ color: '#e8eaf0' }}
           />
           <div ref={listRef} className="max-h-52 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#2a3045 transparent' }}>
@@ -575,7 +575,7 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
                   key={op.id}
                   type="button"
                   onClick={() => selecionar(op.id)}
-                  className="w-full text-left px-3 py-2 text-[12px] transition-colors"
+                  className="w-full text-left px-3 py-2 text-[16px] transition-colors"
                   style={{
                     color: op.id === value ? '#00c896' : op.id === '' ? '#ffffff50' : '#e8eaf0',
                     background: idx === focusIdx ? 'rgba(255,255,255,0.07)' : 'transparent',
@@ -585,13 +585,13 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
                 >
                   <span>{op.icone ? `${op.icone} ` : ''}{op.label}</span>
                   {isFilho && !paiNaLista && op.sublabel && (
-                    <span className="ml-1 text-[10px]" style={{ color: '#8b92a8' }}>({op.sublabel})</span>
+                    <span className="ml-1 text-[14px]" style={{ color: '#8b92a8' }}>({op.sublabel})</span>
                   )}
                 </button>
               )
             })}
             {filtradas.length === 0 && (
-              <p className="px-3 py-2 text-[12px]" style={{ color: '#8b92a8' }}>Nenhum resultado</p>
+              <p className="px-3 py-2 text-[16px]" style={{ color: '#8b92a8' }}>Nenhum resultado</p>
             )}
           </div>
         </div>
@@ -604,7 +604,7 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#8b92a8' }}>{label}</p>
+      <p className="text-[15px] font-semibold uppercase tracking-wide" style={{ color: '#8b92a8' }}>{label}</p>
       {children}
     </div>
   )
@@ -617,7 +617,7 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
       <input {...props} ref={ref}
         style={{ color: '#e8eaf0', ...props.style }}
         className={`w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-          text-[13px] outline-none focus:border-av-green transition-colors
+          text-[17px] outline-none focus:border-av-green transition-colors
           placeholder:text-white/30 ${props.className ?? ''}`} />
     )
   }
@@ -629,7 +629,7 @@ export function SelectDark(props: React.SelectHTMLAttributes<HTMLSelectElement>)
     <select {...props}
       style={{ color: '#e8eaf0', ...props.style }}
       className={`w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-        text-[13px] outline-none focus:border-av-green transition-colors cursor-pointer
+        text-[17px] outline-none focus:border-av-green transition-colors cursor-pointer
         ${props.className ?? ''}`} />
   )
 }
@@ -646,7 +646,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
       </button>
       {label && (
         <button type="button" onClick={toggle}
-          className="text-[12px] cursor-pointer bg-transparent border-0 p-0 text-left"
+          className="text-[16px] cursor-pointer bg-transparent border-0 p-0 text-left"
           style={{ color: '#8b92a8' }}>
           {label}
         </button>
@@ -658,7 +658,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
 // ── PreviewBadge ──────────────────────────────────────────────
 export function PreviewBadge({ icone, label, cor }: { icone: string; label: string; cor: string }) {
   return (
-    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] font-semibold"
+    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[17px] font-semibold"
       style={{ background: `${cor}22`, color: cor }}>
       <span>{icone || '●'}</span>
       <span>{label || '—'}</span>
@@ -673,7 +673,7 @@ export function BtnSalvar({ editando, onClick, salvando, labelSalvar = 'Salvar',
   return (
     <button onClick={onClick} disabled={salvando}
       className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg
-        text-[12px] font-semibold transition-all disabled:opacity-50
+        text-[16px] font-semibold transition-all disabled:opacity-50
         ${editando ? 'bg-[#7F77DD] hover:bg-[#6c64cc]' : 'bg-av-green hover:bg-av-green/90'}`}
       style={{ color: editando ? '#fff' : '#0a0f1a' }}>
       <Check size={13} />
@@ -686,7 +686,7 @@ export function BtnSalvar({ editando, onClick, salvando, labelSalvar = 'Salvar',
 export function BtnCancelar({ onClick }: { onClick: () => void }) {
   return (
     <button onClick={onClick}
-      className="px-4 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold
+      className="px-4 py-2.5 rounded-lg border border-white/10 text-[16px] font-semibold
         transition-all hover:border-white/20"
       style={{ color: '#8b92a8' }}>
       Cancelar
@@ -720,7 +720,7 @@ export function Segmented({ opcoes, value, onChange, autoFocus }: {
         <button key={o.value}
           tabIndex={-1}
           onClick={() => onChange(o.value)}
-          className="flex-1 py-2 text-[11px] font-semibold transition-all"
+          className="flex-1 py-2 text-[15px] font-semibold transition-all"
           style={{
             background: o.value === value ? 'rgba(0,200,150,0.15)' : 'transparent',
             color: o.value === value ? '#00c896' : '#8b92a8',
@@ -736,7 +736,7 @@ export function Segmented({ opcoes, value, onChange, autoFocus }: {
 export function Toast({ msg }: { msg: string | null }) {
   if (!msg) return null
   return (
-    <div className="mb-4 px-4 py-2.5 bg-av-green/10 border border-av-green/30 text-[12px] font-semibold rounded-lg"
+    <div className="mb-4 px-4 py-2.5 bg-av-green/10 border border-av-green/30 text-[16px] font-semibold rounded-lg"
       style={{ color: '#00c896' }}>
       {msg}
     </div>
@@ -753,18 +753,18 @@ export function ModalExcluir({ nome, mensagem, onConfirmar, onCancelar, salvando
       className="fixed inset-0 z-[200] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onCancelar} />
       <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
-        <p className="text-[14px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>Excluir "{nome}"?</p>
-        <p className="text-[12px] mb-5" style={{ color: '#8b92a8' }}>
+        <p className="text-[18px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>Excluir "{nome}"?</p>
+        <p className="text-[16px] mb-5" style={{ color: '#8b92a8' }}>
           {mensagem ?? 'Esta ação não pode ser desfeita.'}
         </p>
         <div className="flex gap-2 justify-end">
           <button onClick={onCancelar}
-            className="px-4 py-2 text-[12px] border border-white/10 rounded-lg transition-all hover:border-white/20"
+            className="px-4 py-2 text-[16px] border border-white/10 rounded-lg transition-all hover:border-white/20"
             style={{ color: '#8b92a8' }}>
             Cancelar
           </button>
           <button onClick={onConfirmar} disabled={salvando}
-            className="px-4 py-2 text-[12px] font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors">
+            className="px-4 py-2 text-[16px] font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors">
             {salvando ? 'Excluindo...' : 'Excluir'}
           </button>
         </div>

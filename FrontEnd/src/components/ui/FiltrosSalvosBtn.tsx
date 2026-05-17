@@ -56,7 +56,7 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
       {temFiltroAtivo && onLimpar && (
         <button
           onClick={onLimpar}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all hover:bg-white/5"
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[15px] font-medium transition-all hover:bg-white/5"
           style={{ borderColor: 'rgba(248,113,113,0.3)', color: '#f87171' }}
         >
           × Limpar
@@ -74,7 +74,7 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
         }}
       >
         <Bookmark size={13} />
-        <span className="text-[11px] font-medium" style={{ color: 'inherit' }}>
+        <span className="text-[15px] font-medium" style={{ color: 'inherit' }}>
           {filtros.length > 0 ? `Filtros (${filtros.length})` : 'Filtros'}
         </span>
       </button>
@@ -87,17 +87,17 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
         >
           {/* Header */}
           <div className="px-4 py-2.5 border-b border-white/10">
-            <p className="text-[12px] font-semibold" style={{ color: '#e8eaf0' }}>Filtros salvos</p>
-            <p className="text-[10px] mt-0.5" style={{ color: '#4a5168' }}>
+            <p className="text-[16px] font-semibold" style={{ color: '#e8eaf0' }}>Filtros salvos</p>
+            <p className="text-[14px] mt-0.5" style={{ color: '#4a5168' }}>
               Clique para aplicar · Gerencie na tela de Perfil
             </p>
           </div>
 
           {/* Lista — todos os filtros do usuário */}
           {carregando ? (
-            <p className="px-4 py-3 text-[11px]" style={{ color: '#8b92a8' }}>Carregando…</p>
+            <p className="px-4 py-3 text-[15px]" style={{ color: '#8b92a8' }}>Carregando…</p>
           ) : filtros.length === 0 ? (
-            <p className="px-4 py-3 text-[11px]" style={{ color: '#8b92a8' }}>
+            <p className="px-4 py-3 text-[15px]" style={{ color: '#8b92a8' }}>
               Nenhum filtro salvo ainda.
             </p>
           ) : (
@@ -109,12 +109,12 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
                   className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.04] transition-colors text-left"
                 >
                   <span
-                    className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                    className="text-[13px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
                     style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
                   >
                     {PAGINA_LABEL[f.pagina] ?? f.pagina}
                   </span>
-                  <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>
+                  <span className="flex-1 text-[16px] truncate" style={{ color: '#c5cad8' }}>
                     {f.nome}
                   </span>
                 </button>
@@ -126,7 +126,7 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
           <div className="px-4 py-3 border-t border-white/10">
             {temFiltroAtivo ? (
               <>
-                <p className="text-[10px] mb-2" style={{ color: '#8b92a8' }}>Salvar filtro atual:</p>
+                <p className="text-[14px] mb-2" style={{ color: '#8b92a8' }}>Salvar filtro atual:</p>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -135,13 +135,13 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
                     onChange={e => setNome(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleSalvar()}
                     autoFocus
-                    className="flex-1 text-[11px] bg-[#252d42] border border-white/10 rounded-lg px-2 py-1.5 focus:outline-none focus:border-white/25"
+                    className="flex-1 text-[15px] bg-[#252d42] border border-white/10 rounded-lg px-2 py-1.5 focus:outline-none focus:border-white/25"
                     style={{ color: '#e8eaf0' }}
                   />
                   <button
                     onClick={handleSalvar}
                     disabled={!nome.trim() || salvando}
-                    className="px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all disabled:opacity-40"
+                    className="px-3 py-1.5 rounded-lg text-[15px] font-semibold transition-all disabled:opacity-40"
                     style={{ background: '#4da6ff', color: '#0a0f1a' }}
                   >
                     {salvando ? '…' : 'Salvar'}
@@ -149,7 +149,7 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
                 </div>
               </>
             ) : (
-              <p className="text-[10px] text-center" style={{ color: '#8b92a8' }}>
+              <p className="text-[14px] text-center" style={{ color: '#8b92a8' }}>
                 Aplique filtros de conta, categoria ou status para salvar.
               </p>
             )}

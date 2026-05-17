@@ -105,7 +105,7 @@ export function MonthPicker({ value, onChange, min, max, className = '', onHover
         <button
           onClick={() => setOpen(o => !o)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md min-w-[148px] justify-center
-                     bg-blue-400/10 border border-blue-400/20 text-blue-300 text-[13px] font-semibold
+                     bg-blue-400/10 border border-blue-400/20 text-blue-300 text-[17px] font-semibold
                      hover:bg-blue-400/20 transition-colors"
         >
           <Calendar size={13} className="opacity-70" />
@@ -137,7 +137,7 @@ export function MonthPicker({ value, onChange, min, max, className = '', onHover
             >
               <ChevronLeft size={14} />
             </button>
-            <span className="text-[13px] font-bold text-white">{anoGrid}</span>
+            <span className="text-[17px] font-bold text-white">{anoGrid}</span>
             <button
               onClick={() => setAnoGrid(a => a + 1)}
               className="p-1 rounded-md hover:bg-blue-400/15 text-blue-300 transition-colors"
@@ -158,7 +158,7 @@ export function MonthPicker({ value, onChange, min, max, className = '', onHover
                   onClick={() => !desabilitado && selecionarMes(idx)}
                   disabled={desabilitado}
                   className={`
-                    py-1.5 rounded-lg text-[12px] font-medium transition-colors
+                    py-1.5 rounded-lg text-[16px] font-medium transition-colors
                     ${selecionado
                       ? 'bg-blue-500 text-white'
                       : desabilitado
@@ -178,7 +178,7 @@ export function MonthPicker({ value, onChange, min, max, className = '', onHover
           <div className="mt-2 pt-2 border-t border-white/10">
             <button
               onClick={irParaHoje}
-              className="w-full py-1.5 rounded-lg text-[11px] font-semibold transition-colors"
+              className="w-full py-1.5 rounded-lg text-[15px] font-semibold transition-colors"
               style={estaHoje
                 ? { background: 'rgba(0,200,150,0.12)', color: '#00c896', cursor: 'default' }
                 : { background: 'rgba(96,165,250,0.1)', color: '#93c5fd' }

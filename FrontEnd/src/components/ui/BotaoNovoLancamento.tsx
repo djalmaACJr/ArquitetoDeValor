@@ -20,7 +20,7 @@ export default function BotaoNovoLancamento({ onSelect, onLembrete, className }:
     <div className={`relative group${className ? ` ${className}` : ''}`}>
       <button
         onClick={() => onSelect('DESPESA')}
-        className="flex items-center gap-1.5 bg-av-green text-[12px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
+        className="flex items-center gap-1.5 bg-av-green text-[16px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
         style={{ color: '#0a0f1a' }}
       >
         <Plus size={14} /> Novo lançamento
@@ -41,7 +41,7 @@ export default function BotaoNovoLancamento({ onSelect, onLembrete, className }:
             <button
               key={tipo}
               onClick={() => onSelect(tipo)}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] font-medium transition-colors hover:bg-white/5"
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[17px] font-medium transition-colors hover:bg-white/5"
               style={{ color: '#e8eaf0' }}
             >
               <Icon size={14} style={{ color: cor, flexShrink: 0 }} />
@@ -54,7 +54,7 @@ export default function BotaoNovoLancamento({ onSelect, onLembrete, className }:
               <div className="mx-3 border-t border-white/8" />
               <button
                 onClick={onLembrete}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] font-medium transition-colors hover:bg-white/5"
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[17px] font-medium transition-colors hover:bg-white/5"
                 style={{ color: '#e8eaf0' }}
               >
                 <Bell size={14} style={{ color: '#f0b429', flexShrink: 0 }} />

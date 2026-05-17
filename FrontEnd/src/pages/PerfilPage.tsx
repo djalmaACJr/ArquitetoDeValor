@@ -51,7 +51,7 @@ function Secao({ titulo, icone, children }: {
     <div className="bg-white/4 border border-white/8 rounded-2xl p-5">
       <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/8">
         <span className="text-av-green/70">{icone}</span>
-        <h2 className="text-[13px] font-semibold text-white">{titulo}</h2>
+        <h2 className="text-[17px] font-semibold text-white">{titulo}</h2>
       </div>
       {children}
     </div>
@@ -62,7 +62,7 @@ function Alerta({ fb }: { fb: Feedback | null }) {
   if (!fb) return null
   const ok = fb.tipo === 'ok'
   return (
-    <div className={`flex items-center gap-2 text-[12px] rounded-lg px-3 py-2 mt-3 ${
+    <div className={`flex items-center gap-2 text-[16px] rounded-lg px-3 py-2 mt-3 ${
       ok ? 'bg-av-green/10 text-av-green' : 'bg-red-400/10 text-red-400'
     }`}>
       {ok ? <Check size={13}/> : <AlertCircle size={13}/>}
@@ -329,15 +329,15 @@ export default function PerfilPage() {
     navigate('/login', { replace: true })
   }
 
-  const input = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors'
-  const label = 'block text-[12px] text-white/50 mb-1.5'
-  const btn   = 'px-4 py-2 rounded-lg text-[12px] font-semibold transition-colors disabled:opacity-50'
+  const input = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors'
+  const label = 'block text-[16px] text-white/50 mb-1.5'
+  const btn   = 'px-4 py-2 rounded-lg text-[16px] font-semibold transition-colors disabled:opacity-50'
 
   return (
     <div className="p-5 max-w-5xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-[17px] font-bold text-white">Meu Perfil</h1>
-        <p className="text-[12px] text-white/40 mt-0.5">{emailAtual}</p>
+        <h1 className="text-[21px] font-bold text-white">Meu Perfil</h1>
+        <p className="text-[16px] text-white/40 mt-0.5">{emailAtual}</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
@@ -357,7 +357,7 @@ export default function PerfilPage() {
                 <label className={label}>E-mail</label>
                 <input type="email" disabled value={emailAtual}
                   className={`${input} opacity-40 cursor-not-allowed`}/>
-                <p className="text-[11px] text-white/25 mt-1">O e-mail não pode ser alterado por aqui.</p>
+                <p className="text-[15px] text-white/25 mt-1">O e-mail não pode ser alterado por aqui.</p>
               </div>
               <div className="flex justify-end pt-1">
                 <button type="submit" disabled={loadNome || nome.trim() === nomeAtual}
@@ -404,19 +404,19 @@ export default function PerfilPage() {
               className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-red-500/5 transition-colors">
               <div className="flex items-center gap-2">
                 <span className="text-red-400/70"><Trash2 size={14}/></span>
-                <span className="text-[12px] font-semibold text-red-400">Zona de perigo</span>
+                <span className="text-[16px] font-semibold text-red-400">Zona de perigo</span>
               </div>
               <ChevronDown size={13} className="transition-transform flex-shrink-0"
                 style={{ color: '#f87171', transform: zonaPerigo ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
             </button>
             {zonaPerigo && (
               <div className="px-4 pb-4 border-t border-red-500/15 pt-3">
-                <p className="text-[11px] text-white/35 mb-3 leading-relaxed">
+                <p className="text-[15px] text-white/35 mb-3 leading-relaxed">
                   Remove permanentemente <strong className="text-red-400/60">todos</strong> os dados: lançamentos, contas, categorias e histórico. Ação irreversível.
                 </p>
                 <button type="button"
                   onClick={() => { setModalExcluir(true); setConfirmText(''); setErroExcluir('') }}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
+                  className="px-3 py-1.5 rounded-lg text-[15px] font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
                   Excluir minha conta
                 </button>
               </div>
@@ -431,9 +431,9 @@ export default function PerfilPage() {
           {/* Filtros salvos */}
           <Secao titulo="Filtros salvos" icone={<Bookmark size={15}/>}>
             {carregandoFiltros ? (
-              <p className="text-[12px] text-white/40">Carregando…</p>
+              <p className="text-[16px] text-white/40">Carregando…</p>
             ) : filtros.length === 0 ? (
-              <p className="text-[12px] text-white/40">Nenhum filtro salvo.</p>
+              <p className="text-[16px] text-white/40">Nenhum filtro salvo.</p>
             ) : (
               <>
                 <div className="space-y-0.5">
@@ -445,7 +445,7 @@ export default function PerfilPage() {
                       <div key={f.id}>
                         {editando ? (
                           <div className="flex items-center gap-2 px-2 py-1.5">
-                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                            <span className="text-[13px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
                               style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}>
                               {PAGINA_LABEL[f.pagina] ?? f.pagina}
                             </span>
@@ -454,7 +454,7 @@ export default function PerfilPage() {
                                 if (e.key === 'Enter') confirmarEdicao(f.id)
                                 if (e.key === 'Escape') setEditandoId(null)
                               }}
-                              className="flex-1 text-[12px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
+                              className="flex-1 text-[16px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
                               style={{ color: '#e8eaf0' }} maxLength={50}/>
                             <button onClick={() => confirmarEdicao(f.id)} disabled={!editandoNome.trim() || salvandoNome}
                               title="Salvar nome"
@@ -467,11 +467,11 @@ export default function PerfilPage() {
                         ) : (
                           <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] group cursor-pointer"
                             onClick={() => setFiltroExpandido(expandido ? null : f.id)}>
-                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                            <span className="text-[13px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
                               style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}>
                               {PAGINA_LABEL[f.pagina] ?? f.pagina}
                             </span>
-                            <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>{f.nome}</span>
+                            <span className="flex-1 text-[16px] truncate" style={{ color: '#c5cad8' }}>{f.nome}</span>
                             <ChevronDown size={12} className="flex-shrink-0 transition-transform"
                               style={{ color: '#4a5168', transform: expandido ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
                             <button onClick={e => { e.stopPropagation(); iniciarEdicao(f.id, f.nome) }} title="Renomear filtro"
@@ -486,13 +486,13 @@ export default function PerfilPage() {
                           <div className="mx-2 mb-1 px-3 py-2 rounded-lg"
                             style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
                             {detalhes.length === 0 ? (
-                              <p className="text-[11px]" style={{ color: '#4a5168' }}>Sem filtros específicos definidos.</p>
+                              <p className="text-[15px]" style={{ color: '#4a5168' }}>Sem filtros específicos definidos.</p>
                             ) : (
                               <div className="space-y-1">
                                 {detalhes.map(d => (
                                   <div key={d.label} className="flex gap-2">
-                                    <span className="text-[10px] font-semibold w-24 flex-shrink-0" style={{ color: '#8b92a8' }}>{d.label}</span>
-                                    <span className="text-[11px]" style={{ color: '#c5cad8' }}>{d.valor}</span>
+                                    <span className="text-[14px] font-semibold w-24 flex-shrink-0" style={{ color: '#8b92a8' }}>{d.label}</span>
+                                    <span className="text-[15px]" style={{ color: '#c5cad8' }}>{d.valor}</span>
                                   </div>
                                 ))}
                               </div>
@@ -505,7 +505,7 @@ export default function PerfilPage() {
                 </div>
                 <div className="flex justify-end pt-3 mt-2 border-t border-white/8">
                   <button onClick={excluirTodos}
-                    className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
+                    className="px-3 py-1.5 rounded-lg text-[15px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
                     Remover todos ({filtros.length})
                   </button>
                 </div>
@@ -523,12 +523,12 @@ export default function PerfilPage() {
                 <input
                   type="text" value={buscaAss} onChange={e => mudarBusca(e.target.value)}
                   placeholder="Buscar padrão…"
-                  className="w-full bg-white/5 border border-white/10 rounded-lg pl-7 pr-3 py-1.5 text-[12px] placeholder-white/20 focus:outline-none focus:border-white/20 transition-colors"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg pl-7 pr-3 py-1.5 text-[16px] placeholder-white/20 focus:outline-none focus:border-white/20 transition-colors"
                   style={{ color: '#c5cad8' }}
                 />
               </div>
               <button onClick={analisarPadroes} disabled={analisando}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-50 flex-shrink-0"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[15px] font-semibold transition-colors disabled:opacity-50 flex-shrink-0"
                 style={{ background: 'rgba(167,139,250,0.10)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.20)' }}>
                 {analisando
                   ? <><RefreshCw size={12} className="animate-spin"/> Analisando…</>
@@ -538,9 +538,9 @@ export default function PerfilPage() {
             </div>
 
             {carregandoAss ? (
-              <p className="text-[12px] text-white/40">Carregando…</p>
+              <p className="text-[16px] text-white/40">Carregando…</p>
             ) : sugestoes.length === 0 ? (
-              <p className="text-[12px] text-white/40 leading-relaxed">
+              <p className="text-[16px] text-white/40 leading-relaxed">
                 Nenhum padrão registrado. Os padrões são criados automaticamente ao salvar lançamentos.
               </p>
             ) : (
@@ -557,7 +557,7 @@ export default function PerfilPage() {
                         {editando ? (
                           <div className="flex items-center gap-2 px-2 py-1.5">
                             {s.is_transferencia && (
-                              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                              <span className="text-[13px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
                                 style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>Transf.</span>
                             )}
                             <input autoFocus value={editandoAssDesc} onChange={e => setEditandoAssDesc(e.target.value)}
@@ -565,7 +565,7 @@ export default function PerfilPage() {
                                 if (e.key === 'Enter')  confirmarEdicaoAss(s.id)
                                 if (e.key === 'Escape') setEditandoAss(null)
                               }}
-                              className="flex-1 text-[12px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
+                              className="flex-1 text-[16px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
                               style={{ color: '#e8eaf0' }} maxLength={200}/>
                             <button onClick={() => confirmarEdicaoAss(s.id)}
                               disabled={editandoAssDesc.trim().length < 2 || salvandoAss} title="Salvar"
@@ -579,10 +579,10 @@ export default function PerfilPage() {
                           <div className="group px-2 py-1.5 rounded-lg hover:bg-white/[0.03]">
                             <div className="flex items-center gap-2">
                               {s.is_transferencia && (
-                                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                                <span className="text-[13px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
                                   style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>Transf.</span>
                               )}
-                              <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>{s.descricao}</span>
+                              <span className="flex-1 text-[16px] truncate" style={{ color: '#c5cad8' }}>{s.descricao}</span>
                               <button onClick={() => iniciarEdicaoAss(s.id, s.descricao)} title="Editar descrição"
                                 className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 flex-shrink-0"
                                 style={{ color: '#8b92a8' }}><Pencil size={11}/></button>
@@ -593,13 +593,13 @@ export default function PerfilPage() {
                             {(catNome || contaOrigem) && (
                               <div className="flex items-center gap-2 mt-0.5 pl-0.5 flex-wrap">
                                 {contaOrigem && (
-                                  <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                                  <span className="text-[14px]" style={{ color: '#4a5168' }}>
                                     {contaOrigem}
                                     {contaDestino && <><ArrowRight size={9} className="inline mx-0.5"/>{contaDestino}</>}
                                   </span>
                                 )}
                                 {catNome && (
-                                  <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                                  <span className="text-[14px]" style={{ color: '#4a5168' }}>
                                     {contaOrigem ? '· ' : ''}{catNome}
                                   </span>
                                 )}
@@ -612,7 +612,7 @@ export default function PerfilPage() {
                   })}
 
                   {sugestoesFiltradas.length === 0 && buscaAss && (
-                    <p className="text-[12px] px-2 py-3 text-center" style={{ color: '#4a5168' }}>
+                    <p className="text-[16px] px-2 py-3 text-center" style={{ color: '#4a5168' }}>
                       Nenhum padrão encontrado para "{buscaAss}".
                     </p>
                   )}
@@ -625,25 +625,25 @@ export default function PerfilPage() {
                       <button onClick={() => setPaginaAss(p => Math.max(0, p - 1))} disabled={paginaSegura === 0}
                         className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/5 disabled:opacity-30"
                         style={{ color: '#8b92a8' }}><ChevronLeft size={13}/></button>
-                      <span className="text-[11px] px-1 tabular-nums" style={{ color: '#4a5168' }}>
+                      <span className="text-[15px] px-1 tabular-nums" style={{ color: '#4a5168' }}>
                         {paginaSegura + 1} / {totalPaginas}
                       </span>
                       <button onClick={() => setPaginaAss(p => Math.min(totalPaginas - 1, p + 1))} disabled={paginaSegura === totalPaginas - 1}
                         className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/5 disabled:opacity-30"
                         style={{ color: '#8b92a8' }}><ChevronRight size={13}/></button>
-                      <span className="text-[11px] ml-1" style={{ color: '#4a5168' }}>
+                      <span className="text-[15px] ml-1" style={{ color: '#4a5168' }}>
                         ({sugestoesFiltradas.length} {buscaAss ? 'encontrado' : 'total'}{sugestoesFiltradas.length !== 1 ? 's' : ''})
                       </span>
                     </div>
                   ) : (
-                    <span className="text-[11px]" style={{ color: '#4a5168' }}>
+                    <span className="text-[15px]" style={{ color: '#4a5168' }}>
                       {sugestoesFiltradas.length} padrão{sugestoesFiltradas.length !== 1 ? 'ões' : ''}
                       {buscaAss ? ' encontrado' : ''}
                       {sugestoesFiltradas.length !== 1 && buscaAss ? 's' : ''}
                     </span>
                   )}
                   <button onClick={excluirTodasAss}
-                    className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
+                    className="px-3 py-1.5 rounded-lg text-[15px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
                     Remover todos ({sugestoes.length})
                   </button>
                 </div>
@@ -664,9 +664,9 @@ export default function PerfilPage() {
             <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-white/8 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <Wand2 size={15} style={{ color: '#a78bfa' }}/>
-                <span className="text-[14px] font-semibold text-white">Padrões detectados</span>
+                <span className="text-[18px] font-semibold text-white">Padrões detectados</span>
                 {sugeridas.length > 0 && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                  <span className="text-[14px] font-bold px-1.5 py-0.5 rounded-full"
                     style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa' }}>
                     {sugeridas.length}
                   </span>
@@ -679,7 +679,7 @@ export default function PerfilPage() {
 
             {/* Feedback */}
             {resultadoSug && (
-              <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-[12px] flex items-center gap-2"
+              <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-[16px] flex items-center gap-2"
                 style={{ background: 'rgba(0,200,150,0.08)', color: '#00c896' }}>
                 <Check size={13}/>
                 {resultadoSug.ok} padrão{resultadoSug.ok !== 1 ? 'ões' : ''} adicionado{resultadoSug.ok !== 1 ? 's' : ''}
@@ -690,7 +690,7 @@ export default function PerfilPage() {
             {/* Body */}
             <div className="flex-1 overflow-y-auto px-5 py-3">
               {sugeridas.length === 0 ? (
-                <p className="text-[12px] text-center py-6" style={{ color: '#8b92a8' }}>
+                <p className="text-[16px] text-center py-6" style={{ color: '#8b92a8' }}>
                   {resultadoSug
                     ? 'Todos os padrões selecionados foram adicionados.'
                     : 'Nenhum padrão novo encontrado nos últimos 12 meses.'}
@@ -702,7 +702,7 @@ export default function PerfilPage() {
                       checked={selecionadas.size === sugeridas.length && sugeridas.length > 0}
                       onChange={e => setSelecionadas(e.target.checked ? new Set(sugeridas.map(s => s.key)) : new Set())}
                       className="accent-[#a78bfa] w-3.5 h-3.5"/>
-                    <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>Selecionar todos</span>
+                    <span className="text-[15px] font-semibold" style={{ color: '#8b92a8' }}>Selecionar todos</span>
                   </label>
                   <div className="space-y-0.5">
                     {sugeridas.map(s => (
@@ -717,17 +717,17 @@ export default function PerfilPage() {
                           className="accent-[#a78bfa] w-3.5 h-3.5 mt-0.5 flex-shrink-0"/>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-[12px] truncate" style={{ color: '#e8eaf0' }}>{s.descricao}</span>
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                            <span className="text-[16px] truncate" style={{ color: '#e8eaf0' }}>{s.descricao}</span>
+                            <span className="text-[14px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
                               style={{ background: 'rgba(167,139,250,0.10)', color: '#a78bfa' }}>
                               {s.ocorrencias}×
                             </span>
                           </div>
                           {(s.conta_nome || s.categoria_nome) && (
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              {s.conta_nome && <span className="text-[10px]" style={{ color: '#4a5168' }}>{s.conta_nome}</span>}
-                              {s.conta_nome && s.categoria_nome && <span className="text-[10px]" style={{ color: '#4a5168' }}>·</span>}
-                              {s.categoria_nome && <span className="text-[10px]" style={{ color: '#4a5168' }}>{s.categoria_nome}</span>}
+                              {s.conta_nome && <span className="text-[14px]" style={{ color: '#4a5168' }}>{s.conta_nome}</span>}
+                              {s.conta_nome && s.categoria_nome && <span className="text-[14px]" style={{ color: '#4a5168' }}>·</span>}
+                              {s.categoria_nome && <span className="text-[14px]" style={{ color: '#4a5168' }}>{s.categoria_nome}</span>}
                             </div>
                           )}
                         </div>
@@ -741,16 +741,16 @@ export default function PerfilPage() {
             {/* Footer */}
             {sugeridas.length > 0 && (
               <div className="flex items-center justify-between px-5 py-4 border-t border-white/8 flex-shrink-0">
-                <span className="text-[11px]" style={{ color: '#8b92a8' }}>
+                <span className="text-[15px]" style={{ color: '#8b92a8' }}>
                   {selecionadas.size} de {sugeridas.length} selecionado{selecionadas.size !== 1 ? 's' : ''}
                 </span>
                 <div className="flex gap-2">
                   <button onClick={() => { setSugeridas(null); setResultadoSug(null) }}
-                    className="px-3 py-1.5 rounded-lg text-[12px] text-white/40 hover:text-white/70 transition-colors">
+                    className="px-3 py-1.5 rounded-lg text-[16px] text-white/40 hover:text-white/70 transition-colors">
                     Fechar
                   </button>
                   <button onClick={adicionarSelecionadas} disabled={selecionadas.size === 0 || salvandoSug}
-                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[16px] font-semibold transition-colors disabled:opacity-40"
                     style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.25)' }}>
                     {salvandoSug
                       ? <><RefreshCw size={12} className="animate-spin"/> Salvando…</>
@@ -770,24 +770,24 @@ export default function PerfilPage() {
           <div className="bg-[#0f1929] border border-white/10 rounded-2xl p-6 w-full max-w-sm">
             <div className="flex items-center gap-2 mb-4">
               <Trash2 size={16} className="text-red-400"/>
-              <h3 className="text-[14px] font-semibold text-white">Confirmar exclusão</h3>
+              <h3 className="text-[18px] font-semibold text-white">Confirmar exclusão</h3>
             </div>
-            <p className="text-[12px] text-white/50 mb-4 leading-relaxed">
+            <p className="text-[16px] text-white/50 mb-4 leading-relaxed">
               Para confirmar, digite <span className="text-white font-semibold">EXCLUIR</span> no campo abaixo.
             </p>
             <input type="text" value={confirmText} onChange={e => setConfirmText(e.target.value)}
               placeholder="EXCLUIR"
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-red-500/50 transition-colors mb-3"/>
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/20 focus:outline-none focus:border-red-500/50 transition-colors mb-3"/>
             {erroExcluir && (
-              <p className="text-[12px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2 mb-3">{erroExcluir}</p>
+              <p className="text-[16px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2 mb-3">{erroExcluir}</p>
             )}
             <div className="flex gap-2 justify-end">
               <button type="button" disabled={loadExcluir} onClick={() => setModalExcluir(false)}
-                className="px-4 py-2 rounded-lg text-[12px] text-white/50 hover:text-white/80 transition-colors disabled:opacity-50">
+                className="px-4 py-2 rounded-lg text-[16px] text-white/50 hover:text-white/80 transition-colors disabled:opacity-50">
                 Cancelar
               </button>
               <button type="button" disabled={confirmText !== 'EXCLUIR' || loadExcluir} onClick={excluirConta}
-                className="px-4 py-2 rounded-lg text-[12px] font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-40">
+                className="px-4 py-2 rounded-lg text-[16px] font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-40">
                 {loadExcluir ? 'Excluindo...' : 'Excluir permanentemente'}
               </button>
             </div>

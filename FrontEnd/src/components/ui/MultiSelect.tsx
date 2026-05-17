@@ -131,7 +131,7 @@ export function MultiSelect({
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-1.5 bg-[#252d42] border border-white/10 rounded-lg
-          px-3 py-2 text-[13px] outline-none transition-colors text-left"
+          px-3 py-2 text-[17px] outline-none transition-colors text-left"
         style={{ borderColor: open ? '#00c896' : undefined, color: resumo ? '#e8eaf0' : '#8b92a8' }}
       >
         <span className="flex-1 truncate">{resumo ?? placeholder}</span>
@@ -160,7 +160,7 @@ export function MultiSelect({
                 value={busca} onChange={e => setBusca(e.target.value)}
                 placeholder="Buscar..."
                 className="w-full bg-[#252d42] border border-white/10 rounded-lg px-2.5 py-2
-                  text-[12px] outline-none focus:border-av-green transition-colors
+                  text-[16px] outline-none focus:border-av-green transition-colors
                   placeholder:text-white/30"
                 style={{ color: '#e8eaf0' }}
                 autoFocus
@@ -171,7 +171,7 @@ export function MultiSelect({
           {/* Opções — AUMENTADO ESPAÇAMENTO */}
           <div className="overflow-y-auto" style={{ maxHeight: '50vh', scrollbarWidth: 'thin' }}>
             {opcoesordenadas.length === 0 ? (
-              <p className="text-[12px] text-center py-6" style={{ color: '#8b92a8' }}>
+              <p className="text-[16px] text-center py-6" style={{ color: '#8b92a8' }}>
                 Nenhum resultado
               </p>
             ) : (
@@ -199,7 +199,7 @@ export function MultiSelect({
 
                     {/* Ícone colorido */}
                     {o.icone && (
-                      <span className="text-[14px] flex-shrink-0">{o.icone}</span>
+                      <span className="text-[18px] flex-shrink-0">{o.icone}</span>
                     )}
                     {o.cor && !o.icone && (
                       <span className="w-2.5 h-2.5 rounded-full flex-shrink-0"
@@ -218,7 +218,7 @@ export function MultiSelect({
 
                     {/* Badge para pais com filhos selecionados */}
                     {ehPai && temFilhos && sel && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-av-green/20"
+                      <span className="text-[14px] px-1.5 py-0.5 rounded bg-av-green/20"
                         style={{ color: '#00c896', flexShrink: 0 }}>
                         {options.filter(opt => opt.idPai === o.value && values.includes(opt.value)).length}/{options.filter(opt => opt.idPai === o.value).length}
                       </span>
@@ -232,11 +232,11 @@ export function MultiSelect({
           {/* Rodapé com contagem */}
           {values.length > 0 && (
             <div className="px-3 py-2.5 border-t border-white/10 flex items-center justify-between sticky bottom-0 bg-[#1a1f2e]">
-              <span className="text-[11px]" style={{ color: '#8b92a8' }}>
+              <span className="text-[15px]" style={{ color: '#8b92a8' }}>
                 {values.length} selecionado{values.length > 1 ? 's' : ''}
               </span>
               <button onClick={() => onChange([])}
-                className="text-[11px] hover:text-red-400 transition-colors"
+                className="text-[15px] hover:text-red-400 transition-colors"
                 style={{ color: '#8b92a8' }}>
                 Limpar
               </button>

@@ -36,7 +36,7 @@ const LogoSVG = () => (
 )
 
 const bgGrid = 'repeating-linear-gradient(0deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px),repeating-linear-gradient(90deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px)'
-const inputCls = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors'
+const inputCls = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors'
 
 export default function LoginPage() {
   const { signIn } = useAuth()
@@ -89,7 +89,7 @@ export default function LoginPage() {
             <LogoSVG />
           </div>
           <h1 className="text-2xl font-bold text-white">Arquiteto de Valor</h1>
-          <p className="text-[11px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
+          <p className="text-[15px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
         </div>
 
         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-sm">
@@ -100,18 +100,18 @@ export default function LoginPage() {
               <h2 className="text-base font-semibold text-white mb-5">Entrar na sua conta</h2>
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
-                  <label className="block text-[12px] text-white/50 mb-1.5">Email</label>
+                  <label className="block text-[16px] text-white/50 mb-1.5">Email</label>
                   <input type="email" required value={email}
                     onChange={e => setEmail(e.target.value)}
                     className={inputCls} placeholder="seu@email.com" />
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[12px] text-white/50">Senha</label>
+                    <label className="text-[16px] text-white/50">Senha</label>
                     <button
                       type="button"
                       onClick={() => { setModo('esqueci'); setError('') }}
-                      className="text-[11px] text-blue-400/70 hover:text-blue-300 transition-colors"
+                      className="text-[15px] text-blue-400/70 hover:text-blue-300 transition-colors"
                     >
                       Esqueci minha senha
                     </button>
@@ -121,17 +121,17 @@ export default function LoginPage() {
                     className={inputCls} placeholder="••••••••" />
                 </div>
                 {error && (
-                  <p className="text-[12px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
+                  <p className="text-[16px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
                 )}
                 <button type="submit" disabled={loading}
-                  className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[13px] hover:bg-av-green/90 disabled:opacity-50 transition-colors mt-2">
+                  className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[17px] hover:bg-av-green/90 disabled:opacity-50 transition-colors mt-2">
                   {loading ? 'Entrando...' : 'Entrar'}
                 </button>
               </form>
 
               <div className="mt-4 pt-4 border-t border-white/8 text-center">
-                <span className="text-[12px] text-white/30">Não tem uma conta? </span>
-                <Link to="/cadastro" className="text-[12px] text-av-green hover:text-av-green/80 transition-colors">
+                <span className="text-[16px] text-white/30">Não tem uma conta? </span>
+                <Link to="/cadastro" className="text-[16px] text-av-green hover:text-av-green/80 transition-colors">
                   Criar conta
                 </Link>
               </div>
@@ -142,27 +142,27 @@ export default function LoginPage() {
           {modo === 'esqueci' && !linkEnviado && (
             <>
               <h2 className="text-base font-semibold text-white mb-1">Recuperar senha</h2>
-              <p className="text-[12px] text-white/40 mb-5">
+              <p className="text-[16px] text-white/40 mb-5">
                 Informe seu e-mail e enviaremos um link para redefinir sua senha.
               </p>
               <form onSubmit={handleEsqueci} className="space-y-4">
                 <div>
-                  <label className="block text-[12px] text-white/50 mb-1.5">Email</label>
+                  <label className="block text-[16px] text-white/50 mb-1.5">Email</label>
                   <input type="email" required value={email}
                     onChange={e => setEmail(e.target.value)}
                     className={inputCls} placeholder="seu@email.com" />
                 </div>
                 {error && (
-                  <p className="text-[12px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
+                  <p className="text-[16px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
                 )}
                 <button type="submit" disabled={loading}
-                  className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[13px] hover:bg-av-green/90 disabled:opacity-50 transition-colors mt-2">
+                  className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[17px] hover:bg-av-green/90 disabled:opacity-50 transition-colors mt-2">
                   {loading ? 'Enviando...' : 'Enviar link de recuperação'}
                 </button>
               </form>
               <div className="mt-4 pt-4 border-t border-white/8 text-center">
                 <button onClick={voltarLogin}
-                  className="text-[12px] text-white/40 hover:text-white/70 transition-colors">
+                  className="text-[16px] text-white/40 hover:text-white/70 transition-colors">
                   ← Voltar para o login
                 </button>
               </div>
@@ -180,11 +180,11 @@ export default function LoginPage() {
                   </svg>
                 </div>
                 <h2 className="text-base font-semibold text-white mb-2">Link enviado!</h2>
-                <p className="text-[12px] text-white/40 text-center leading-relaxed mb-5">
+                <p className="text-[16px] text-white/40 text-center leading-relaxed mb-5">
                   Verifique sua caixa de entrada em <span className="text-white/70">{email}</span> e clique no link para redefinir sua senha.
                 </p>
                 <button onClick={voltarLogin}
-                  className="text-[12px] text-av-green hover:text-av-green/80 transition-colors">
+                  className="text-[16px] text-av-green hover:text-av-green/80 transition-colors">
                   ← Voltar para o login
                 </button>
               </div>
@@ -192,7 +192,7 @@ export default function LoginPage() {
           )}
         </div>
 
-        <p className="text-center text-[11px] text-white/20 mt-4">
+        <p className="text-center text-[15px] text-white/20 mt-4">
           Arquiteto de Valor · BLUEPRINT
         </p>
       </div>

@@ -46,7 +46,7 @@ function StatusBadge({ status, onClick }: { status: string; onClick?: () => void
       className={onClick ? 'cursor-pointer' : ''}
       style={{
         background: c.bg, color: c.color,
-        fontSize: 10, fontWeight: 700, padding: '2px 7px',
+        fontSize: 14, fontWeight: 700, padding: '2px 7px',
         borderRadius: 20, letterSpacing: '0.4px', whiteSpace: 'nowrap',
       }}
     >{c.label}</span>
@@ -159,10 +159,10 @@ function CalendarioStrip({ mes, diasComMovimento, hoje, onSelectDia }: {
               opacity, transition: 'background 0.15s',
             }}
           >
-            <span style={{ fontSize: 9, fontWeight: 600, color: corDow, letterSpacing: '0.5px' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: corDow, letterSpacing: '0.5px' }}>
               {DIAS_ABR[dow]}
             </span>
-            <span style={{ fontSize: 13, lineHeight: 1, fontWeight: ehHoje ? 700 : temMov ? 600 : 400, color: corNum }}>
+            <span style={{ fontSize: 17, lineHeight: 1, fontWeight: ehHoje ? 700 : temMov ? 600 : 400, color: corNum }}>
               {d}
             </span>
             <span style={{ width: 4, height: 4, borderRadius: '50%', flexShrink: 0, background: corDot }} />
@@ -293,31 +293,44 @@ export default function LancamentosPage() {
 
   const exportarXlsx = async () => {
     if (lancamentosParaExibir.length === 0) return
-    // @ts-expect-error CDN dynamic import sem declarações de tipo
-    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
+    const { exportToExcel } = await import('../lib/exportUtils')
+
     const rows = lancamentosParaExibir.map(l => {
       const isTransf = !!l.id_par_transferencia
       return {
-        'Data':       l.data.split('-').reverse().join('/'),
-        'Tipo':       isTransf ? 'TRANSFERÊNCIA' : l.tipo,
-        'Descrição':  isTransf ? (l.descricao?.replace(/^\[Transf\. (saída|entrada)\] /, '') ?? '') : (l.descricao ?? ''),
-        'Categoria':  l.categoria_pai_nome ? `${l.categoria_pai_nome} / ${l.categoria_nome}` : (l.categoria_nome ?? ''),
-        'Conta':      l.conta_nome ?? '',
-        'Valor':      l.tipo === 'RECEITA' ? l.valor : -l.valor,
-        'Status':     STATUS_LABEL[l.status] ?? l.status,
-        'Parcela':    l.nr_parcela && l.total_parcelas ? `${l.nr_parcela}/${l.total_parcelas}` : '',
-        'Observação': l.observacao ?? '',
+        data:       new Date(l.data + 'T12:00:00'),
+        tipo:       isTransf ? 'TRANSFERÊNCIA' : l.tipo,
+        descricao:  isTransf ? (l.descricao?.replace(/^\[Transf\. (saída|entrada)\] /, '') ?? '') : (l.descricao ?? ''),
+        categoria:  l.categoria_pai_nome ? `${l.categoria_pai_nome} / ${l.categoria_nome}` : (l.categoria_nome ?? ''),
+        conta:      l.conta_nome ?? '',
+        valor:      l.tipo === 'RECEITA' ? l.valor : -l.valor,
+        status:     STATUS_LABEL[l.status] ?? l.status,
+        parcela:    l.nr_parcela && l.total_parcelas ? `${l.nr_parcela}/${l.total_parcelas}` : '',
+        observacao: l.observacao ?? '',
       }
     })
-    const ws = XLSX.utils.json_to_sheet(rows)
-    ws['!cols'] = [
-      { wch: 12 }, { wch: 14 }, { wch: 36 }, { wch: 26 },
-      { wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 32 },
-    ]
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Extrato')
+
     const nome = buscaMultiMes ? 'extrato_busca' : `extrato_${mes}`
-    XLSX.writeFile(wb, `${nome}.xlsx`)
+    await exportToExcel({
+      filename: nome,
+      sheets: [{
+        name: 'Extrato',
+        title: 'Extrato de Lançamentos',
+        subtitle: buscaMultiMes ? 'Resultado da busca' : `Mês: ${mes}`,
+        columns: [
+          { key: 'data',       label: 'Data',       type: 'date',     width: 12 },
+          { key: 'tipo',       label: 'Tipo',       type: 'text',     width: 14 },
+          { key: 'descricao',  label: 'Descrição',  type: 'text',     width: 36 },
+          { key: 'categoria',  label: 'Categoria',  type: 'text',     width: 26 },
+          { key: 'conta',      label: 'Conta',      type: 'text',     width: 22 },
+          { key: 'valor',      label: 'Valor',      type: 'currency', width: 14 },
+          { key: 'status',     label: 'Status',     type: 'text',     width: 12 },
+          { key: 'parcela',    label: 'Parcela',    type: 'text',     width: 10, align: 'center' },
+          { key: 'observacao', label: 'Observação', type: 'text',     width: 32 },
+        ],
+        rows,
+      }],
+    })
   }
 
   const abrirEditar = (l: Lancamento) => {
@@ -646,13 +659,13 @@ export default function LancamentosPage() {
       <div ref={stickyRef} className="sticky top-0 z-20 -mx-5 px-5 pt-4 pb-2" style={{ background: '#0d1220', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
         {/* Topbar */}
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>Lançamentos</h1>
+          <h1 className="text-[21px] font-bold" style={{ color: '#e8eaf0' }}>Lançamentos</h1>
           <div className="flex items-center gap-2">
             <button
               onClick={exportarXlsx}
               disabled={lancamentosParaExibir.length === 0}
               title="Exportar extrato como XLSX"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[12px] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[16px] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
                 borderColor: 'rgba(255,255,255,0.12)',
                 color: '#8b92a8',
@@ -745,14 +758,14 @@ export default function LancamentosPage() {
               />
             </span>
             <span
-              className="text-[11px] font-medium whitespace-nowrap transition-colors"
+              className="text-[15px] font-medium whitespace-nowrap transition-colors"
               style={{ color: filtCats.length > 0 ? '#8b92a8' : comSaldo ? '#00c896' : '#8b92a8' }}
             >
               Saldo anterior
             </span>
           </button>
           {filtCats.length > 0 && (
-            <span className="text-[9px] text-yellow-400/70 px-1">
+            <span className="text-[13px] text-yellow-400/70 px-1">
               Indisponível com filtro de categoria
             </span>
           )}
@@ -769,7 +782,7 @@ export default function LancamentosPage() {
               value={pesquisa}
               onChange={e => setPesquisa(e.target.value)}
               placeholder="Pesquisar por descrição, categoria ou conta…"
-              className="flex-1 bg-transparent text-[12px] text-white placeholder-[#4a5168] focus:outline-none min-w-0"
+              className="flex-1 bg-transparent text-[16px] text-white placeholder-[#4a5168] focus:outline-none min-w-0"
             />
             {pesquisa && (
               <button onClick={limparPesquisa} className="flex-shrink-0 opacity-60 hover:opacity-100 transition-opacity">
@@ -784,7 +797,7 @@ export default function LancamentosPage() {
                 const ativo = escopoPesquisa === e
                 return (
                   <button key={e} onClick={() => setEscopoPesquisa(e)}
-                    className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all whitespace-nowrap"
+                    className="px-2.5 py-1.5 rounded-lg text-[15px] font-medium border transition-all whitespace-nowrap"
                     style={{
                       background: ativo ? 'rgba(77,166,255,0.15)' : 'transparent',
                       borderColor: ativo ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.1)',
@@ -813,28 +826,28 @@ export default function LancamentosPage() {
           { label: 'Resultado', valor: totais.resultado, color: totais.resultado >= 0 ? '#00c896' : '#f87171' },
         ].map(c => (
           <div key={c.label} className="bg-[#1a1f2e] border border-white/10 rounded-xl px-4 py-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#8b92a8' }}>{c.label}</p>
-            <p className="text-[16px] font-bold" style={{ color: c.color }}>{formatBRL(c.valor)}</p>
+            <p className="text-[14px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#8b92a8' }}>{c.label}</p>
+            <p className="text-[20px] font-bold" style={{ color: c.color }}>{formatBRL(c.valor)}</p>
           </div>
         ))}
       </div>
 
-      {loading && !buscaMultiMes && <p className="text-[13px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>}
+      {loading && !buscaMultiMes && <p className="text-[17px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>}
       {carregandoBusca && (
         <div className="flex items-center justify-center gap-3 py-4">
-          <span className="text-[13px]" style={{ color: '#8b92a8' }}>
+          <span className="text-[17px]" style={{ color: '#8b92a8' }}>
             Pesquisando{buscaMesesVistos > 0 ? ` (${buscaMesesVistos} meses, ${buscaResultados.length} encontrado${buscaResultados.length !== 1 ? 's' : ''})` : ''}…
           </span>
           <button
             onClick={() => pararBuscaRef.current?.()}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all hover:bg-red-400/10"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[15px] font-medium transition-all hover:bg-red-400/10"
             style={{ borderColor: 'rgba(248,113,113,0.4)', color: '#f87171' }}
           >
             <X size={11} /> Parar
           </button>
         </div>
       )}
-      {error && !buscaMultiMes && <p className="text-[13px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
+      {error && !buscaMultiMes && <p className="text-[17px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
 
       {!(loading && !buscaMultiMes) && !error && (
         <>
@@ -844,7 +857,7 @@ export default function LancamentosPage() {
             const sufixo  = buscaParada ? ' (interrompida)' : ''
             const textoEscopo = `nos ${direcao} ${buscaMesesVistos} meses verificados${sufixo}`
             return (
-              <p className="text-[11px] mb-2 mt-1" style={{ color: '#8b92a8' }}>
+              <p className="text-[15px] mb-2 mt-1" style={{ color: '#8b92a8' }}>
                 {lancamentosParaExibir.length} resultado{lancamentosParaExibir.length !== 1 ? 's' : ''}
                 {pesquisa ? <> para &ldquo;{pesquisa}&rdquo;</> : null}
                 {' '}{textoEscopo}
@@ -857,12 +870,12 @@ export default function LancamentosPage() {
             <div className="flex items-center gap-2 mb-3">
               <button
                 onClick={buscarMais}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-medium transition-all hover:bg-blue-400/10"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[15px] font-medium transition-all hover:bg-blue-400/10"
                 style={{ borderColor: 'rgba(77,166,255,0.35)', color: '#4da6ff' }}
               >
                 <Search size={11} /> Buscar mais 5 anos anteriores
               </button>
-              <span className="text-[10px]" style={{ color: '#4a5168' }}>
+              <span className="text-[14px]" style={{ color: '#4a5168' }}>
                 ({buscaMesesVistos} meses verificados)
               </span>
             </div>
@@ -872,14 +885,14 @@ export default function LancamentosPage() {
           {!carregandoBusca && lancamentosParaExibir.length === 0 && (
             <div className="text-center py-16">
               {pesquisa ? (
-                <p className="text-[13px]" style={{ color: '#8b92a8' }}>
+                <p className="text-[17px]" style={{ color: '#8b92a8' }}>
                   Nenhum resultado para &ldquo;{pesquisa}&rdquo;
                   {escopoPesquisa === 'MESES_ANTERIORES' ? ` nos últimos ${buscaMesesVistos} meses`
                    : escopoPesquisa === 'PROXIMOS_MESES'  ? ` nos próximos ${buscaMesesVistos} meses`
                    : ' neste mês'}.
                 </p>
               ) : buscaMultiMes ? (
-                <p className="text-[13px]" style={{ color: '#8b92a8' }}>
+                <p className="text-[17px]" style={{ color: '#8b92a8' }}>
                   Nenhum lançamento encontrado com os filtros selecionados
                   {escopoPesquisa === 'MESES_ANTERIORES' ? ` nos últimos ${buscaMesesVistos} meses`
                    : escopoPesquisa === 'PROXIMOS_MESES'  ? ` nos próximos ${buscaMesesVistos} meses`
@@ -887,8 +900,8 @@ export default function LancamentosPage() {
                 </p>
               ) : (
                 <>
-                  <p className="text-[13px] mb-3" style={{ color: '#8b92a8' }}>Nenhum lançamento em {mesLabel(mes)}.</p>
-                  <button onClick={() => abrirNovo()} className="text-[12px] underline underline-offset-2" style={{ color: '#00c896' }}>
+                  <p className="text-[17px] mb-3" style={{ color: '#8b92a8' }}>Nenhum lançamento em {mesLabel(mes)}.</p>
+                  <button onClick={() => abrirNovo()} className="text-[16px] underline underline-offset-2" style={{ color: '#00c896' }}>
                     Criar primeiro lançamento
                   </button>
                 </>
@@ -945,11 +958,11 @@ export default function LancamentosPage() {
                           </span>
                         )
                       })()}
-                      <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
+                      <span className="text-[15px] font-semibold" style={{ color: '#8b92a8' }}>
                         {fmtDataLabel(data)}
                       </span>
                       {comSaldo && data === primeiraData && saldoAnterior !== null && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full border"
+                        <span className="text-[14px] px-2 py-0.5 rounded-full border"
                           style={{
                             color: saldoAnterior >= 0 ? '#00c896' : '#f87171',
                             borderColor: saldoAnterior >= 0 ? 'rgba(0,200,150,0.25)' : 'rgba(248,113,113,0.25)',
@@ -963,7 +976,7 @@ export default function LancamentosPage() {
                     <div className="grid gap-2 px-4 py-2 border-b border-white/5"
                       style={{ gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px' }}>
                       {['','','Descrição','Categoria','Conta','Valor','Status',''].map((h, i) => (
-                        <span key={i} className="text-[10px] font-bold uppercase tracking-wide"
+                        <span key={i} className="text-[14px] font-bold uppercase tracking-wide"
                           style={{ color: '#4a5168' }}>{h}</span>
                       ))}
                     </div>
@@ -1031,27 +1044,27 @@ export default function LancamentosPage() {
 
                           {/* Descrição */}
                           <div className="min-w-0">
-                            <p className="text-[12px] font-medium truncate" style={{ color: '#e8eaf0' }}>
+                            <p className="text-[16px] font-medium truncate" style={{ color: '#e8eaf0' }}>
                               {isTransf
                                 ? l.descricao?.replace(/^\[Transf\. (saída|entrada)\] /, '')
                                 : l.descricao}
                               {l.nr_parcela && l.total_parcelas && (
-                                <span className="ml-1 text-[10px]" style={{ color: '#8b92a8' }}>
+                                <span className="ml-1 text-[14px]" style={{ color: '#8b92a8' }}>
                                   {l.nr_parcela}/{l.total_parcelas}
                                 </span>
                               )}
                             </p>
                             {l.observacao && (
-                              <p className="text-[10px] truncate mt-0.5" style={{ color: '#8b92a8' }}>{l.observacao}</p>
+                              <p className="text-[14px] truncate mt-0.5" style={{ color: '#8b92a8' }}>{l.observacao}</p>
                             )}
                           </div>
 
                           {/* Categoria */}
                           <div className="flex items-center gap-1.5 min-w-0">
                             {l.categoria_icone && (
-                              <span className="text-[13px] flex-shrink-0">{l.categoria_icone}</span>
+                              <span className="text-[17px] flex-shrink-0">{l.categoria_icone}</span>
                             )}
-                            <span className="text-[11px] truncate" style={{ color: '#c5cad8' }}>
+                            <span className="text-[15px] truncate" style={{ color: '#c5cad8' }}>
                               {l.categoria_pai_nome
                                 ? `${l.categoria_pai_nome} / ${l.categoria_nome}`
                                 : (l.categoria_nome ?? '—')}
@@ -1061,19 +1074,19 @@ export default function LancamentosPage() {
                           {/* Conta */}
                           <div className="flex items-center gap-1.5 min-w-0">
                             <IconeConta icone={l.conta_icone} cor={l.conta_cor} size="sm" />
-                            <span className="text-[11px] truncate" style={{ color: '#c5cad8' }}>
+                            <span className="text-[15px] truncate" style={{ color: '#c5cad8' }}>
                               {l.conta_nome ?? '—'}
                             </span>
                           </div>
 
                           {/* Valor */}
                           <div className="text-right">
-                            <p className="text-[13px] font-bold"
+                            <p className="text-[17px] font-bold"
                               style={{ color: l.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}>
                               {l.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(l.valor)}
                             </p>
                             {comSaldo && l.saldo_acumulado !== undefined && (
-                              <p className="text-[9px]" style={{ color: l.saldo_acumulado >= 0 ? '#00c896' : '#f87171' }}>
+                              <p className="text-[13px]" style={{ color: l.saldo_acumulado >= 0 ? '#00c896' : '#f87171' }}>
                                 saldo: {formatBRL(l.saldo_acumulado)}
                               </p>
                             )}
@@ -1129,9 +1142,9 @@ export default function LancamentosPage() {
                       <div className="grid gap-2 px-4 py-2 border-t border-white/5 items-center"
                         style={{ gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px', background: 'rgba(255,255,255,0.015)' }}>
                         <span/><span/>
-                        <span className="text-[10px] font-medium uppercase tracking-wider text-right" style={{ color: '#4a5168' }}>Saldo do dia</span>
+                        <span className="text-[14px] font-medium uppercase tracking-wider text-right" style={{ color: '#4a5168' }}>Saldo do dia</span>
                         <span/><span/>
-                        <span className="text-[12px] font-bold text-right"
+                        <span className="text-[16px] font-bold text-right"
                           style={{ color: (saldoPorData.get(data) ?? 0) >= 0 ? '#00c896' : '#f87171' }}>
                           {formatBRL(saldoPorData.get(data) ?? 0)}
                         </span>
@@ -1153,11 +1166,11 @@ export default function LancamentosPage() {
                     }}>
                     <div className="flex items-center gap-2 px-1 mb-2"
                       style={data === diaFocado ? { background: 'rgba(77,166,255,0.1)', borderRadius: '10px 10px 0 0', padding: '6px 4px' } : undefined}>
-                      <p className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
+                      <p className="text-[15px] font-semibold" style={{ color: '#8b92a8' }}>
                         {fmtDataLabel(data)}
                       </p>
                       {comSaldo && data === primeiraData && saldoAnterior !== null && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full border"
+                        <span className="text-[14px] px-2 py-0.5 rounded-full border"
                           style={{
                             color: saldoAnterior >= 0 ? '#00c896' : '#f87171',
                             borderColor: saldoAnterior >= 0 ? 'rgba(0,200,150,0.25)' : 'rgba(248,113,113,0.25)',
@@ -1193,23 +1206,23 @@ export default function LancamentosPage() {
                                   <Repeat2 size={12} style={{ color: '#f0b429', flexShrink: 0 }} />
                                 ) : null}
                                 <div className="min-w-0">
-                                  <p className="text-[13px] font-semibold truncate" style={{ color: '#e8eaf0' }}>
+                                  <p className="text-[17px] font-semibold truncate" style={{ color: '#e8eaf0' }}>
                                     {isTransf
                                       ? l.descricao?.replace(/^\[Transf\. (saída|entrada)\] /, '')
                                       : l.descricao}
                                     {l.nr_parcela && l.total_parcelas && (
-                                      <span className="ml-1 text-[10px]" style={{ color: '#8b92a8' }}>
+                                      <span className="ml-1 text-[14px]" style={{ color: '#8b92a8' }}>
                                         {l.nr_parcela}/{l.total_parcelas}
                                       </span>
                                     )}
                                   </p>
-                                  <p className="text-[10px] mt-0.5" style={{ color: '#8b92a8' }}>
+                                  <p className="text-[14px] mt-0.5" style={{ color: '#8b92a8' }}>
                                     {l.categoria_nome ?? ''}
                                   </p>
                                 </div>
                               </div>
                               <div className="text-right flex-shrink-0">
-                                <p className="text-[14px] font-bold"
+                                <p className="text-[18px] font-bold"
                                   style={{ color: l.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}>
                                   {l.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(l.valor)}
                                 </p>
@@ -1219,7 +1232,7 @@ export default function LancamentosPage() {
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-1.5">
                                 <IconeConta icone={l.conta_icone} cor={l.conta_cor} size="sm" />
-                                <span className="text-[11px]" style={{ color: '#8b92a8' }}>{l.conta_nome}</span>
+                                <span className="text-[15px]" style={{ color: '#8b92a8' }}>{l.conta_nome}</span>
                               </div>
                               <div className="flex gap-1">
                                 {!isTransf && !isPago && (
@@ -1247,10 +1260,10 @@ export default function LancamentosPage() {
                     {/* Rodapé mobile com saldo do dia */}
                     {!buscaMultiMes && saldoPorData.has(data) && (
                       <div className="flex items-center gap-2 px-2 pt-2 mt-1 border-t border-white/5">
-                        <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: '#4a5168' }}>
+                        <span className="text-[14px] font-medium uppercase tracking-wider" style={{ color: '#4a5168' }}>
                           Saldo do dia
                         </span>
-                        <span className="text-[11px] font-bold"
+                        <span className="text-[15px] font-bold"
                           style={{ color: (saldoPorData.get(data) ?? 0) >= 0 ? '#00c896' : '#f87171' }}>
                           {formatBRL(saldoPorData.get(data) ?? 0)}
                         </span>
@@ -1314,7 +1327,7 @@ export default function LancamentosPage() {
                 <button key={s} onClick={() => handleStatus(l, s)}
                   className="flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-white/5 transition-colors">
                   {l.status === s && <Check size={10} style={{ color: '#00c896' }} />}
-                  <span className="text-[11px]" style={{ color: '#e8eaf0' }}>
+                  <span className="text-[15px]" style={{ color: '#e8eaf0' }}>
                     {STATUS_LABEL[s] ?? s}
                   </span>
                 </button>
@@ -1341,26 +1354,26 @@ export default function LancamentosPage() {
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-green-400/10">
                   <Check size={16} style={{ color: '#00c896' }} />
                 </div>
-                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar valor real</p>
+                <p className="text-[18px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar valor real</p>
               </div>
 
               <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
-                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{l.descricao}</span>
+                  <span className="text-[15px]" style={{ color: '#8b92a8' }}>Descrição</span>
+                  <span className="text-[16px] font-medium" style={{ color: '#e8eaf0' }}>{l.descricao}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Conta</span>
-                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{l.conta_nome ?? '—'}</span>
+                  <span className="text-[15px]" style={{ color: '#8b92a8' }}>Conta</span>
+                  <span className="text-[16px]" style={{ color: '#e8eaf0' }}>{l.conta_nome ?? '—'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor projetado</span>
-                  <span className="text-[12px]" style={{ color: '#8b92a8' }}>{sinal}{formatBRL(vOrig)}</span>
+                  <span className="text-[15px]" style={{ color: '#8b92a8' }}>Valor projetado</span>
+                  <span className="text-[16px]" style={{ color: '#8b92a8' }}>{sinal}{formatBRL(vOrig)}</span>
                 </div>
                 <div className="flex justify-between items-center gap-3">
-                  <span className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Valor real</span>
+                  <span className="text-[15px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Valor real</span>
                   <div className="flex items-center gap-1">
-                    <span className="text-[12px]" style={{ color: corVal }}>{sinal}</span>
+                    <span className="text-[16px]" style={{ color: corVal }}>{sinal}</span>
                     <input
                       type="text"
                       inputMode="numeric"
@@ -1371,7 +1384,7 @@ export default function LancamentosPage() {
                         const n = parseInt(nums, 10)
                         setValorConfirmado((n / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
                       }}
-                      className="w-32 text-right text-[13px] font-bold bg-[#1a1f2e] border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:border-white/30"
+                      className="w-32 text-right text-[17px] font-bold bg-[#1a1f2e] border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:border-white/30"
                       style={{ color: corVal }}
                       autoFocus
                     />
@@ -1379,22 +1392,22 @@ export default function LancamentosPage() {
                 </div>
                 {hasDiff && (
                   <div className="flex justify-between border-t border-white/5 pt-2">
-                    <span className="text-[11px]" style={{ color: '#8b92a8' }}>Diferença</span>
-                    <span className="text-[12px]" style={{ color: diff > 0 ? '#00c896' : '#f87171' }}>
+                    <span className="text-[15px]" style={{ color: '#8b92a8' }}>Diferença</span>
+                    <span className="text-[16px]" style={{ color: diff > 0 ? '#00c896' : '#f87171' }}>
                       {diff > 0 ? '+' : ''}{formatBRL(diff)}
                     </span>
                   </div>
                 )}
               </div>
 
-              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
+              <p className="text-[15px] mb-4 text-center" style={{ color: '#8b92a8' }}>
                 O valor projetado será preservado e o lançamento marcado como{' '}
                 <span style={{ color: '#00c896' }}>PAGO</span>.
               </p>
 
               <div className="flex gap-2">
                 <button onClick={() => setConfirmandoProjecao(null)}
-                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20"
+                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[16px] font-semibold transition-all hover:border-white/20"
                   style={{ color: '#8b92a8' }}>
                   Cancelar
                 </button>
@@ -1411,7 +1424,7 @@ export default function LancamentosPage() {
                     if (ok) toast('Lançamento confirmado como pago!')
                     else toast(e ?? 'Erro ao confirmar.')
                   }}
-                  className="flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:bg-green-500/90"
+                  className="flex-1 py-2.5 rounded-lg text-[16px] font-semibold transition-all hover:bg-green-500/90"
                   style={{ background: '#00c896', color: '#0a0f1a' }}>
                   <Check size={12} className="inline mr-1" /> Confirmar pago
                 </button>
@@ -1437,26 +1450,26 @@ export default function LancamentosPage() {
             minWidth: 400,
           }}
         >
-          <span className="text-[11px] font-medium flex-1" style={{ color: '#8b92a8' }}>
+          <span className="text-[15px] font-medium flex-1" style={{ color: '#8b92a8' }}>
             {selecionados.size} selecionado(s)
           </span>
           <button onClick={pagarSelecionados}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all hover:opacity-90"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[15px] font-semibold transition-all hover:opacity-90"
             style={{ background: '#00c896', color: '#0a0f1a' }}>
             <Check size={12} /> Pagar
           </button>
           <button onClick={cancelarPgtoSelecionados}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-all hover:bg-white/5"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[15px] font-semibold border transition-all hover:bg-white/5"
             style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#8b92a8' }}>
             Cancelar pgto
           </button>
           <button onClick={() => setConfirmandoExcLote(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-all hover:bg-red-400/5"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[15px] font-semibold border transition-all hover:bg-red-400/5"
             style={{ borderColor: 'rgba(248,113,113,0.3)', color: '#f87171' }}>
             Excluir
           </button>
           <button onClick={() => setSelecionados(new Set())}
-            className="text-[11px] px-2 py-1 rounded-lg transition-all hover:bg-white/5"
+            className="text-[15px] px-2 py-1 rounded-lg transition-all hover:bg-white/5"
             style={{ color: '#8b92a8' }}>
             × Limpar
           </button>
@@ -1492,7 +1505,7 @@ export default function LancamentosPage() {
                     ? <Zap size={16} style={{ color: '#f0b429' }} />
                     : <Check size={16} style={{ color: '#00c896' }} />}
                 </div>
-                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>
+                <p className="text-[18px] font-semibold" style={{ color: '#e8eaf0' }}>
                   {isRecorrModal ? 'Confirmar antecipação' : 'Confirmar pagamento'}
                 </p>
               </div>
@@ -1500,34 +1513,34 @@ export default function LancamentosPage() {
               {/* Resumo */}
               <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
-                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{antecipando.descricao}</span>
+                  <span className="text-[15px]" style={{ color: '#8b92a8' }}>Descrição</span>
+                  <span className="text-[16px] font-medium" style={{ color: '#e8eaf0' }}>{antecipando.descricao}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Conta</span>
-                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{antecipando.conta_nome ?? '—'}</span>
+                  <span className="text-[15px]" style={{ color: '#8b92a8' }}>Conta</span>
+                  <span className="text-[16px]" style={{ color: '#e8eaf0' }}>{antecipando.conta_nome ?? '—'}</span>
                 </div>
                 {isRecorrModal ? (
                   <>
                     <div className="flex justify-between">
-                      <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcela atual</span>
-                      <span className="text-[12px]" style={{ color: '#e8eaf0' }}>
+                      <span className="text-[15px]" style={{ color: '#8b92a8' }}>Parcela atual</span>
+                      <span className="text-[16px]" style={{ color: '#e8eaf0' }}>
                         {nrAtual}/{totalParc} — {formatBRL(valorUnitario)}
                       </span>
                     </div>
                     {temFuturas && (
                       <>
                         <div className="flex justify-between">
-                          <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcelas a eliminar</span>
-                          <span className="text-[12px]" style={{ color: corValor }}>
+                          <span className="text-[15px]" style={{ color: '#8b92a8' }}>Parcelas a eliminar</span>
+                          <span className="text-[16px]" style={{ color: corValor }}>
                             {nFuturas}× — {sinal}{formatBRL(valorFutEst)}
                           </span>
                         </div>
                         <div className="border-t border-white/5 pt-2 flex justify-between">
-                          <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
+                          <span className="text-[15px] font-semibold" style={{ color: '#8b92a8' }}>
                             Total antecipado ({nFuturas + 1} parcelas)
                           </span>
-                          <span className="text-[13px] font-bold" style={{ color: corValor }}>
+                          <span className="text-[17px] font-bold" style={{ color: corValor }}>
                             {sinal}{formatBRL(valorTotal)}
                           </span>
                         </div>
@@ -1535,8 +1548,8 @@ export default function LancamentosPage() {
                     )}
                     {!temFuturas && (
                       <div className="flex justify-between">
-                        <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor</span>
-                        <span className="text-[13px] font-bold" style={{ color: corValor }}>
+                        <span className="text-[15px]" style={{ color: '#8b92a8' }}>Valor</span>
+                        <span className="text-[17px] font-bold" style={{ color: corValor }}>
                           {sinal}{formatBRL(valorUnitario)}
                         </span>
                       </div>
@@ -1544,15 +1557,15 @@ export default function LancamentosPage() {
                   </>
                 ) : (
                   <div className="flex justify-between">
-                    <span className="text-[11px]" style={{ color: '#8b92a8' }}>Valor</span>
-                    <span className="text-[13px] font-bold" style={{ color: corValor }}>
+                    <span className="text-[15px]" style={{ color: '#8b92a8' }}>Valor</span>
+                    <span className="text-[17px] font-bold" style={{ color: corValor }}>
                       {sinal}{formatBRL(antecipando.valor)}
                     </span>
                   </div>
                 )}
               </div>
 
-              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
+              <p className="text-[15px] mb-4 text-center" style={{ color: '#8b92a8' }}>
                 {temFuturas
                   ? <>A parcela atual será marcada como <span style={{ color: '#00c896' }}>PAGA</span> com o valor consolidado e as {nFuturas} parcelas seguintes serão removidas.</>
                   : <>O lançamento será marcado como <span style={{ color: '#00c896' }}>PAGO</span> com a data de hoje.</>
@@ -1561,7 +1574,7 @@ export default function LancamentosPage() {
 
               <div className="flex gap-2">
                 <button onClick={() => setAntecipando(null)}
-                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20"
+                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[16px] font-semibold transition-all hover:border-white/20"
                   style={{ color: '#8b92a8' }}>
                   Cancelar
                 </button>
@@ -1594,7 +1607,7 @@ export default function LancamentosPage() {
                       }
                     }
                   }}
-                  className={`flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all ${isRecorrModal ? 'hover:bg-yellow-400/90' : 'hover:bg-green-500/90'}`}
+                  className={`flex-1 py-2.5 rounded-lg text-[16px] font-semibold transition-all ${isRecorrModal ? 'hover:bg-yellow-400/90' : 'hover:bg-green-500/90'}`}
                   style={{ background: isRecorrModal ? '#f0b429' : '#00c896', color: '#0a0f1a' }}>
                   {isRecorrModal
                     ? <><Zap size={12} className="inline mr-1" /> Antecipar</>

@@ -125,7 +125,7 @@ function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChi
       <NavLink
         to={item.to}
         title={item.label}
-        className={`flex items-center justify-center px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
+        className={`flex items-center justify-center px-2 py-[7px] rounded-lg text-[17px] mb-[1px] transition-colors ${
           anyActive ? 'bg-av-green/15 text-av-green font-medium' : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
         }`}
       >
@@ -138,7 +138,7 @@ function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChi
     <div>
       <button
         onClick={() => setOpen(v => !v)}
-        className={`w-full flex items-center gap-2 px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
+        className={`w-full flex items-center gap-2 px-2 py-[7px] rounded-lg text-[17px] mb-[1px] transition-colors ${
           anyActive ? 'bg-av-green/10 text-av-green' : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
         }`}
       >
@@ -153,7 +153,7 @@ function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChi
               key={child.to}
               to={child.to}
               className={({ isActive }) =>
-                `flex items-center gap-2 px-2 py-[6px] rounded-lg text-[12px] mb-[1px] transition-colors ${
+                `flex items-center gap-2 px-2 py-[6px] rounded-lg text-[16px] mb-[1px] transition-colors ${
                   isActive
                     ? 'bg-av-green/15 text-av-green font-medium'
                     : 'text-white/50 hover:bg-blue-400/8 hover:text-white/80'
@@ -174,7 +174,7 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
   return (
     <div className="mb-2">
       {!collapsed && (
-        <p className="text-[10px] uppercase tracking-widest text-blue-400/50 px-2 mb-1">{label}</p>
+        <p className="text-[14px] uppercase tracking-widest text-blue-400/50 px-2 mb-1">{label}</p>
       )}
       {items.map(item =>
         item.children && item.children.length > 0 ? (
@@ -186,7 +186,7 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
             end={item.to === '/'}
             title={collapsed ? item.label : undefined}
             className={({ isActive }) =>
-              `flex items-center gap-2 px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
+              `flex items-center gap-2 px-2 py-[7px] rounded-lg text-[17px] mb-[1px] transition-colors ${
                 collapsed ? 'justify-center' : ''
               } ${
                 isActive
@@ -200,7 +200,7 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
               <>
                 <span className="flex-1">{item.label}</span>
                 {item.soon && (
-                  <span className="text-[9px] px-[6px] py-[2px] rounded-full bg-av-amber/15 text-av-amber">
+                  <span className="text-[13px] px-[6px] py-[2px] rounded-full bg-av-amber/15 text-av-amber">
                     em breve
                   </span>
                 )}
@@ -246,8 +246,8 @@ export default function Sidebar() {
         </div>
         {!collapsed && (
           <div>
-            <p className="text-[13px] font-bold text-white leading-tight">Arquiteto<br/>de Valor</p>
-            <p className="text-[9px] text-av-green tracking-[2px]">BLUEPRINT</p>
+            <p className="text-[17px] font-bold text-white leading-tight">Arquiteto<br/>de Valor</p>
+            <p className="text-[13px] text-av-green tracking-[2px]">BLUEPRINT</p>
           </div>
         )}
       </div>
@@ -266,8 +266,8 @@ export default function Sidebar() {
       <div className={`pt-3 border-t border-blue-400/30 bg-av-dark ${collapsed ? 'flex flex-col items-center gap-2' : ''}`}>
         {!collapsed && (
           <div className="w-full mb-2 px-1 py-1">
-            <p className="text-[12px] font-semibold text-white truncate">{nome}</p>
-            <p className="text-[10px] text-blue-300/60 truncate">{email}</p>
+            <p className="text-[16px] font-semibold text-white truncate">{nome}</p>
+            <p className="text-[14px] text-blue-300/60 truncate">{email}</p>
           </div>
         )}
         <div className={`flex items-center gap-1 ${collapsed ? 'flex-col' : 'px-1'}`}>
@@ -291,7 +291,7 @@ export default function Sidebar() {
             title="Sair"
           >
             <LogOut size={15}/>
-            {!collapsed && <span className="text-[12px] font-medium">Sair</span>}
+            {!collapsed && <span className="text-[16px] font-medium">Sair</span>}
           </button>
         </div>
         {!collapsed && (
