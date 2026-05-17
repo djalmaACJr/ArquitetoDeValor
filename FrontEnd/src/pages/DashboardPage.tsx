@@ -127,7 +127,7 @@ function CardSaldo({ contas, oculto, mes, historico, modo, setModo }: {
   })()
 
   return (
-    <div className="bg-av-dark rounded-xl p-4 relative overflow-hidden h-full">
+    <div className="bg-[#1a1f2e] rounded-xl p-4 relative overflow-hidden h-full">
       <div className="absolute inset-0 opacity-[0.07]" style={{
         backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px),repeating-linear-gradient(90deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px)'
       }}/>

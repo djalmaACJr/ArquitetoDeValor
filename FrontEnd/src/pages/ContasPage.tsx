@@ -280,11 +280,11 @@ export default function ContasPage() {
             </span>
             <span className="text-[14px]" style={{ color: '#8b92a8' }}>· {contasInativas.length}</span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 opacity-50">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 opacity-60 dark:opacity-50">
             {contasInativas.map(c => (
               <div key={c.conta_id}
-                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/5 bg-[#1a1f2e]/60">
-                <div className="grayscale">
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/5 bg-[#1a1f2e]">
+                <div className="dark:grayscale">
                   <IconeConta icone={c.icone} cor={c.cor} size="md" />
                 </div>
                 <div className="flex-1 min-w-0">

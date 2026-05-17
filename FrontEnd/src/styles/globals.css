@@ -3,11 +3,114 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * SISTEMA DE TEMAS
+ *
+ * 1. Tokens semânticos (variáveis CSS) abstraem as cores reais. Componentes
+ *    legados continuam usando hex hardcoded (#1a1f2e, etc.) — o bloco de
+ *    OVERRIDES no final do arquivo mapeia esses valores para os tokens, e o
+ *    tema ativo controla os tokens. Resultado: trocar de tema é só trocar
+ *    o conjunto de variáveis.
+ *
+ * 2. Como adicionar um NOVO tema:
+ *      a) Defina um bloco `html[data-theme="meu-tema"] { ... }` aqui abaixo
+ *         setando os mesmos tokens com suas novas cores.
+ *      b) Em `src/lib/themes.ts` adicione o tema ao array `TEMAS`.
+ *      c) (opcional) Se o tema for "claro" do ponto de vista do Tailwind,
+ *         não inclua a classe `.dark` no html. Se for "escuro", a função
+ *         `setTheme` já adiciona automaticamente quando você marca o tema
+ *         como `escuro: true` em `TEMAS`.
+ *
+ * 3. Tokens disponíveis:
+ *      --bg-page        Fundo da área de conteúdo
+ *      --bg-card        Cards / painéis
+ *      --bg-input       Campos de entrada / busca
+ *      --bg-elevated    Modais / dropdowns / drawer
+ *      --text-primary   Texto principal (alto contraste)
+ *      --text-secondary Texto secundário
+ *      --text-muted     Texto auxiliar (labels, captions)
+ *      --text-faint     Texto desligado / placeholder
+ *      --border-subtle  Bordas internas (cards, divisores)
+ *      --border-faint   Bordas muito leves (separação visual fraca)
+ *      --tint-1         Sobreposição leve (zebra)
+ *      --tint-2         Sobreposição mais forte (hover/destaque)
+ *
+ * 4. As cores de marca (--av-green/amber/blue/dark) permanecem fixas — são
+ *    identidade visual e não mudam com o tema.
+ * ────────────────────────────────────────────────────────────────────────── */
+
 :root {
+  /* Cores de marca (não mudam com o tema) */
   --av-green:  #00c896;
   --av-amber:  #f0b429;
   --av-blue:   #4da6ff;
   --av-dark:   #0d1220;
+
+  /* Tema padrão = escuro (sem .dark removido as variáveis ainda valem) */
+  --bg-page:        #0a0f1a;
+  --bg-card:        #1a1f2e;
+  --bg-input:       #131825;
+  --bg-elevated:    #1a2235;
+  --text-primary:   #e8eaf0;
+  --text-secondary: #c5cad8;
+  --text-muted:     #8b92a8;
+  --text-faint:     #4a5168;
+  --border-subtle:  rgba(255, 255, 255, 0.10);
+  --border-faint:   rgba(255, 255, 255, 0.05);
+  --tint-1:         rgba(255, 255, 255, 0.025);
+  --tint-2:         rgba(255, 255, 255, 0.045);
+}
+
+/* TEMA: Claro — quando o html NÃO tem classe .dark.
+ * (Usa o seletor :not para casar com o sistema atual que mantém a classe
+ * .dark do Tailwind para o tema escuro.) */
+html:not(.dark) {
+  --bg-page:        #f3f4f6;
+  --bg-card:        #ffffff;
+  --bg-input:       #f9fafb;
+  --bg-elevated:    #ffffff;
+  --text-primary:   #111827;
+  --text-secondary: #374151;
+  --text-muted:     #6b7280;
+  --text-faint:     #9ca3af;
+  --border-subtle:  rgba(0, 0, 0, 0.10);
+  --border-faint:   rgba(0, 0, 0, 0.05);
+  --tint-1:         rgba(0, 0, 0, 0.025);
+  --tint-2:         rgba(0, 0, 0, 0.045);
+}
+
+/* TEMA: Midnight (alto contraste escuro com sotaque azul-violeta).
+ * Exemplo de tema extra — comente as linhas abaixo se quiser remover. */
+html.dark[data-theme="midnight"] {
+  --bg-page:        #050813;
+  --bg-card:        #0f1428;
+  --bg-input:       #0a0e1f;
+  --bg-elevated:    #141b35;
+  --text-primary:   #f0eefa;
+  --text-secondary: #d4cfe8;
+  --text-muted:     #9b94c7;
+  --text-faint:     #555078;
+  --border-subtle:  rgba(155, 148, 199, 0.18);
+  --border-faint:   rgba(155, 148, 199, 0.08);
+  --tint-1:         rgba(155, 148, 199, 0.05);
+  --tint-2:         rgba(155, 148, 199, 0.10);
+}
+
+/* TEMA: Sépia (claro quente, papel envelhecido).
+ * Outro exemplo de tema extra — útil pra leitura prolongada. */
+html[data-theme="sepia"]:not(.dark) {
+  --bg-page:        #f5efe1;
+  --bg-card:        #fdf8eb;
+  --bg-input:       #f7f1de;
+  --bg-elevated:    #fdf8eb;
+  --text-primary:   #2b2218;
+  --text-secondary: #5a4a36;
+  --text-muted:     #8a7656;
+  --text-faint:     #b09875;
+  --border-subtle:  rgba(120, 90, 50, 0.18);
+  --border-faint:   rgba(120, 90, 50, 0.08);
+  --tint-1:         rgba(120, 90, 50, 0.04);
+  --tint-2:         rgba(120, 90, 50, 0.08);
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
@@ -22,4 +125,178 @@
   0%   { box-shadow: inset 0 0 0 2px rgba(77,166,255,0.7); background: rgba(77,166,255,0.18); }
   50%  { box-shadow: inset 0 0 0 3px rgba(77,166,255,0.95); background: rgba(77,166,255,0.30); }
   100% { box-shadow: inset 0 0 0 2px rgba(77,166,255,0.7); background: rgba(77,166,255,0.12); }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * OVERRIDES — mapeia valores hardcoded legados para tokens semânticos.
+ *
+ * Como o codebase tem ~78 usos de `bg-[#1a1f2e]`, ~328 de `color: #8b92a8`,
+ * etc., refatorar componente por componente seria caro. Aqui reescrevemos
+ * esses valores para usar `var(--bg-card)` etc., e cada tema só precisa
+ * definir suas variáveis. Em tema escuro padrão isto é no-op porque as vars
+ * resolvem para os mesmos hex.
+ *
+ * IMPORTANTE:
+ *  - Inline styles precisam de !important (CSS não vence inline sem ele).
+ *  - Classes Tailwind arbitrary precisam de !important só pra garantir
+ *    precedência consistente independente da ordem.
+ *  - Atributos `style` em React podem virar `rgb(...)` ou ficar hex —
+ *    cobrimos as duas formas.
+ *  - Charts (Chart.js) renderizam em canvas e ignoram CSS — esses seguem
+ *    com a paleta JS de cada componente.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Tailwind arbitrary — backgrounds escuros */
+.bg-\[\#1a1f2e\] { background-color: var(--bg-card) !important; }
+.bg-\[\#0a0f1a\] { background-color: var(--bg-page) !important; }
+.bg-\[\#131825\] { background-color: var(--bg-input) !important; }
+.bg-\[\#0e1320\] { background-color: var(--bg-input) !important; }
+.bg-\[\#0d1220\] { background-color: var(--bg-page) !important; }
+.bg-\[\#1a2235\] { background-color: var(--bg-elevated) !important; }
+.bg-\[\#141b2e\] { background-color: var(--bg-elevated) !important; }
+.bg-\[\#141929\] { background-color: var(--bg-elevated) !important; }
+.bg-\[\#252d42\] { background-color: var(--bg-elevated) !important; }
+.bg-\[\#1a2540\] { background-color: var(--bg-elevated) !important; }
+
+/* Tailwind — bordas brancas → token (border-subtle) */
+.border-white\/5         { border-color: var(--border-faint)  !important; }
+.border-white\/10        { border-color: var(--border-subtle) !important; }
+.border-white\/20        { border-color: var(--border-subtle) !important; }
+.border-white\/30        { border-color: var(--border-subtle) !important; }
+.border-white\/\[0\.03\] { border-color: var(--border-faint)  !important; }
+.border-white\/\[0\.05\] { border-color: var(--border-faint)  !important; }
+.border-white\/\[0\.08\] { border-color: var(--border-subtle) !important; }
+
+/* Tailwind — zebras/hover brancos */
+.bg-white\/5         { background-color: var(--tint-1) !important; }
+.bg-white\/10        { background-color: var(--tint-2) !important; }
+.bg-white\/\[0\.02\] { background-color: var(--tint-1) !important; }
+.bg-white\/\[0\.03\] { background-color: var(--tint-1) !important; }
+.bg-white\/\[0\.04\] { background-color: var(--tint-2) !important; }
+.hover\:bg-white\/5:hover         { background-color: var(--tint-2) !important; }
+.hover\:bg-white\/10:hover        { background-color: var(--tint-2) !important; }
+.hover\:bg-white\/\[0\.02\]:hover { background-color: var(--tint-1) !important; }
+.hover\:bg-white\/\[0\.03\]:hover { background-color: var(--tint-1) !important; }
+.hover\:bg-white\/\[0\.04\]:hover { background-color: var(--tint-2) !important; }
+
+/* Inline styles — backgrounds escuros (hex e rgb) */
+[style*="background: #1a1f2e"],
+[style*="background:#1a1f2e"],
+[style*="background-color: #1a1f2e"],
+[style*="background: rgb(26, 31, 46)"],
+[style*="background-color: rgb(26, 31, 46)"] { background-color: var(--bg-card) !important; }
+
+[style*="background: #0a0f1a"],
+[style*="background:#0a0f1a"],
+[style*="background-color: #0a0f1a"],
+[style*="background: rgb(10, 15, 26)"],
+[style*="background-color: rgb(10, 15, 26)"] { background-color: var(--bg-page) !important; }
+
+[style*="background: #131825"],
+[style*="background:#131825"],
+[style*="background-color: #131825"],
+[style*="background: rgb(19, 24, 37)"],
+[style*="background-color: rgb(19, 24, 37)"] { background-color: var(--bg-input) !important; }
+
+[style*="background: #0e1320"],
+[style*="background:#0e1320"],
+[style*="background-color: #0e1320"],
+[style*="background: rgb(14, 19, 32)"],
+[style*="background-color: rgb(14, 19, 32)"] { background-color: var(--bg-input) !important; }
+
+[style*="background: #0d1220"],
+[style*="background:#0d1220"],
+[style*="background-color: #0d1220"],
+[style*="background: rgb(13, 18, 32)"],
+[style*="background-color: rgb(13, 18, 32)"] { background-color: var(--bg-page) !important; }
+
+[style*="background: #141929"],
+[style*="background:#141929"],
+[style*="background-color: #141929"],
+[style*="background: rgb(20, 25, 41)"],
+[style*="background-color: rgb(20, 25, 41)"] { background-color: var(--bg-elevated) !important; }
+
+[style*="background: #252d42"],
+[style*="background:#252d42"],
+[style*="background-color: #252d42"],
+[style*="background: rgb(37, 45, 66)"],
+[style*="background-color: rgb(37, 45, 66)"] { background-color: var(--bg-elevated) !important; }
+
+[style*="background: #1a2540"],
+[style*="background:#1a2540"],
+[style*="background-color: #1a2540"],
+[style*="background: rgb(26, 37, 64)"],
+[style*="background-color: rgb(26, 37, 64)"] { background-color: var(--bg-elevated) !important; }
+
+[style*="background: #1a2235"],
+[style*="background:#1a2235"],
+[style*="background-color: #1a2235"],
+[style*="background: rgb(26, 34, 53)"],
+[style*="background-color: rgb(26, 34, 53)"] { background-color: var(--bg-elevated) !important; }
+
+[style*="background: #141b2e"],
+[style*="background:#141b2e"],
+[style*="background-color: #141b2e"],
+[style*="background: rgb(20, 27, 46)"],
+[style*="background-color: rgb(20, 27, 46)"] { background-color: var(--bg-elevated) !important; }
+
+/* Inline styles — texto.
+ *   #e8eaf0 → text-primary       (~328 → mapeia pra cinza-900 no claro)
+ *   #c5cad8 → text-secondary
+ *   #8b92a8 → text-muted
+ *   #4a5168 → text-faint
+ */
+[style*="color: #e8eaf0"],
+[style*="color:#e8eaf0"],
+[style*="color: rgb(232, 234, 240)"] { color: var(--text-primary) !important; }
+
+[style*="color: #c5cad8"],
+[style*="color:#c5cad8"],
+[style*="color: rgb(197, 202, 216)"] { color: var(--text-secondary) !important; }
+
+[style*="color: #8b92a8"],
+[style*="color:#8b92a8"],
+[style*="color: rgb(139, 146, 168)"] { color: var(--text-muted) !important; }
+
+[style*="color: #4a5168"],
+[style*="color:#4a5168"],
+[style*="color: rgb(74, 81, 104)"] { color: var(--text-faint) !important; }
+
+/* Inline styles — bordas brancas semi-transparentes */
+[style*="borderColor: rgba(255, 255, 255, 0.1)"],
+[style*="border-color: rgba(255, 255, 255, 0.1)"],
+[style*="border-color:rgba(255,255,255,0.1)"] { border-color: var(--border-subtle) !important; }
+[style*="border-color: rgba(255, 255, 255, 0.15)"],
+[style*="border-color:rgba(255,255,255,0.15)"] { border-color: var(--border-subtle) !important; }
+[style*="border-color: rgba(255, 255, 255, 0.08)"],
+[style*="border-color:rgba(255,255,255,0.08)"] { border-color: var(--border-faint) !important; }
+
+/* Inline styles — backgrounds brancos semi-transparentes (zebra/hover) */
+[style*="background: rgba(255, 255, 255, 0.02)"],
+[style*="background:rgba(255,255,255,0.02)"] { background-color: var(--tint-1) !important; }
+[style*="background: rgba(255, 255, 255, 0.04)"],
+[style*="background:rgba(255,255,255,0.04)"] { background-color: var(--tint-2) !important; }
+
+/* Tailwind `text-white` e `text-white/X` em tema claro: ficariam invisíveis
+ * sobre fundo branco. Mapeamos para o token primário/secundário/muted.
+ * Em tema escuro, essas classes seguem brancas (regra `:not(.dark)`). */
+html:not(.dark) {
+  .text-white       { color: var(--text-primary)   !important; }
+  .text-white\/90   { color: var(--text-primary)   !important; }
+  .text-white\/80   { color: var(--text-primary)   !important; }
+  .text-white\/70   { color: var(--text-secondary) !important; }
+  .text-white\/60   { color: var(--text-secondary) !important; }
+  .text-white\/50   { color: var(--text-muted)     !important; }
+  .text-white\/40   { color: var(--text-muted)     !important; }
+  .text-white\/35   { color: var(--text-muted)     !important; }
+  .text-white\/30   { color: var(--text-faint)     !important; }
+  .text-white\/25   { color: var(--text-faint)     !important; }
+  .text-white\/20   { color: var(--text-faint)     !important; }
+  .placeholder-white\/20::placeholder { color: var(--text-faint) !important; }
+
+  /* Mesmo tratamento para Tailwind `bg-white/X` quando aparecer em tema
+   * claro (botões/formulários com fundo translúcido) — já temos classes
+   * mais raras cobertas acima. */
+  .bg-white\/4   { background-color: var(--tint-1) !important; }
+  .bg-white\/8   { background-color: var(--tint-2) !important; }
 }

@@ -3,7 +3,9 @@ import type { FormEvent } from 'react'
 import {
   User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown,
   Pencil, Sparkles, ArrowRight, Wand2, RefreshCw, Search, ChevronLeft, ChevronRight,
+  Palette,
 } from 'lucide-react'
+import { useTheme } from '../hooks/useTheme'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -68,6 +70,29 @@ function Alerta({ fb }: { fb: Feedback | null }) {
       {ok ? <Check size={13}/> : <AlertCircle size={13}/>}
       {fb.msg}
     </div>
+  )
+}
+
+/** Picker de tema — usa o registro em lib/themes.ts (extensível). */
+function SecaoTema() {
+  const { tema, temas, setTheme } = useTheme()
+  return (
+    <Secao titulo="Aparência" icone={<Palette size={15}/>}>
+      <label className="block text-[16px] text-white/50 mb-1.5">Tema do site</label>
+      <select
+        value={tema.id}
+        onChange={e => setTheme(e.target.value)}
+        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white focus:outline-none focus:border-av-green/50 transition-colors"
+        style={{ colorScheme: tema.escuro ? 'dark' : 'light' }}
+      >
+        {temas.map(t => (
+          <option key={t.id} value={t.id}>{t.label}</option>
+        ))}
+      </select>
+      <p className="text-[14px] text-white/35 mt-2 leading-relaxed">
+        Escolha como o site aparece. Novos temas podem ser adicionados em <code>src/lib/themes.ts</code>.
+      </p>
+    </Secao>
   )
 }
 
@@ -396,6 +421,9 @@ export default function PerfilPage() {
               <Alerta fb={fbSenha}/>
             </form>
           </Secao>
+
+          {/* Aparência */}
+          <SecaoTema/>
 
           {/* Zona de perigo */}
           <div className="bg-red-500/5 border border-red-500/20 rounded-2xl overflow-hidden">
