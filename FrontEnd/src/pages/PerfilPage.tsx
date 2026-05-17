@@ -73,24 +73,109 @@ function Alerta({ fb }: { fb: Feedback | null }) {
   )
 }
 
-/** Picker de tema — usa o registro em lib/themes.ts (extensível). */
+/** Picker de família de layout — grade de cards com preview, mascote, e
+ *  preview lado-a-lado dos modos dia/noite. O modo é alternado pelo botão
+ *  sol/lua da sidebar (mesma origem do `toggle()`). A escolha persiste em
+ *  `arqvalor.usuarios.layout` via useTheme. */
 function SecaoTema() {
-  const { tema, temas, setTheme } = useTheme()
+  const { familia, modo, familias, setFamilia, toggle } = useTheme()
   return (
     <Secao titulo="Aparência" icone={<Palette size={15}/>}>
-      <label className="block text-[16px] text-white/50 mb-1.5">Tema do site</label>
-      <select
-        value={tema.id}
-        onChange={e => setTheme(e.target.value)}
-        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white focus:outline-none focus:border-av-green/50 transition-colors"
-        style={{ colorScheme: tema.escuro ? 'dark' : 'light' }}
-      >
-        {temas.map(t => (
-          <option key={t.id} value={t.id}>{t.label}</option>
-        ))}
-      </select>
-      <p className="text-[14px] text-white/35 mt-2 leading-relaxed">
-        Escolha como o site aparece. Novos temas podem ser adicionados em <code>src/lib/themes.ts</code>.
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <p className="text-[15px] text-white/40 leading-relaxed flex-1">
+          Escolha o layout do app. O ícone sol/lua na barra lateral alterna entre <strong>dia</strong> e <strong>noite</strong> dentro da família escolhida.
+        </p>
+        <button
+          type="button"
+          onClick={toggle}
+          className="px-2.5 py-1 rounded-lg border text-[13px] font-semibold transition-all hover:opacity-80 flex-shrink-0"
+          style={{
+            borderColor: 'rgba(255,255,255,0.15)',
+            background:  modo === 'noite' ? 'rgba(77,166,255,0.12)' : 'rgba(240,180,41,0.12)',
+            color:       modo === 'noite' ? '#4da6ff' : '#f0b429',
+          }}
+          title="Alternar entre modo dia e modo noite"
+        >
+          Modo: {modo === 'noite' ? '🌙 Noite' : '☀️ Dia'}
+        </button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        {familias.map(f => {
+          const ativo = f.id === familia.id
+          const cor   = f.cores[modo]  // preview da cor no modo atual
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setFamilia(f.id)}
+              className="text-left rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-av-green/40"
+              style={{
+                borderColor: ativo ? '#00c896' : 'rgba(255,255,255,0.10)',
+                background:  cor.bg,
+              }}
+              title={f.descricao}
+              aria-pressed={ativo}
+            >
+              {/* Faixa superior com mascote + nome + swatches dia/noite */}
+              <div className="flex items-center gap-2 px-3 pt-3">
+                {f.mascote ? (
+                  <img
+                    src={`/mascotes/${f.mascote}-hero.png`}
+                    alt=""
+                    width={40}
+                    height={40}
+                    className="object-contain flex-shrink-0"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                  />
+                ) : (
+                  <div
+                    className="w-10 h-10 rounded-lg flex-shrink-0 flex items-center justify-center text-[20px]"
+                    style={{ background: cor.accent + '22', color: cor.accent }}
+                  >★</div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[16px] font-semibold truncate" style={{ color: cor.text }}>
+                    {f.label}
+                  </p>
+                  <p
+                    className="text-[12.5px] truncate"
+                    style={{ color: cor.text, opacity: 0.55 }}
+                  >
+                    {ativo
+                      ? `Ativo · modo ${modo === 'noite' ? 'noite' : 'dia'}`
+                      : 'Toque para aplicar'}
+                  </p>
+                </div>
+                {/* Swatches mostrando dia + noite lado a lado */}
+                <div className="flex flex-col gap-1 flex-shrink-0" title="Cores dia / noite">
+                  <span
+                    className="w-3.5 h-3.5 rounded-full border"
+                    style={{ background: f.cores.dia.bg, borderColor: 'rgba(0,0,0,0.25)' }}
+                  />
+                  <span
+                    className="w-3.5 h-3.5 rounded-full border"
+                    style={{ background: f.cores.noite.bg, borderColor: 'rgba(255,255,255,0.25)' }}
+                  />
+                </div>
+              </div>
+              {/* Descrição */}
+              <p
+                className="text-[13px] px-3 pb-3 pt-2 leading-snug"
+                style={{ color: cor.text, opacity: 0.7 }}
+              >
+                {f.descricao}
+              </p>
+              {/* Barra de sotaque colorido (cor identidade da família) */}
+              <div
+                className="h-1 w-full"
+                style={{ background: cor.accent }}
+              />
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-[13px] text-white/30 mt-3 leading-relaxed">
+        Preferência salva em <code>arqvalor.usuarios.layout</code> e sincronizada entre dispositivos.
       </p>
     </Secao>
   )

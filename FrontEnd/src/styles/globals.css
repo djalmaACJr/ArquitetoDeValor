@@ -46,7 +46,7 @@
   --av-blue:   #4da6ff;
   --av-dark:   #0d1220;
 
-  /* Tema padrão = escuro (sem .dark removido as variáveis ainda valem) */
+  /* === Tokens semânticos: Clássico Noite (default) ============ */
   --bg-page:        #0a0f1a;
   --bg-card:        #1a1f2e;
   --bg-input:       #131825;
@@ -61,10 +61,9 @@
   --tint-2:         rgba(255, 255, 255, 0.045);
 }
 
-/* TEMA: Claro — quando o html NÃO tem classe .dark.
- * (Usa o seletor :not para casar com o sistema atual que mantém a classe
- * .dark do Tailwind para o tema escuro.) */
-html:not(.dark) {
+/* === LAYOUT: Clássico Dia ====================================== */
+html:not(.dark)[data-theme="classico"],
+html:not(.dark):not([data-theme]) {
   --bg-page:        #f3f4f6;
   --bg-card:        #ffffff;
   --bg-input:       #f9fafb;
@@ -79,38 +78,132 @@ html:not(.dark) {
   --tint-2:         rgba(0, 0, 0, 0.045);
 }
 
-/* TEMA: Midnight (alto contraste escuro com sotaque azul-violeta).
- * Exemplo de tema extra — comente as linhas abaixo se quiser remover. */
-html.dark[data-theme="midnight"] {
-  --bg-page:        #050813;
-  --bg-card:        #0f1428;
-  --bg-input:       #0a0e1f;
-  --bg-elevated:    #141b35;
-  --text-primary:   #f0eefa;
-  --text-secondary: #d4cfe8;
-  --text-muted:     #9b94c7;
-  --text-faint:     #555078;
-  --border-subtle:  rgba(155, 148, 199, 0.18);
-  --border-faint:   rgba(155, 148, 199, 0.08);
-  --tint-1:         rgba(155, 148, 199, 0.05);
-  --tint-2:         rgba(155, 148, 199, 0.10);
+/* === LAYOUT: Sábio Noite — couro escuro + ouro vivo =========== */
+html.dark[data-theme="sabio"] {
+  --bg-page:        #1a0f06;
+  --bg-card:        #2d1b0d;
+  --bg-input:       #15090a;
+  --bg-elevated:    #3a2415;
+  --text-primary:   #fff4dd;
+  --text-secondary: #e8c98a;
+  --text-muted:     #b08c52;
+  --text-faint:     #6b5538;
+  --border-subtle:  rgba(227, 168, 58, 0.30);
+  --border-faint:   rgba(227, 168, 58, 0.12);
+  --tint-1:         rgba(227, 168, 58, 0.06);
+  --tint-2:         rgba(227, 168, 58, 0.14);
 }
 
-/* TEMA: Sépia (claro quente, papel envelhecido).
- * Outro exemplo de tema extra — útil pra leitura prolongada. */
-html[data-theme="sepia"]:not(.dark) {
-  --bg-page:        #f5efe1;
-  --bg-card:        #fdf8eb;
-  --bg-input:       #f7f1de;
-  --bg-elevated:    #fdf8eb;
-  --text-primary:   #2b2218;
-  --text-secondary: #5a4a36;
-  --text-muted:     #8a7656;
-  --text-faint:     #b09875;
-  --border-subtle:  rgba(120, 90, 50, 0.18);
-  --border-faint:   rgba(120, 90, 50, 0.08);
-  --tint-1:         rgba(120, 90, 50, 0.04);
-  --tint-2:         rgba(120, 90, 50, 0.08);
+/* === LAYOUT: Sábio Dia — creme com texto marrom =============== */
+html:not(.dark)[data-theme="sabio"] {
+  --bg-page:        #f5ecd9;
+  --bg-card:        #fffaee;
+  --bg-input:       #f0e6cf;
+  --bg-elevated:    #fffaee;
+  --text-primary:   #3a2715;
+  --text-secondary: #6b4924;
+  --text-muted:     #8b6738;
+  --text-faint:     #c5a575;
+  --border-subtle:  rgba(139, 90, 35, 0.28);
+  --border-faint:   rgba(139, 90, 35, 0.12);
+  --tint-1:         rgba(139, 90, 35, 0.05);
+  --tint-2:         rgba(139, 90, 35, 0.10);
+}
+
+/* === LAYOUT: Engenheira Noite — blueprint deep + cyan vivo ==== */
+html.dark[data-theme="engenheira"] {
+  --bg-page:        #051120;
+  --bg-card:        #0e2a4a;
+  --bg-input:       #04101e;
+  --bg-elevated:    #15365e;
+  --text-primary:   #e0eeff;
+  --text-secondary: #a0c6e8;
+  --text-muted:     #5d8cb8;
+  --text-faint:     #2d4a6b;
+  --border-subtle:  rgba(77, 195, 255, 0.32);
+  --border-faint:   rgba(77, 195, 255, 0.14);
+  --tint-1:         rgba(77, 195, 255, 0.06);
+  --tint-2:         rgba(77, 195, 255, 0.14);
+}
+
+/* === LAYOUT: Engenheira Dia — papel azul-claro ================ */
+html:not(.dark)[data-theme="engenheira"] {
+  --bg-page:        #e8f1fa;
+  --bg-card:        #ffffff;
+  --bg-input:       #f3f8fc;
+  --bg-elevated:    #ffffff;
+  --text-primary:   #0d2a4a;
+  --text-secondary: #1e466e;
+  --text-muted:     #4970a0;
+  --text-faint:     #a0b8d4;
+  --border-subtle:  rgba(25, 118, 210, 0.25);
+  --border-faint:   rgba(25, 118, 210, 0.10);
+  --tint-1:         rgba(25, 118, 210, 0.05);
+  --tint-2:         rgba(25, 118, 210, 0.10);
+}
+
+/* === LAYOUT: Mago Gato Noite — roxo profundo + esmeralda ====== */
+html.dark[data-theme="mago"] {
+  --bg-page:        #0a0414;
+  --bg-card:        #1f0e3e;
+  --bg-input:       #060211;
+  --bg-elevated:    #2c1554;
+  --text-primary:   #f4eafa;
+  --text-secondary: #c5a8e0;
+  --text-muted:     #8b6fb8;
+  --text-faint:     #4f3870;
+  --border-subtle:  rgba(180, 140, 255, 0.35);
+  --border-faint:   rgba(180, 140, 255, 0.14);
+  --tint-1:         rgba(180, 140, 255, 0.06);
+  --tint-2:         rgba(80, 213, 156, 0.14);
+}
+
+/* === LAYOUT: Mago Gato Dia — lavanda pálido =================== */
+html:not(.dark)[data-theme="mago"] {
+  --bg-page:        #f0eaf5;
+  --bg-card:        #ffffff;
+  --bg-input:       #f7f1fb;
+  --bg-elevated:    #ffffff;
+  --text-primary:   #1a0526;
+  --text-secondary: #44115d;
+  --text-muted:     #6b21a8;
+  --text-faint:     #b58cd0;
+  --border-subtle:  rgba(107, 33, 168, 0.30);
+  --border-faint:   rgba(107, 33, 168, 0.12);
+  --tint-1:         rgba(107, 33, 168, 0.05);
+  --tint-2:         rgba(80, 180, 120, 0.10);
+}
+
+/* === LAYOUT: Raposa Noite — terracota + laranja vivo ========== */
+html.dark[data-theme="raposa"] {
+  --bg-page:        #190a05;
+  --bg-card:        #2d130b;
+  --bg-input:       #140702;
+  --bg-elevated:    #3a1c10;
+  --text-primary:   #ffe8d5;
+  --text-secondary: #e8b18a;
+  --text-muted:     #a8714a;
+  --text-faint:     #6b4830;
+  --border-subtle:  rgba(255, 122, 58, 0.32);
+  --border-faint:   rgba(255, 122, 58, 0.14);
+  --tint-1:         rgba(255, 122, 58, 0.06);
+  --tint-2:         rgba(255, 122, 58, 0.14);
+}
+
+/* === LAYOUT: Raposa Dia — pêssego claro ======================= */
+html:not(.dark)[data-theme="raposa"] {
+  --bg-page:        #fbf0e8;
+  --bg-card:        #ffffff;
+  --bg-input:       #fcebde;
+  --bg-elevated:    #ffffff;
+  --text-primary:   #3a1409;
+  --text-secondary: #6b3220;
+  --text-muted:     #a8593a;
+  --text-faint:     #d4a07a;
+  --border-subtle:  rgba(193, 67, 24, 0.28);
+  --border-faint:   rgba(193, 67, 24, 0.10);
+  --tint-1:         rgba(193, 67, 24, 0.05);
+  --tint-2:         rgba(193, 67, 24, 0.10);
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }

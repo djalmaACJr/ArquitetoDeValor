@@ -20,6 +20,7 @@ import { useOcultarValores } from '../hooks/useOcultarValores'
 import ParetoChart from '../components/relatorios/ParetoChart'
 import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
 import { useExpansaoCategoria } from '../lib/agrupamentoCategoria'
+import MascoteDica from '../components/ui/MascoteDica'
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, LineElement,
@@ -1505,6 +1506,28 @@ export default function ComparativoMensalPage() {
                   {insights.length} observação{insights.length !== 1 ? 'ões' : ''}
                 </p>
               </div>
+              {/* Raposa estratégica narra a leitura do período. Some se o PNG
+                  ainda não foi exportado (graceful no-op). */}
+              {buscado && insights.length > 0 && (
+                <div className="px-4 pt-4">
+                  <MascoteDica
+                    nome="raposa"
+                    pose={
+                      insights.some(i => i.tipo === 'alerta')   ? 'espantado'
+                      : insights.some(i => i.tipo === 'positivo') ? 'feliz'
+                      :                                            'curioso'
+                    }
+                    size={72}
+                    texto={
+                      insights.some(i => i.tipo === 'alerta')
+                        ? 'Detectei pontos de atenção no período final. Veja os alertas em vermelho — clique pra destacar as categorias responsáveis.'
+                      : insights.some(i => i.tipo === 'positivo')
+                        ? 'Boa leitura do período: tendências positivas dominam. Os insights destacam o que está funcionando.'
+                        : 'O período está estável. Observe as variações por categoria para identificar oportunidades.'
+                    }
+                  />
+                </div>
+              )}
               <div className="p-4 space-y-2.5 overflow-auto flex-1" style={{ maxHeight: 440 }}>
                 {insights.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-8 gap-2">

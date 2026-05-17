@@ -79,10 +79,33 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-av-dark">
-      <div className="absolute inset-0 opacity-[0.06]" style={{ backgroundImage: bgGrid }} />
+    <div className="min-h-screen bg-av-dark relative overflow-hidden">
+      {/* Cena com mascotes ao fundo (logn.jpg). */}
+      <div
+        className="absolute inset-0 bg-no-repeat bg-cover bg-center"
+        style={{ backgroundImage: 'url(/mascotes/login-bg.jpg)' }}
+        aria-hidden="true"
+      />
+      {/* Gradiente lateral: escurece o lado esquerdo (onde o card fica) e
+          deixa o lado direito (mascotes Engenheira/Mago/Sábio) visível.
+          Em mobile vira gradiente vertical pra continuar legível. */}
+      <div
+        className="absolute inset-0 md:hidden"
+        style={{ background: 'linear-gradient(to bottom, rgba(13,18,32,0.92) 0%, rgba(13,18,32,0.55) 45%, rgba(13,18,32,0.85) 100%)' }}
+        aria-hidden="true"
+      />
+      <div
+        className="absolute inset-0 hidden md:block"
+        style={{ background: 'linear-gradient(to right, rgba(13,18,32,0.92) 0%, rgba(13,18,32,0.78) 28%, rgba(13,18,32,0.25) 55%, transparent 70%)' }}
+        aria-hidden="true"
+      />
+      <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: bgGrid }} />
 
-      <div className="relative w-full max-w-sm mx-4">
+      {/* Card alinhado à ESQUERDA em telas ≥ md, centralizado no mobile.
+          Posicionamento evita sobrepor os personagens (que ficam à direita
+          do gradiente). */}
+      <div className="relative min-h-screen flex items-center justify-center md:justify-start px-4 md:pl-16 lg:pl-24 xl:pl-32">
+      <div className="relative w-full max-w-sm">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 rounded-2xl bg-av-dark border border-blue-400/30 flex items-center justify-center mb-4">
@@ -92,7 +115,7 @@ export default function LoginPage() {
           <p className="text-[15px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
         </div>
 
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-sm">
+        <div className="bg-[#0d1220]/85 border border-white/10 rounded-2xl p-6 backdrop-blur-md shadow-2xl">
 
           {/* ── Modo: login ─────────────────────────────────── */}
           {modo === 'login' && (
@@ -195,6 +218,7 @@ export default function LoginPage() {
         <p className="text-center text-[15px] text-white/20 mt-4">
           Arquiteto de Valor · BLUEPRINT
         </p>
+      </div>
       </div>
     </div>
   )

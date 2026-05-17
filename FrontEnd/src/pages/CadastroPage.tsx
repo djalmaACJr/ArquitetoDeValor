@@ -80,8 +80,19 @@ export default function CadastroPage() {
 
   if (sucesso) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-av-dark">
-        <div className="absolute inset-0 opacity-[0.06]"
+      <div className="min-h-screen flex items-center justify-center bg-av-dark relative overflow-hidden">
+        {/* Mesma cena de fundo do Login — mantém continuidade visual com os 4 mascotes */}
+        <div
+          className="absolute inset-0 bg-no-repeat bg-cover bg-center"
+          style={{ backgroundImage: 'url(/mascotes/login-bg.jpg)' }}
+          aria-hidden="true"
+        />
+        <div
+          className="absolute inset-0"
+          style={{ background: 'radial-gradient(ellipse at center, rgba(13,18,32,0.15) 0%, rgba(13,18,32,0.75) 75%)' }}
+          aria-hidden="true"
+        />
+        <div className="absolute inset-0 opacity-[0.04]"
           style={{ backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px),repeating-linear-gradient(90deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px)' }}
         />
         <div className="relative w-full max-w-sm mx-4 text-center">
@@ -92,7 +103,7 @@ export default function CadastroPage() {
             <h1 className="text-2xl font-bold text-white">Arquiteto de Valor</h1>
             <p className="text-[15px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
           </div>
-          <div className="bg-white/5 border border-av-green/30 rounded-2xl p-6 backdrop-blur-sm">
+          <div className="bg-[#0d1220]/85 border border-av-green/30 rounded-2xl p-6 backdrop-blur-md shadow-2xl">
             <div className="w-12 h-12 rounded-full bg-av-green/10 border border-av-green/30 flex items-center justify-center mx-auto mb-4">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#00c896" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12"/>
@@ -129,7 +140,7 @@ export default function CadastroPage() {
           <p className="text-[15px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
         </div>
 
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-sm">
+        <div className="bg-[#0d1220]/85 border border-white/10 rounded-2xl p-6 backdrop-blur-md shadow-2xl">
           <h2 className="text-base font-semibold text-white mb-5">Criar nova conta</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

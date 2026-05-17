@@ -1,6 +1,7 @@
 // src/pages/DashboardPage.tsx
 import { useState, useEffect, useCallback, memo, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import MascoteDica from '../components/ui/MascoteDica'
 import { ChevronDown, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus, Search } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { log } from '../lib/logger'
@@ -1527,6 +1528,31 @@ export default function DashboardPage() {
         </div>
       ) : (
         <div className="space-y-3">
+          {/* Dica do Sábio — sumariza o resultado do mês com tom contextual.
+              Renderiza nada se o PNG ainda não existir (graceful no-op). */}
+          {(() => {
+            const ent = resumo?.total_entradas ?? 0
+            const sai = resumo?.total_saidas   ?? 0
+            const r = ent - sai
+            const pctGasto = ent > 0 ? (sai / ent) * 100 : 0
+            const texto =
+              ent === 0 && sai === 0
+                ? 'Nenhum movimento neste mês ainda. A jornada começa com o primeiro lançamento.'
+              : r > 0
+                ? `Resultado positivo de ${pctGasto.toFixed(0)}% das receitas comprometidas — o capital trabalha a seu favor.`
+              : r < 0
+                ? 'Despesas superaram receitas neste mês. Avalie reduções pontuais antes que vire padrão.'
+                : 'Receitas e despesas se equilibraram. Próximo passo: criar margem para investimento.'
+            // Pose varia com o resultado: feliz = bom mês, espantado = atenção,
+            // curioso = sem dados, sentado = neutro/equilibrado.
+            const pose =
+              ent === 0 && sai === 0 ? 'curioso'
+              : r > 0                ? 'feliz'
+              : r < 0                ? 'espantado'
+              :                        'sentado'
+            return <MascoteDica nome="sabio" pose={pose} texto={texto} size={80} />
+          })()}
+
           {/* Linha 1: calendário + resultados + saldo */}
           <div className="flex flex-wrap gap-3 items-stretch">
             <CalendarioDashboard
