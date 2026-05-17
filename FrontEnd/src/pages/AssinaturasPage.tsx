@@ -1,16 +1,18 @@
 // src/pages/AssinaturasPage.tsx
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from 'react'
 import { Doughnut, Bar, Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS, ArcElement, CategoryScale, LinearScale,
   BarElement, LineElement, PointElement, Tooltip, Legend, Filler,
 } from 'chart.js'
-import { Download, RefreshCw, Search, X, Pencil, ChevronDown, Tags, Check, AlertCircle } from 'lucide-react'
+import { Download, RefreshCw, Search, X, Pencil, ChevronDown, ChevronRight, Tags, Check, AlertCircle } from 'lucide-react'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useCategorias } from '../hooks/useCategorias'
 import { apiMutate } from '../lib/api'
 import { formatBRL, mesLabel } from '../lib/utils'
+import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
+import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCategoria'
 
 ChartJS.register(ArcElement, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, Filler)
 
@@ -314,6 +316,10 @@ export default function AssinaturasPage() {
   const [recSelecionada, setRecSelecionada] = useState<Recorrencia | null>(null)
   const [editandoId, setEditandoId]         = useState<string | null>(null)
   const detalheRef = useRef<HTMLDivElement>(null)
+  // Granularidade da tabela: 'cat' = cada recorrência é uma linha (modo atual);
+  // 'pai' = consolida recorrências por categoria pai, com expansão.
+  const [agrupCat, setAgrupCat] = useState<'cat' | 'pai'>('cat')
+  const expCat = useExpansaoCategoria()
 
   // ── Reclassificação em massa ──────────────────────────────
   const { categorias } = useCategorias()
@@ -461,16 +467,82 @@ export default function AssinaturasPage() {
     return recorrencias.filter(r => r.nome.toLowerCase().includes(t) || r.categoria.toLowerCase().includes(t))
   }, [recorrencias, busca])
 
+  /**
+   * Agrupamento "Resumo" (por categoria pai). Consolida as recorrências
+   * filtradas em pais; cada pai vira uma linha com totais agregados e a lista
+   * original como subs expansíveis.
+   *
+   *  - Para recorrências SEM `categoriaId`, usa o próprio nome de categoria
+   *    como fallback.
+   *  - Recorrências cujo `categoriaId` é raiz (sem id_pai) caem no bucket
+   *    do próprio nome.
+   *
+   * `paisComSub` lista os pais que têm >1 sub (ou cujo único sub é diferente
+   * do pai); usado pelo botão "Expandir todas".
+   */
+  const agrupado = useMemo(() => {
+    const paiMap = paiPorCategoriaId(categorias)
+    const buckets = new Map<string, { paiKey: string; nome: string; recs: Recorrencia[] }>()
+    for (const r of filtradas) {
+      const paiInfo = r.categoriaId ? paiMap.get(r.categoriaId) : undefined
+      const paiNome = paiInfo?.nome ?? r.categoria ?? 'Sem categoria'
+      const paiKey  = `pai:${paiNome}`
+      if (!buckets.has(paiKey)) buckets.set(paiKey, { paiKey, nome: paiNome, recs: [] })
+      buckets.get(paiKey)!.recs.push(r)
+    }
+    const lista = [...buckets.values()]
+      .map(b => ({
+        ...b,
+        valorMensal: b.recs.reduce((s, r) => s + r.valorMensal, 0),
+        ocorrencias: b.recs.reduce((s, r) => s + r.ocorrencias, 0),
+        ultimaCobranca: b.recs.reduce((m, r) => r.ultimaCobranca > m ? r.ultimaCobranca : m, ''),
+      }))
+      .sort((a, b) => b.valorMensal - a.valorMensal)
+    const paisComSub = new Set(
+      lista
+        .filter(p => p.recs.length > 1 || (p.recs.length === 1 && p.recs[0].nome !== p.nome))
+        .map(p => p.paiKey)
+    )
+    return { lista, paisComSub }
+  }, [filtradas, categorias])
+
+  /**
+   * Exporta CSV refletindo o modo atual da tabela:
+   *  - 'cat': lista plana de recorrências (como antes)
+   *  - 'pai': linha do pai + sub-linhas (└ ...) das recorrências, somente
+   *           para pais expandidos na tela.
+   */
   const exportar = () => {
-    const rows = [
-      ['Serviço', 'Categoria', 'Frequência', 'Custo Mensal', 'Custo Anual', 'Última Cobrança', 'Ocorrências', 'Status'],
-      ...recorrencias.map(r => [
-        r.nome, r.categoria, FREQ_LABEL[r.frequencia],
-        r.valorMensal.toFixed(2).replace('.', ','),
-        (r.valorMensal * 12).toFixed(2).replace('.', ','),
-        r.ultimaCobranca, String(r.ocorrencias), STATUS_INFO[r.status].label,
-      ]),
+    const header = ['Serviço', 'Categoria', 'Frequência', 'Custo Mensal', 'Custo Anual', 'Última Cobrança', 'Ocorrências', 'Status']
+    const linhaRec = (r: Recorrencia, prefixo = ''): string[] => [
+      `${prefixo}${r.nome}`, r.categoria, FREQ_LABEL[r.frequencia],
+      r.valorMensal.toFixed(2).replace('.', ','),
+      (r.valorMensal * 12).toFixed(2).replace('.', ','),
+      r.ultimaCobranca, String(r.ocorrencias), STATUS_INFO[r.status].label,
     ]
+
+    const rows: string[][] = [header]
+    if (agrupCat === 'pai') {
+      for (const p of agrupado.lista) {
+        rows.push([
+          p.nome,
+          `${p.recs.length} recorrência${p.recs.length !== 1 ? 's' : ''}`,
+          '—',
+          p.valorMensal.toFixed(2).replace('.', ','),
+          (p.valorMensal * 12).toFixed(2).replace('.', ','),
+          p.ultimaCobranca,
+          String(p.ocorrencias),
+          '—',
+        ])
+        if (expCat.expandidos.has(p.paiKey)) {
+          p.recs
+            .slice().sort((a, b) => b.valorMensal - a.valorMensal)
+            .forEach(r => rows.push(linhaRec(r, '   └ ')))
+        }
+      }
+    } else {
+      filtradas.forEach(r => rows.push(linhaRec(r)))
+    }
     const csv  = rows.map(r => r.map(c => `"${c}"`).join(';')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
     const a    = Object.assign(document.createElement('a'), {
@@ -674,6 +746,39 @@ export default function AssinaturasPage() {
           <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
             <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3 flex-wrap">
               <p className="text-[17px] font-semibold text-white flex-1">Detalhamento</p>
+
+              {/* Toggle Categoria / Resumo */}
+              <div className="flex rounded-lg overflow-hidden border border-white/10 text-[14px] font-semibold">
+                {([
+                  { id: 'cat' as const, label: 'Categoria', title: 'Cada recorrência aparece como uma linha' },
+                  { id: 'pai' as const, label: 'Resumo',    title: 'Consolida as recorrências por categoria pai · clique para expandir' },
+                ]).map(({ id, label, title }, idx) => (
+                  <button
+                    key={id}
+                    title={title}
+                    onClick={() => setAgrupCat(id)}
+                    className="px-2.5 py-1 transition-colors"
+                    style={{
+                      background:  agrupCat === id ? 'rgba(0,200,150,0.15)' : 'transparent',
+                      color:       agrupCat === id ? '#00c896' : '#8b92a8',
+                      borderRight: idx === 0 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {agrupCat === 'pai' && agrupado.paisComSub.size > 0 && (
+                <BotaoExpandirTodas
+                  compacto
+                  todasExpandidas={expCat.todasExpandidas(agrupado.paisComSub)}
+                  onClick={() => expCat.todasExpandidas(agrupado.paisComSub)
+                    ? expCat.colapsar()
+                    : expCat.expandirTodas(agrupado.paisComSub)}
+                />
+              )}
+
               <div className="flex items-center gap-2 rounded-lg px-3 py-1.5 border"
                 style={{ background: '#131825', borderColor: busca ? 'rgba(77,166,255,0.4)' : 'rgba(255,255,255,0.1)', minWidth: 220 }}>
                 <Search size={12} style={{ color: '#8b92a8' }} />
@@ -699,63 +804,141 @@ export default function AssinaturasPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtradas.map(r => {
-                    const ativa = recSelecionada?.id === r.id
-                    return (
-                    <tr
-                      key={r.id}
-                      onClick={() => setRecSelecionada(ativa ? null : r)}
-                      className="border-b border-white/5 transition-colors cursor-pointer"
-                      style={{ background: ativa ? 'rgba(77,166,255,0.08)' : undefined }}
-                      onMouseEnter={e => { if (!ativa) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)' }}
-                      onMouseLeave={e => { if (!ativa) (e.currentTarget as HTMLElement).style.background = '' }}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <ChevronDown
-                            size={12}
-                            style={{
-                              color: ativa ? '#4da6ff' : '#4a5168',
-                              transform: ativa ? 'rotate(0deg)' : 'rotate(-90deg)',
-                              transition: 'transform 0.2s',
-                              flexShrink: 0,
-                            }}
-                          />
-                          <span className="text-[16px] font-medium" style={{ color: ativa ? '#4da6ff' : '#e8eaf0' }}>{r.nome}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[15px]" style={{ color: '#8b92a8' }}>{r.categoria}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[15px]" style={{ color: '#8b92a8' }}>{FREQ_LABEL[r.frequencia]}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="text-[16px] font-semibold" style={{ color: '#00c896' }}>{formatBRL(r.valorMensal)}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="text-[15px]" style={{ color: '#4da6ff' }}>{formatBRL(r.valorMensal * 12)}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[15px]" style={{ color: '#8b92a8' }}>
-                          {new Date(r.ultimaCobranca + 'T12:00:00').toLocaleDateString('pt-BR')}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="text-[15px]" style={{ color: '#8b92a8' }}>{r.ocorrencias}×</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={r.status} />
-                      </td>
-                    </tr>
-                  )})}
-                  {filtradas.length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center">
+                  {(() => {
+                    // Row de uma recorrência (modo Categoria, ou sub do modo Resumo).
+                    const renderRec = (r: Recorrencia, opts?: { sub?: boolean }) => {
+                      const isSub = !!opts?.sub
+                      const ativa = recSelecionada?.id === r.id
+                      return (
+                        <tr
+                          key={r.id + (isSub ? '-sub' : '')}
+                          onClick={() => setRecSelecionada(ativa ? null : r)}
+                          className="border-b border-white/5 transition-colors cursor-pointer"
+                          style={{
+                            background: ativa
+                              ? 'rgba(77,166,255,0.08)'
+                              : (isSub ? 'rgba(255,255,255,0.015)' : undefined),
+                          }}
+                          onMouseEnter={e => { if (!ativa) (e.currentTarget as HTMLElement).style.background = isSub ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.03)' }}
+                          onMouseLeave={e => { if (!ativa) (e.currentTarget as HTMLElement).style.background = isSub ? 'rgba(255,255,255,0.015)' : '' }}
+                        >
+                          <td className={`py-3 ${isSub ? 'pl-10 pr-4' : 'px-4'}`}>
+                            <div className="flex items-center gap-1.5">
+                              {isSub
+                                ? <span style={{ color: '#4a5168' }}>└</span>
+                                : <ChevronDown
+                                    size={12}
+                                    style={{
+                                      color: ativa ? '#4da6ff' : '#4a5168',
+                                      transform: ativa ? 'rotate(0deg)' : 'rotate(-90deg)',
+                                      transition: 'transform 0.2s',
+                                      flexShrink: 0,
+                                    }}
+                                  />}
+                              <span className="text-[16px] font-medium" style={{ color: ativa ? '#4da6ff' : (isSub ? '#c5cad8' : '#e8eaf0') }}>{r.nome}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>{r.categoria}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>{FREQ_LABEL[r.frequencia]}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[16px] font-semibold" style={{ color: '#00c896' }}>{formatBRL(r.valorMensal)}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[15px]" style={{ color: '#4da6ff' }}>{formatBRL(r.valorMensal * 12)}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>
+                              {new Date(r.ultimaCobranca + 'T12:00:00').toLocaleDateString('pt-BR')}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>{r.ocorrencias}×</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={r.status} />
+                          </td>
+                        </tr>
+                      )
+                    }
+
+                    // Modo Categoria: lista plana.
+                    if (agrupCat !== 'pai') {
+                      if (filtradas.length === 0) return (
+                        <tr><td colSpan={8} className="px-4 py-8 text-center">
+                          <span className="text-[16px]" style={{ color: '#8b92a8' }}>Nenhuma recorrência encontrada</span>
+                        </td></tr>
+                      )
+                      return filtradas.map(r => renderRec(r))
+                    }
+
+                    // Modo Resumo: linha por pai + subs expansíveis.
+                    if (agrupado.lista.length === 0) return (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center">
                         <span className="text-[16px]" style={{ color: '#8b92a8' }}>Nenhuma recorrência encontrada</span>
-                      </td>
-                    </tr>
-                  )}
+                      </td></tr>
+                    )
+                    return agrupado.lista.flatMap(p => {
+                      const podeExpandir = agrupado.paisComSub.has(p.paiKey)
+                      const expanded = podeExpandir && expCat.expandidos.has(p.paiKey)
+                      const out: ReactNode[] = [
+                        <tr
+                          key={p.paiKey}
+                          onClick={podeExpandir ? () => expCat.toggle(p.paiKey) : undefined}
+                          className={`border-b border-white/5 transition-colors ${podeExpandir ? 'cursor-pointer' : ''}`}
+                          style={{ background: expanded ? 'rgba(255,255,255,0.03)' : undefined }}
+                          onMouseEnter={e => { if (!expanded) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.02)' }}
+                          onMouseLeave={e => { if (!expanded) (e.currentTarget as HTMLElement).style.background = '' }}
+                        >
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              {podeExpandir
+                                ? (expanded
+                                    ? <ChevronDown  size={12} style={{ color: '#8b92a8', flexShrink: 0 }} />
+                                    : <ChevronRight size={12} style={{ color: '#8b92a8', flexShrink: 0 }} />)
+                                : <span style={{ width: 12, display: 'inline-block' }} />}
+                              <span className="text-[16px] font-semibold" style={{ color: '#e8eaf0' }}>{p.nome}</span>
+                              {podeExpandir && (
+                                <span className="text-[13px] ml-1" style={{ color: '#4a5168' }}>({p.recs.length})</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[15px]" style={{ color: '#4a5168' }}>
+                              {p.recs.length} recorrência{p.recs.length !== 1 ? 's' : ''}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3"><span className="text-[15px]" style={{ color: '#4a5168' }}>—</span></td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[16px] font-bold" style={{ color: '#00c896' }}>{formatBRL(p.valorMensal)}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[15px] font-semibold" style={{ color: '#4da6ff' }}>{formatBRL(p.valorMensal * 12)}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>
+                              {p.ultimaCobranca
+                                ? new Date(p.ultimaCobranca + 'T12:00:00').toLocaleDateString('pt-BR')
+                                : '—'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>{p.ocorrencias}×</span>
+                          </td>
+                          <td className="px-4 py-3"><span className="text-[15px]" style={{ color: '#4a5168' }}>—</span></td>
+                        </tr>,
+                      ]
+                      if (expanded) {
+                        p.recs
+                          .slice().sort((a, b) => b.valorMensal - a.valorMensal)
+                          .forEach(r => out.push(renderRec(r, { sub: true })))
+                      }
+                      return out
+                    })
+                  })()}
                 </tbody>
                 {filtradas.length > 0 && (
                   <tfoot>

@@ -18,6 +18,8 @@ import { formatBRL, mesLabel, mesAtual } from '../lib/utils'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
 import { useOcultarValores } from '../hooks/useOcultarValores'
 import ParetoChart from '../components/relatorios/ParetoChart'
+import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
+import { useExpansaoCategoria } from '../lib/agrupamentoCategoria'
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, LineElement,
@@ -285,6 +287,12 @@ export default function ComparativoMensalPage() {
   const [despesasAberto, setDespesasAberto] = useState(true)
   // Vista atual da Análise por Categoria: tabela tradicional ou Pareto
   const [vistaCat, setVistaCat] = useState<'tabela' | 'pareto'>('tabela')
+  // Granularidade da Análise por Categoria: 'cat' = todas categorias (incl. subs);
+  // 'pai' = consolida subs no pai (Resumo). Aplicado a tabela E pareto.
+  const [agrupCat,        setAgrupCat]        = useState<'cat' | 'pai'>('cat')
+  // Estado de expansão (compartilhado via hook) — reflete no export
+  const expCat = useExpansaoCategoria()
+  const expandidosCat = expCat.expandidos
   const { oculto, toggle: toggleOculto } = useOcultarValores()
 
   // Scroll para o painel de drill-down ao abri-lo
@@ -408,6 +416,79 @@ export default function ComparativoMensalPage() {
     })
   }, [resumoA, resumoB])
 
+  // ── Agrupamento "Resumo" (por categoria pai) ─────────────────────────────
+  // Mapa categoria_id (leaf) -> nome do pai. Quando o leaf é o próprio pai
+  // (categoria_pai_nome === null), aponta para o próprio nome.
+  const paiNomePorCatKey = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const l of [...lancA, ...lancB]) {
+      const k = l.categoria_id ?? '__sem__'
+      if (m.has(k)) continue
+      const paiNome = l.categoria_pai_nome ?? l.categoria_nome ?? 'Sem categoria'
+      m.set(k, paiNome)
+    }
+    return m
+  }, [lancA, lancB])
+
+  /**
+   * Consolida `comparativo` (leaf) por nome da categoria pai. Para cada pai:
+   *  - soma receitas e despesas separadamente nos dois períodos
+   *  - net = receitas − despesas; tipo determinado pelo período com maior |net|
+   *  - se o tipo do pai mudou entre A e B, trata como "Novo" (variacao=null)
+   * Devolve também o submap `subsPorPai: paiKey -> CatComparativo[]` (leaves),
+   * usado tanto para expansão da tabela quanto para o ParetoChart.
+   */
+  const comparativoPaiData = useMemo(() => {
+    if (agrupCat !== 'pai' || comparativo.length === 0) {
+      return { lista: [] as CatComparativo[], subsPorPai: new Map<string, CatComparativo[]>(), paisComSub: new Set<string>() }
+    }
+    const byPai = new Map<string, CatComparativo[]>()
+    for (const c of comparativo) {
+      const paiNome = paiNomePorCatKey.get(c.catKey) ?? c.nome
+      const k = `pai:${paiNome}`
+      if (!byPai.has(k)) byPai.set(k, [])
+      byPai.get(k)!.push(c)
+    }
+    const lista: CatComparativo[] = []
+    const paisComSub = new Set<string>()
+    for (const [paiKey, leaves] of byPai) {
+      // Identifica pais com mais de um leaf OU cujo único leaf é diferente do pai:
+      // só faz sentido expandir nesses casos (apresentar a sub idêntica ao pai é ruído).
+      const paiNome = paiKey.slice(4)
+      const temSubReal = leaves.length > 1 || (leaves.length === 1 && leaves[0].nome !== paiNome)
+      if (temSubReal) paisComSub.add(paiKey)
+
+      let recA = 0, recB = 0, despA = 0, despB = 0
+      for (const c of leaves) {
+        if (c.tipo === 'RECEITA') { recA += c.anterior; recB += c.atual }
+        else                       { despA += c.anterior; despB += c.atual }
+      }
+      const netA = recA - despA
+      const netB = recB - despB
+      const tipoA: 'RECEITA' | 'DESPESA' | null = netA > 0 ? 'RECEITA' : netA < 0 ? 'DESPESA' : null
+      const tipoB: 'RECEITA' | 'DESPESA' | null = netB > 0 ? 'RECEITA' : netB < 0 ? 'DESPESA' : null
+      const mudouTipo = tipoA !== null && tipoB !== null && tipoA !== tipoB
+      if (mudouTipo) {
+        const atual = Math.abs(netB)
+        lista.push({ catKey: paiKey, nome: paiNome, tipo: tipoB!, atual, anterior: 0, diferenca: atual, variacao: null })
+        continue
+      }
+      const refNet = Math.abs(netB) >= Math.abs(netA) ? netB : netA
+      const tipo: 'RECEITA' | 'DESPESA' = refNet >= 0 ? 'RECEITA' : 'DESPESA'
+      const atual    = Math.abs(netB)
+      const anterior = Math.abs(netA)
+      lista.push({
+        catKey: paiKey, nome: paiNome, tipo, atual, anterior,
+        diferenca: atual - anterior,
+        variacao:  calcVariacao(atual, anterior),
+      })
+    }
+    return { lista, subsPorPai: byPai, paisComSub }
+  }, [agrupCat, comparativo, paiNomePorCatKey])
+
+  // Lista efetiva renderizada: leaf (cat) ou consolidada por pai (pai).
+  const comparativoExibido = agrupCat === 'pai' ? comparativoPaiData.lista : comparativo
+
   const topAumento = useMemo(() =>
     comparativo.filter(c => c.tipo === 'DESPESA' && c.variacao !== null && c.variacao > 0)
       .sort((a, b) => (b.variacao ?? 0) - (a.variacao ?? 0))[0]
@@ -469,8 +550,9 @@ export default function ComparativoMensalPage() {
   }, [buscado, resumoA, resumoB, comparativo])
 
   // ── Table (sorted + filtered) ─────────────────────────────────────────────
+  // Opera sobre `comparativoExibido` para refletir o agrupamento atual.
   const tableCats = useMemo(() => {
-    let rows = [...comparativo]
+    let rows = [...comparativoExibido]
     if (busca.trim()) {
       const q = busca.toLowerCase()
       rows = rows.filter(c => c.nome.toLowerCase().includes(q))
@@ -486,12 +568,25 @@ export default function ComparativoMensalPage() {
       return (a[sortCat.col] - b[sortCat.col]) * sortCat.dir
     })
     return rows
-  }, [comparativo, busca, sortCat])
+  }, [comparativoExibido, busca, sortCat])
 
   const drillDownLancamentos = useMemo(() => {
     if (!drillDown) return []
     const lances = drillDown.periodo === 'inicial' ? lancA : lancB
-    const catId  = drillDown.catKey === '__sem__' ? null : drillDown.catKey
+    const k = drillDown.catKey
+    // Drill em um pai (modo Resumo): inclui lançamentos do próprio pai
+    // (categoria_pai_nome === null && categoria_nome === paiName) e todas
+    // as subs (categoria_pai_nome === paiName).
+    if (k.startsWith('pai:')) {
+      const paiName = k.slice(4)
+      return lances
+        .filter(l => !isTransf(l) && (
+          l.categoria_pai_nome === paiName ||
+          (l.categoria_pai_nome === null && l.categoria_nome === paiName)
+        ))
+        .sort((a, b) => a.data.localeCompare(b.data))
+    }
+    const catId  = k === '__sem__' ? null : k
     return lances
       .filter(l => !isTransf(l) && l.categoria_id === catId)
       .sort((a, b) => a.data.localeCompare(b.data))
@@ -560,15 +655,39 @@ export default function ComparativoMensalPage() {
 
     const rows: Row[] = []
 
+    // Linha de sub (só usada em modo Resumo com pai expandido)
+    const linhaSub = (s: CatComparativo): Row => {
+      const linha: Row = {
+        cat:  `   └ ${s.nome}`,
+        tipo: s.tipo === 'RECEITA' ? 'Receita' : 'Despesa',
+        pA:   s.anterior,
+        pB:   s.atual,
+        dif:  s.diferenca,
+        var:  s.variacao !== null ? s.variacao / 100 : 'Novo',
+      }
+      if (keysDestaque) linha.mark = keysDestaque.has(s.catKey) ? '★' : ''
+      return linha
+    }
+
+    const pushCatComSubs = (c: CatComparativo) => {
+      rows.push(linhaCat(c))
+      // Só anexa subs em modo Resumo, com o pai expandido na tela
+      if (agrupCat === 'pai' && c.catKey.startsWith('pai:') && expandidosCat.has(c.catKey)) {
+        const subs = (comparativoPaiData.subsPorPai.get(c.catKey) ?? [])
+          .slice().sort((a, b) => b.atual - a.atual)
+        subs.forEach(s => rows.push(linhaSub(s)))
+      }
+    }
+
     if (receitas.length > 0) {
       rows.push({ cat: `▼ Receitas (${receitas.length})`, tipo: '', pA: '', pB: '', dif: '', var: '', _style: 'group' })
-      receitas.forEach(c => rows.push(linhaCat(c)))
+      receitas.forEach(pushCatComSubs)
       rows.push(linhaSubtotal(receitas, 'Total Receitas'))
     }
 
     if (despesas.length > 0) {
       rows.push({ cat: `▼ Despesas (${despesas.length})`, tipo: '', pA: '', pB: '', dif: '', var: '', _style: 'group' })
-      despesas.forEach(c => rows.push(linhaCat(c)))
+      despesas.forEach(pushCatComSubs)
       rows.push(linhaSubtotal(despesas, 'Total Despesas'))
     }
 
@@ -599,7 +718,7 @@ export default function ComparativoMensalPage() {
         rows,
       }],
     })
-  }, [buscado, tableCats, inicioA, fimA, inicioB, fimB, insightAtivo, insights])
+  }, [buscado, tableCats, inicioA, fimA, inicioB, fimB, insightAtivo, insights, agrupCat, expandidosCat, comparativoPaiData])
 
   // ── Chart data ─────────────────────────────────────────────────────────────
   const chartBarComp = useMemo((): ChartData<'bar'> => ({
@@ -1029,6 +1148,36 @@ export default function ComparativoMensalPage() {
                       </button>
                     ))}
                   </div>
+                  {/* Toggle Categoria / Resumo (afeta tabela e pareto) */}
+                  <div className="flex rounded-lg overflow-hidden border border-white/10 text-[14px] font-semibold">
+                    {([
+                      { id: 'cat' as const, label: 'Categoria', title: 'Cada categoria (incluindo subcategorias) entra como linha separada' },
+                      { id: 'pai' as const, label: 'Resumo',    title: 'Consolida as subcategorias na categoria pai · clique para expandir' },
+                    ]).map(({ id, label, title }, idx) => (
+                      <button
+                        key={id}
+                        title={title}
+                        onClick={() => setAgrupCat(id)}
+                        className="px-2.5 py-1 transition-colors"
+                        style={{
+                          background:  agrupCat === id ? 'rgba(0,200,150,0.15)' : 'transparent',
+                          color:       agrupCat === id ? '#00c896' : '#8b92a8',
+                          borderRight: idx === 0 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {agrupCat === 'pai' && comparativoPaiData.paisComSub.size > 0 && (
+                    <BotaoExpandirTodas
+                      compacto
+                      todasExpandidas={expCat.todasExpandidas(comparativoPaiData.paisComSub)}
+                      onClick={() => expCat.todasExpandidas(comparativoPaiData.paisComSub)
+                        ? expCat.colapsar()
+                        : expCat.expandirTodas(comparativoPaiData.paisComSub)}
+                    />
+                  )}
                   {vistaCat === 'tabela' && (
                     <input type="text" placeholder="Buscar categoria…" value={busca}
                       onChange={e => setBusca(e.target.value)}
@@ -1040,21 +1189,38 @@ export default function ComparativoMensalPage() {
               {vistaCat === 'pareto' ? (
                 <div className="p-4 overflow-auto" style={{ maxHeight: 600 }}>
                   <ParetoChart
-                    receitas={comparativo
+                    receitas={comparativoExibido
                       .filter(c => c.tipo === 'RECEITA' && c.atual > 0)
                       .map(c => ({ categoria_id: c.catKey, categoria_nome: c.nome, total: c.atual }))}
-                    despesas={comparativo
+                    despesas={comparativoExibido
                       .filter(c => c.tipo === 'DESPESA' && c.atual > 0)
                       .map(c => ({ categoria_id: c.catKey, categoria_nome: c.nome, total: c.atual }))}
-                    receitasAnteriores={comparativo
+                    receitasAnteriores={comparativoExibido
                       .filter(c => c.tipo === 'RECEITA' && c.anterior > 0)
                       .map(c => ({ categoria_id: c.catKey, categoria_nome: c.nome, total: c.anterior }))}
-                    despesasAnteriores={comparativo
+                    despesasAnteriores={comparativoExibido
                       .filter(c => c.tipo === 'DESPESA' && c.anterior > 0)
                       .map(c => ({ categoria_id: c.catKey, categoria_nome: c.nome, total: c.anterior }))}
                     labelAtual="Período final"
                     labelAnterior="Período inicial"
                     oculto={oculto}
+                    subsDe={agrupCat === 'pai' ? ((catId, tipo) => {
+                      if (!catId) return undefined
+                      const leaves = comparativoPaiData.subsPorPai.get(catId) ?? []
+                      // Subs do tipo correspondente à tabela; inclui também aquelas
+                      // que só existiram no período inicial (atual=0, anterior>0)
+                      // para que a variação fique evidente.
+                      return leaves
+                        .filter(l => l.tipo === tipo && (l.atual > 0 || l.anterior > 0))
+                        .map(l => ({
+                          categoria_id:   l.catKey,
+                          categoria_nome: l.nome,
+                          total:          l.atual,
+                          totalAnterior:  l.anterior,
+                        }))
+                    }) : undefined}
+                    expandidos={expandidosCat}
+                    onToggleExp={expCat.toggle}
                   />
                 </div>
               ) : (
@@ -1094,7 +1260,15 @@ export default function ComparativoMensalPage() {
                       )
                       const insightAtual = insightAtivo !== null ? insights[insightAtivo] : null
                       const keysDestaque = insightAtual ? new Set(insightAtual.catKeys) : null
-                      const renderRow = (c: CatComparativo, i: number) => {
+                      // No modo Resumo, um insight ficado em catKeys leaf:
+                      // marca o pai como destacado se qualquer leaf seu estiver no insight.
+                      const paiDestacado = (paiKey: string) => {
+                        if (!keysDestaque) return false
+                        const leaves = comparativoPaiData.subsPorPai.get(paiKey) ?? []
+                        return leaves.some(l => keysDestaque.has(l.catKey))
+                      }
+                      const renderRow = (c: CatComparativo, i: number, opts?: { sub?: boolean }) => {
+                        const isSub = !!opts?.sub
                         const melhorou = c.tipo === 'RECEITA' ? c.diferenca >= 0 : c.diferenca <= 0
                         const cor = c.variacao === null ? '#f0b429' : melhorou ? '#00c896' : '#f87171'
                         const TendIcon = c.variacao === null ? null
@@ -1103,17 +1277,35 @@ export default function ComparativoMensalPage() {
                           : Minus
                         const ativoAnterior = drillDown?.catKey === c.catKey && drillDown?.periodo === 'inicial'
                         const ativoAtual    = drillDown?.catKey === c.catKey && drillDown?.periodo === 'final'
-                        const destacado = keysDestaque?.has(c.catKey) ?? false
+                        const ehPai = agrupCat === 'pai' && c.catKey.startsWith('pai:')
+                        const podeExpandir = ehPai && comparativoPaiData.paisComSub.has(c.catKey)
+                        const expanded = podeExpandir && expandidosCat.has(c.catKey)
+                        const destacado = ehPai ? paiDestacado(c.catKey) : (keysDestaque?.has(c.catKey) ?? false)
                         return (
-                          <tr key={`${c.catKey}-${i}`}
+                          <tr key={`${c.catKey}-${i}${isSub ? '-sub' : ''}`}
                             data-destaque-insight={destacado || undefined}
                             className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors"
                             style={destacado ? {
                               background:  'rgba(77,166,255,0.12)',
                               boxShadow:   'inset 3px 0 0 #4da6ff',
-                            } : undefined}>
-                            <td className="px-4 py-2.5">
-                              <span className="text-[15px]" style={{ color: '#e8eaf0' }}>{c.nome}</span>
+                            } : (isSub ? { background: 'rgba(255,255,255,0.015)' } : undefined)}>
+                            <td
+                              className={`py-2.5 ${isSub ? 'pl-10 pr-4' : 'px-4'} ${podeExpandir ? 'cursor-pointer select-none' : ''}`}
+                              onClick={podeExpandir ? () => expCat.toggle(c.catKey) : undefined}
+                              title={podeExpandir ? (expanded ? 'Colapsar' : 'Expandir subcategorias') : undefined}
+                            >
+                              <span className="text-[15px] inline-flex items-center gap-1.5" style={{ color: isSub ? '#8b92a8' : '#e8eaf0' }}>
+                                {podeExpandir && (expanded
+                                  ? <ChevronDown size={12} style={{ color: '#8b92a8', flexShrink: 0 }} />
+                                  : <ChevronRight size={12} style={{ color: '#8b92a8', flexShrink: 0 }} />)}
+                                {isSub && <span style={{ color: '#4a5168' }}>└</span>}
+                                {c.nome}
+                                {podeExpandir && (
+                                  <span className="text-[12px] ml-1" style={{ color: '#4a5168' }}>
+                                    ({(comparativoPaiData.subsPorPai.get(c.catKey)?.length ?? 0)})
+                                  </span>
+                                )}
+                              </span>
                             </td>
                             <td className="px-4 py-2.5 text-right cursor-pointer"
                               onClick={() => setDrillDown(ativoAnterior ? null : { catKey: c.catKey, nome: c.nome, periodo: 'inicial' })}
@@ -1222,7 +1414,15 @@ export default function ComparativoMensalPage() {
                                   </span>
                                 </td>
                               </tr>
-                              {receitasAberto && receitaRows.map((c, i) => renderRow(c, i))}
+                              {receitasAberto && receitaRows.flatMap((c, i) => {
+                                const out = [renderRow(c, i)]
+                                if (agrupCat === 'pai' && c.catKey.startsWith('pai:') && expandidosCat.has(c.catKey)) {
+                                  const subs = (comparativoPaiData.subsPorPai.get(c.catKey) ?? [])
+                                    .slice().sort((a, b) => b.atual - a.atual)
+                                  subs.forEach((s, j) => out.push(renderRow(s, i * 1000 + j, { sub: true })))
+                                }
+                                return out
+                              })}
                               {renderSubtotal(receitaRows, '#00c896', 'Total Receitas', 'RECEITA')}
                             </>
                           )}
@@ -1240,7 +1440,15 @@ export default function ComparativoMensalPage() {
                                   </span>
                                 </td>
                               </tr>
-                              {despesasAberto && despesaRows.map((c, i) => renderRow(c, i))}
+                              {despesasAberto && despesaRows.flatMap((c, i) => {
+                                const out = [renderRow(c, i)]
+                                if (agrupCat === 'pai' && c.catKey.startsWith('pai:') && expandidosCat.has(c.catKey)) {
+                                  const subs = (comparativoPaiData.subsPorPai.get(c.catKey) ?? [])
+                                    .slice().sort((a, b) => b.atual - a.atual)
+                                  subs.forEach((s, j) => out.push(renderRow(s, i * 1000 + j, { sub: true })))
+                                }
+                                return out
+                              })}
                               {renderSubtotal(despesaRows, '#f87171', 'Total Despesas', 'DESPESA')}
                             </>
                           )}

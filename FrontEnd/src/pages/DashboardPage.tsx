@@ -702,26 +702,28 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
         />
       </div>
 
-      {/* Lista compacta — apenas top N */}
-      <div className="space-y-1.5">
+      {/* Lista compacta — apenas top N.
+          Largura mínima das células fixada e flex-shrink-0 para que valores
+          longos (R$ 12.345,67) não estourem o card. A barra é que flexiona. */}
+      <div className="space-y-1.5 min-w-0">
         {tops.map((d, i) => (
-          <div key={d.categoria_id} className="flex items-center gap-1.5 text-[15px]">
-            <span className="w-[76px] text-gray-400 truncate">{d.categoria_nome}</span>
-            <div className="flex-1 h-[3px] rounded-full bg-gray-100 dark:bg-gray-700">
+          <div key={d.categoria_id} className="flex items-center gap-1.5 text-[15px] min-w-0">
+            <span className="w-[76px] flex-shrink-0 text-gray-400 truncate">{d.categoria_nome}</span>
+            <div className="flex-1 min-w-[24px] h-[3px] rounded-full bg-gray-100 dark:bg-gray-700">
               <div className="h-full rounded-full" style={{ width: `${total > 0 ? (d.total / total) * 100 : 0}%`, background: coresChart[i] }} />
             </div>
-            <span className="w-[34px] text-right text-gray-400">{formatPct(d.total)}%</span>
-            <span className="w-[50px] text-right font-semibold text-gray-700 dark:text-gray-200">{formatBRL(d.total)}</span>
+            <span className="w-[44px] flex-shrink-0 text-right text-gray-400 whitespace-nowrap">{formatPct(d.total)}%</span>
+            <span className="min-w-[88px] flex-shrink-0 text-right font-semibold text-gray-700 dark:text-gray-200 whitespace-nowrap">{formatBRL(d.total)}</span>
           </div>
         ))}
         {temOutros && (
-          <div className="flex items-center gap-1.5 text-[15px] pt-1 border-t border-white/5">
-            <span className="w-[76px] text-gray-500 italic truncate">Outros ({sobras.length})</span>
-            <div className="flex-1 h-[3px] rounded-full bg-gray-100 dark:bg-gray-700">
+          <div className="flex items-center gap-1.5 text-[15px] pt-1 border-t border-white/5 min-w-0">
+            <span className="w-[76px] flex-shrink-0 text-gray-500 italic truncate">Outros ({sobras.length})</span>
+            <div className="flex-1 min-w-[24px] h-[3px] rounded-full bg-gray-100 dark:bg-gray-700">
               <div className="h-full rounded-full" style={{ width: `${total > 0 ? (outros / total) * 100 : 0}%`, background: '#8b92a8' }} />
             </div>
-            <span className="w-[34px] text-right text-gray-400">{formatPct(outros)}%</span>
-            <span className="w-[50px] text-right font-semibold text-gray-500">{formatBRL(outros)}</span>
+            <span className="w-[44px] flex-shrink-0 text-right text-gray-400 whitespace-nowrap">{formatPct(outros)}%</span>
+            <span className="min-w-[88px] flex-shrink-0 text-right font-semibold text-gray-500 whitespace-nowrap">{formatBRL(outros)}</span>
           </div>
         )}
       </div>
@@ -970,7 +972,7 @@ function CardUltimasAlteracoes({ contas, onEditar }: { contas: Conta[]; onEditar
 }
 
 // -- Card de contas com saldo dinâmico ------------------------------
-function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw }: {
+function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw, ultimaTxPorConta }: {
   contas: Conta[];
   oculto: boolean;
   mes: string;
@@ -981,6 +983,8 @@ function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw
   saldoBaseMes: Record<string, number>;
   /** Todas as transações do mês exibido (qualquer status). */
   doMesRaw: Transacao[];
+  /** Data do último lançamento por conta (janela carregada — 6 meses). */
+  ultimaTxPorConta: Record<string, string>;
 }) {
   const navigate = useNavigate()
   const mesAtualStr = new Date().toISOString().slice(0, 7)
@@ -1058,6 +1062,9 @@ function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw
           .sort((a, b) => getSaldoConta(b) - getSaldoConta(a) || a.nome.localeCompare(b.nome, 'pt-BR'))
         if (contasGrupo.length === 0) return null
         const totalGrupo = contasGrupo.reduce((s, c) => s + getSaldoConta(c), 0)
+        // Bancárias e Investimentos ganham linha extra: saldo === 0 mostra a
+        // data do último lançamento; saldo ≠ 0 mostra % do total do grupo.
+        const temInfoExtra = grupo.label === 'Contas bancárias' || grupo.label === 'Investimentos'
         return (
           <div key={grupo.label} className="mb-4 last:mb-0">
             <div className="flex items-center gap-2 mb-2">
@@ -1067,16 +1074,30 @@ function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
               {contasGrupo.map(conta => {
                 const saldoConta = getSaldoConta(conta)
+                let infoExtra: string | null = null
+                if (temInfoExtra) {
+                  if (saldoConta === 0) {
+                    const ult = ultimaTxPorConta[conta.conta_id]
+                    infoExtra = ult
+                      ? `Último mov.: ${new Date(ult + 'T12:00:00').toLocaleDateString('pt-BR')}`
+                      : 'Sem movimento recente'
+                  } else if (totalGrupo !== 0) {
+                    const pct = (saldoConta / totalGrupo) * 100
+                    infoExtra = `${pct.toFixed(1).replace('.', ',')}% do total`
+                  }
+                }
                 return (
-                  <div 
-                    key={conta.conta_id} 
+                  <div
+                    key={conta.conta_id}
                     className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3 flex items-center gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
                     onClick={() => navigate('/lancamentos', { state: { contaId: conta.conta_id, mes } })}
                   >
                     <IconeConta icone={conta.icone} cor={conta.cor} size="md" />
                     <div className="flex-1 min-w-0">
                       <p className="text-[16px] font-semibold text-gray-700 dark:text-gray-200 truncate">{conta.nome}</p>
-                      <p className="text-[14px] text-gray-400">{conta.tipo}</p>
+                      <p className="text-[14px] text-gray-400 truncate">
+                        {infoExtra ?? conta.tipo}
+                      </p>
                     </div>
                     <p className="text-[16px] font-bold whitespace-nowrap"
                       style={{ color: saldoConta >= 0 ? '#00c896' : '#ff6b4a' }}>
@@ -1327,7 +1348,7 @@ export default function DashboardPage() {
     setLancamentoEditando(tx)
   }
 
-  const { contas, pendentes, proximas, doMesRaw, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch, prefetchMesSeguinte, prefetchMesAnterior } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
+  const { contas, pendentes, proximas, doMesRaw, ultimaTxPorConta, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch, prefetchMesSeguinte, prefetchMesAnterior } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -1538,7 +1559,7 @@ export default function DashboardPage() {
               onEditar={abrirEdicao}
             />
             <CardAlertas
-              titulo="Próximas contas não pagas"
+              titulo="Próximas não pagas"
               cor="#f0b429"
               total={totalProximas}
               itens={proximas}
@@ -1581,7 +1602,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Linha 5: contas */}
-          <CardContas contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo} saldoBaseMes={saldoBaseMes} doMesRaw={doMesRaw}/>
+          <CardContas contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo} saldoBaseMes={saldoBaseMes} doMesRaw={doMesRaw} ultimaTxPorConta={ultimaTxPorConta}/>
         </div>
       )}
       {/* Drawer de edicao de lancamento */}

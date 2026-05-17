@@ -5,7 +5,12 @@ import { formatBRL } from '../../lib/utils'
 import { calcularParetto, type ResumoParetto } from '../../lib/paretoAnalysis'
 
 type CategoriaItem = { categoria_id: string | null; categoria_nome: string; total: number }
-type SubItem      = { categoria_id: string;        categoria_nome: string; total: number }
+type SubItem      = {
+  categoria_id:    string
+  categoria_nome:  string
+  total:           number           // valor atual (período final)
+  totalAnterior?:  number           // valor no período inicial (opcional, só usado no modo comparativo)
+}
 
 interface ParetoChartProps {
   receitas: CategoriaItem[]
@@ -24,7 +29,14 @@ interface ParetoChartProps {
   // Quando informado, transforma cada categoria pai em uma linha clicável que
   // expande/colapsa para revelar suas subcategorias. As subs NÃO entram na
   // análise 80/20 — são apenas decomposição informativa.
-  subsDe?: (categoriaId: string | null) => SubItem[] | undefined
+  // O `tipo` é obrigatório para isolar receitas/despesas: a mesma categoria
+  // pode aparecer nos dois lados, e as subs precisam refletir o tipo da tabela.
+  subsDe?: (categoriaId: string | null, tipo: 'RECEITA' | 'DESPESA') => SubItem[] | undefined
+  // Modo controlado opcional para expansão (necessário se o pai precisa saber
+  // o estado, ex.: para exportar reflexo da tela). Quando não vier, o
+  // componente mantém estado interno.
+  expandidos?: Set<string>
+  onToggleExp?: (categoriaId: string) => void
 }
 
 /**
@@ -45,6 +57,8 @@ function TabelaParetto({
   labelAtual,
   labelAnterior,
   subsDe,
+  expandidos: expandidosProp,
+  onToggleExp,
 }: {
   resumo: ResumoParetto
   titulo: string
@@ -56,16 +70,25 @@ function TabelaParetto({
   labelAtual?:    string
   labelAnterior?: string
   subsDe?:        (categoriaId: string | null) => SubItem[] | undefined
+  expandidos?:    Set<string>
+  onToggleExp?:   (categoriaId: string) => void
 }) {
   // Itens dentro dos 80% (regra clássica, incluindo o que faz cruzar):
   // `resumo.quantidadeAte80` é a contagem. Os primeiros N itens ordenados
   // são os que compõem ~80% do volume — destacados visualmente.
   const ultimoIdxAte80 = resumo.quantidadeAte80 - 1
   const modoComparativo = !!anteriores
-  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
-  const toggleExp = (id: string) => setExpandidos(prev => {
-    const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n
-  })
+  // Expansão controlada: se o pai fornece `expandidos` + `onToggleExp`,
+  // usa esse estado. Caso contrário, mantém estado interno.
+  const [expandidosLocal, setExpandidosLocal] = useState<Set<string>>(new Set())
+  const controlado = !!expandidosProp && !!onToggleExp
+  const expandidos = controlado ? expandidosProp! : expandidosLocal
+  const toggleExp = (id: string) => {
+    if (controlado) { onToggleExp!(id); return }
+    setExpandidosLocal(prev => {
+      const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n
+    })
+  }
 
   return (
     <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
@@ -264,6 +287,11 @@ function TabelaParetto({
                   .sort((a, b) => b.total - a.total)
                   .map(s => {
                     const pctSub = item.total > 0 ? (s.total / item.total) * 100 : 0
+                    const sAnt   = s.totalAnterior ?? 0
+                    const sDif   = s.total - sAnt
+                    const sVar   = sAnt > 0 ? (sDif / sAnt) * 100 : null
+                    const corSub = sDif > 0 ? '#00c896' : sDif < 0 ? '#f87171' : '#8b92a8'
+                    const TendSub = sDif > 0 ? TrendingUp : sDif < 0 ? TrendingDown : Minus
                     return (
                       <tr key={`sub-${s.categoria_id}`}
                         onClick={() => onClickCategoria?.(s.categoria_id, s.categoria_nome)}
@@ -271,17 +299,37 @@ function TabelaParetto({
                         style={{ background: 'rgba(255,255,255,0.015)' }}
                       >
                         <td />
-                        <td colSpan={modoComparativo ? 2 : 1} className="pl-8 pr-4 py-2">
+                        <td className="pl-8 pr-4 py-2">
                           <span className="text-[14px]" style={{ color: '#8b92a8' }}>
                             └ {s.categoria_nome}
                           </span>
                         </td>
+                        {modoComparativo && (
+                          <td className="px-4 py-2 text-right">
+                            <span className="text-[14px]" style={{ color: '#8b92a8' }}>
+                              {oculto ? '??????' : (sAnt > 0 ? formatBRL(sAnt) : '—')}
+                            </span>
+                          </td>
+                        )}
                         <td className="px-4 py-2 text-right">
                           <span className="text-[14px]" style={{ color: '#8b92a8' }}>
                             {oculto ? '??????' : formatBRL(s.total)}
                           </span>
                         </td>
-                        {modoComparativo && <td />}
+                        {modoComparativo && (
+                          <td className="px-4 py-2 text-right">
+                            {sVar === null ? (
+                              <span className="text-[14px]" style={{ color: '#4a5168' }}>—</span>
+                            ) : (
+                              <div className="flex items-center justify-end gap-1.5">
+                                <span className="text-[13px] font-semibold" style={{ color: corSub }}>
+                                  {sVar >= 0 ? '+' : ''}{sVar.toFixed(1)}%
+                                </span>
+                                <TendSub size={10} style={{ color: corSub }} />
+                              </div>
+                            )}
+                          </td>
+                        )}
                         <td className="px-4 py-2 text-right">
                           <span className="text-[13px]" style={{ color: '#4a5168' }}>
                             {pctSub.toFixed(1)}% da pai
@@ -449,6 +497,9 @@ export default function ParetoChart({
   despesasAnteriores,
   labelAtual,
   labelAnterior,
+  subsDe,
+  expandidos,
+  onToggleExp,
 }: ParetoChartProps) {
   const resumoReceitas = useMemo(() => calcularParetto(receitas, 'RECEITA'), [receitas])
   const resumoDespesas = useMemo(() => calcularParetto(despesas, 'DESPESA'), [despesas])
@@ -493,6 +544,9 @@ export default function ParetoChart({
             totalAnterior={totalRecAnt}
             labelAtual={labelAtual}
             labelAnterior={labelAnterior}
+            subsDe={subsDe ? (id) => subsDe(id, 'RECEITA') : undefined}
+            expandidos={expandidos}
+            onToggleExp={onToggleExp}
           />
         </div>
       )}
@@ -519,6 +573,9 @@ export default function ParetoChart({
             totalAnterior={totalDespAnt}
             labelAtual={labelAtual}
             labelAnterior={labelAnterior}
+            subsDe={subsDe ? (id) => subsDe(id, 'DESPESA') : undefined}
+            expandidos={expandidos}
+            onToggleExp={onToggleExp}
           />
         </div>
       )}

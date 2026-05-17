@@ -12,6 +12,8 @@ import { useOcultarValores } from '../hooks/useOcultarValores'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
+import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
+import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCategoria'
 
 // -- Tipos -----------------------------------------------------
 interface Lancamento {
@@ -289,6 +291,10 @@ export default function RelatoriosPage() {
   // Granularidade do Pareto: 'cat' = todas categorias (incl. subs);
   // 'pai' = consolida subs no pai.
   const [paretoAgrup, setParetoAgrup] = useState<'cat' | 'pai'>('cat')
+  // Estado de expansão (compartilhado via hook) — mantido fora do componente
+  // do Pareto para que a exportação reflita exatamente o que está na tela.
+  const expPareto = useExpansaoCategoria()
+  const expandidosPareto = expPareto.expandidos
   const drillRef    = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [lancamentoEditando, setLancamentoEditando] = useState<any | null>(null)
@@ -571,15 +577,7 @@ export default function RelatoriosPage() {
 
     // Mapa categoria_id -> { id raiz, nome raiz } usado quando paretoAgrup === 'pai'.
     // Resolve subcategoria até o pai (1 nível na hierarquia do projeto).
-    const raizPorId = new Map<string, { id: string; nome: string }>()
-    for (const c of categorias) {
-      if (c.id_pai) {
-        const pai = categorias.find(p => p.id === c.id_pai)
-        raizPorId.set(c.id, { id: pai?.id ?? c.id, nome: pai?.descricao ?? c.descricao })
-      } else {
-        raizPorId.set(c.id, { id: c.id, nome: c.descricao })
-      }
-    }
+    const raizPorId = paiPorCategoriaId(categorias)
 
     for (const l of lista) {
       let key:  string
@@ -599,6 +597,79 @@ export default function RelatoriosPage() {
 
     return { receitas: [...recMap.values()], despesas: [...despMap.values()] }
   }, [lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias, paretoAgrup])
+
+  /**
+   * Submaps usados quando o Paretto está agrupado por categoria pai ('Resumo').
+   * Para cada pai presente em `dadosPareto`, lista as subcategorias com seus
+   * totais (consolidados nos mesmos filtros/período).
+   *
+   * IMPORTANTE: os totais são separados por tipo (RECEITA vs DESPESA) — uma
+   * mesma subcategoria pode ter movimentos dos dois tipos, e o pai pode
+   * aparecer em ambas as tabelas; sem essa separação as subs vazariam entre
+   * Receitas e Despesas.
+   *
+   * Em modo 'cat' retorna mapas vazios — não há nada para expandir, pois cada
+   * linha já é uma categoria.
+   */
+  const submapPareto = useMemo<{
+    receitas: Map<string, { categoria_id: string; categoria_nome: string; total: number }[]>
+    despesas: Map<string, { categoria_id: string; categoria_nome: string; total: number }[]>
+    pais:     Set<string>
+  }>(() => {
+    const rec  = new Map<string, { categoria_id: string; categoria_nome: string; total: number }[]>()
+    const desp = new Map<string, { categoria_id: string; categoria_nome: string; total: number }[]>()
+    const pais = new Set<string>()
+    if (paretoAgrup !== 'pai' || !buscado || lancamentos.length === 0) {
+      return { receitas: rec, despesas: desp, pais }
+    }
+
+    const isTransfP = (l: Lancamento) =>
+      !!l.id_par_transferencia ||
+      l.descricao?.startsWith('[Transf.') ||
+      l.categoria_nome === 'Transferências'
+
+    const catsSel = filtCats.length > 0
+      ? new Set(filtCats.flatMap(id => {
+          const cat = categorias.find(c => c.id === id)
+          if (!cat) return [id]
+          if (!cat.id_pai) return [cat.id, ...categorias.filter(c => c.id_pai === cat.id).map(c => c.id)]
+          return [cat.id]
+        }))
+      : null
+
+    let lista = lancamentos
+    if (!incluirTransf) lista = lista.filter(l => !isTransfP(l))
+    if (filtStatus.length > 0) lista = lista.filter(l => filtStatus.includes(l.status))
+    if (filtContas.length > 0) lista = lista.filter(l => filtContas.includes(l.conta_id))
+    if (catsSel)               lista = lista.filter(l => catsSel.has(l.categoria_id ?? ''))
+    lista = lista.filter(l => meses.includes(l.data.slice(0, 7)))
+
+    // Lookup de categoria por id — usado para descobrir id_pai/descricao da sub.
+    const catById = new Map<string, { id: string; nome: string; idPai: string | null }>()
+    for (const c of categorias) catById.set(c.id, { id: c.id, nome: c.descricao, idPai: c.id_pai })
+
+    // Acumula por (tipo, paiId, subId)
+    const buckets = {
+      RECEITA: new Map<string, Map<string, { categoria_id: string; categoria_nome: string; total: number }>>(),
+      DESPESA: new Map<string, Map<string, { categoria_id: string; categoria_nome: string; total: number }>>(),
+    }
+    for (const l of lista) {
+      if (!l.categoria_id) continue
+      const cat = catById.get(l.categoria_id)
+      if (!cat?.idPai) continue            // já é raiz: nada a expandir
+      const paiId = cat.idPai
+      const tipoBucket = buckets[l.tipo]
+      if (!tipoBucket.has(paiId)) tipoBucket.set(paiId, new Map())
+      const subMap = tipoBucket.get(paiId)!
+      if (!subMap.has(cat.id)) subMap.set(cat.id, { categoria_id: cat.id, categoria_nome: cat.nome, total: 0 })
+      subMap.get(cat.id)!.total += l.valor
+      pais.add(paiId)
+    }
+
+    for (const [paiId, subMap] of buckets.RECEITA) rec.set(paiId, [...subMap.values()])
+    for (const [paiId, subMap] of buckets.DESPESA) desp.set(paiId, [...subMap.values()])
+    return { receitas: rec, despesas: desp, pais }
+  }, [paretoAgrup, lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias])
 
   /**
    * Exporta a TABELA conforme está visível na tela:
@@ -713,15 +784,35 @@ export default function RelatoriosPage() {
       if (resumo.quantidadeCategorias === 0) return
 
       const ultimoIdxAte80 = resumo.quantidadeAte80 - 1
-      const rows: Row[] = resumo.itens.map((item, idx) => ({
-        n:   idx + 1,
-        cat: item.categoria_nome,
-        val: item.total,
-        pct: item.percentual        / 100,   // exceljs espera decimal 0-1 para `0.0%`
-        acu: item.percentualAcumulado / 100,
-        d80: idx <= ultimoIdxAte80 ? 'Sim' : 'Não',
-        _style: idx <= ultimoIdxAte80 ? 'highlight' : 'normal',
-      }))
+      const rows: Row[] = []
+      resumo.itens.forEach((item, idx) => {
+        rows.push({
+          n:   idx + 1,
+          cat: item.categoria_nome,
+          val: item.total,
+          pct: item.percentual          / 100,  // exceljs espera decimal 0-1 para `0.0%`
+          acu: item.percentualAcumulado / 100,
+          d80: idx <= ultimoIdxAte80 ? 'Sim' : 'Não',
+          _style: idx <= ultimoIdxAte80 ? 'highlight' : 'normal',
+        })
+        // Subcategorias só entram no export se o pai estiver expandido em tela
+        // (reflete exatamente o que o usuário vê). Usa o submap do MESMO tipo
+        // da aba sendo montada — senão receitas/despesas vazariam entre si.
+        if (paretoAgrup === 'pai' && item.categoria_id && expandidosPareto.has(item.categoria_id)) {
+          const mapaSub = tipo === 'RECEITA' ? submapPareto.receitas : submapPareto.despesas
+          const subs = mapaSub.get(item.categoria_id) ?? []
+          subs.slice().sort((a, b) => b.total - a.total).forEach(s => {
+            const pctPai = item.total > 0 ? (s.total / item.total) * 100 : 0
+            rows.push({
+              n:   '',
+              cat: `   └ ${s.categoria_nome} (${pctPai.toFixed(1)}% da pai)`,
+              val: s.total,
+              pct: '', acu: '', d80: '',
+              _style: 'normal',
+            })
+          })
+        }
+      })
 
       rows.push({
         n: '', cat: 'Total', val: resumo.total, pct: 1, acu: '', d80: '',
@@ -750,7 +841,7 @@ export default function RelatoriosPage() {
       filename: `relatorio_pareto_${inicio}_${fim}`,
       sheets,
     })
-  }, [buscado, dadosPareto, inicio, fim, meses])
+  }, [buscado, dadosPareto, inicio, fim, meses, paretoAgrup, expandidosPareto, submapPareto])
 
   /** Roteador: exporta a vista atualmente visível. */
   const exportar = useCallback(() => {
@@ -952,7 +1043,7 @@ export default function RelatoriosPage() {
 
             {/* Agrupamento — visível apenas na vista Pareto */}
             {vistaPareto && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Agrupar por</span>
                 {([
                   { id: 'cat' as const, label: 'Categoria', title: 'Cada categoria (incluindo subcategorias) entra como linha separada' },
@@ -972,6 +1063,14 @@ export default function RelatoriosPage() {
                     {label}
                   </button>
                 ))}
+                {paretoAgrup === 'pai' && submapPareto.pais.size > 0 && (
+                  <BotaoExpandirTodas
+                    todasExpandidas={expPareto.todasExpandidas(submapPareto.pais)}
+                    onClick={() => expPareto.todasExpandidas(submapPareto.pais)
+                      ? expPareto.colapsar()
+                      : expPareto.expandirTodas(submapPareto.pais)}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -985,6 +1084,15 @@ export default function RelatoriosPage() {
               onClickCategoria={(catId, catNome) =>
                 setDrillDown({ titulo: `${catNome} — Pareto`, categoria_id: catId, categoria_nome: catNome, mes: null })
               }
+              subsDe={paretoAgrup === 'pai'
+                ? ((catId, tipo) => {
+                    if (!catId) return undefined
+                    const m = tipo === 'RECEITA' ? submapPareto.receitas : submapPareto.despesas
+                    return m.get(catId)
+                  })
+                : undefined}
+              expandidos={expandidosPareto}
+              onToggleExp={expPareto.toggle}
             />
           )}
 

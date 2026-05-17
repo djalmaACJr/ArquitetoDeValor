@@ -121,16 +121,52 @@ function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChi
   const [open, setOpen] = useState(anyActive)
 
   if (collapsed) {
+    // Sidebar recolhido: o pai segue como ícone único, mas ao passar o mouse
+    // (ou foco via teclado) revela um flyout à direita com os filhos. Garante
+    // que todos os relatórios fiquem acessíveis sem aumentar a barra.
     return (
-      <NavLink
-        to={item.to}
-        title={item.label}
-        className={`flex items-center justify-center px-2 py-[7px] rounded-lg text-[17px] mb-[1px] transition-colors ${
-          anyActive ? 'bg-av-green/15 text-av-green font-medium' : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
-        }`}
-      >
-        {item.icon}
-      </NavLink>
+      <div className="relative group">
+        <NavLink
+          to={item.to}
+          title={item.label}
+          className={`flex items-center justify-center px-2 py-[7px] rounded-lg text-[17px] mb-[1px] transition-colors ${
+            anyActive ? 'bg-av-green/15 text-av-green font-medium' : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
+          }`}
+        >
+          {item.icon}
+        </NavLink>
+        {/* Flyout. O wrapper tem `pl-2` (transparente) servindo de "bridge"
+            entre o ícone e o painel — sem essa ponte, o cursor saía do ícone
+            antes de entrar no flyout e o hover quebrava. O painel visual é a
+            div interna. */}
+        <div
+          className="absolute left-full top-0 pl-2 z-50 opacity-0 invisible pointer-events-none group-hover:opacity-100 group-hover:visible group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:visible group-focus-within:pointer-events-auto transition-opacity duration-100"
+          role="menu"
+        >
+          <div className="min-w-[200px] py-1 rounded-lg bg-av-dark border border-blue-400/30 shadow-xl">
+            <p className="px-3 pt-1.5 pb-1 text-[13px] uppercase tracking-widest text-blue-400/60">
+              {item.label}
+            </p>
+            {item.children.map(child => (
+              <NavLink
+                key={child.to}
+                to={child.to}
+                end={child.to === item.to}
+                className={({ isActive }) =>
+                  `flex items-center gap-2 px-3 py-1.5 text-[16px] transition-colors ${
+                    isActive
+                      ? 'bg-av-green/15 text-av-green font-medium'
+                      : 'text-white/70 hover:bg-blue-400/10 hover:text-white'
+                  }`
+                }
+              >
+                {child.icon}
+                <span className="flex-1">{child.label}</span>
+              </NavLink>
+            ))}
+          </div>
+        </div>
+      </div>
     )
   }
 

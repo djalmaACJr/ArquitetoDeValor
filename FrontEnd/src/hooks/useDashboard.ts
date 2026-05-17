@@ -323,6 +323,27 @@ export function useDashboard(
   }, [fase1Q.data, historicoData, filtros, parsed,
       contasFiltro.length, filtCats.length, filtStatus.length])
 
+  /**
+   * Data do lançamento mais recente por conta, considerando os 6 meses já
+   * carregados (histórico + mês exibido). Usado pelo card "Minhas contas"
+   * para anotar contas zeradas com a data do último movimento.
+   *
+   * Se a conta não tiver lançamentos nessa janela, a chave simplesmente não
+   * aparece no objeto.
+   */
+  const ultimaTxPorConta = useMemo<Record<string, string>>(() => {
+    if (!fase1Q.data) return {}
+    const map: Record<string, string> = {}
+    const fontes = [...historicoData, fase1Q.data.doMesRaw]
+    for (const fonte of fontes) {
+      for (const tx of fonte) {
+        const atual = map[tx.conta_id]
+        if (!atual || tx.data > atual) map[tx.conta_id] = tx.data
+      }
+    }
+    return map
+  }, [fase1Q.data, historicoData])
+
   const refetch = async () => {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ['dashboard-fase1', mes] }),
@@ -358,6 +379,7 @@ export function useDashboard(
     // Todas as transações do mês exibido (qualquer status) — usado para
     // calcular saldo dia-a-dia (ex.: detecção de dias negativos).
     doMesRaw: fase1Q.data?.doMesRaw ?? ([] as Transacao[]),
+    ultimaTxPorConta,
     resumo, despesasCat, receitasCat,
     historico, pagos, pendentesStatus, projecoes,
     loading:          fase1Q.isLoading,
