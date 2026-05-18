@@ -82,7 +82,7 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
       {/* Dropdown */}
       {aberto && (
         <div
-          className="absolute top-9 right-0 z-30 rounded-xl border shadow-xl"
+          className="absolute top-9 right-0 z-50 rounded-xl border shadow-xl"
           style={{ background: '#1a1f2e', borderColor: 'rgba(255,255,255,0.1)', minWidth: 300 }}
         >
           {/* Header */}

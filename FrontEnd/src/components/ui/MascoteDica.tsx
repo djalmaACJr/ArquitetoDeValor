@@ -11,7 +11,7 @@ export default function MascoteDica({
   nome,
   pose = 'hero',
   texto,
-  size = 80,
+  size = 128,
   className = '',
 }: {
   nome:   MascoteNome
@@ -25,19 +25,16 @@ export default function MascoteDica({
   if (imgFalhou) return null
 
   return (
-    <div className={`flex items-start gap-3 ${className}`}>
-      <div className="flex-shrink-0" style={{ width: size, height: size }}>
-        <img
-          src={`/mascotes/${nome}-${pose}.png`}
-          alt=""
-          width={size}
-          height={size}
-          loading="lazy"
-          onError={() => setImgFalhou(true)}
-          className="object-contain select-none pointer-events-none w-full h-full"
-        />
-      </div>
-      <div className="flex-1 relative">
+    <div className={`flex items-end gap-3 ${className}`}>
+      <img
+        src={`/mascotes/${nome}-${pose}.png`}
+        alt=""
+        loading="lazy"
+        onError={() => setImgFalhou(true)}
+        className="flex-shrink-0 select-none pointer-events-none object-contain"
+        style={{ width: size, height: 'auto' }}
+      />
+      <div className="flex-1 relative mb-3">
         <div
           className="rounded-2xl px-4 py-3 text-[15px] leading-relaxed border"
           style={{

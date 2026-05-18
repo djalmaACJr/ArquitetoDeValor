@@ -1519,7 +1519,7 @@ export default function ComparativoMensalPage() {
                       : insights.some(i => i.tipo === 'positivo') ? 'feliz'
                       :                                            'curioso'
                     }
-                    size={96}
+                    size={128}
                     texto={
                       insights.some(i => i.tipo === 'alerta')
                         ? 'Detectei pontos de atenção no período final. Veja os alertas em vermelho — clique pra destacar as categorias responsáveis.'

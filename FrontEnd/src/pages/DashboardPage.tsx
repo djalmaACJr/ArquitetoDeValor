@@ -1552,7 +1552,7 @@ export default function DashboardPage() {
               : r > 0                ? 'feliz'
               : r < 0                ? 'espantado'
               :                        'sentado'
-            return <MascoteDica nome={mascote} pose={pose} texto={texto} size={96} />
+            return <MascoteDica nome={mascote} pose={pose} texto={texto} />
           })()}
 
           {/* Linha 1: calendário + resultados + saldo */}

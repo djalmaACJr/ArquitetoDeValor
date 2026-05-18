@@ -59,12 +59,10 @@ export default function Mascote({
     <img
       src={src}
       alt={alt ?? `${LABEL[nome]} (${pose})`}
-      width={size}
-      height={size}
       loading="lazy"
       onError={() => setErro(true)}
-      className={`object-contain select-none pointer-events-none ${className}`}
-      style={{ maxWidth: size, maxHeight: size }}
+      className={`select-none pointer-events-none object-contain ${className}`}
+      style={{ width: size, height: 'auto' }}
     />
   )
 }
