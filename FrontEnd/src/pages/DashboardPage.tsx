@@ -207,26 +207,26 @@ function GrupoConta({
       {/* Lancamentos expandidos */}
       {aberto && (
         <div className="bg-gray-50/50 dark:bg-gray-700/30">
-          <div className="grid grid-cols-[1fr_56px_72px] px-6 py-1 text-[14px] font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-700">
+          <div className="grid grid-cols-[minmax(0,1fr)_76px_96px] gap-2 px-6 py-1 text-[14px] font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-700">
             <span>Transação</span><span className="text-center">Data</span><span className="text-right">Valor</span>
           </div>
           {itens.map(tx => (
             <div
               key={tx.id}
               onClick={() => onEditar(tx)}
-              className="grid grid-cols-[1fr_56px_72px] items-center px-6 py-[5px] border-b border-gray-100 dark:border-gray-700 last:border-0 cursor-pointer hover:bg-white/5 transition-colors"
+              className="grid grid-cols-[minmax(0,1fr)_76px_96px] gap-2 items-center px-6 py-[5px] border-b border-gray-100 dark:border-gray-700 last:border-0 cursor-pointer hover:bg-white/5 transition-colors"
             >
-              <span className="text-[16px] text-gray-700 dark:text-gray-200 truncate flex items-center gap-1">
+              <span className="text-[16px] text-gray-700 dark:text-gray-200 truncate flex items-center gap-1 min-w-0">
                 {tx.id_recorrencia && (
                   <span className="w-3 h-3 rounded-full border border-gray-400 flex items-center justify-center flex-shrink-0 text-[11px] text-gray-400">↻</span>
                 )}
-                {tx.descricao}
+                <span className="truncate">{tx.descricao}</span>
                 {tx.nr_parcela && tx.total_parcelas && (
-                  <span className="text-gray-400 text-[14px]">({tx.nr_parcela}/{tx.total_parcelas})</span>
+                  <span className="text-gray-400 text-[14px] flex-shrink-0">({tx.nr_parcela}/{tx.total_parcelas})</span>
                 )}
               </span>
-              <span className="text-[15px] text-gray-400 text-center">{formatData(tx.data)}</span>
-              <span className={`text-[16px] font-semibold text-right ${tx.tipo === 'RECEITA' ? 'text-av-green' : 'text-red-400'}`}>
+              <span className="text-[15px] text-gray-400 text-center whitespace-nowrap">{formatData(tx.data)}</span>
+              <span className={`text-[16px] font-semibold text-right whitespace-nowrap ${tx.tipo === 'RECEITA' ? 'text-av-green' : 'text-red-400'}`}>
                 {tx.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(tx.valor)}
               </span>
             </div>
@@ -1361,16 +1361,13 @@ export default function DashboardPage() {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
-      // Ignora combinações com Ctrl/Cmd/Alt — esses são atalhos do browser.
       if (e.ctrlKey || e.metaKey || e.altKey) return
-      // ←/↑ = mês anterior · →/↓ = próximo mês
-      const ehAnterior = e.key === 'ArrowLeft'  || e.key === 'ArrowUp'
-      const ehProximo  = e.key === 'ArrowRight' || e.key === 'ArrowDown'
-      if (ehAnterior) {
+      // ←/→ navegam meses. ↑/↓ ficam livres pra scroll natural da página.
+      if (e.key === 'ArrowLeft') {
         e.preventDefault()
         prefetchMesAnterior()
         setMes(navMesStr(mes, -1))
-      } else if (ehProximo) {
+      } else if (e.key === 'ArrowRight') {
         e.preventDefault()
         prefetchMesSeguinte()
         setMes(navMesStr(mes, 1))
@@ -1570,8 +1567,10 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Linha 2: alertas + últimas alterações */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {/* Linha 2: alertas + últimas alterações.
+              O card do meio (Próximas) tem título mais longo + toggle "Este mês / 30 dias",
+              então ganha um pouco mais de largura que os dois laterais. */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[1fr_1.25fr_1fr] gap-3">
             <CardAlertas
               titulo="Vencidos não pagos"
               cor="#ff6b4a"

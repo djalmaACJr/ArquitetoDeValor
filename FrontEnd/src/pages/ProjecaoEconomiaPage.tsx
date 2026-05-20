@@ -9,6 +9,7 @@ import { Download, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-rea
 import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { formatBRL, mesLabel } from '../lib/utils'
 import MascoteDica from '../components/ui/MascoteDica'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 
 ChartJS.register(CategoryScale, LinearScale, LineElement, BarElement, PointElement, Tooltip, Legend, Filler)
@@ -242,6 +243,8 @@ export default function ProjecaoEconomiaPage() {
 
   return (
     <div className="space-y-6">
+
+      <MascoteTutorial pagina="projecao" />
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between flex-wrap gap-3">

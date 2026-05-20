@@ -14,6 +14,7 @@ import { formatBRL, mesLabel } from '../lib/utils'
 import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteDica from '../components/ui/MascoteDica'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCategoria'
 
@@ -566,6 +567,8 @@ export default function AssinaturasPage() {
 
   return (
     <div className="space-y-6">
+
+      <MascoteTutorial pagina="assinaturas" />
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between flex-wrap gap-3">

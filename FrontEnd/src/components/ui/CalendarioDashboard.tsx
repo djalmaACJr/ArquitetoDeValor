@@ -82,9 +82,9 @@ export default function CalendarioDashboard({
           {MESES_NOME[m - 1]} {ano}
         </span>
         <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#f0b429' }} title="Lembrete" />
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#4da6ff' }} title="Fechamento" />
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#f87171' }} title="Pagamento" />
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#f0b429' }} title="Lembretes criados por você" />
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#4da6ff' }} title="Data de fechamento da fatura do cartão de crédito" />
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#f87171' }} title="Data de pagamento da fatura do cartão de crédito" />
           {diasNegativos && diasNegativos.size > 0 && (
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#fb923c' }} title="Saldo negativo em alguma conta" />
           )}

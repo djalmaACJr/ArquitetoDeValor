@@ -22,6 +22,7 @@ import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
 import { useExpansaoCategoria } from '../lib/agrupamentoCategoria'
 import MascoteDica from '../components/ui/MascoteDica'
 import LoadingMascote from '../components/ui/LoadingMascote'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { falaComparativoPeriodos } from '../lib/conteudoMascotes'
 
@@ -842,6 +843,10 @@ export default function ComparativoMensalPage() {
           </p>
         </div>
         <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+      </div>
+
+      <div className="mb-5">
+        <MascoteTutorial pagina="comparativo" />
       </div>
 
       {/* Filters */}

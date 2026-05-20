@@ -243,11 +243,9 @@ export default function LancamentosPage() {
       if (['INPUT','TEXTAREA','SELECT','BUTTON'].includes(tag)) return
       if (drawerAberto) return
       if (e.ctrlKey || e.metaKey || e.altKey) return
-      // ←/↑ = mês anterior · →/↓ = próximo mês
-      const ehAnterior = e.key === 'ArrowLeft'  || e.key === 'ArrowUp'
-      const ehProximo  = e.key === 'ArrowRight' || e.key === 'ArrowDown'
-      if (ehAnterior) { e.preventDefault(); prefetchAdj(-1); navMes(-1) }
-      else if (ehProximo) { e.preventDefault(); prefetchAdj(1);  navMes(1)  }
+      // ←/→ navegam meses. ↑/↓ ficam livres pra scroll natural da página.
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); prefetchAdj(-1); navMes(-1) }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); prefetchAdj(1);  navMes(1)  }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)

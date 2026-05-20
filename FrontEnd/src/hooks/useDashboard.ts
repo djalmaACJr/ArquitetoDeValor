@@ -3,6 +3,7 @@ import { useMemo, useEffect, useState } from 'react'
 import { useQuery, useQueries, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiFetch, extrairLista } from '../lib/api'
 import { qk } from '../lib/queryKeys'
+import { hojeLocal } from '../lib/utils'
 import type { Conta, Transacao, ResumoMensal, DespesaCategoria } from '../types'
 
 /** Gera array com os últimos N meses a partir de ano/mes, em ordem cronológica */
@@ -226,7 +227,7 @@ export function useDashboard(
   )
 
   // ── Derivados (useMemo para evitar recomputação desnecessária) ─────
-  const hoje = new Date().toISOString().split('T')[0]
+  const hoje = hojeLocal()
 
   // Filtros: passa contas (sempre) + categorias + status (com_status para alguns cálculos)
   const filtros = useMemo(() => {

@@ -52,6 +52,14 @@ export function mesAtual(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+// Data de hoje no fuso LOCAL no formato YYYY-MM-DD.
+// Não usar `new Date().toISOString().split('T')[0]` — toISOString devolve UTC
+// e em UTC-3 vira o dia seguinte a partir das 21h local.
+export function hojeLocal(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export function mesesDisponiveis(qtd = 12): string[] {
   const meses: string[] = []
   const d = new Date()
