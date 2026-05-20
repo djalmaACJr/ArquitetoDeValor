@@ -7,7 +7,9 @@ import {
 } from 'lucide-react'
 import { useTheme } from '../hooks/useTheme'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
-import type { MascoteNome } from '../components/ui/Mascote'
+import Mascote, { type MascoteNome, type MascotePose } from '../components/ui/Mascote'
+import { useIAPreferencia } from '../hooks/useIAPreferencia'
+import { PROVEDORES, PROVEDOR_PADRAO } from '../lib/iaProvedores'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -52,7 +54,7 @@ function Secao({ titulo, icone, children }: {
   children: React.ReactNode
 }) {
   return (
-    <div className="bg-white/4 border border-white/8 rounded-2xl p-5">
+    <div className="bg-white/4 border border-white/8 rounded-2xl p-5 h-full">
       <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/8">
         <span className="text-av-green/70">{icone}</span>
         <h2 className="text-[17px] font-semibold text-white">{titulo}</h2>
@@ -75,24 +77,54 @@ function Alerta({ fb }: { fb: Feedback | null }) {
   )
 }
 
-/** Picker de mascote preferido — grade 2x2 de cards com a pose "hero" /
- *  "sentado" de cada mascote. A escolha define qual personagem aparece
- *  nos balões contextuais do Dashboard, Comparativo, etc. */
+/** Picker de mascote preferido — grade 2x2 de cards. Poses por estado:
+ *  - sentado:     mascote NÃO selecionado (calmo, neutro)
+ *  - feliz:       mascote selecionado (ativo, contente)
+ *  - triste:      último mascote (perdeu a vaga durante a troca)
+ *
+ *  Quando o usuário clica em outro mascote, o anterior fica visualmente
+ *  "triste" por um instante antes de voltar para sentado — feedback de
+ *  transição. A escolha persiste em `arqvalor.usuarios.mascote_preferido`. */
 function SecaoMascote() {
-  const { mascote, setMascote } = useMascotePreferido()
+  const { mascote, setMascote, apelidos, apelidoDe, definirApelido } = useMascotePreferido()
+  // Mascote "deposto": fica triste por uns segundos após perder o ativo.
+  const [tristePassageiro, setTristePassageiro] = useState<MascoteNome | null>(null)
+  // Modal de apelido: aberto ao selecionar mascote SEM apelido ainda,
+  // ou ao clicar no botão de renomear.
+  const [modalApelido, setModalApelido] = useState<MascoteNome | null>(null)
+  const [apelidoInput, setApelidoInput] = useState('')
 
-  // Catálogo dos 4 mascotes — descrição + arquivo preferido para preview
-  const catalogo: Array<{
-    id: MascoteNome
-    label: string
-    descricao: string
-    poseDefault: string
-  }> = [
-    { id: 'sabio',      label: 'Sábio',      descricao: 'Sabedoria e visão de longo prazo.',                poseDefault: 'sentado' },
-    { id: 'engenheira', label: 'Engenheira', descricao: 'Estrutura, cálculo e disciplina.',                  poseDefault: 'pensando' },
-    { id: 'mago',       label: 'Mago Gato',  descricao: 'A magia dos juros compostos.',                      poseDefault: 'sentado' },
-    { id: 'raposa',     label: 'Raposa',     descricao: 'Astúcia estratégica de mercado.',                   poseDefault: 'sentado' },
+  // Catálogo dos 4 mascotes
+  const catalogo: Array<{ id: MascoteNome; label: string; descricao: string }> = [
+    { id: 'sabio',     label: 'Sábio',     descricao: 'Sabedoria e visão de longo prazo.' },
+    { id: 'arquiteta', label: 'Arquiteta', descricao: 'Estrutura, cálculo e disciplina.' },
+    { id: 'gato',      label: 'Mago Gato', descricao: 'A magia dos juros compostos.' },
+    { id: 'raposa',    label: 'Raposa',    descricao: 'Astúcia estratégica de mercado.' },
   ]
+
+  // Abre o modal pra (re)nomear — chamado pelo botão dedicado.
+  const abrirRenomear = (id: MascoteNome) => {
+    setApelidoInput(apelidos[id] ?? '')
+    setModalApelido(id)
+  }
+
+  const aoTrocar = (id: MascoteNome) => {
+    if (id === mascote) return  // re-clique no ativo: não faz nada (use botão renomear)
+    const anterior = mascote
+    setMascote(id)
+    setTristePassageiro(anterior)
+    setTimeout(() => setTristePassageiro(p => (p === anterior ? null : p)), 2200)
+    // Só pede nome se o mascote escolhido ainda NÃO tem apelido salvo.
+    if (!apelidos[id]) {
+      setApelidoInput('')
+      setModalApelido(id)
+    }
+  }
+
+  const salvarApelido = async () => {
+    if (modalApelido) await definirApelido(modalApelido, apelidoInput)
+    setModalApelido(null)
+  }
 
   return (
     <Secao titulo="Mascote preferido" icone={<Users size={15}/>}>
@@ -103,35 +135,58 @@ function SecaoMascote() {
       <div className="grid grid-cols-2 gap-2.5">
         {catalogo.map(m => {
           const ativo = m.id === mascote
+          const triste = m.id === tristePassageiro
+          // Pose por estado: ativo→feliz, triste passageiro→triste, default→sentado
+          const pose: MascotePose = ativo ? 'feliz' : triste ? 'triste' : 'sentado'
           return (
             <button
               key={m.id}
               type="button"
-              onClick={() => setMascote(m.id)}
+              onClick={() => aoTrocar(m.id)}
               className="text-left rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-av-green/40 p-2.5"
               style={{
-                borderColor: ativo ? '#00c896' : 'rgba(255,255,255,0.10)',
-                background:  ativo ? 'rgba(0,200,150,0.08)' : 'rgba(255,255,255,0.03)',
+                borderColor: ativo ? '#00c896' : triste ? 'rgba(248,113,113,0.5)' : 'rgba(255,255,255,0.10)',
+                background:  ativo ? 'rgba(0,200,150,0.08)'
+                            : triste ? 'rgba(248,113,113,0.06)'
+                            : 'rgba(255,255,255,0.03)',
               }}
               aria-pressed={ativo}
               title={m.descricao}
             >
-              <div className="flex items-start gap-2.5">
-                <img
-                  src={`/mascotes/${m.id}-${m.poseDefault}.png`}
-                  alt=""
-                  width={56}
-                  height={56}
-                  loading="lazy"
-                  className="object-contain flex-shrink-0 rounded-lg"
-                  style={{ maxWidth: 56, maxHeight: 72 }}
-                  onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden' }}
+              <div className="flex items-center gap-3">
+                <Mascote
+                  nome={m.id}
+                  pose={pose}
+                  size={84}
+                  className="flex-shrink-0"
                 />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[15px] font-semibold text-white truncate">{m.label}</p>
+                  <p className="text-[16px] font-semibold text-white truncate">
+                    {apelidoDe(m.id)}
+                    {apelidoDe(m.id) !== m.label && (
+                      <span className="text-[12px] font-normal ml-1.5" style={{ color: '#8b92a8' }}>
+                        ({m.label})
+                      </span>
+                    )}
+                  </p>
                   {ativo && (
-                    <p className="text-[12px] font-semibold uppercase tracking-wider mt-0.5" style={{ color: '#00c896' }}>
-                      ✓ Em uso
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <span className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: '#00c896' }}>
+                        ✓ Em uso
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); abrirRenomear(m.id) }}
+                        className="text-[12px] font-medium underline hover:opacity-80"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
+                        renomear
+                      </button>
+                    </div>
+                  )}
+                  {triste && (
+                    <p className="text-[12px] font-semibold uppercase tracking-wider mt-0.5" style={{ color: '#f87171' }}>
+                      ✗ Trocado
                     </p>
                   )}
                   <p className="text-[13px] mt-1 leading-snug" style={{ color: '#8b92a8' }}>
@@ -144,8 +199,62 @@ function SecaoMascote() {
         })}
       </div>
       <p className="text-[13px] text-white/30 mt-3 leading-relaxed">
-        Preferência salva em <code>arqvalor.usuarios.mascote_preferido</code>.
+        Toque novamente no mascote ativo para renomeá-lo.
       </p>
+
+      {/* Modal: pedir apelido para o mascote escolhido */}
+      {modalApelido && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setModalApelido(null)} />
+          <div
+            className="relative w-full max-w-sm rounded-2xl p-5 shadow-2xl"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
+          >
+            <div className="flex flex-col items-center mb-3">
+              <Mascote nome={modalApelido} pose="feliz" size={120} />
+            </div>
+            <p className="text-[17px] font-semibold text-center mb-1" style={{ color: 'var(--text-primary)' }}>
+              Como vou te chamar?
+            </p>
+            <p className="text-[14px] text-center mb-4" style={{ color: 'var(--text-muted)' }}>
+              Dê um apelido para o seu novo mascote. Você pode mudar depois.
+            </p>
+            <input
+              type="text"
+              value={apelidoInput}
+              onChange={e => setApelidoInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') salvarApelido() }}
+              autoFocus
+              maxLength={40}
+              placeholder={catalogo.find(c => c.id === modalApelido)?.label}
+              className="w-full rounded-lg px-3 py-2.5 text-[16px] focus:outline-none transition-colors"
+              style={{
+                background:  'var(--bg-input)',
+                color:       'var(--text-primary)',
+                border:      '1px solid var(--border-subtle)',
+              }}
+            />
+            <div className="flex gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setModalApelido(null)}
+                className="flex-1 py-2.5 rounded-lg text-[16px] font-medium transition-colors hover:opacity-80"
+                style={{ border: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}
+              >
+                Manter "{catalogo.find(c => c.id === modalApelido)?.label}"
+              </button>
+              <button
+                type="button"
+                onClick={salvarApelido}
+                className="flex-1 py-2.5 rounded-lg text-[16px] font-semibold transition-colors hover:opacity-90"
+                style={{ background: '#00c896', color: '#0a0f1a' }}
+              >
+                Salvar nome
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Secao>
   )
 }
@@ -253,6 +362,352 @@ function SecaoTema() {
       </div>
       <p className="text-[13px] text-white/30 mt-3 leading-relaxed">
         Preferência salva em <code>arqvalor.usuarios.layout</code> e sincronizada entre dispositivos.
+      </p>
+    </Secao>
+  )
+}
+
+/** Configuração da integração com IA: MÚLTIPLAS configs, UMA ativa.
+ *  Cada usuário usa SUA própria chave (paga seu próprio uso). */
+function SecaoIA() {
+  const { ativa, configs, carregando, salvando, adicionar, atualizar, ativar, remover } = useIAPreferencia()
+
+  const [adicionando, setAdicionando] = useState(false)
+  const [editando,    setEditando]    = useState<string | null>(null)
+  const [provedorId,  setProvedorId]  = useState<string>(PROVEDOR_PADRAO)
+  const [chave,       setChave]       = useState('')
+  const [nome,        setNome]        = useState('')
+  const [expandido,   setExpandido]   = useState<string | null>(null)
+  const [fb,          setFb]          = useState<Feedback | null>(null)
+  const [confirmRemover, setConfirmRemover] = useState<string | null>(null)
+
+  const provedorAtual = PROVEDORES.find(p => p.id === provedorId) ?? PROVEDORES[0]
+
+  const abrirNova = () => {
+    setAdicionando(true)
+    setEditando(null)
+    setProvedorId(PROVEDOR_PADRAO)
+    setChave('')
+    setNome('')
+    setFb(null)
+  }
+
+  const abrirEditar = (configId: string) => {
+    const c = configs.find(x => x.id === configId)
+    if (!c) return
+    setAdicionando(false)
+    setEditando(configId)
+    setProvedorId(c.provedor)
+    setChave('')
+    setNome(c.nome ?? '')
+    setFb(null)
+  }
+
+  const cancelar = () => {
+    setAdicionando(false)
+    setEditando(null)
+    setFb(null)
+  }
+
+  const aoSalvar = async (e: FormEvent) => {
+    e.preventDefault()
+    setFb(null)
+    let r: { ok: boolean; erro?: string }
+    if (editando) {
+      r = await atualizar(editando, { provedor: provedorId, api_key: chave, nome })
+    } else {
+      r = await adicionar(provedorId, chave, nome)
+    }
+    if (r.ok) {
+      setFb({ tipo: 'ok', msg: 'Configuração salva.' })
+      setChave('')
+      setNome('')
+      setAdicionando(false)
+      setEditando(null)
+    } else {
+      setFb({ tipo: 'erro', msg: r.erro ?? 'Erro ao salvar.' })
+    }
+  }
+
+  const aoAtivar = async (configId: string) => {
+    setFb(null)
+    const r = await ativar(configId)
+    if (!r.ok) setFb({ tipo: 'erro', msg: r.erro ?? 'Erro ao ativar.' })
+  }
+
+  const aoRemover = async (configId: string) => {
+    setFb(null)
+    const r = await remover(configId)
+    if (r.ok) {
+      setConfirmRemover(null)
+    } else {
+      setFb({ tipo: 'erro', msg: r.erro ?? 'Erro ao remover.' })
+    }
+  }
+
+  const editandoFormulario = adicionando || editando !== null
+
+  return (
+    <Secao titulo="Integração com IA" icone={<Sparkles size={15}/>}>
+      <p className="text-[15px] mb-4 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+        Configure um ou mais provedores de IA. Só a configuração marcada como{' '}
+        <strong style={{ color: 'var(--text-primary)' }}>ativa</strong> é usada pelo chat com o mascote —
+        as outras ficam guardadas para troca rápida.
+      </p>
+
+      {carregando ? (
+        <p className="text-[15px]" style={{ color: 'var(--text-muted)' }}>Carregando configurações…</p>
+      ) : (
+        <>
+          {/* Lista de configs salvas */}
+          {configs.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {configs.map(c => {
+                const p = PROVEDORES.find(x => x.id === c.provedor)
+                const ehAtiva = c.id === ativa?.id
+                return (
+                  <div
+                    key={c.id}
+                    className="rounded-xl p-3 border transition-all"
+                    style={{
+                      background:  ehAtiva ? 'rgba(0,200,150,0.08)' : 'var(--bg-elevated)',
+                      borderColor: ehAtiva ? 'rgba(0,200,150,0.35)' : 'var(--border-subtle)',
+                    }}
+                  >
+                    <div className="flex items-start gap-2 flex-wrap">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[16px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                            {p?.label ?? c.provedor}
+                          </span>
+                          {c.nome && (
+                            <span className="text-[14px] px-1.5 py-0.5 rounded" style={{ color: 'var(--text-secondary)', background: 'var(--tint-2)' }}>
+                              {c.nome}
+                            </span>
+                          )}
+                          {ehAtiva && (
+                            <span className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: '#00c896' }}>
+                              ✓ Ativa
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-faint)' }}>
+                          Chave salva · oculta por segurança
+                        </p>
+                      </div>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {!ehAtiva && (
+                          <button
+                            type="button"
+                            onClick={() => aoAtivar(c.id)}
+                            disabled={salvando}
+                            className="px-2.5 py-1 rounded-lg text-[14px] font-semibold transition-colors disabled:opacity-50"
+                            style={{ background: 'rgba(0,200,150,0.12)', color: '#00c896', border: '1px solid rgba(0,200,150,0.3)' }}
+                          >
+                            Ativar
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => abrirEditar(c.id)}
+                          disabled={salvando}
+                          className="px-2.5 py-1 rounded-lg text-[14px] font-medium transition-colors disabled:opacity-50"
+                          style={{ color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}
+                        >
+                          Editar
+                        </button>
+                        {confirmRemover === c.id ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => aoRemover(c.id)}
+                              disabled={salvando}
+                              className="px-2.5 py-1 rounded-lg text-[14px] font-semibold transition-colors disabled:opacity-50"
+                              style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171', border: '1px solid rgba(248,113,113,0.35)' }}
+                            >
+                              Confirmar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmRemover(null)}
+                              className="px-2 py-1 rounded-lg text-[14px]"
+                              style={{ color: 'var(--text-muted)' }}
+                            >
+                              ×
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmRemover(c.id)}
+                            className="px-2.5 py-1 rounded-lg text-[14px] font-medium transition-colors hover:text-red-300"
+                            style={{ color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}
+                          >
+                            Remover
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Botão adicionar (quando NÃO está editando) */}
+          {!editandoFormulario && (
+            <button
+              type="button"
+              onClick={abrirNova}
+              disabled={salvando}
+              className="w-full py-2.5 rounded-xl text-[15px] font-semibold transition-colors disabled:opacity-50"
+              style={{
+                background:  configs.length === 0 ? '#00c896' : 'var(--tint-2)',
+                color:       configs.length === 0 ? '#0a0f1a' : 'var(--text-primary)',
+                border:      configs.length === 0 ? 'none' : '1px dashed var(--border-subtle)',
+              }}
+            >
+              + {configs.length === 0 ? 'Configurar primeira integração' : 'Adicionar outra configuração'}
+            </button>
+          )}
+
+          {/* Formulário (criar / editar) */}
+          {editandoFormulario && (
+            <form
+              onSubmit={aoSalvar}
+              className="space-y-3 rounded-xl p-3 mt-1"
+              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
+            >
+              <p className="text-[15px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {editando ? 'Editar configuração' : 'Nova configuração'}
+              </p>
+
+              <div>
+                <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>Provedor</label>
+                <select
+                  value={provedorId}
+                  onChange={e => { setProvedorId(e.target.value); setFb(null) }}
+                  disabled={salvando}
+                  className="w-full rounded-lg px-3 py-2.5 text-[16px] focus:outline-none focus:border-av-green/50 disabled:opacity-50"
+                  style={{
+                    background:  'var(--bg-input)',
+                    color:       'var(--text-primary)',
+                    border:      '1px solid var(--border-subtle)',
+                    colorScheme: 'auto',
+                  }}
+                >
+                  {PROVEDORES.map(p => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Apelido (opcional) <span className="text-[12px] ml-1" style={{ color: 'var(--text-faint)' }}>ex.: Pessoal, Trabalho</span>
+                </label>
+                <input
+                  type="text"
+                  value={nome}
+                  onChange={e => setNome(e.target.value)}
+                  disabled={salvando}
+                  maxLength={32}
+                  placeholder="Sem apelido"
+                  className="w-full rounded-lg px-3 py-2.5 text-[16px] focus:outline-none disabled:opacity-50"
+                  style={{
+                    background: 'var(--bg-input)',
+                    color:      'var(--text-primary)',
+                    border:     '1px solid var(--border-subtle)',
+                  }}
+                />
+              </div>
+
+              {/* Instruções específicas */}
+              <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tint-1)', border: '1px solid var(--border-subtle)' }}>
+                <button
+                  type="button"
+                  onClick={() => setExpandido(v => v === provedorAtual.id ? null : provedorAtual.id)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 hover:opacity-80 transition-opacity"
+                >
+                  <span className="text-[14px] font-medium flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+                    <Sparkles size={13} style={{ color: '#f0b429' }}/>
+                    Como obter a chave do {provedorAtual.label}
+                  </span>
+                  <ChevronDown size={14} className="transition-transform"
+                    style={{ color: 'var(--text-muted)', transform: expandido === provedorAtual.id ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
+                </button>
+                {expandido === provedorAtual.id && (
+                  <div className="px-3 pb-3 pt-1 space-y-2" style={{ borderTop: '1px solid var(--border-faint)' }}>
+                    <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>{provedorAtual.custo}</p>
+                    <ol className="space-y-1 list-decimal list-inside">
+                      {provedorAtual.passos.map((p, i) => (
+                        <li key={i} className="text-[13px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{p}</li>
+                      ))}
+                    </ol>
+                    <a
+                      href={provedorAtual.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-[13px] hover:opacity-80"
+                      style={{ color: 'var(--av-blue)' }}
+                    >
+                      <ArrowRight size={12}/> Abrir página do {provedorAtual.label}
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Chave da API{editando && (
+                    <span className="text-[12px] ml-2" style={{ color: 'var(--text-faint)' }}>(em branco mantém a atual)</span>
+                  )}
+                </label>
+                <input
+                  type="password"
+                  value={chave}
+                  onChange={e => { setChave(e.target.value); setFb(null) }}
+                  disabled={salvando}
+                  placeholder={provedorAtual.formatoDica}
+                  className="w-full rounded-lg px-3 py-2.5 text-[16px] focus:outline-none font-mono disabled:opacity-50"
+                  style={{
+                    background: 'var(--bg-input)',
+                    color:      'var(--text-primary)',
+                    border:     '1px solid var(--border-subtle)',
+                  }}
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  type="submit"
+                  disabled={salvando}
+                  className="px-4 py-2 rounded-lg text-[15px] font-semibold transition-colors disabled:opacity-50"
+                  style={{ background: '#00c896', color: '#0a0f1a' }}
+                >
+                  {salvando ? 'Salvando…' : (editando ? 'Salvar alterações' : 'Adicionar')}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelar}
+                  className="px-4 py-2 rounded-lg text-[15px] font-medium transition-colors hover:opacity-80"
+                  style={{ color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          )}
+
+          <Alerta fb={fb}/>
+        </>
+      )}
+
+      <p className="text-[13px] mt-4 leading-relaxed" style={{ color: 'var(--text-faint)' }}>
+        As chaves ficam em <code>arqvalor.usuarios.ia_configs</code> e só são acessíveis
+        a partir da sua conta (RLS). Cada conversa é enviada para o servidor do
+        provedor ATIVO.
       </p>
     </Secao>
   )
@@ -527,10 +982,10 @@ export default function PerfilPage() {
         <p className="text-[16px] text-white/40 mt-0.5">{emailAtual}</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+      <div className="space-y-4">
 
-        {/* ── Coluna esquerda ───────────────────────────────── */}
-        <div className="flex flex-col gap-4">
+        {/* ── Linha 1: Dados pessoais | Alterar senha ──────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
           {/* Dados pessoais */}
           <Secao titulo="Dados pessoais" icone={<User size={15}/>}>
@@ -584,42 +1039,10 @@ export default function PerfilPage() {
             </form>
           </Secao>
 
-          {/* Aparência */}
-          <SecaoTema/>
+        </div>{/* fim Linha 1 */}
 
-          {/* Mascote preferido */}
-          <SecaoMascote/>
-
-          {/* Zona de perigo */}
-          <div className="bg-red-500/5 border border-red-500/20 rounded-2xl overflow-hidden">
-            <button type="button"
-              onClick={() => setZonaPerigo(v => !v)}
-              className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-red-500/5 transition-colors">
-              <div className="flex items-center gap-2">
-                <span className="text-red-400/70"><Trash2 size={14}/></span>
-                <span className="text-[16px] font-semibold text-red-400">Zona de perigo</span>
-              </div>
-              <ChevronDown size={13} className="transition-transform flex-shrink-0"
-                style={{ color: '#f87171', transform: zonaPerigo ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
-            </button>
-            {zonaPerigo && (
-              <div className="px-4 pb-4 border-t border-red-500/15 pt-3">
-                <p className="text-[15px] text-white/35 mb-3 leading-relaxed">
-                  Remove permanentemente <strong className="text-red-400/60">todos</strong> os dados: lançamentos, contas, categorias e histórico. Ação irreversível.
-                </p>
-                <button type="button"
-                  onClick={() => { setModalExcluir(true); setConfirmText(''); setErroExcluir('') }}
-                  className="px-3 py-1.5 rounded-lg text-[15px] font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
-                  Excluir minha conta
-                </button>
-              </div>
-            )}
-          </div>
-
-        </div>
-
-        {/* ── Coluna direita ────────────────────────────────── */}
-        <div className="flex flex-col gap-4">
+        {/* ── Linha 2: Filtros salvos | Assistente de Lançamentos ─ */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
           {/* Filtros salvos */}
           <Secao titulo="Filtros salvos" icone={<Bookmark size={15}/>}>
@@ -844,8 +1267,44 @@ export default function PerfilPage() {
             )}
           </Secao>
 
-        </div>{/* fim coluna direita */}
-      </div>{/* fim grid */}
+        </div>{/* fim Linha 2 */}
+
+        {/* ── Linha 3: Mascote favorito | Aparência ──────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <SecaoMascote/>
+          <SecaoTema/>
+        </div>
+
+        {/* ── Linha 4: Integração com IA (largura cheia) ──────── */}
+        <SecaoIA/>
+
+        {/* ── Linha 5: Zona de perigo (largura cheia, recolhida) ─ */}
+        <div className="bg-red-500/5 border border-red-500/20 rounded-2xl overflow-hidden">
+          <button type="button"
+            onClick={() => setZonaPerigo(v => !v)}
+            className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-red-500/5 transition-colors">
+            <div className="flex items-center gap-2">
+              <span className="text-red-400/70"><Trash2 size={14}/></span>
+              <span className="text-[16px] font-semibold text-red-400">Zona de perigo</span>
+            </div>
+            <ChevronDown size={13} className="transition-transform flex-shrink-0"
+              style={{ color: '#f87171', transform: zonaPerigo ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
+          </button>
+          {zonaPerigo && (
+            <div className="px-4 pb-4 border-t border-red-500/15 pt-3">
+              <p className="text-[15px] text-white/35 mb-3 leading-relaxed">
+                Remove permanentemente <strong className="text-red-400/60">todos</strong> os dados: lançamentos, contas, categorias e histórico. Ação irreversível.
+              </p>
+              <button type="button"
+                onClick={() => { setModalExcluir(true); setConfirmText(''); setErroExcluir('') }}
+                className="px-3 py-1.5 rounded-lg text-[15px] font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
+                Excluir minha conta
+              </button>
+            </div>
+          )}
+        </div>
+
+      </div>{/* fim space-y-4 */}
 
       {/* ── Modal de padrões sugeridos ────────────────────────── */}
       {sugeridas !== null && (

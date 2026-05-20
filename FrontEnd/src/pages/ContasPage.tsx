@@ -11,6 +11,8 @@ import {
   Toggle, BtnSalvar, BtnCancelar, Toast, ModalExcluir,
 } from '../components/ui/shared'
 import type { Conta, TipoConta } from '../types'
+import LoadingMascote from '../components/ui/LoadingMascote'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
 
 interface PayloadEditarConta {
   nome: string; tipo: TipoConta
@@ -208,7 +210,15 @@ export default function ContasPage() {
 
       <Toast msg={feedback} />
 
-      {loading && <p className="text-[17px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando contas...</p>}
+      <div className="mb-4">
+        <MascoteTutorial pagina="contas" />
+      </div>
+
+      {loading && (
+        <div className="py-8">
+          <LoadingMascote texto="Carregando contas…" size={130} />
+        </div>
+      )}
       {error   && <p className="text-[17px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
 
       {!loading && !error && contas.length > 0 && (

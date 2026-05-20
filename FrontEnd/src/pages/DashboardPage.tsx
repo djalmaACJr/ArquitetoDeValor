@@ -2,6 +2,8 @@
 import { useState, useEffect, useCallback, memo, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import MascoteDica from '../components/ui/MascoteDica'
+import { falaResultadoMes } from '../lib/conteudoMascotes'
+import LoadingMascote from '../components/ui/LoadingMascote'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { ChevronDown, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus, Search } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
@@ -141,6 +143,7 @@ function CardSaldo({ contas, oculto, mes, historico, modo, setModo }: {
           <select
             value={modo} onChange={e => setModo(e.target.value as 'hoje' | 'fim')}
             className="text-[15px] bg-blue-400/10 border border-blue-400/30 rounded-md text-av-blue px-2 py-1 cursor-pointer"
+            style={{ colorScheme: 'auto' }}
           >
             <option value="hoje">Até hoje</option>
             <option value="fim">Até fim do mês</option>
@@ -1052,6 +1055,7 @@ function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw
           <select
             value={modo} onChange={e => setModo(e.target.value as 'hoje' | 'fim')}
             className="text-[15px] bg-blue-400/10 border border-blue-400/30 rounded-md text-av-blue px-2 py-1 cursor-pointer"
+            style={{ colorScheme: 'auto' }}
           >
             <option value="hoje">Até hoje</option>
             <option value="fim">Até fim do mês</option>
@@ -1357,12 +1361,16 @@ export default function DashboardPage() {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
-      if (e.key === 'ArrowLeft') {
+      // Ignora combinações com Ctrl/Cmd/Alt — esses são atalhos do browser.
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      // ←/↑ = mês anterior · →/↓ = próximo mês
+      const ehAnterior = e.key === 'ArrowLeft'  || e.key === 'ArrowUp'
+      const ehProximo  = e.key === 'ArrowRight' || e.key === 'ArrowDown'
+      if (ehAnterior) {
         e.preventDefault()
         prefetchMesAnterior()
         setMes(navMesStr(mes, -1))
-      }
-      if (e.key === 'ArrowRight') {
+      } else if (ehProximo) {
         e.preventDefault()
         prefetchMesSeguinte()
         setMes(navMesStr(mes, 1))
@@ -1525,34 +1533,21 @@ export default function DashboardPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-64 text-gray-400 text-[17px]">
-          Carregando dados...
+        <div className="flex items-center justify-center h-64">
+          <LoadingMascote texto="Carregando dados…" size={150} />
         </div>
       ) : (
         <div className="space-y-3">
-          {/* Dica do Sábio — sumariza o resultado do mês com tom contextual.
-              Renderiza nada se o PNG ainda não existir (graceful no-op). */}
+          {/* Dica do mascote preferido — texto e pose variam com o mascote
+              escolhido E o resultado do mês. Cada personagem fala na voz
+              própria (ver lib/conteudoMascotes.ts). */}
           {(() => {
-            const ent = resumo?.total_entradas ?? 0
-            const sai = resumo?.total_saidas   ?? 0
-            const r = ent - sai
-            const pctGasto = ent > 0 ? (sai / ent) * 100 : 0
-            const texto =
-              ent === 0 && sai === 0
-                ? 'Nenhum movimento neste mês ainda. A jornada começa com o primeiro lançamento.'
-              : r > 0
-                ? `Resultado positivo de ${pctGasto.toFixed(0)}% das receitas comprometidas — o capital trabalha a seu favor.`
-              : r < 0
-                ? 'Despesas superaram receitas neste mês. Avalie reduções pontuais antes que vire padrão.'
-                : 'Receitas e despesas se equilibraram. Próximo passo: criar margem para investimento.'
-            // Pose varia com o resultado: feliz = bom mês, espantado = atenção,
-            // curioso = sem dados, sentado = neutro/equilibrado.
-            const pose =
-              ent === 0 && sai === 0 ? 'curioso'
-              : r > 0                ? 'feliz'
-              : r < 0                ? 'espantado'
-              :                        'sentado'
-            return <MascoteDica nome={mascote} pose={pose} texto={texto} />
+            const fala = falaResultadoMes({
+              receitas: resumo?.total_entradas ?? 0,
+              despesas: resumo?.total_saidas   ?? 0,
+              mascote,
+            })
+            return <MascoteDica nome={mascote} pose={fala.pose} texto={fala.texto} />
           })()}
 
           {/* Linha 1: calendário + resultados + saldo */}

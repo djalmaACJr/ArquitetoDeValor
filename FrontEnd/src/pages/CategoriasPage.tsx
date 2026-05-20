@@ -9,6 +9,8 @@ import {
 import type { Categoria } from '../types'
 import { apiFetch, apiMutate, extrairLista } from '../lib/api'
 import { formatBRL, formatData, STATUS_LABEL, STATUS_COR } from '../lib/utils'
+import LoadingMascote from '../components/ui/LoadingMascote'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
 
 // ── Helpers de importação paralela ───────────────────────────────────────────
 const _sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -421,6 +423,10 @@ export default function CategoriasPage() {
 
       <Toast msg={feedback} />
 
+      <div className="mb-4">
+        <MascoteTutorial pagina="categorias" />
+      </div>
+
       {/* Busca */}
       <input value={busca} onChange={e => setBusca(e.target.value)}
         placeholder="Buscar categoria..."
@@ -428,7 +434,11 @@ export default function CategoriasPage() {
           text-[17px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
         style={{ color: '#e8eaf0' }} />
 
-      {loading && <p className="text-[17px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>}
+      {loading && (
+        <div className="py-8">
+          <LoadingMascote texto="Carregando categorias…" size={130} />
+        </div>
+      )}
       {error   && <p className="text-[17px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
 
       {/* Lista hierárquica */}

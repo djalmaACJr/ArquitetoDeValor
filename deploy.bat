@@ -18,10 +18,11 @@ echo   8 - excluir_conta
 echo   9 - filtros
 echo  10 - assistente
 echo  11 - lembretes
-echo  12 - Configurar nivel de logs
-echo  13 - Deploy com --debug (usar nesta maquina)
+echo  12 - chat_mascote
+echo  13 - Configurar nivel de logs
+echo  14 - Deploy com --debug (usar nesta maquina)
 echo.
-set /p opcao="Digite a opcao desejada (1-13): "
+set /p opcao="Digite a opcao desejada (1-14): "
 
 if "%opcao%"=="1"  goto todos
 if "%opcao%"=="2"  goto contas
@@ -34,8 +35,9 @@ if "%opcao%"=="8"  goto excluir_conta
 if "%opcao%"=="9"  goto filtros
 if "%opcao%"=="10" goto assistente
 if "%opcao%"=="11" goto lembretes
-if "%opcao%"=="12" goto config_log
-if "%opcao%"=="13" goto debug_mode
+if "%opcao%"=="12" goto chat_mascote
+if "%opcao%"=="13" goto config_log
+if "%opcao%"=="14" goto debug_mode
 echo Opcao invalida! & pause & exit /b
 
 :debug_mode
@@ -56,8 +58,9 @@ echo   8 - excluir_conta
 echo   9 - filtros
 echo  10 - assistente
 echo  11 - lembretes
+echo  12 - chat_mascote
 echo.
-set /p mod_debug="Digite o modulo (1-11): "
+set /p mod_debug="Digite o modulo (1-12): "
 
 if "%mod_debug%"=="1"  goto debug_todos
 if "%mod_debug%"=="2"  goto debug_contas
@@ -70,6 +73,7 @@ if "%mod_debug%"=="8"  goto debug_excluir_conta
 if "%mod_debug%"=="9"  goto debug_filtros
 if "%mod_debug%"=="10" goto debug_assistente
 if "%mod_debug%"=="11" goto debug_lembretes
+if "%mod_debug%"=="12" goto debug_chat_mascote
 echo Opcao invalida! & pause & exit /b
 
 :debug_contas
@@ -142,6 +146,13 @@ supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] lembretes deployed
 goto fim
 
+:debug_chat_mascote
+echo.
+echo [DEPLOY --debug] chat_mascote...
+supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo --debug
+echo [OK] chat_mascote deployed
+goto fim
+
 :debug_todos
 echo.
 echo [DEPLOY --debug] contas...
@@ -173,6 +184,9 @@ supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] lembretes...
 supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo --debug
+echo.
+echo [DEPLOY --debug] chat_mascote...
+supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [OK] Todos os modulos deployados com --debug
 goto fim
@@ -275,6 +289,13 @@ supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo
 echo [OK] lembretes deployed
 goto fim
 
+:chat_mascote
+echo.
+echo [DEPLOY] chat_mascote...
+supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo
+echo [OK] chat_mascote deployed
+goto fim
+
 :todos
 echo.
 echo [DEPLOY] contas...
@@ -306,6 +327,9 @@ supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] lembretes...
 supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo
+echo.
+echo [DEPLOY] chat_mascote...
+supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [OK] Todos os modulos deployados
 goto fim

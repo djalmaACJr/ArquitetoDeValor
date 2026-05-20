@@ -624,12 +624,22 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
 )
 
 // ── SelectDark ────────────────────────────────────────────────
+// Apesar do nome histórico, segue o tema ativo: usa tokens semânticos
+// (--bg-input, --text-primary, --border-subtle) e `colorScheme: 'auto'`
+// para que o dropdown de opções nativo do navegador também respeite o
+// tema (claro/escuro) escolhido.
 export function SelectDark(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select {...props}
-      style={{ color: '#e8eaf0', ...props.style }}
-      className={`w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-        text-[17px] outline-none focus:border-av-green transition-colors cursor-pointer
+      style={{
+        background:  'var(--bg-input)',
+        color:       'var(--text-primary)',
+        borderColor: 'var(--border-subtle)',
+        colorScheme: 'auto',
+        ...props.style,
+      }}
+      className={`w-full border rounded-lg px-3 py-2 text-[17px] outline-none
+        focus:border-av-green transition-colors cursor-pointer
         ${props.className ?? ''}`} />
   )
 }

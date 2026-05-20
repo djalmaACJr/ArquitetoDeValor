@@ -12,6 +12,9 @@ import { useCategorias } from '../hooks/useCategorias'
 import { apiMutate } from '../lib/api'
 import { formatBRL, mesLabel } from '../lib/utils'
 import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
+import LoadingMascote from '../components/ui/LoadingMascote'
+import MascoteDica from '../components/ui/MascoteDica'
+import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCategoria'
 
 ChartJS.register(ArcElement, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, Filler)
@@ -323,6 +326,7 @@ export default function AssinaturasPage() {
 
   // ── Reclassificação em massa ──────────────────────────────
   const { categorias } = useCategorias()
+  const { mascote } = useMascotePreferido()
   const [reclassificando, setReclassificando] = useState<Recorrencia | null>(null)
   const [novaDescricao,   setNovaDescricao]   = useState('')
   const [novaCategoriaId, setNovaCategoriaId] = useState('')
@@ -554,10 +558,7 @@ export default function AssinaturasPage() {
   // ── Render: loading ──────────────────────────────────────────
   if (loading) return (
     <div className="flex items-center justify-center py-24">
-      <div className="text-center">
-        <RefreshCw size={24} className="animate-spin mx-auto mb-3" style={{ color: '#4da6ff' }} />
-        <p className="text-[17px]" style={{ color: '#8b92a8' }}>Analisando histórico de transações…</p>
-      </div>
+      <LoadingMascote texto="Analisando histórico de transações…" size={150} />
     </div>
   )
 
@@ -730,6 +731,26 @@ export default function AssinaturasPage() {
           {insights.length > 0 && (
             <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
               <p className="text-[17px] font-semibold text-white mb-3">Insights Automáticos</p>
+              {/* Dica narrada — pose varia com o teor dos insights */}
+              <div className="mb-3">
+                <MascoteDica
+                  nome={mascote}
+                  pose={
+                    kpis.reajustadas > 0 || kpis.inativos > 0 ? 'espantado'
+                    : kpis.totalMensal > 0 ? 'sentado'
+                    : 'curioso'
+                  }
+                  texto={
+                    kpis.reajustadas > 0
+                      ? `Detectei ${kpis.reajustadas} reajuste${kpis.reajustadas > 1 ? 's' : ''} recente${kpis.reajustadas > 1 ? 's' : ''}. Vale revisar se ainda compensa.`
+                    : kpis.inativos > 0
+                      ? `${kpis.inativos} cobrança${kpis.inativos > 1 ? 's' : ''} parou${kpis.inativos > 1 ? 'aram' : ''} de aparecer há mais de 45 dias — confira se foi cancelada de fato.`
+                    : kpis.totalMensal > 0
+                      ? `Você compromete ${formatBRL(kpis.totalMensal)}/mês em recorrências. Pequenos cortes têm efeito grande no ano.`
+                    : 'Ainda não identifiquei assinaturas no seu histórico. Conforme você lançar despesas, padrões vão aparecer aqui.'
+                  }
+                />
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {insights.map((ins, i) => (
                   <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg"

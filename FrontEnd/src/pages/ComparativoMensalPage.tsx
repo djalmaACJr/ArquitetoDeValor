@@ -21,7 +21,9 @@ import ParetoChart from '../components/relatorios/ParetoChart'
 import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
 import { useExpansaoCategoria } from '../lib/agrupamentoCategoria'
 import MascoteDica from '../components/ui/MascoteDica'
+import LoadingMascote from '../components/ui/LoadingMascote'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import { falaComparativoPeriodos } from '../lib/conteudoMascotes'
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, LineElement,
@@ -929,6 +931,13 @@ export default function ComparativoMensalPage() {
         )}
       </div>
 
+      {/* Loading enquanto busca */}
+      {loading && (
+        <div className="py-12">
+          <LoadingMascote texto="Comparando períodos…" size={150} />
+        </div>
+      )}
+
       {/* Empty state */}
       {!buscado && !loading && (
         <div className="flex flex-col items-center justify-center py-24">
@@ -1508,28 +1517,20 @@ export default function ComparativoMensalPage() {
                   {insights.length} observação{insights.length !== 1 ? 'ões' : ''}
                 </p>
               </div>
-              {/* Raposa estratégica narra a leitura do período. Some se o PNG
-                  ainda não foi exportado (graceful no-op). */}
-              {buscado && insights.length > 0 && (
-                <div className="px-4 pt-4">
-                  <MascoteDica
-                    nome={mascote}
-                    pose={
-                      insights.some(i => i.tipo === 'alerta')   ? 'espantado'
-                      : insights.some(i => i.tipo === 'positivo') ? 'feliz'
-                      :                                            'curioso'
-                    }
-                    size={128}
-                    texto={
-                      insights.some(i => i.tipo === 'alerta')
-                        ? 'Detectei pontos de atenção no período final. Veja os alertas em vermelho — clique pra destacar as categorias responsáveis.'
-                      : insights.some(i => i.tipo === 'positivo')
-                        ? 'Boa leitura do período: tendências positivas dominam. Os insights destacam o que está funcionando.'
-                        : 'O período está estável. Observe as variações por categoria para identificar oportunidades.'
-                    }
-                  />
-                </div>
-              )}
+              {/* Mascote narra a leitura do período — texto na voz do
+                  mascote escolhido (ver lib/conteudoMascotes.ts). */}
+              {buscado && insights.length > 0 && (() => {
+                const fala = falaComparativoPeriodos({
+                  temAlerta:   insights.some(i => i.tipo === 'alerta'),
+                  temPositivo: insights.some(i => i.tipo === 'positivo'),
+                  mascote,
+                })
+                return (
+                  <div className="px-4 pt-4">
+                    <MascoteDica nome={mascote} pose={fala.pose} texto={fala.texto} />
+                  </div>
+                )
+              })()}
               <div className="p-4 space-y-2.5 overflow-auto flex-1" style={{ maxHeight: 440 }}>
                 {insights.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-8 gap-2">

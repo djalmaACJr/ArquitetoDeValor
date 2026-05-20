@@ -8,6 +8,8 @@ import {
 import { Download, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { formatBRL, mesLabel } from '../lib/utils'
+import MascoteDica from '../components/ui/MascoteDica'
+import { useMascotePreferido } from '../hooks/useMascotePreferido'
 
 ChartJS.register(CategoryScale, LinearScale, LineElement, BarElement, PointElement, Tooltip, Legend, Filler)
 
@@ -94,6 +96,7 @@ let _saved: PageCache | null = null
 export default function ProjecaoEconomiaPage() {
   const [lancamentos, setLancamentos] = useState<Lancamento[]>(() => _saved?.lancamentos ?? [])
   const [loading, setLoading]         = useState(!_saved)
+  const { mascote } = useMascotePreferido()
 
   // Simulador
   const [rendimento,  setRendimento]  = useState(0.8)   // % a.m.
@@ -482,6 +485,27 @@ export default function ProjecaoEconomiaPage() {
           {insights.length > 0 && (
             <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
               <p className="text-[17px] font-semibold text-white mb-3">Insights Automáticos</p>
+              {/* Dica narrada — pose contextual ao cenário projetado */}
+              <div className="mb-3">
+                <MascoteDica
+                  nome={mascote}
+                  pose={
+                    medias.economia < 0 ? 'espantado'
+                    : medias.taxaPoupanca >= 20 ? 'feliz'
+                    : medias.economia > 0 ? 'sentado'
+                    : 'curioso'
+                  }
+                  texto={
+                    medias.economia < 0
+                      ? `Você está gastando mais do que recebe (${formatBRL(Math.abs(medias.economia))}/mês). Sem ajustes, o patrimônio diminui no horizonte de ${hLabel}.`
+                    : medias.taxaPoupanca >= 20
+                      ? `Excelente disciplina! Com ${medias.taxaPoupanca.toFixed(0)}% de taxa de poupança, em ${hLabel} você acumula ${formatBRL(pvAtual)} com rendimento de ${rendimento}% a.m.`
+                    : medias.economia > 0
+                      ? `Ritmo de poupança ${medias.taxaPoupanca.toFixed(0)}% — abaixo dos 20% recomendados. Pequenos cortes amplificam muito no horizonte de ${hLabel}.`
+                    : 'Ainda não tenho histórico suficiente pra projetar. Continue lançando para uma análise mais rica.'
+                  }
+                />
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {insights.map((ins, i) => (
                   <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg"

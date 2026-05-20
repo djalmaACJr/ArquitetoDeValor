@@ -6,6 +6,7 @@ import {
   DatabaseBackup, RotateCcw, Save,
 } from 'lucide-react'
 import { apiFetch, apiMutate, extrairLista } from '../lib/api'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { log as logDev } from '../lib/logger'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
@@ -2461,6 +2462,10 @@ export default function ImportExportPage() {
       <div className="mb-5">
         <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Ferramentas</h1>
         <p className="text-[16px] text-gray-400 mt-0.5">Backup, restore, exportação, importação e limpeza de dados</p>
+      </div>
+
+      <div className="mb-4">
+        <MascoteTutorial pagina="importexport" />
       </div>
 
       <div className="space-y-3">

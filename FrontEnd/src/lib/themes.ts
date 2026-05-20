@@ -58,20 +58,20 @@ export const FAMILIAS: Familia[] = [
     },
   },
   {
-    id: 'engenheira',
-    label: 'Engenheira',
+    id: 'arquiteta',
+    label: 'Arquiteta',
     descricao: 'Blueprint azul vivo — precisão e cálculo estrutural.',
-    mascote: 'engenheira',
+    mascote: 'arquiteta',
     cores: {
       dia:   { bg: '#ffffff', accent: '#1976d2', text: '#0d2a4a' },
       noite: { bg: '#0e2a4a', accent: '#4dc3ff', text: '#e0eeff' },
     },
   },
   {
-    id: 'mago',
+    id: 'gato',
     label: 'Mago Gato',
     descricao: 'Roxo profundo com brilho esmeralda — a magia dos juros compostos.',
-    mascote: 'mago',
+    mascote: 'gato',
     cores: {
       dia:   { bg: '#ffffff', accent: '#6b21a8', text: '#1a0526' },
       noite: { bg: '#1f0e3e', accent: '#b48cff', text: '#f4eafa' },
@@ -111,6 +111,13 @@ export function parseLayoutId(raw: string | null | undefined): { familia: Famili
   if (raw === 'classico')                   return { familia: 'classico', modo: 'noite' }
   if (raw === 'midnight')                   return { familia: 'classico', modo: 'noite' }
   if (raw === 'sepia')                      return { familia: 'classico', modo: 'dia' }
+  // Aliases dos nomes antigos dos mascotes
+  if (raw === 'engenheira')                 return { familia: 'arquiteta', modo: 'noite' }
+  if (raw === 'engenheira-noite')           return { familia: 'arquiteta', modo: 'noite' }
+  if (raw === 'engenheira-dia')             return { familia: 'arquiteta', modo: 'dia' }
+  if (raw === 'mago')                       return { familia: 'gato', modo: 'noite' }
+  if (raw === 'mago-noite')                 return { familia: 'gato', modo: 'noite' }
+  if (raw === 'mago-dia')                   return { familia: 'gato', modo: 'dia' }
   // Formato composto família-modo
   const partes = raw.split('-')
   if (partes.length === 2) {

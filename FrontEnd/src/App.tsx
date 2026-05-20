@@ -15,12 +15,13 @@ import ComparativoMensalPage from './pages/ComparativoMensalPage'
 import AssinaturasPage from './pages/AssinaturasPage'
 import ProjecaoEconomiaPage from './pages/ProjecaoEconomiaPage'
 import { PageStateProvider } from './context/PageStateContext'
+import { LoadingMascoteEstatico } from './components/ui/LoadingMascote'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-av-dark">
-      <div className="text-av-green text-sm">Carregando...</div>
+      <LoadingMascoteEstatico texto="Carregando…" size={160} />
     </div>
   )
   return session ? <>{children}</> : <Navigate to="/login" replace/>

@@ -110,8 +110,8 @@ html:not(.dark)[data-theme="sabio"] {
   --tint-2:         rgba(139, 90, 35, 0.10);
 }
 
-/* === LAYOUT: Engenheira Noite — blueprint deep + cyan vivo ==== */
-html.dark[data-theme="engenheira"] {
+/* === LAYOUT: Arquiteta Noite — blueprint deep + cyan vivo ===== */
+html.dark[data-theme="arquiteta"] {
   --bg-page:        #051120;
   --bg-card:        #0e2a4a;
   --bg-input:       #04101e;
@@ -126,8 +126,8 @@ html.dark[data-theme="engenheira"] {
   --tint-2:         rgba(77, 195, 255, 0.14);
 }
 
-/* === LAYOUT: Engenheira Dia — papel azul-claro ================ */
-html:not(.dark)[data-theme="engenheira"] {
+/* === LAYOUT: Arquiteta Dia — papel azul-claro ================= */
+html:not(.dark)[data-theme="arquiteta"] {
   --bg-page:        #e8f1fa;
   --bg-card:        #ffffff;
   --bg-input:       #f3f8fc;
@@ -143,7 +143,7 @@ html:not(.dark)[data-theme="engenheira"] {
 }
 
 /* === LAYOUT: Mago Gato Noite — roxo profundo + esmeralda ====== */
-html.dark[data-theme="mago"] {
+html.dark[data-theme="gato"] {
   --bg-page:        #0a0414;
   --bg-card:        #1f0e3e;
   --bg-input:       #060211;
@@ -159,7 +159,7 @@ html.dark[data-theme="mago"] {
 }
 
 /* === LAYOUT: Mago Gato Dia — lavanda pálido =================== */
-html:not(.dark)[data-theme="mago"] {
+html:not(.dark)[data-theme="gato"] {
   --bg-page:        #f0eaf5;
   --bg-card:        #ffffff;
   --bg-input:       #f7f1fb;

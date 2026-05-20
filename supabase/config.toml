@@ -468,3 +468,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/lembretes/deno.json"
 entrypoint = "./functions/lembretes/index.ts"
+
+[functions.chat_mascote]
+enabled = true
+verify_jwt = false
+import_map = "./functions/chat_mascote/deno.json"
+entrypoint = "./functions/chat_mascote/index.ts"

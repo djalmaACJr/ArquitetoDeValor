@@ -8,6 +8,8 @@ import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import ModalLembrete from '../components/ui/ModalLembrete'
 import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X, RefreshCw, FileDown } from 'lucide-react'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
+import LoadingMascote from '../components/ui/LoadingMascote'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { useLancamentos, fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
@@ -240,8 +242,12 @@ export default function LancamentosPage() {
       const tag = (e.target as HTMLElement).tagName
       if (['INPUT','TEXTAREA','SELECT','BUTTON'].includes(tag)) return
       if (drawerAberto) return
-      if (e.key === 'ArrowLeft')  { e.preventDefault(); prefetchAdj(-1); navMes(-1) }
-      if (e.key === 'ArrowRight') { e.preventDefault(); prefetchAdj(1);  navMes(1)  }
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      // ←/↑ = mês anterior · →/↓ = próximo mês
+      const ehAnterior = e.key === 'ArrowLeft'  || e.key === 'ArrowUp'
+      const ehProximo  = e.key === 'ArrowRight' || e.key === 'ArrowDown'
+      if (ehAnterior) { e.preventDefault(); prefetchAdj(-1); navMes(-1) }
+      else if (ehProximo) { e.preventDefault(); prefetchAdj(1);  navMes(1)  }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -818,6 +824,11 @@ export default function LancamentosPage() {
 
       <Toast msg={feedback} />
 
+      {/* Tutorial do mascote (oculta após o usuário fechar) */}
+      <div className="mt-4">
+        <MascoteTutorial pagina="lancamentos" />
+      </div>
+
       {/* Cards de resumo */}
       <div className="grid grid-cols-3 gap-3 mt-4 mb-4">
         {[
@@ -832,7 +843,11 @@ export default function LancamentosPage() {
         ))}
       </div>
 
-      {loading && !buscaMultiMes && <p className="text-[17px] text-center py-12" style={{ color: '#8b92a8' }}>Carregando...</p>}
+      {loading && !buscaMultiMes && (
+        <div className="py-8">
+          <LoadingMascote texto="Carregando lançamentos…" size={130} />
+        </div>
+      )}
       {carregandoBusca && (
         <div className="flex items-center justify-center gap-3 py-4">
           <span className="text-[17px]" style={{ color: '#8b92a8' }}>

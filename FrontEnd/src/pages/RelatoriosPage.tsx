@@ -2,6 +2,8 @@
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react'
 import { ChevronDown, ChevronRight, Download, RefreshCw, Filter, Pencil } from 'lucide-react'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
+import LoadingMascote from '../components/ui/LoadingMascote'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
 import ParetoChart from '../components/relatorios/ParetoChart'
 
 import { apiFetch } from '../lib/api'
@@ -877,6 +879,10 @@ export default function RelatoriosPage() {
         <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
       </div>
 
+      <div className="mb-5">
+        <MascoteTutorial pagina="relatorios" />
+      </div>
+
       {/* Filtros */}
       <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5">
         <div className="flex flex-wrap gap-3 items-end">
@@ -1444,6 +1450,13 @@ export default function RelatoriosPage() {
           onFechar={() => setLancamentoEditando(null)}
           onSalvo={() => { setLancamentoEditando(null); buscar() }}
         />
+      )}
+
+      {/* Loading enquanto busca */}
+      {loading && (
+        <div className="py-12">
+          <LoadingMascote texto="Gerando relatório…" size={150} />
+        </div>
       )}
 
       {/* Estado vazio */}

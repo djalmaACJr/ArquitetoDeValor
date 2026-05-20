@@ -1,40 +1,55 @@
 // src/components/ui/Mascote.tsx
 //
-// Componente unificado para exibir os mascotes do app. Aceita um `nome` (a
-// personagem) e uma `pose` (a expressão/cena). Procura por um PNG
-// individual em `/mascotes/<nome>-<pose>.png` e, se não encontrar,
-// gracefulmente esconde o elemento — assim a UI não quebra enquanto as
-// imagens individuais ainda não foram exportadas.
+// Componente unificado para exibir os 4 mascotes do app.
 //
 // Personagens (`nome`):
 //   - sabio       Financial Advisor — sabedoria de longo prazo
-//   - engenheira  Structural Engineer — estrutura/cálculo
-//   - mago        Cat Wizard — magia dos juros compostos
+//   - arquiteta   Structural Engineer / Arquiteta — estrutura/cálculo
+//   - gato        Cat Wizard / Mago Gato — magia dos juros compostos
 //   - raposa      Strategic Fox — visão estratégica de mercado
 //
-// Poses (vocabulário alinhado com os arquivos exportados):
+// Poses (forma canônica masculina/neutra):
 //   - sentado     calmo, pensativo (default ideal para dicas)
 //   - curioso     descoberta, exploração (empty states)
-//   - pensando    reflexão, cálculo em andamento
 //   - andando     transição, ação, jornada
 //   - feliz       resultado positivo, conquista
+//   - triste      resultado negativo / "trocando"
 //   - espantado   surpresa, alerta, "novo"
 //   - hero        pose principal (cena cinematográfica, opcional)
 //
-// Arquivos esperados: `public/mascotes/<nome>-<pose>.png` (PNG-32 com
-// transparência). Sem o arquivo, o componente renderiza nada (no-op).
+// Os arquivos físicos podem usar variação feminina em algumas poses
+// (arquiteta-sentada, raposa-sentada, raposa-espantada). A função
+// `arquivoPara` cuida disso — o consumidor sempre passa a forma canônica.
 
 import { useState } from 'react'
 
-export type MascoteNome  = 'sabio' | 'engenheira' | 'mago' | 'raposa'
+export type MascoteNome  = 'sabio' | 'arquiteta' | 'gato' | 'raposa'
 export type MascotePose  =
-  | 'sentado' | 'curioso' | 'pensando' | 'andando' | 'feliz' | 'espantado' | 'hero'
+  | 'sentado' | 'curioso' | 'andando'
+  | 'feliz'   | 'triste'  | 'espantado'
+  | 'hero'
 
 const LABEL: Record<MascoteNome, string> = {
-  sabio:      'Sábio',
-  engenheira: 'Engenheira',
-  mago:       'Mago Gato',
-  raposa:     'Raposa',
+  sabio:     'Sábio',
+  arquiteta: 'Arquiteta',
+  gato:      'Mago Gato',
+  raposa:    'Raposa',
+}
+
+/**
+ * Resolve qual arquivo carregar para (nome, pose). Em alguns casos o
+ * arquivo usa variação feminina ("sentada"/"espantada"); a forma canônica
+ * exposta na API é sempre a masculina/neutra para simplificar o
+ * vocabulário dos consumidores.
+ */
+function arquivoPara(nome: MascoteNome, pose: MascotePose): string {
+  if (pose === 'sentado' && (nome === 'arquiteta' || nome === 'raposa')) return `${nome}-sentada`
+  if (pose === 'espantado' && nome === 'raposa') return `${nome}-espantada`
+  return `${nome}-${pose}`
+}
+
+export function srcMascote(nome: MascoteNome, pose: MascotePose): string {
+  return `/mascotes/${arquivoPara(nome, pose)}.png`
 }
 
 export default function Mascote({
@@ -46,7 +61,7 @@ export default function Mascote({
 }: {
   nome:   MascoteNome
   pose:   MascotePose
-  /** Tamanho em pixels (lado maior). Default 96. */
+  /** Largura em pixels — a altura ajusta automaticamente. */
   size?:  number
   className?: string
   alt?:   string
@@ -54,10 +69,9 @@ export default function Mascote({
   const [erro, setErro] = useState(false)
   if (erro) return null
 
-  const src = `/mascotes/${nome}-${pose}.png`
   return (
     <img
-      src={src}
+      src={srcMascote(nome, pose)}
       alt={alt ?? `${LABEL[nome]} (${pose})`}
       loading="lazy"
       onError={() => setErro(true)}
