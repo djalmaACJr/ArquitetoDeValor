@@ -174,7 +174,7 @@ def main() -> int:
         return 1
 
     BACKUP.mkdir(exist_ok=True)
-    # Pega só os PNGs dos mascotes (pula login-bg, etc.)
+    # Pega só os PNGs dos mascotes (pula zlogin-bg, etc.)
     pngs = sorted(
         p for p in PASTA.glob('*.png')
         if any(p.name.startswith(prefixo) for prefixo in ('sabio-', 'arquiteta-', 'gato-', 'raposa-'))

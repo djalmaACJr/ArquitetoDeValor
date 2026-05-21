@@ -1,12 +1,27 @@
-import { useEffect, useRef } from 'react'
-import { Outlet } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Outlet, useLocation, Navigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
+import { Menu } from 'lucide-react'
 import Sidebar from './Sidebar'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
+import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 
 export default function AppLayout() {
   const qc = useQueryClient()
   const mainRef = useRef<HTMLElement>(null)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const { pathname } = useLocation()
+  const { primeiroAcesso } = useMascotePreferido()
+
+  // Fecha o menu mobile ao navegar (UX)
+  useEffect(() => { setMobileNavOpen(false) }, [pathname])
+
+  // Primeiro acesso: redireciona pra tela de apresentação dos mascotes.
+  // `primeiroAcesso === undefined` significa "ainda carregando do banco" —
+  // espera (não redireciona, evita flicker).
+  if (primeiroAcesso === true) {
+    return <Navigate to="/apresentacao" replace/>
+  }
 
   // Pré-aquece o cache dos meses vizinhos ao mês atual logo após o login,
   // antes mesmo do usuário navegar para a tela de Lançamentos.
@@ -61,10 +76,36 @@ export default function AppLayout() {
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
+  // Atalho global de tutorial: F1 abre o tour da página atual.
+  // Funciona em qualquer lugar do app (mesmo dentro de inputs).
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => {
+      if (e.key === 'F1') {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent('av-abrir-tutorial'))
+      }
+    }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }, [])
+
   return (
-    <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
-      <Sidebar />
-      <main ref={mainRef} className="flex-1 overflow-auto">
+    <div className="flex flex-col md:flex-row h-screen" style={{ background: 'var(--bg-page)' }}>
+      {/* Topbar — só no mobile */}
+      <header className="md:hidden flex items-center gap-3 px-3 h-12 bg-av-dark border-b border-blue-400/15 flex-shrink-0 z-30">
+        <button
+          onClick={() => setMobileNavOpen(true)}
+          aria-label="Abrir menu"
+          className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+        >
+          <Menu size={20}/>
+        </button>
+        <p className="text-[15px] font-semibold text-white">Arquiteto de Valor</p>
+      </header>
+
+      <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+
+      <main ref={mainRef} className="flex-1 overflow-auto min-w-0">
         <Outlet />
       </main>
     </div>

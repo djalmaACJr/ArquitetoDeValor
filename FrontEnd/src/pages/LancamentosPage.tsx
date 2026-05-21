@@ -6,7 +6,7 @@ import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import ModalLembrete from '../components/ui/ModalLembrete'
-import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X, RefreshCw, FileDown } from 'lucide-react'
+import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X, RefreshCw, FileDown, ChevronDown, ChevronUp, ArrowUp, Filter } from 'lucide-react'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
@@ -15,6 +15,7 @@ import { useContas } from '../hooks/useContas'
 import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { apiMutate } from '../lib/api'
 import { usePageState } from '../context/PageStateContext'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { supabase } from '../lib/supabase'
 import { IconeConta } from '../components/ui/IconeConta'
 import { Toast, ModalExcluir } from '../components/ui/shared'
@@ -382,6 +383,48 @@ export default function LancamentosPage() {
     return () => clearTimeout(timer)
   }, [diaFocado])
 
+  // ── Auto-colapsar header ao rolar; mostrar botão "voltar ao topo" ──
+  // `overrideManual`: ativado quando o usuário clica em expandir/recolher
+  // enquanto está scrollado. Desativa o auto-collapse até voltar ao topo.
+  const [headerColapsado,   setHeaderColapsado]   = useState(false)
+  const [mostrarVoltarTopo, setMostrarVoltarTopo] = useState(false)
+  const overrideManualRef = useRef(false)
+  useEffect(() => {
+    const main = document.querySelector('main') as HTMLElement | null
+    if (!main) return
+    let ticking = false
+    function onScroll() {
+      if (ticking) return
+      ticking = true
+      requestAnimationFrame(() => {
+        const y = main!.scrollTop
+        if (y < 20) {
+          // Topo: zera override e força expandido
+          overrideManualRef.current = false
+          setHeaderColapsado(false)
+        } else if (y > 120 && !overrideManualRef.current) {
+          setHeaderColapsado(true)
+        }
+        setMostrarVoltarTopo(y > 240)
+        ticking = false
+      })
+    }
+    main.addEventListener('scroll', onScroll, { passive: true })
+    return () => main.removeEventListener('scroll', onScroll)
+  }, [])
+  const expandirHeader = useCallback(() => {
+    overrideManualRef.current = true
+    setHeaderColapsado(false)
+  }, [])
+  const colapsarHeader = useCallback(() => {
+    overrideManualRef.current = true
+    setHeaderColapsado(true)
+  }, [])
+  const voltarAoTopo = useCallback(() => {
+    const main = document.querySelector('main') as HTMLElement | null
+    main?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
+
   const handleSelectDia = useCallback((data: string) => {
     setDiaFocado(data)
     requestAnimationFrame(() => {
@@ -608,6 +651,35 @@ export default function LancamentosPage() {
     return { receitas, despesas, resultado: receitas - despesas }
   }, [lancamentosParaExibir])
 
+  // ── Registra snapshot dos dados pra IA poder analisar ─────────────
+  useRegistrarContextoIA(useMemo(() => ({
+    titulo:    `Extratos · ${mesLabel(mes)}`,
+    descricao: 'Lista de lançamentos exibida na página, com totais e filtros ativos',
+    dados: {
+      mes,
+      filtros: {
+        contas:     filtContas,
+        categorias: filtCats,
+        status:     filtStatus,
+        pesquisa,
+        escopoPesquisa,
+        comSaldo,
+      },
+      totais,
+      total_lancamentos: lancamentosParaExibir.length,
+      // Amostra dos primeiros 30 lançamentos (suficiente pra IA pegar padrão)
+      amostra: lancamentosParaExibir.slice(0, 30).map(l => ({
+        data:      l.data,
+        tipo:      l.tipo,
+        descricao: l.descricao,
+        valor:     l.valor,
+        status:    l.status,
+        conta:     l.conta_nome,
+        categoria: l.categoria_nome,
+      })),
+    },
+  }), [mes, filtContas, filtCats, filtStatus, pesquisa, escopoPesquisa, comSaldo, totais, lancamentosParaExibir]))
+
   // Saldo por data calculado no frontend — 2 modos:
   const saldoPorData = useMemo(() => {
     const grupos = agruparPorData(lancamentosComSaldoCorrigido)
@@ -657,13 +729,58 @@ export default function LancamentosPage() {
   )
 
 
+  const filtrosAtivosBadge = temFiltroAtivo || pesquisa.length > 0
+
   return (
     <div className="p-5">
       {/* ── Sticky: topbar + filtros + calendário ── */}
       <div ref={stickyRef} className="sticky top-0 z-20 -mx-5 px-5 pt-4 pb-2" style={{ background: '#0d1220', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+        {headerColapsado ? (
+          // ── Versão compacta (auto ao rolar): só o calendário + botão expandir ──
+          <div className="flex items-center gap-2">
+            <button
+              onClick={expandirHeader}
+              title="Mostrar filtros"
+              aria-label="Mostrar filtros"
+              className="relative flex items-center justify-center rounded-lg border transition-all flex-shrink-0"
+              style={{
+                width: 34, height: 34,
+                borderColor: filtrosAtivosBadge ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.12)',
+                color: filtrosAtivosBadge ? '#4da6ff' : '#8b92a8',
+                background: filtrosAtivosBadge ? 'rgba(77,166,255,0.08)' : 'rgba(255,255,255,0.03)',
+              }}
+            >
+              <Filter size={14} />
+              {filtrosAtivosBadge && (
+                <span
+                  className="absolute -top-1 -right-1 w-2 h-2 rounded-full"
+                  style={{ background: '#4da6ff' }}
+                />
+              )}
+            </button>
+            <div className="flex-1 min-w-0">
+              {!buscaMultiMes && (
+                <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} onSelectDia={handleSelectDia} />
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
         {/* Topbar */}
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-[21px] font-bold" style={{ color: '#e8eaf0' }}>Lançamentos</h1>
+          <h1 className="text-[21px] font-bold flex items-center gap-2" style={{ color: '#e8eaf0' }}>
+            Lançamentos
+            {/* Botão de recolher filtros — sempre visível */}
+            <button
+              onClick={colapsarHeader}
+              title="Recolher filtros"
+              aria-label="Recolher filtros"
+              className="p-1 rounded-md border transition-colors"
+              style={{ borderColor: 'rgba(255,255,255,0.12)', color: '#8b92a8' }}
+            >
+              <ChevronUp size={14} />
+            </button>
+          </h1>
           <div className="flex items-center gap-2">
             <button
               onClick={exportarXlsx}
@@ -818,7 +935,22 @@ export default function LancamentosPage() {
         {!buscaMultiMes && (
           <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} onSelectDia={handleSelectDia} />
         )}
+          </>
+        )}
       </div>
+
+      {/* Botão flutuante "voltar ao topo" */}
+      {mostrarVoltarTopo && (
+        <button
+          onClick={voltarAoTopo}
+          title="Voltar ao topo"
+          aria-label="Voltar ao topo"
+          className="fixed bottom-5 right-5 z-30 w-11 h-11 rounded-full border border-white/15 shadow-lg flex items-center justify-center transition-all hover:scale-110"
+          style={{ background: 'rgba(13,18,32,0.92)', color: '#e8eaf0', backdropFilter: 'blur(4px)' }}
+        >
+          <ArrowUp size={18} />
+        </button>
+      )}
 
       <Toast msg={feedback} />
 

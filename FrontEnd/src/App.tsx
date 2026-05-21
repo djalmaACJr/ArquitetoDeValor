@@ -14,7 +14,9 @@ import ImportExportPage from './pages/ImportExportPage'
 import ComparativoMensalPage from './pages/ComparativoMensalPage'
 import AssinaturasPage from './pages/AssinaturasPage'
 import ProjecaoEconomiaPage from './pages/ProjecaoEconomiaPage'
+import ApresentacaoMascotes from './pages/ApresentacaoMascotes'
 import { PageStateProvider } from './context/PageStateContext'
+import { ContextoIAProvider } from './context/ContextoIAContext'
 import { LoadingMascoteEstatico } from './components/ui/LoadingMascote'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -36,10 +38,16 @@ export default function App() {
   return (
     <BrowserRouter>
       <PageStateProvider key={userId ?? 'anon'}>
+        <ContextoIAProvider>
         <Routes>
           <Route path="/login"    element={<LoginPage/>}/>
           <Route path="/cadastro"        element={<CadastroPage/>}/>
           <Route path="/redefinir-senha" element={<RedefinirSenhaPage/>}/>
+          <Route path="/apresentacao" element={
+            <PrivateRoute>
+              <ApresentacaoMascotes/>
+            </PrivateRoute>
+          }/>
           <Route path="/" element={
             <PrivateRoute>
               <AppLayout/>
@@ -58,6 +66,7 @@ export default function App() {
           </Route>
           <Route path="*" element={<Navigate to="/" replace/>}/>
         </Routes>
+        </ContextoIAProvider>
       </PageStateProvider>
     </BrowserRouter>
   )

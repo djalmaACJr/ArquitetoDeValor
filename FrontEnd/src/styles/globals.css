@@ -78,68 +78,68 @@ html:not(.dark):not([data-theme]) {
   --tint-2:         rgba(0, 0, 0, 0.045);
 }
 
-/* === LAYOUT: Sábio Noite — couro escuro + ouro vivo =========== */
+/* === LAYOUT: Conselheiro Noite — marrom claro + caramelo ====== */
 html.dark[data-theme="sabio"] {
-  --bg-page:        #1a0f06;
-  --bg-card:        #2d1b0d;
-  --bg-input:       #15090a;
-  --bg-elevated:    #3a2415;
-  --text-primary:   #fff4dd;
-  --text-secondary: #e8c98a;
-  --text-muted:     #b08c52;
-  --text-faint:     #6b5538;
-  --border-subtle:  rgba(227, 168, 58, 0.30);
-  --border-faint:   rgba(227, 168, 58, 0.12);
-  --tint-1:         rgba(227, 168, 58, 0.06);
-  --tint-2:         rgba(227, 168, 58, 0.14);
+  --bg-page:        #3a2a1c;
+  --bg-card:        #4d3a26;
+  --bg-input:       #2d2014;
+  --bg-elevated:    #5c4830;
+  --text-primary:   #f7eada;
+  --text-secondary: #dcbf90;
+  --text-muted:     #b09775;
+  --text-faint:     #7a6448;
+  --border-subtle:  rgba(212, 168, 110, 0.32);
+  --border-faint:   rgba(212, 168, 110, 0.14);
+  --tint-1:         rgba(212, 168, 110, 0.07);
+  --tint-2:         rgba(212, 168, 110, 0.16);
 }
 
-/* === LAYOUT: Sábio Dia — creme com texto marrom =============== */
+/* === LAYOUT: Conselheiro Dia — bege com marrom claro ========== */
 html:not(.dark)[data-theme="sabio"] {
-  --bg-page:        #f5ecd9;
-  --bg-card:        #fffaee;
-  --bg-input:       #f0e6cf;
-  --bg-elevated:    #fffaee;
-  --text-primary:   #3a2715;
-  --text-secondary: #6b4924;
-  --text-muted:     #8b6738;
+  --bg-page:        #f5e8d0;
+  --bg-card:        #fdf6e8;
+  --bg-input:       #ede1c8;
+  --bg-elevated:    #fdf6e8;
+  --text-primary:   #5a3e22;
+  --text-secondary: #8a6238;
+  --text-muted:     #a8825a;
   --text-faint:     #c5a575;
-  --border-subtle:  rgba(139, 90, 35, 0.28);
-  --border-faint:   rgba(139, 90, 35, 0.12);
-  --tint-1:         rgba(139, 90, 35, 0.05);
-  --tint-2:         rgba(139, 90, 35, 0.10);
+  --border-subtle:  rgba(170, 120, 70, 0.28);
+  --border-faint:   rgba(170, 120, 70, 0.12);
+  --tint-1:         rgba(170, 120, 70, 0.05);
+  --tint-2:         rgba(170, 120, 70, 0.10);
 }
 
-/* === LAYOUT: Arquiteta Noite — blueprint deep + cyan vivo ===== */
+/* === LAYOUT: Arquiteta Noite — rosa profundo + bebê vivo ====== */
 html.dark[data-theme="arquiteta"] {
-  --bg-page:        #051120;
-  --bg-card:        #0e2a4a;
-  --bg-input:       #04101e;
-  --bg-elevated:    #15365e;
-  --text-primary:   #e0eeff;
-  --text-secondary: #a0c6e8;
-  --text-muted:     #5d8cb8;
-  --text-faint:     #2d4a6b;
-  --border-subtle:  rgba(77, 195, 255, 0.32);
-  --border-faint:   rgba(77, 195, 255, 0.14);
-  --tint-1:         rgba(77, 195, 255, 0.06);
-  --tint-2:         rgba(77, 195, 255, 0.14);
+  --bg-page:        #2a1520;
+  --bg-card:        #3d2235;
+  --bg-input:       #1f0e18;
+  --bg-elevated:    #4d2c44;
+  --text-primary:   #ffe0ee;
+  --text-secondary: #f3b8d2;
+  --text-muted:     #c0869f;
+  --text-faint:     #7d5a6a;
+  --border-subtle:  rgba(248, 168, 200, 0.34);
+  --border-faint:   rgba(248, 168, 200, 0.14);
+  --tint-1:         rgba(248, 168, 200, 0.07);
+  --tint-2:         rgba(248, 168, 200, 0.16);
 }
 
-/* === LAYOUT: Arquiteta Dia — papel azul-claro ================= */
+/* === LAYOUT: Arquiteta Dia — rosa bebê pastel ================= */
 html:not(.dark)[data-theme="arquiteta"] {
-  --bg-page:        #e8f1fa;
+  --bg-page:        #fdeef5;
   --bg-card:        #ffffff;
-  --bg-input:       #f3f8fc;
+  --bg-input:       #fbe2ec;
   --bg-elevated:    #ffffff;
-  --text-primary:   #0d2a4a;
-  --text-secondary: #1e466e;
-  --text-muted:     #4970a0;
-  --text-faint:     #a0b8d4;
-  --border-subtle:  rgba(25, 118, 210, 0.25);
-  --border-faint:   rgba(25, 118, 210, 0.10);
-  --tint-1:         rgba(25, 118, 210, 0.05);
-  --tint-2:         rgba(25, 118, 210, 0.10);
+  --text-primary:   #5a1f3a;
+  --text-secondary: #843a5e;
+  --text-muted:     #b06080;
+  --text-faint:     #dba5be;
+  --border-subtle:  rgba(232, 120, 168, 0.28);
+  --border-faint:   rgba(232, 120, 168, 0.10);
+  --tint-1:         rgba(232, 120, 168, 0.05);
+  --tint-2:         rgba(232, 120, 168, 0.10);
 }
 
 /* === LAYOUT: Mago Gato Noite — roxo profundo + esmeralda ====== */
@@ -174,36 +174,36 @@ html:not(.dark)[data-theme="gato"] {
   --tint-2:         rgba(80, 180, 120, 0.10);
 }
 
-/* === LAYOUT: Raposa Noite — terracota + laranja vivo ========== */
+/* === LAYOUT: Raposa Noite — money green profundo ============== */
 html.dark[data-theme="raposa"] {
-  --bg-page:        #190a05;
-  --bg-card:        #2d130b;
-  --bg-input:       #140702;
-  --bg-elevated:    #3a1c10;
-  --text-primary:   #ffe8d5;
-  --text-secondary: #e8b18a;
-  --text-muted:     #a8714a;
-  --text-faint:     #6b4830;
-  --border-subtle:  rgba(255, 122, 58, 0.32);
-  --border-faint:   rgba(255, 122, 58, 0.14);
-  --tint-1:         rgba(255, 122, 58, 0.06);
-  --tint-2:         rgba(255, 122, 58, 0.14);
+  --bg-page:        #061a0c;
+  --bg-card:        #0f2b18;
+  --bg-input:       #03110a;
+  --bg-elevated:    #173d24;
+  --text-primary:   #dcf5dc;
+  --text-secondary: #aedaae;
+  --text-muted:     #6da06d;
+  --text-faint:     #3d6b3d;
+  --border-subtle:  rgba(80, 200, 110, 0.32);
+  --border-faint:   rgba(80, 200, 110, 0.14);
+  --tint-1:         rgba(80, 200, 110, 0.06);
+  --tint-2:         rgba(80, 200, 110, 0.14);
 }
 
-/* === LAYOUT: Raposa Dia — pêssego claro ======================= */
+/* === LAYOUT: Raposa Dia — money green claro =================== */
 html:not(.dark)[data-theme="raposa"] {
-  --bg-page:        #fbf0e8;
+  --bg-page:        #ebf5ec;
   --bg-card:        #ffffff;
-  --bg-input:       #fcebde;
+  --bg-input:       #dfecdf;
   --bg-elevated:    #ffffff;
-  --text-primary:   #3a1409;
-  --text-secondary: #6b3220;
-  --text-muted:     #a8593a;
-  --text-faint:     #d4a07a;
-  --border-subtle:  rgba(193, 67, 24, 0.28);
-  --border-faint:   rgba(193, 67, 24, 0.10);
-  --tint-1:         rgba(193, 67, 24, 0.05);
-  --tint-2:         rgba(193, 67, 24, 0.10);
+  --text-primary:   #0d2818;
+  --text-secondary: #1f4d2e;
+  --text-muted:     #3d7a4d;
+  --text-faint:     #95b8a0;
+  --border-subtle:  rgba(40, 130, 60, 0.28);
+  --border-faint:   rgba(40, 130, 60, 0.10);
+  --tint-1:         rgba(40, 130, 60, 0.05);
+  --tint-2:         rgba(40, 130, 60, 0.10);
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
@@ -393,3 +393,71 @@ html:not(.dark) {
   .bg-white\/4   { background-color: var(--tint-1) !important; }
   .bg-white\/8   { background-color: var(--tint-2) !important; }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Body — garante que a área "vazia" entre cards acompanhe o tema. Sem isto
+ * o wrap do AppLayout (`bg-gray-900`) fica fixo independente do tema ativo.
+ * ────────────────────────────────────────────────────────────────────────── */
+html, body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Tailwind grays (gray-50..900) — não são theme-aware, mas são usados
+ * como cinzas neutros em telas que ainda não foram migradas pra tokens.
+ * Mapeamos para tokens semânticos do tema ativo.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Backgrounds — claros (modo dia / Tailwind default) */
+.bg-white         { background-color: var(--bg-card)     !important; }
+.bg-gray-50       { background-color: var(--bg-page)     !important; }
+.bg-gray-100      { background-color: var(--bg-page)     !important; }
+.bg-gray-200      { background-color: var(--bg-input)    !important; }
+
+/* Backgrounds — escuros (sem prefixo dark) */
+.bg-gray-600      { background-color: var(--bg-elevated) !important; }
+.bg-gray-700      { background-color: var(--bg-elevated) !important; }
+.bg-gray-800      { background-color: var(--bg-card)     !important; }
+.bg-gray-900      { background-color: var(--bg-page)     !important; }
+
+/* Backgrounds — variantes dark: (só aplicam quando html.dark) */
+html.dark .dark\:bg-gray-700 { background-color: var(--bg-elevated) !important; }
+html.dark .dark\:bg-gray-800 { background-color: var(--bg-card)     !important; }
+html.dark .dark\:bg-gray-900 { background-color: var(--bg-page)     !important; }
+
+/* Textos — claros (sem prefixo dark) */
+.text-gray-400    { color: var(--text-muted)     !important; }
+.text-gray-500    { color: var(--text-muted)     !important; }
+.text-gray-600    { color: var(--text-secondary) !important; }
+.text-gray-700    { color: var(--text-secondary) !important; }
+.text-gray-800    { color: var(--text-primary)   !important; }
+.text-gray-900    { color: var(--text-primary)   !important; }
+
+/* Textos — variantes dark: (texto claro sobre escuro) */
+html.dark .dark\:text-gray-100 { color: var(--text-primary)   !important; }
+html.dark .dark\:text-gray-200 { color: var(--text-primary)   !important; }
+html.dark .dark\:text-gray-300 { color: var(--text-secondary) !important; }
+html.dark .dark\:text-gray-400 { color: var(--text-muted)     !important; }
+html.dark .dark\:text-gray-500 { color: var(--text-muted)     !important; }
+
+/* Bordas */
+.border-gray-100  { border-color: var(--border-faint)  !important; }
+.border-gray-200  { border-color: var(--border-subtle) !important; }
+.border-gray-300  { border-color: var(--border-subtle) !important; }
+.border-gray-700  { border-color: var(--border-subtle) !important; }
+html.dark .dark\:border-gray-600 { border-color: var(--border-subtle) !important; }
+html.dark .dark\:border-gray-700 { border-color: var(--border-subtle) !important; }
+html.dark .dark\:border-gray-800 { border-color: var(--border-faint)  !important; }
+
+/* Hover variants comuns */
+.hover\:bg-gray-50:hover     { background-color: var(--tint-1) !important; }
+.hover\:bg-gray-100:hover    { background-color: var(--tint-2) !important; }
+html.dark .dark\:hover\:bg-gray-700:hover { background-color: var(--tint-2) !important; }
+html.dark .dark\:hover\:bg-gray-600:hover { background-color: var(--tint-2) !important; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Chrome do app (sidebar, topbar mobile) — segue o tema via --bg-card.
+ * Mantém harmonia entre o "chrome" e o conteúdo independente da família.
+ * ────────────────────────────────────────────────────────────────────────── */
+.bg-av-dark { background-color: var(--bg-card) !important; }

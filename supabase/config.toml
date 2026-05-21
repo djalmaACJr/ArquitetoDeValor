@@ -474,3 +474,11 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/chat_mascote/deno.json"
 entrypoint = "./functions/chat_mascote/index.ts"
+
+
+
+[functions.ia_configs]
+enabled = true
+verify_jwt = false
+import_map = "./functions/ia_configs/deno.json"
+entrypoint = "./functions/ia_configs/index.ts"

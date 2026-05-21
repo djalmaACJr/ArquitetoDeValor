@@ -3,19 +3,24 @@
 // Componente unificado para exibir os 4 mascotes do app.
 //
 // Personagens (`nome`):
-//   - sabio       Financial Advisor — sabedoria de longo prazo
+//   - sabio       Financial Advisor / Conselheiro — sabedoria de longo prazo
 //   - arquiteta   Structural Engineer / Arquiteta — estrutura/cálculo
 //   - gato        Cat Wizard / Mago Gato — magia dos juros compostos
 //   - raposa      Strategic Fox — visão estratégica de mercado
 //
 // Poses (forma canônica masculina/neutra):
-//   - sentado     calmo, pensativo (default ideal para dicas)
-//   - curioso     descoberta, exploração (empty states)
-//   - andando     transição, ação, jornada
-//   - feliz       resultado positivo, conquista
-//   - triste      resultado negativo / "trocando"
-//   - espantado   surpresa, alerta, "novo"
-//   - hero        pose principal (cena cinematográfica, opcional)
+//   - sentado              calmo, pensativo (default ideal para dicas)
+//   - curioso              descoberta, exploração (empty states)
+//   - andando              transição, ação, jornada
+//   - feliz                resultado positivo, conquista
+//   - triste               resultado negativo / "trocando"
+//   - espantado            surpresa, alerta, "novo"
+//   - hero                 pose principal (cena cinematográfica, opcional)
+//   - apontando-esquerda          tutorial — apontando lateral pra esquerda
+//   - apontando-direita           tutorial — apontando lateral pra direita
+//   - apontando-esquerda-acima    tutorial — apontando pra cima-esquerda
+//   - apontando-direita-acima     tutorial — apontando pra cima-direita
+//   - comprimento-inicio          tutorial — pose de boas-vindas / despedida
 //
 // Os arquivos físicos podem usar variação feminina em algumas poses
 // (arquiteta-sentada, raposa-sentada, raposa-espantada). A função
@@ -28,9 +33,12 @@ export type MascotePose  =
   | 'sentado' | 'curioso' | 'andando'
   | 'feliz'   | 'triste'  | 'espantado'
   | 'hero'
+  | 'apontando-esquerda' | 'apontando-direita'
+  | 'apontando-esquerda-acima' | 'apontando-direita-acima'
+  | 'comprimento-inicio'
 
 const LABEL: Record<MascoteNome, string> = {
-  sabio:     'Sábio',
+  sabio:     'Conselheiro',
   arquiteta: 'Arquiteta',
   gato:      'Mago Gato',
   raposa:    'Raposa',

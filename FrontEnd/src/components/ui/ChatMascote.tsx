@@ -5,10 +5,14 @@
 // Anthropic Claude. Histórico em memória — não persiste entre aberturas.
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Send, Trash2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { X, Send, Trash2, Paperclip, Camera, HelpCircle, Users } from 'lucide-react'
 import Mascote, { type MascoteNome, type MascotePose } from './Mascote'
 import { useChatMascote } from '../../hooks/useChatMascote'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
+import { useContextoIA, serializarContexto } from '../../context/ContextoIAContext'
+import { useIAPreferencia } from '../../hooks/useIAPreferencia'
+import { capturarTela } from '../../lib/screenshot'
 
 // Sugestões iniciais por mascote — incentiva a primeira pergunta.
 const SUGESTOES: Record<MascoteNome, string[]> = {
@@ -45,10 +49,34 @@ export default function ChatMascote({
 }) {
   const { apelidoDe } = useMascotePreferido()
   const apelido = apelidoDe(nome)
+  const navigate = useNavigate()
   const { mensagens, carregando, erro, enviar, limpar } = useChatMascote(nome, apelido)
   const [input, setInput] = useState('')
   const finalRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Contexto da página atual (se registrado) — anexável à mensagem.
+  const contextoPagina = useContextoIA()
+  const [anexarContexto, setAnexarContexto] = useState(true)  // ON por padrão quando disponível
+
+  // Screenshot — só relevante se o provedor ativo aceitar visão.
+  const { provedorAtivo } = useIAPreferencia()
+  const suportaVisao = !!provedorAtivo?.visao
+  const [screenshot, setScreenshot] = useState<string | null>(null)
+  const [capturando, setCapturando] = useState(false)
+
+  const tirarScreenshot = async () => {
+    setCapturando(true)
+    // Fecha visualmente pra captar a tela embaixo, depois reabre.
+    // Truque: rendera off-screen captura — mais simples, esconder o aside temporariamente.
+    const el = asideRef.current
+    if (el) el.style.visibility = 'hidden'
+    const dataUrl = await capturarTela()
+    if (el) el.style.visibility = ''
+    setCapturando(false)
+    if (dataUrl) setScreenshot(dataUrl)
+  }
+  const asideRef = useRef<HTMLElement>(null)
 
   // Auto-scroll para o final ao receber mensagem nova
   useEffect(() => {
@@ -74,8 +102,11 @@ export default function ChatMascote({
   const submit = () => {
     const t = input.trim()
     if (!t || carregando) return
+    const contextoTexto = (anexarContexto && contextoPagina) ? serializarContexto(contextoPagina) : undefined
+    const screenshotBase64 = (suportaVisao && screenshot) ? screenshot : undefined
     setInput('')
-    enviar(t)
+    setScreenshot(null)  // limpa screenshot após enviar — usa-se uma vez
+    enviar(t, { contextoTexto, screenshotBase64 })
   }
 
   // Pose do mascote no avatar: feliz no início (vazio), curioso quando
@@ -97,6 +128,7 @@ export default function ChatMascote({
       />
       {/* Drawer lateral direito */}
       <aside
+        ref={asideRef}
         role="dialog"
         aria-label={`Conversa com ${apelido}`}
         className="fixed right-0 top-0 bottom-0 z-[101] w-full sm:w-[460px] flex flex-col shadow-2xl"
@@ -118,6 +150,15 @@ export default function ChatMascote({
               {carregando ? 'pensando…' : 'pergunte qualquer coisa sobre finanças'}
             </p>
           </div>
+          <button
+            onClick={() => { onFechar(); navigate('/apresentacao') }}
+            title="Trocar de mentor"
+            aria-label="Reapresentar mentores"
+            className="p-2 rounded-lg transition-colors hover:bg-white/10"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <Users size={14} />
+          </button>
           {mensagens.length > 0 && (
             <button
               onClick={limpar}
@@ -219,6 +260,48 @@ export default function ChatMascote({
           <div ref={finalRef} />
         </div>
 
+        {/* Chips de anexos (contexto da página + screenshot) */}
+        {(contextoPagina || screenshot) && (
+          <div
+            className="px-3 pt-2 pb-1 flex flex-wrap gap-1.5 border-t"
+            style={{ borderColor: 'var(--border-subtle)' }}
+          >
+            {contextoPagina && (
+              <button
+                type="button"
+                onClick={() => setAnexarContexto(v => !v)}
+                title={anexarContexto
+                  ? `Clique para NÃO enviar os dados de "${contextoPagina.titulo}" para a IA`
+                  : `Clique para enviar os dados de "${contextoPagina.titulo}" para a IA junto com sua pergunta`}
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[12px] font-medium transition-colors"
+                style={anexarContexto
+                  ? { background: 'rgba(0,200,150,0.12)', color: '#00c896', border: '1px solid rgba(0,200,150,0.35)' }
+                  : { background: 'var(--tint-1)',        color: 'var(--text-faint)', border: '1px dashed var(--border-subtle)' }}
+              >
+                <Paperclip size={11}/>
+                <span className="truncate max-w-[240px]">
+                  {anexarContexto ? 'Enviando dados de ' : 'Sem dados de '}
+                  <strong>{contextoPagina.titulo}</strong>
+                </span>
+                {anexarContexto && <X size={10}/>}
+              </button>
+            )}
+            {screenshot && (
+              <button
+                type="button"
+                onClick={() => setScreenshot(null)}
+                title="Remover screenshot"
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[12px] font-medium transition-colors"
+                style={{ background: 'rgba(77,166,255,0.10)', color: '#4da6ff', border: '1px solid rgba(77,166,255,0.35)' }}
+              >
+                <Camera size={11}/>
+                Print da tela
+                <X size={10}/>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Input */}
         <div
           className="p-3 border-t flex gap-2 items-end"
@@ -242,6 +325,18 @@ export default function ChatMascote({
               maxHeight:   140,
             }}
           />
+          {suportaVisao && !screenshot && (
+            <button
+              type="button"
+              onClick={tirarScreenshot}
+              disabled={capturando || carregando}
+              title="Capturar screenshot desta tela e anexar"
+              className="px-3 py-2 rounded-xl text-[14px] font-medium transition-all disabled:opacity-40"
+              style={{ color: '#4da6ff', border: '1px solid rgba(77,166,255,0.3)', background: 'rgba(77,166,255,0.06)' }}
+            >
+              <Camera size={14} />
+            </button>
+          )}
           <button
             onClick={submit}
             disabled={!input.trim() || carregando}

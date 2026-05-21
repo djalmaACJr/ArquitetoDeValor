@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, List, CreditCard, Tag,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
-  ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2, TrendingUp,
+  ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2, TrendingUp, X,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
@@ -268,7 +268,13 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
   )
 }
 
-export default function Sidebar() {
+interface SidebarProps {
+  /** Em telas < md a Sidebar vira um overlay deslizante controlado por este flag. */
+  mobileOpen?:    boolean
+  onMobileClose?: () => void
+}
+
+export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}) {
   const { dark, toggle } = useTheme()
   const { signOut, session } = useAuth()
   const navigate = useNavigate()
@@ -279,27 +285,71 @@ export default function Sidebar() {
     ?? 'Usuário'
   const email = session?.user?.email ?? ''
 
+  // `collapsed` só deve afetar a renderizaçao em desktop (md+). Em mobile
+  // o overlay é sempre expandido — usamos `colapsado` (efetivo) abaixo.
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)')
+    const fn = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+    mq.addEventListener('change', fn)
+    return () => mq.removeEventListener('change', fn)
+  }, [])
+  const colapsado = isDesktop && collapsed
+
   return (
-    <nav
-      className={`flex-shrink-0 bg-av-dark flex flex-col px-3 py-5 rounded-r-2xl transition-all duration-300 relative sticky top-0 h-screen ${
-        collapsed ? 'w-[60px]' : 'w-[216px]'
-      }`}
-    >
-      {/* Botão de colapso */}
-      <button
-        onClick={() => setCollapsed(v => !v)}
-        title={collapsed ? 'Expandir menu' : 'Recolher menu'}
-        className="absolute -right-3 top-6 z-10 w-6 h-6 rounded-full bg-av-dark border border-blue-400/30 flex items-center justify-center text-white/60 hover:text-av-green hover:border-av-green/50 transition-colors shadow-md"
+    <>
+      {/* Backdrop — renderiza só quando mobile aberto, pra não interceptar
+          cliques na sidebar desktop nem ficar no DOM à toa. */}
+      {!isDesktop && mobileOpen && (
+        <div
+          onClick={onMobileClose}
+          className="fixed inset-0 z-40 bg-black/60 transition-opacity duration-300"
+        />
+      )}
+
+      <nav
+        className={
+          isDesktop
+            // Desktop: parte do layout, largura controlada por `colapsado`.
+            ? `flex flex-col px-3 py-5 bg-av-dark sticky top-0 h-screen rounded-r-2xl flex-shrink-0 transition-all duration-300 ${
+                colapsado ? 'w-[60px]' : 'w-[216px]'
+              }`
+            // Mobile: overlay deslizante.
+            : `flex flex-col px-3 py-5 bg-av-dark fixed top-0 left-0 h-screen z-50 w-[260px] transition-transform duration-300 ${
+                mobileOpen ? 'translate-x-0' : '-translate-x-full'
+              }`
+        }
       >
-        {collapsed ? <ChevronRight size={12}/> : <ChevronLeft size={12}/>}
-      </button>
+        {/* Fechar — só no mobile */}
+        {!isDesktop && (
+          <button
+            onClick={onMobileClose}
+            aria-label="Fechar menu"
+            className="absolute top-3 right-3 z-10 w-8 h-8 rounded-lg border border-blue-400/30 flex items-center justify-center text-white/70 hover:text-white hover:border-white/40 transition-colors"
+          >
+            <X size={14}/>
+          </button>
+        )}
+
+        {/* Colapsar — só no desktop */}
+        {isDesktop && (
+          <button
+            onClick={() => setCollapsed(v => !v)}
+            title={collapsed ? 'Expandir menu' : 'Recolher menu'}
+            className="absolute -right-3 top-6 z-10 w-6 h-6 rounded-full bg-av-dark border border-blue-400/30 flex items-center justify-center text-white/60 hover:text-av-green hover:border-av-green/50 transition-colors shadow-md"
+          >
+            {collapsed ? <ChevronRight size={12}/> : <ChevronLeft size={12}/>}
+          </button>
+        )}
 
       {/* Logo */}
-      <div className={`flex items-center gap-3 mb-7 pb-4 border-b border-blue-400/20 ${collapsed ? 'justify-center' : ''}`}>
+      <div className={`flex items-center gap-3 mb-7 pb-4 border-b border-blue-400/20 ${colapsado ? 'justify-center' : ''}`}>
         <div className="w-9 h-9 rounded-[10px] bg-av-dark border border-blue-400/30 flex items-center justify-center flex-shrink-0">
           <Logo />
         </div>
-        {!collapsed && (
+        {!colapsado && (
           <div>
             <p className="text-[17px] font-bold text-white leading-tight">Arquiteto<br/>de Valor</p>
             <p className="text-[13px] text-av-green tracking-[2px]">BLUEPRINT</p>
@@ -307,25 +357,25 @@ export default function Sidebar() {
         )}
       </div>
 
-      <NavGroup label="Principal"   items={navPrincipal}   collapsed={collapsed} />
+      <NavGroup label="Principal"   items={navPrincipal}   collapsed={colapsado} />
       <div className="h-px bg-blue-400/15 my-2" />
-      <NavGroup label="Cadastros"   items={navCadastros}   collapsed={collapsed} />
+      <NavGroup label="Cadastros"   items={navCadastros}   collapsed={colapsado} />
       <div className="h-px bg-blue-400/15 my-2" />
-      <NavGroup label="Relatórios"  items={navRelatorios}  collapsed={collapsed} />
+      <NavGroup label="Relatórios"  items={navRelatorios}  collapsed={colapsado} />
       <div className="h-px bg-blue-400/15 my-2" />
-      <NavGroup label="Ferramentas" items={navFerramentas} collapsed={collapsed} />
+      <NavGroup label="Ferramentas" items={navFerramentas} collapsed={colapsado} />
 
       <div className="flex-1" />
 
       {/* Rodapé - fixo no fundo, sempre visível */}
-      <div className={`pt-3 border-t border-blue-400/30 bg-av-dark ${collapsed ? 'flex flex-col items-center gap-2' : ''}`}>
-        {!collapsed && (
+      <div className={`pt-3 border-t border-blue-400/30 bg-av-dark ${colapsado ? 'flex flex-col items-center gap-2' : ''}`}>
+        {!colapsado && (
           <div className="w-full mb-2 px-1 py-1">
             <p className="text-[16px] font-semibold text-white truncate">{nome}</p>
             <p className="text-[14px] text-blue-300/60 truncate">{email}</p>
           </div>
         )}
-        <div className={`flex items-center gap-1 ${collapsed ? 'flex-col' : 'px-1'}`}>
+        <div className={`flex items-center gap-1 ${colapsado ? 'flex-col' : 'px-1'}`}>
           <button
             onClick={() => navigate('/perfil')}
             className="p-2 rounded-lg text-white/70 hover:text-blue-400 hover:bg-blue-400/10 transition-colors flex-shrink-0"
@@ -346,15 +396,16 @@ export default function Sidebar() {
             title="Sair"
           >
             <LogOut size={15}/>
-            {!collapsed && <span className="text-[16px] font-medium">Sair</span>}
+            {!colapsado && <span className="text-[16px] font-medium">Sair</span>}
           </button>
         </div>
-        {!collapsed && (
+        {!colapsado && (
           <div className="mt-2 px-1">
             <AppVersion />
           </div>
         )}
       </div>
     </nav>
+    </>
   )
 }

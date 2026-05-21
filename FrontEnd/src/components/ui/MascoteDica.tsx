@@ -13,6 +13,7 @@
 import { useState } from 'react'
 import Mascote, { srcMascote, type MascoteNome, type MascotePose } from './Mascote'
 import ChatMascote from './ChatMascote'
+import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 
 export default function MascoteDica({
   nome,
@@ -35,7 +36,10 @@ export default function MascoteDica({
 }) {
   const [imgFalhou, setImgFalhou] = useState(false)
   const [chatAberto, setChatAberto] = useState(false)
+  const { apelidoDe } = useMascotePreferido()
   if (imgFalhou) return null
+
+  const apelido = apelidoDe(nome)
 
   return (
     <div className={`flex items-center gap-3 ${className}`}>
@@ -43,7 +47,7 @@ export default function MascoteDica({
       <button
         type="button"
         onClick={() => setChatAberto(true)}
-        title="Conversar com o mascote"
+        title={`Conversar com ${apelido}`}
         className="flex-shrink-0 rounded-full overflow-hidden transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-av-green/40 cursor-pointer"
         style={{
           width: size,
@@ -55,7 +59,7 @@ export default function MascoteDica({
       >
         <img
           src={srcMascote(nome, pose)}
-          alt={`Conversar com ${nome}`}
+          alt={`Conversar com ${apelido}`}
           loading="lazy"
           onError={() => setImgFalhou(true)}
           className="select-none pointer-events-none"

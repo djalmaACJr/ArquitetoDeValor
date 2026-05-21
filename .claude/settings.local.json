@@ -34,7 +34,28 @@
       "Bash(node -e \"require\\('fs'\\)\")",
       "Bash(node -e \"require\\('docx'\\)\")",
       "Bash(node _gen_spec.js)",
-      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")"
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
+      "Bash(where magick *)",
+      "Bash(where convert *)",
+      "PowerShell(if \\(Test-Path \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-frames.png\"\\) { Write-Output \"EXISTE\"; \\(Get-Item \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-frames.png\"\\).Length } else { Write-Output \"AINDA NAO\" })",
+      "Bash(python -m pip install Pillow imageio imageio-ffmpeg)",
+      "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" -m pip install Pillow imageio imageio-ffmpeg)",
+      "PowerShell(if \\(Test-Path \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-frames.png\"\\) { $f = Get-Item \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-frames.png\"; \"OK $\\($f.Length\\) bytes\" } else { \"AINDA NAO\" })",
+      "PowerShell(Rename-Item \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-frames.png..png\" \"conselheiro-frames.png\"; \\(Get-Item \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-frames.png\"\\).Length)",
+      "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" -c \"from PIL import Image; im = Image.open\\('FrontEnd/public/mascotes/conselheiro-frames.png'\\); print\\(im.size, im.mode\\)\")",
+      "Bash('C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe' -c ' *)",
+      "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" scripts/gerar_anim_conselheiro.py)",
+      "Read(//c/tmp/**)",
+      "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" scripts/gerar_anim_mascote.py arquiteta)",
+      "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" scripts/gerar_anim_mascote.py sabio)",
+      "PowerShell(Rename-Item \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-frames.png\" \"sabio-frames.png\")",
+      "PowerShell(Rename-Item \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-andando.webm\" \"sabio-andando.webm\")",
+      "Read(//c/Pessoal/ArquitetoDeValor/FrontEnd/public/mascotes/**)",
+      "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" scripts/gerar_anim_mascote.py gato)"
+    ],
+    "additionalDirectories": [
+      "C:\\Pessoal\\ArquitetoDeValor\\scripts",
+      "C:\\Pessoal\\ArquitetoDeValor\\FrontEnd\\scripts"
     ]
   }
 }

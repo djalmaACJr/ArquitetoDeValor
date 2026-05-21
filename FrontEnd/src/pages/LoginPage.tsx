@@ -83,7 +83,7 @@ export default function LoginPage() {
       {/* Cena com mascotes ao fundo (logn.jpg). */}
       <div
         className="absolute inset-0 bg-no-repeat bg-cover bg-center"
-        style={{ backgroundImage: 'url(/mascotes/login-bg.jpg)' }}
+        style={{ backgroundImage: 'url(/mascotes/zlogin-bg.jpg)' }}
         aria-hidden="true"
       />
       {/* Gradiente lateral: escurece o lado esquerdo (onde o card fica) e

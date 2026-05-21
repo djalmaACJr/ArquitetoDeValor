@@ -78,13 +78,13 @@ export function Drawer({
 
       <div role="dialog" aria-modal="true"
         style={{
-          left: open ? '220px' : '-600px',
-          width: 'min(460px, calc(100vw - 220px))',
           visibility: open ? 'visible' : 'hidden',
           pointerEvents: open ? 'auto' : 'none',
         }}
-        className="fixed top-0 h-full z-[101]
-          bg-[#1a1f2e] border-r border-white/10 flex flex-col transition-all duration-300">
+        className={`fixed top-0 h-full z-[101]
+          bg-[#1a1f2e] border-r border-white/10 flex flex-col transition-all duration-300
+          left-0 w-full md:w-[min(460px,calc(100vw-220px))]
+          ${open ? 'translate-x-0 md:left-[220px]' : '-translate-x-full md:left-[-600px] md:translate-x-0'}`}>
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 flex-shrink-0">

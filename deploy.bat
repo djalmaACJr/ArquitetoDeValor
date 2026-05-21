@@ -19,10 +19,12 @@ echo   9 - filtros
 echo  10 - assistente
 echo  11 - lembretes
 echo  12 - chat_mascote
-echo  13 - Configurar nivel de logs
-echo  14 - Deploy com --debug (usar nesta maquina)
+echo  13 - ia_configs
+echo  14 - Configurar nivel de logs
+echo  15 - Configurar IA_KEYS_ENCRYPTION_KEY (cripto das api_keys de IA)
+echo  16 - Deploy com --debug (usar nesta maquina)
 echo.
-set /p opcao="Digite a opcao desejada (1-14): "
+set /p opcao="Digite a opcao desejada (1-16): "
 
 if "%opcao%"=="1"  goto todos
 if "%opcao%"=="2"  goto contas
@@ -36,8 +38,10 @@ if "%opcao%"=="9"  goto filtros
 if "%opcao%"=="10" goto assistente
 if "%opcao%"=="11" goto lembretes
 if "%opcao%"=="12" goto chat_mascote
-if "%opcao%"=="13" goto config_log
-if "%opcao%"=="14" goto debug_mode
+if "%opcao%"=="13" goto ia_configs
+if "%opcao%"=="14" goto config_log
+if "%opcao%"=="15" goto config_ia_key
+if "%opcao%"=="16" goto debug_mode
 echo Opcao invalida! & pause & exit /b
 
 :debug_mode
@@ -59,8 +63,9 @@ echo   9 - filtros
 echo  10 - assistente
 echo  11 - lembretes
 echo  12 - chat_mascote
+echo  13 - ia_configs
 echo.
-set /p mod_debug="Digite o modulo (1-12): "
+set /p mod_debug="Digite o modulo (1-13): "
 
 if "%mod_debug%"=="1"  goto debug_todos
 if "%mod_debug%"=="2"  goto debug_contas
@@ -74,6 +79,7 @@ if "%mod_debug%"=="9"  goto debug_filtros
 if "%mod_debug%"=="10" goto debug_assistente
 if "%mod_debug%"=="11" goto debug_lembretes
 if "%mod_debug%"=="12" goto debug_chat_mascote
+if "%mod_debug%"=="13" goto debug_ia_configs
 echo Opcao invalida! & pause & exit /b
 
 :debug_contas
@@ -153,6 +159,13 @@ supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo --debu
 echo [OK] chat_mascote deployed
 goto fim
 
+:debug_ia_configs
+echo.
+echo [DEPLOY --debug] ia_configs...
+supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo --debug
+echo [OK] ia_configs deployed
+goto fim
+
 :debug_todos
 echo.
 echo [DEPLOY --debug] contas...
@@ -188,7 +201,56 @@ echo.
 echo [DEPLOY --debug] chat_mascote...
 supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo --debug
 echo.
+echo [DEPLOY --debug] ia_configs...
+supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo --debug
+echo.
 echo [OK] Todos os modulos deployados com --debug
+goto fim
+
+:config_ia_key
+echo.
+echo ================================
+echo   IA_KEYS_ENCRYPTION_KEY
+echo ================================
+echo.
+echo Este secret criptografa as api_keys de IA armazenadas em
+echo arqvalor.usuarios.ia_configs com AES-256-GCM.
+echo.
+echo [!] ATENCAO: trocar este secret depois que ja houver chaves
+echo     cadastradas TORNA ELAS ILEGIVEIS. Os usuarios precisarao
+echo     recadastrar todas as configuracoes de IA. So defina UMA
+echo     vez por ambiente.
+echo.
+set /p confirma_key="Continuar e definir o secret? (s/N): "
+if /i not "%confirma_key%"=="s" goto fim
+
+echo.
+echo Gerando 32 bytes random (base64)...
+for /f "tokens=*" %%K in ('powershell -NoProfile -Command "[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))"') do set IA_KEY=%%K
+
+if "%IA_KEY%"=="" (
+  echo [ERRO] Falha ao gerar a chave via PowerShell.
+  pause
+  goto fim
+)
+
+echo.
+echo Chave gerada (guarde em local seguro como backup):
+echo   %IA_KEY%
+echo.
+set /p confirma_aplica="Aplicar este valor como secret IA_KEYS_ENCRYPTION_KEY? (s/N): "
+if /i not "%confirma_aplica%"=="s" (
+  echo Cancelado. Nenhuma alteracao feita.
+  pause
+  goto fim
+)
+
+supabase secrets set --project-ref ftpelncgrakpphytfrfo IA_KEYS_ENCRYPTION_KEY=%IA_KEY%
+echo.
+echo [OK] IA_KEYS_ENCRYPTION_KEY configurado.
+echo [LEMBRETE] Faca deploy de ia_configs e chat_mascote para usarem o novo valor.
+echo.
+pause
 goto fim
 
 :config_log
@@ -296,6 +358,13 @@ supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo
 echo [OK] chat_mascote deployed
 goto fim
 
+:ia_configs
+echo.
+echo [DEPLOY] ia_configs...
+supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo
+echo [OK] ia_configs deployed
+goto fim
+
 :todos
 echo.
 echo [DEPLOY] contas...
@@ -330,6 +399,9 @@ supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] chat_mascote...
 supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo
+echo.
+echo [DEPLOY] ia_configs...
+supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [OK] Todos os modulos deployados
 goto fim

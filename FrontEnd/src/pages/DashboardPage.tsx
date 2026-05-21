@@ -10,6 +10,9 @@ import { useDashboard } from '../hooks/useDashboard'
 import { log } from '../lib/logger'
 import { mesLabel, formatBRL, formatData, CORES_CATEGORIA } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
+import TutorialTour from '../components/ui/TutorialTour'
+import { TUTORIAL_DASHBOARD } from '../lib/tutoriaisPaginas'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { Doughnut, Chart } from 'react-chartjs-2'
@@ -441,7 +444,10 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
         pointBorderWidth: 1.5,
         tension: 0.35,
         fill: false,
-        yAxisID: 'ySaldo',
+        // Eixo dedicado — o Resultado mensal (poucos R$ mil) ficaria
+        // visualmente achatado se compartilhasse escala com o Saldo
+        // acumulado (centenas de milhares).
+        yAxisID: 'yResultado',
         order: 2,
       },
       {
@@ -561,6 +567,13 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
         },
         grid: { display: false },
         border: { display: false },
+      },
+      // Eixo invisível dedicado à linha de Resultado. Sem isso, a linha
+      // dividia a escala com o Saldo acumulado (centenas de milhares),
+      // ficando achatada perto de zero. Auto-ajusta à faixa do resultado.
+      yResultado: {
+        display: false,
+        position: 'right' as const,
       },
     },
   }
@@ -1062,6 +1075,23 @@ function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw
           </select>
         )}
       </div>
+      {(() => {
+        // Total geral — soma de todos os saldos das contas ativas exibidas.
+        const todasAtivas = contas.filter(c => c.ativa)
+        const totalGeral = todasAtivas.reduce((s, c) => s + getSaldoConta(c), 0)
+        const algumaContaAtiva = todasAtivas.length > 0
+        return algumaContaAtiva && (
+          <div className="flex items-center justify-between mb-4 pb-3 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
+            <span className="text-[15px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Total geral</span>
+            <span
+              className="text-[20px] font-bold whitespace-nowrap"
+              style={{ color: totalGeral >= 0 ? '#00c896' : '#ff6b4a' }}
+            >
+              {oculto ? OCULTO : formatBRL(totalGeral)}
+            </span>
+          </div>
+        )
+      })()}
       {gruposDash.map(grupo => {
         const contasGrupo = contas
           .filter(c => grupo.tipos.includes(c.tipo) && c.ativa)
@@ -1396,7 +1426,53 @@ export default function DashboardPage() {
   }, [contas, pendentes, proximas, resumo, despesasCat, receitasCat, historico, loading, error])
 
   const totalPendentes = pendentes.reduce((s, t) => s + (t.tipo === 'DESPESA' ? -t.valor : t.valor), 0)
-  const totalProximas  = proximas.reduce((s, t)  => s + (t.tipo === 'DESPESA' ? -t.valor : t.valor), 0)
+
+  // `proximas` vem de useDashboard incluindo o mês selecionado + o mês
+  // seguinte (pendMes + pendProx). Por padrão o card "Próximas não pagas"
+  // mostra só o mês corrente — o toggle "30 dias" expande para o próximo
+  // mês. Para alinhar o BOTÃO/CONTEXTO da IA com o estado padrão do card,
+  // filtramos aqui ao mês selecionado.
+  const proximasNoMes = useMemo(
+    () => proximas.filter(t => t.data.startsWith(mes)),
+    [proximas, mes],
+  )
+  const totalProximas = proximasNoMes.reduce((s, t) => s + (t.tipo === 'DESPESA' ? -t.valor : t.valor), 0)
+
+  // ── Registra snapshot dos dados pra IA poder analisar ─────────────
+  useRegistrarContextoIA(useMemo(() => ({
+    titulo:    `Dashboard · ${mesLabel(mes)}`,
+    descricao: 'Snapshot dos números visíveis no painel principal',
+    dados: {
+      mes,
+      filtros: {
+        contas:     contasFiltro,
+        categorias: filtCats,
+        status:     filtStatus,
+      },
+      resumo: {
+        receitas:   resumo?.total_entradas ?? 0,
+        despesas:   resumo?.total_saidas   ?? 0,
+        resultado: (resumo?.total_entradas ?? 0) - (resumo?.total_saidas ?? 0),
+      },
+      contas: contas.map(c => ({ nome: c.nome, tipo: c.tipo })),
+      vencidos_nao_pagos: {
+        total: totalPendentes,
+        qtd:   pendentes.length,
+      },
+      proximos_vencimentos: {
+        total: totalProximas,
+        qtd:   proximasNoMes.length,
+      },
+      receitas_por_categoria: receitasCat.slice(0, 6).map(c => ({ cat: c.categoria, total: c.total })),
+      despesas_por_categoria: despesasCat.slice(0, 6).map(c => ({ cat: c.categoria, total: c.total })),
+      evolucao_6m: historico.slice(-6).map(h => ({
+        mes:      h.mes,
+        receitas: h.total_entradas,
+        despesas: h.total_saidas,
+        saldo:    h.saldo_mes ?? (h.total_entradas - h.total_saidas),
+      })),
+    },
+  }), [mes, contasFiltro, filtCats, filtStatus, resumo, contas, totalPendentes, pendentes.length, totalProximas, proximasNoMes.length, receitasCat, despesasCat, historico]))
 
   // Saldo das contas no fim do mês anterior ao mês exibido — usado como
   // base para projeção dia-a-dia da detecção de saldo negativo.
@@ -1496,7 +1572,7 @@ export default function DashboardPage() {
       {/* Topbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2" data-tutorial="dashboard-filtros">
           <FiltrosLancamentos
             pagina="dashboard"
             filtContas={contasFiltro} filtCats={filtCats} filtStatus={filtStatus}
@@ -1515,12 +1591,14 @@ export default function DashboardPage() {
 
           <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
 
-          <MonthPicker
-            value={mes}
-            onChange={setMes}
-            onHoverPrev={prefetchMesAnterior}
-            onHoverNext={prefetchMesSeguinte}
-          />
+          <div data-tutorial="dashboard-mes">
+            <MonthPicker
+              value={mes}
+              onChange={setMes}
+              onHoverPrev={prefetchMesAnterior}
+              onHoverNext={prefetchMesSeguinte}
+            />
+          </div>
 
           <BotaoNovoLancamento
             onSelect={tipo => navigate('/lancamentos', { state: { novoLancamento: true, tipoInicial: tipo } })}
@@ -1542,6 +1620,7 @@ export default function DashboardPage() {
             const fala = falaResultadoMes({
               receitas: resumo?.total_entradas ?? 0,
               despesas: resumo?.total_saidas   ?? 0,
+              vencidos: Math.abs(totalPendentes),
               mascote,
             })
             return <MascoteDica nome={mascote} pose={fala.pose} texto={fala.texto} />
@@ -1549,21 +1628,23 @@ export default function DashboardPage() {
 
           {/* Linha 1: calendário + resultados + saldo */}
           <div className="flex flex-wrap gap-3 items-stretch">
-            <CalendarioDashboard
-              mes={mes}
-              lembretes={lembretes}
-              contas={contas}
-              diasNegativos={diasNegativos}
-              ultimasParcelas={ultimasParcelas}
-              onEditar={l => { setLembreteEditando(l); setModalLembreteAberto(true) }}
-              onExcluir={id => excluirLembrete(id)}
-              onToggle={(id, novoStatus) => editarLembrete(id, { status: novoStatus })}
-              onNovoNoDia={data => { setLembreteEditando(null); setDataInicialLembrete(data); setModalLembreteAberto(true) }}
-              onAbrirTodosLembretes={() => setPainelTodosAberto(true)}
-            />
+            <div data-tutorial="dashboard-calendario">
+              <CalendarioDashboard
+                mes={mes}
+                lembretes={lembretes}
+                contas={contas}
+                diasNegativos={diasNegativos}
+                ultimasParcelas={ultimasParcelas}
+                onEditar={l => { setLembreteEditando(l); setModalLembreteAberto(true) }}
+                onExcluir={id => excluirLembrete(id)}
+                onToggle={(id, novoStatus) => editarLembrete(id, { status: novoStatus })}
+                onNovoNoDia={data => { setLembreteEditando(null); setDataInicialLembrete(data); setModalLembreteAberto(true) }}
+                onAbrirTodosLembretes={() => setPainelTodosAberto(true)}
+              />
+            </div>
             <div className="flex-1 min-w-[300px] flex flex-col gap-3">
-              <CardResultados resumo={resumo}/>
-              <CardSaldo contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo}/>
+              <div data-tutorial="dashboard-resultados"><CardResultados resumo={resumo}/></div>
+              <div data-tutorial="dashboard-saldo"><CardSaldo contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo}/></div>
             </div>
           </div>
 
@@ -1571,42 +1652,50 @@ export default function DashboardPage() {
               O card do meio (Próximas) tem título mais longo + toggle "Este mês / 30 dias",
               então ganha um pouco mais de largura que os dois laterais. */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[1fr_1.25fr_1fr] gap-3">
-            <CardAlertas
-              titulo="Vencidos não pagos"
-              cor="#ff6b4a"
-              total={totalPendentes}
-              itens={pendentes}
-              contas={contas}
-              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: ['PENDENTE', 'PROJECAO'], mes, limparOutrosFiltros: true } })}
-              onEditar={abrirEdicao}
-            />
-            <CardAlertas
-              titulo="Próximas não pagas"
-              cor="#f0b429"
-              total={totalProximas}
-              itens={proximas}
-              contas={contas}
-              onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: ['PENDENTE', 'PROJECAO'], mes, limparOutrosFiltros: true } })}
-              onEditar={abrirEdicao}
-              filtravel
-              mes={mes}
-            />
-            <CardUltimasAlteracoes contas={contas} onEditar={id => setEditandoId(id)} />
+            <div data-tutorial="dashboard-vencidos">
+              <CardAlertas
+                titulo="Vencidos não pagos"
+                cor="#ff6b4a"
+                total={totalPendentes}
+                itens={pendentes}
+                contas={contas}
+                onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: ['PENDENTE', 'PROJECAO'], mes, limparOutrosFiltros: true } })}
+                onEditar={abrirEdicao}
+              />
+            </div>
+            <div data-tutorial="dashboard-proximas">
+              <CardAlertas
+                titulo="Próximas não pagas"
+                cor="#f0b429"
+                total={totalProximas}
+                itens={proximas}
+                contas={contas}
+                onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: ['PENDENTE', 'PROJECAO'], mes, limparOutrosFiltros: true } })}
+                onEditar={abrirEdicao}
+                filtravel
+                mes={mes}
+              />
+            </div>
+            <div data-tutorial="dashboard-alteracoes">
+              <CardUltimasAlteracoes contas={contas} onEditar={id => setEditandoId(id)} />
+            </div>
           </div>
 
           {/* Linha 3: grafico de barras */}
-          <GraficoBarras
-              historico={historico}
-              oculto={oculto}
-              pagos={pagos}
-              pendentes={pendentesStatus}
-              projecoes={projecoes}
-              loading={loadingHistorico}
-              onMesClick={setMes}
-            />
+          <div data-tutorial="dashboard-evolucao">
+            <GraficoBarras
+                historico={historico}
+                oculto={oculto}
+                pagos={pagos}
+                pendentes={pendentesStatus}
+                projecoes={projecoes}
+                loading={loadingHistorico}
+                onMesClick={setMes}
+              />
+          </div>
 
           {/* Linha 4: donuts */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-tutorial="dashboard-donuts">
             <GraficoDonut
               titulo="Receitas por categoria"
               subtitulo={mesLabel(mes)}
@@ -1624,7 +1713,9 @@ export default function DashboardPage() {
           </div>
 
           {/* Linha 5: contas */}
-          <CardContas contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo} saldoBaseMes={saldoBaseMes} doMesRaw={doMesRaw} ultimaTxPorConta={ultimaTxPorConta}/>
+          <div data-tutorial="dashboard-contas">
+            <CardContas contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo} saldoBaseMes={saldoBaseMes} doMesRaw={doMesRaw} ultimaTxPorConta={ultimaTxPorConta}/>
+          </div>
         </div>
       )}
       {/* Drawer de edicao de lancamento */}
@@ -1672,6 +1763,9 @@ export default function DashboardPage() {
           }}
         />
       )}
+
+      {/* Tutorial guiado — dispara na 1ª visita e fica disponível pelo botão ❓ */}
+      <TutorialTour pageKey="dashboard-v1" passos={TUTORIAL_DASHBOARD} />
     </div>
   )
 }

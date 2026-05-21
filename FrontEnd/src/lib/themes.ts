@@ -49,22 +49,22 @@ export const FAMILIAS: Familia[] = [
   },
   {
     id: 'sabio',
-    label: 'Sábio',
-    descricao: 'Couro envelhecido e ouro — sabedoria e visão de longo prazo.',
+    label: 'Conselheiro',
+    descricao: 'Marrom claro e caramelo — sabedoria e visão de longo prazo.',
     mascote: 'sabio',
     cores: {
-      dia:   { bg: '#fffaee', accent: '#8b4513', text: '#3a2715' },
-      noite: { bg: '#2d1b0d', accent: '#e3a83a', text: '#fff4dd' },
+      dia:   { bg: '#fdf6e8', accent: '#aa7846', text: '#5a3e22' },
+      noite: { bg: '#4d3a26', accent: '#d4a86e', text: '#f7eada' },
     },
   },
   {
     id: 'arquiteta',
     label: 'Arquiteta',
-    descricao: 'Blueprint azul vivo — precisão e cálculo estrutural.',
+    descricao: 'Rosa-bebê pastel — leveza com precisão e cálculo.',
     mascote: 'arquiteta',
     cores: {
-      dia:   { bg: '#ffffff', accent: '#1976d2', text: '#0d2a4a' },
-      noite: { bg: '#0e2a4a', accent: '#4dc3ff', text: '#e0eeff' },
+      dia:   { bg: '#ffffff', accent: '#e878a8', text: '#5a1f3a' },
+      noite: { bg: '#3d2235', accent: '#f8a8c8', text: '#ffe0ee' },
     },
   },
   {
@@ -80,11 +80,11 @@ export const FAMILIAS: Familia[] = [
   {
     id: 'raposa',
     label: 'Raposa',
-    descricao: 'Terracota e laranja vivo — astúcia estratégica de mercado.',
+    descricao: 'Money green — astúcia estratégica de mercado.',
     mascote: 'raposa',
     cores: {
-      dia:   { bg: '#ffffff', accent: '#c14318', text: '#3a1409' },
-      noite: { bg: '#2d130b', accent: '#ff7a3a', text: '#ffe8d5' },
+      dia:   { bg: '#ffffff', accent: '#28823c', text: '#0d2818' },
+      noite: { bg: '#0f2b18', accent: '#50c86e', text: '#dcf5dc' },
     },
   },
 ]

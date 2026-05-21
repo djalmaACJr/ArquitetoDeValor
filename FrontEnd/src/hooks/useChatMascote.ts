@@ -21,7 +21,15 @@ export function useChatMascote(mascote: MascoteNome, apelido?: string) {
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
-  const enviar = useCallback(async (texto: string) => {
+  const enviar = useCallback(async (
+    texto: string,
+    extras?: {
+      /** Texto adicional injetado antes da mensagem do usuário — ex.: snapshot dos dados da página */
+      contextoTexto?: string
+      /** Screenshot em base64 (data URL ou só base64) — só processado por modelos com visão */
+      screenshotBase64?: string
+    },
+  ) => {
     const limpo = texto.trim()
     if (!limpo || carregando) return
     setErro(null)
@@ -36,6 +44,8 @@ export function useChatMascote(mascote: MascoteNome, apelido?: string) {
       mascote,
       apelido:  apelido || undefined,  // edge function injeta no system prompt
       mensagem: limpo,
+      contexto: extras?.contextoTexto || undefined,
+      screenshot: extras?.screenshotBase64 || undefined,
       historico: [...mensagens, minhaMsg].slice(0, -1).map(m => ({
         role:    m.role,
         content: m.content,
@@ -44,7 +54,7 @@ export function useChatMascote(mascote: MascoteNome, apelido?: string) {
 
     setCarregando(false)
     if (!res.ok || !res.dados?.resposta) {
-      setErro(res.erro || 'Falha ao falar com o mascote. Tente de novo em instantes.')
+      setErro(res.erro || 'Falha ao falar com o mentor. Tente de novo em instantes.')
       return
     }
     setMensagens(m => [...m, {

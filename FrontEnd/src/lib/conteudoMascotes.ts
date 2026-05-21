@@ -374,16 +374,33 @@ export interface FalaContextual {
 /**
  * Dica para o Dashboard com base no resultado do mês.
  * O mascote que falará é decidido externamente (preferência do usuário).
+ *
+ * Gradação de poses (em ordem de prioridade):
+ *   1. SEM DADOS                              → curioso
+ *   2. VENCIDOS RELEVANTES (>10% da receita)  → espantado  (alerta urgente)
+ *   3. ESTOURO GRANDE (>30% da receita)       → triste     (decepção, vazou demais)
+ *   4. ESTOURO LEVE (<=30%)                   → espantado  (atenção, dá pra corrigir)
+ *   5. EMPATE EXATO                           → sentado
+ *   6. APERTADO (sobra <10% da receita)       → sentado    (positivo mas sem folga)
+ *   7. FOLGA GRANDE (sobra >40%)              → feliz      (com texto reforçando)
+ *   8. CONFORTÁVEL (sobra 10..40%)            → feliz      (caminho do meio)
  */
 export function falaResultadoMes(opts: {
   receitas: number
   despesas: number
   mascote:  MascoteNome
+  /** Total absoluto de despesas vencidas e não pagas (opcional). */
+  vencidos?: number
 }): FalaContextual {
   const { receitas, despesas, mascote } = opts
-  const resultado = receitas - despesas
-  const pctGasto  = receitas > 0 ? (despesas / receitas) * 100 : 0
+  const vencidos    = Math.abs(opts.vencidos ?? 0)
+  const resultado   = receitas - despesas
+  const pctGasto    = receitas > 0 ? (despesas / receitas) * 100 : 0
+  const pctSobra    = receitas > 0 ? (resultado / receitas) * 100 : 0
+  const pctEstouro  = receitas > 0 ? (Math.abs(resultado) / receitas) * 100 : 0
+  const pctVencido  = receitas > 0 ? (vencidos / receitas) * 100 : 0
 
+  // 1. Sem dados ────────────────────────────────────────────────────
   if (receitas === 0 && despesas === 0) {
     const texto: Record<MascoteNome, string> = {
       sabio:     'Nenhum movimento neste mês ainda. A jornada começa com o primeiro lançamento.',
@@ -394,34 +411,81 @@ export function falaResultadoMes(opts: {
     return { pose: 'curioso', texto: texto[mascote] }
   }
 
-  if (resultado > 0) {
+  // 2. Vencidos relevantes — prioridade alta (independente do resultado) ─
+  if (pctVencido > 10) {
     const texto: Record<MascoteNome, string> = {
-      sabio:     `Resultado positivo. Comprometeu ${pctGasto.toFixed(0)}% das receitas — boa margem. O capital trabalha a seu favor.`,
-      arquiteta: `${pctGasto.toFixed(0)}% das receitas usadas. Sobra ${(100 - pctGasto).toFixed(0)}% — direcione antes que se dilua em "Outros".`,
-      gato:      `Sobrou dinheiro! Esse é o momento da mágica começar — bote pra render e veja o feitiço acontecer.`,
-      raposa:    `Saldo positivo. A pergunta não é "guardar ou gastar" — é "onde alocar pra render mais que a poupança".`,
-    }
-    return { pose: 'feliz', texto: texto[mascote] }
-  }
-
-  if (resultado < 0) {
-    const texto: Record<MascoteNome, string> = {
-      sabio:     'Despesas superaram receitas neste mês. Avalie reduções pontuais antes que vire padrão.',
-      arquiteta: `Estouro de ${Math.abs(resultado / receitas * 100).toFixed(0)}% sobre a receita. Vamos identificar a categoria que vazou.`,
-      gato:      'Atenção: a magia foi pro lado errado este mês. Os juros funcionam dos dois lados — pra cima e pra baixo.',
-      raposa:    'Despesas > receitas. Antes de cortar tudo, identifique a causa — gastos extras pontuais são diferentes de padrão estrutural.',
+      sabio:     `Atenção: há contas vencidas equivalentes a ${pctVencido.toFixed(0)}% da sua receita. Resolver atraso antes de qualquer outra estratégia.`,
+      arquiteta: `Vencidos somam ${pctVencido.toFixed(0)}% da receita. Liste e priorize por juros — pague o mais caro primeiro.`,
+      gato:      `Pchsst! Tem fatura vencida pendente — juros estão correndo. Apague o incêndio antes do próximo feitiço.`,
+      raposa:    `Vencidos = ${pctVencido.toFixed(0)}% da receita. Custo de oportunidade negativo: cada dia em atraso piora seu retorno real.`,
     }
     return { pose: 'espantado', texto: texto[mascote] }
   }
 
-  // Empate exato
-  const texto: Record<MascoteNome, string> = {
-    sabio:     'Receitas e despesas se equilibraram. Próximo passo: criar margem para investimento.',
-    arquiteta: 'Resultado zero. Sem sobra, sem rombo — mas também sem reserva. Vamos buscar 10% de margem.',
-    gato:      'Empate técnico! Cabe um truque pra criar sobra — começa cortando 5% dos variáveis.',
-    raposa:    'Equilíbrio é melhor que déficit, mas pior que superávit. Sem margem, qualquer imprevisto vira problema.',
+  // 3-4. Resultado negativo ─────────────────────────────────────────
+  if (resultado < 0) {
+    if (pctEstouro > 30) {
+      // Estouro grande — decepção
+      const texto: Record<MascoteNome, string> = {
+        sabio:     `Estouro pesado: ${pctEstouro.toFixed(0)}% acima da receita. Um mês não é tendência — mas se repetir, é estrutural. Revise.`,
+        arquiteta: `Despesas excederam receitas em ${pctEstouro.toFixed(0)}%. Não é desvio, é padrão a quebrar. Vamos achar as 3 maiores categorias.`,
+        gato:      `O feitiço foi pro lado errado com força — ${pctEstouro.toFixed(0)}% de estouro. Magia precisa de ingredientes certos: gastar menos que entra.`,
+        raposa:    `Déficit de ${pctEstouro.toFixed(0)}% sobre a receita. Antes de cortar tudo no susto, separe gasto pontual de padrão estrutural.`,
+      }
+      return { pose: 'triste', texto: texto[mascote] }
+    }
+    // Estouro leve — alerta moderado
+    const texto: Record<MascoteNome, string> = {
+      sabio:     `Despesas ${pctEstouro.toFixed(0)}% acima das receitas. Pequeno desvio, fácil de reverter no próximo mês.`,
+      arquiteta: `Estouro de ${pctEstouro.toFixed(0)}% — manejável. Identifique a categoria responsável e ajuste.`,
+      gato:      `Quase no zero a zero, mas faltou um truque de mágica. ${pctEstouro.toFixed(0)}% de estouro — pequeno acerto resolve.`,
+      raposa:    `Pequeno déficit (${pctEstouro.toFixed(0)}%). Não é crise — é sinal pra olhar onde pode comprimir.`,
+    }
+    return { pose: 'espantado', texto: texto[mascote] }
   }
-  return { pose: 'sentado', texto: texto[mascote] }
+
+  // 5. Empate exato ─────────────────────────────────────────────────
+  if (resultado === 0) {
+    const texto: Record<MascoteNome, string> = {
+      sabio:     'Receitas e despesas se equilibraram. Próximo passo: criar margem para investimento.',
+      arquiteta: 'Resultado zero. Sem sobra, sem rombo — mas também sem reserva. Vamos buscar 10% de margem.',
+      gato:      'Empate técnico! Cabe um truque pra criar sobra — começa cortando 5% dos variáveis.',
+      raposa:    'Equilíbrio é melhor que déficit, mas pior que superávit. Sem margem, qualquer imprevisto vira problema.',
+    }
+    return { pose: 'sentado', texto: texto[mascote] }
+  }
+
+  // 6. Apertado — sobra menor que 10% ───────────────────────────────
+  if (pctSobra < 10) {
+    const texto: Record<MascoteNome, string> = {
+      sabio:     `Sobrou ${pctSobra.toFixed(0)}% — fechou no positivo, mas a margem é fina. Cuidado com imprevistos.`,
+      arquiteta: `Margem de ${pctSobra.toFixed(0)}%. Ideal é construir 15-20% de folga — vamos olhar onde apertar.`,
+      gato:      `Sobrou pouquinho (${pctSobra.toFixed(0)}%). O feitiço dos juros precisa de ingrediente — quanto mais aporta, mais mágico.`,
+      raposa:    `Margem estreita (${pctSobra.toFixed(0)}%). Qualquer despesa não-prevista vira déficit. Robustez antes de retorno.`,
+    }
+    return { pose: 'sentado', texto: texto[mascote] }
+  }
+
+  // 7. Folga grande — sobra > 40% ───────────────────────────────────
+  if (pctSobra > 40) {
+    const destino = pctSobra > 50 ? 'investimento de longo prazo' : 'reserva ou abater dívida cara'
+    const texto: Record<MascoteNome, string> = {
+      sabio:     `Excelente: sobrou ${pctSobra.toFixed(0)}% da receita. Mês assim merece destino: ${destino}.`,
+      arquiteta: `Sobra de ${pctSobra.toFixed(0)}%! Defina hoje pra onde vai — sem destino, dilui no próximo mês.`,
+      gato:      `Abracadinheiro! ${pctSobra.toFixed(0)}% sobrou. Esse é o ingrediente principal pra mágica dos juros compostos.`,
+      raposa:    `Folga de ${pctSobra.toFixed(0)}% — terreno fértil pra alocar. Renda fixa cobre custo de oportunidade; bolsa, para horizonte de 5+ anos.`,
+    }
+    return { pose: 'feliz', texto: texto[mascote] }
+  }
+
+  // 8. Confortável — sobra 10..40% (caminho do meio) ────────────────
+  const texto: Record<MascoteNome, string> = {
+    sabio:     `Resultado positivo. Comprometeu ${pctGasto.toFixed(0)}% das receitas — boa margem. O capital trabalha a seu favor.`,
+    arquiteta: `${pctGasto.toFixed(0)}% das receitas usadas. Sobra ${pctSobra.toFixed(0)}% — direcione antes que se dilua em "Outros".`,
+    gato:      `Sobrou dinheiro! Esse é o momento da mágica começar — bote pra render e veja o feitiço acontecer.`,
+    raposa:    `Saldo positivo. A pergunta não é "guardar ou gastar" — é "onde alocar pra render mais que a poupança".`,
+  }
+  return { pose: 'feliz', texto: texto[mascote] }
 }
 
 /**

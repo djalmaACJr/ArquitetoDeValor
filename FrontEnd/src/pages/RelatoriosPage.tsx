@@ -16,6 +16,7 @@ import { MonthPicker } from '../components/ui/MonthPicker'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
 import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
 import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCategoria'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 
 // -- Tipos -----------------------------------------------------
 interface Lancamento {
@@ -491,6 +492,29 @@ export default function RelatoriosPage() {
       }, 50)
     }
   }, [drillDown])
+
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  useRegistrarContextoIA(useMemo(() => {
+    if (!buscado) return null
+    return {
+      titulo:    `Relatório: ${inicio} a ${fim}`,
+      descricao: 'Resumo agregado por categoria e mês no período selecionado',
+      dados: {
+        periodo: { inicio, fim },
+        filtros: { contas: filtContas, categorias: filtCats, status: filtStatus },
+        totais: {
+          receitas: grandTotalEntradas,
+          despesas: grandTotalDespesas,
+          resultado: grandTotalEntradas - grandTotalDespesas,
+        },
+        meses_no_periodo: meses.length,
+        // Top 10 grupos (categorias) por valor absoluto
+        top_categorias: grupos
+          .slice(0, 10)
+          .map(g => ({ nome: g.nome, tipo: g.tipo, total: g.total })),
+      },
+    }
+  }, [buscado, inicio, fim, filtContas, filtCats, filtStatus, grandTotalEntradas, grandTotalDespesas, meses.length, grupos]))
 
   // Lancamentos do drill-down
   const lancamentosDrill = useMemo(() => {

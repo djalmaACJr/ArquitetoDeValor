@@ -11,6 +11,7 @@ import { formatBRL, mesLabel } from '../lib/utils'
 import MascoteDica from '../components/ui/MascoteDica'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 
 ChartJS.register(CategoryScale, LinearScale, LineElement, BarElement, PointElement, Tooltip, Legend, Filler)
 
@@ -194,6 +195,30 @@ export default function ProjecaoEconomiaPage() {
     : horizonte < 60
     ? `${(horizonte / 12).toFixed(0)} anos`
     : `${(horizonte / 12).toFixed(0)} anos`
+
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  useRegistrarContextoIA(useMemo(() => ({
+    titulo:    `Projeção de Economia · ${hLabel}`,
+    descricao: 'Simulação de patrimônio futuro a partir das médias atuais de receita/despesa/economia',
+    dados: {
+      horizonte_meses: horizonte,
+      rendimento_anual_pct: rendimento * 12 * 100,  // mensal → anual aprox
+      rendimento_mensal_pct: rendimento * 100,
+      reducao_despesas_pct: reducaoPerc,
+      medias: {
+        receitas:     medias.receitas,
+        despesas:     medias.despesas,
+        economia:     medias.economia,
+        taxa_poupanca_pct: medias.taxaPoupanca,
+      },
+      projecao: {
+        cenario_atual_aporte_mensal:    economiaAtual,
+        cenario_otimista_aporte_mensal: economiaOtimista,
+        patrimonio_final_atual:    pvAtual,
+        patrimonio_final_otimista: pvOtimista,
+      },
+    },
+  }), [hLabel, horizonte, rendimento, reducaoPerc, medias, economiaAtual, economiaOtimista, pvAtual, pvOtimista]))
 
   // ── Insights ─────────────────────────────────────────────────
   const insights = useMemo(() => {

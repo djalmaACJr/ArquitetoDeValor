@@ -25,6 +25,7 @@ import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { falaComparativoPeriodos } from '../lib/conteudoMascotes'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, LineElement,
@@ -554,6 +555,25 @@ export default function ComparativoMensalPage() {
     }
     return items
   }, [buscado, resumoA, resumoB, comparativo])
+
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  useRegistrarContextoIA(useMemo(() => {
+    if (!buscado) return null
+    return {
+      titulo:    `Comparativo: ${inicioA} a ${fimA} vs ${inicioB} a ${fimB}`,
+      descricao: 'Comparativo entre dois períodos com insights pré-calculados',
+      dados: {
+        periodoA: { inicio: inicioA, fim: fimA, dias: diasA, resumo: { receitas: resumoA.totalReceitas, despesas: resumoA.totalDespesas, resultado: resumoA.resultado } },
+        periodoB: { inicio: inicioB, fim: fimB, dias: diasB, resumo: { receitas: resumoB.totalReceitas, despesas: resumoB.totalDespesas, resultado: resumoB.resultado } },
+        insights: insights.map(i => ({ tipo: i.tipo, texto: i.texto })),
+        top_variacoes: comparativo
+          .filter(c => c.variacao !== null)
+          .sort((a, b) => Math.abs((b.variacao ?? 0)) - Math.abs((a.variacao ?? 0)))
+          .slice(0, 10)
+          .map(c => ({ categoria: c.nome, tipo: c.tipo, valorA: c.valorA, valorB: c.valorB, variacao_pct: c.variacao })),
+      },
+    }
+  }, [buscado, inicioA, fimA, inicioB, fimB, diasA, diasB, resumoA, resumoB, insights, comparativo]))
 
   // ── Table (sorted + filtered) ─────────────────────────────────────────────
   // Opera sobre `comparativoExibido` para refletir o agrupamento atual.

@@ -84,7 +84,7 @@ export default function CadastroPage() {
         {/* Mesma cena de fundo do Login — mantém continuidade visual com os 4 mascotes */}
         <div
           className="absolute inset-0 bg-no-repeat bg-cover bg-center"
-          style={{ backgroundImage: 'url(/mascotes/login-bg.jpg)' }}
+          style={{ backgroundImage: 'url(/mascotes/zlogin-bg.jpg)' }}
           aria-hidden="true"
         />
         <div

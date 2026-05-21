@@ -22,7 +22,7 @@ const MASCOTES_VALIDOS: readonly MascoteNome[] = ['sabio', 'arquiteta', 'gato', 
 const PADRAO: MascoteNome = 'sabio'
 
 const LABEL_PADRAO: Record<MascoteNome, string> = {
-  sabio:     'Sábio',
+  sabio:     'Conselheiro',
   arquiteta: 'Arquiteta',
   gato:      'Mago Gato',
   raposa:    'Raposa',
@@ -50,6 +50,10 @@ export function useMascotePreferido() {
     normalizar(localStorage.getItem(STORAGE_KEY)),
   )
   const [apelidos, setApelidos] = useState<Apelidos>({})
+  // `primeiroAcesso` é true quando carregamos do banco e mascote_preferido
+  // veio NULL — usuário ainda não passou pela tela de apresentação.
+  // undefined = ainda não sabemos (carregando do banco).
+  const [primeiroAcesso, setPrimeiroAcesso] = useState<boolean | undefined>(undefined)
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, mascote)
@@ -57,7 +61,10 @@ export function useMascotePreferido() {
 
   // Sincroniza com o banco ao logar.
   useEffect(() => {
-    if (!userId) return
+    if (!userId) {
+      setPrimeiroAcesso(undefined)
+      return
+    }
     let cancelado = false
     supabase
       .schema('arqvalor')
@@ -71,6 +78,8 @@ export function useMascotePreferido() {
         setMascoteState(prev => (prev === remoto ? prev : remoto))
         const apels = (data.mascote_apelidos as Apelidos | null | undefined) ?? {}
         setApelidos(apels)
+        // Primeiro acesso = nunca salvou mascote_preferido (NULL/vazio no banco)
+        setPrimeiroAcesso(!data.mascote_preferido)
       })
     return () => { cancelado = true }
   }, [userId])
@@ -115,5 +124,7 @@ export function useMascotePreferido() {
     apelidos,
     definirApelido,
     apelidoDe,
+    /** true = usuário ainda não passou pela tela de apresentação. undefined = carregando. */
+    primeiroAcesso,
   }
 }

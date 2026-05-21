@@ -3,8 +3,9 @@ import type { FormEvent } from 'react'
 import {
   User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown,
   Pencil, Sparkles, ArrowRight, Wand2, RefreshCw, Search, ChevronLeft, ChevronRight,
-  Palette, Users,
+  Palette, Users, MessageCircle,
 } from 'lucide-react'
+import ChatMascote from '../components/ui/ChatMascote'
 import { useTheme } from '../hooks/useTheme'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import Mascote, { type MascoteNome, type MascotePose } from '../components/ui/Mascote'
@@ -96,7 +97,7 @@ function SecaoMascote() {
 
   // Catálogo dos 4 mascotes
   const catalogo: Array<{ id: MascoteNome; label: string; descricao: string }> = [
-    { id: 'sabio',     label: 'Sábio',     descricao: 'Sabedoria e visão de longo prazo.' },
+    { id: 'sabio',     label: 'Conselheiro', descricao: 'Sabedoria e visão de longo prazo.' },
     { id: 'arquiteta', label: 'Arquiteta', descricao: 'Estrutura, cálculo e disciplina.' },
     { id: 'gato',      label: 'Mago Gato', descricao: 'A magia dos juros compostos.' },
     { id: 'raposa',    label: 'Raposa',    descricao: 'Astúcia estratégica de mercado.' },
@@ -127,7 +128,7 @@ function SecaoMascote() {
   }
 
   return (
-    <Secao titulo="Mascote preferido" icone={<Users size={15}/>}>
+    <Secao titulo="Mentor preferido" icone={<Users size={15}/>}>
       <p className="text-[15px] text-white/40 mb-3 leading-relaxed">
         Quem aparece nos balões contextuais (Dashboard, Comparativo, etc.).
         A escolha é salva na sua conta.
@@ -199,7 +200,7 @@ function SecaoMascote() {
         })}
       </div>
       <p className="text-[13px] text-white/30 mt-3 leading-relaxed">
-        Toque novamente no mascote ativo para renomeá-lo.
+        Toque novamente no mentor ativo para renomeá-lo.
       </p>
 
       {/* Modal: pedir apelido para o mascote escolhido */}
@@ -217,7 +218,7 @@ function SecaoMascote() {
               Como vou te chamar?
             </p>
             <p className="text-[14px] text-center mb-4" style={{ color: 'var(--text-muted)' }}>
-              Dê um apelido para o seu novo mascote. Você pode mudar depois.
+              Dê um apelido para o seu novo mentor. Você pode mudar depois.
             </p>
             <input
               type="text"
@@ -371,6 +372,19 @@ function SecaoTema() {
  *  Cada usuário usa SUA própria chave (paga seu próprio uso). */
 function SecaoIA() {
   const { ativa, configs, carregando, salvando, adicionar, atualizar, ativar, remover } = useIAPreferencia()
+  const { mascote, apelidoDe } = useMascotePreferido()
+  const [chatAberto, setChatAberto] = useState(false)
+  const [ativandoId, setAtivandoId] = useState<string | null>(null)
+
+  /** Abre o chat com o mascote. Se a config clicada não for a ativa, ativa antes. */
+  const aoConversar = async (configId: string) => {
+    if (configId !== ativa?.id) {
+      setAtivandoId(configId)
+      await ativar(configId)
+      setAtivandoId(null)
+    }
+    setChatAberto(true)
+  }
 
   const [adicionando, setAdicionando] = useState(false)
   const [editando,    setEditando]    = useState<string | null>(null)
@@ -451,7 +465,7 @@ function SecaoIA() {
     <Secao titulo="Integração com IA" icone={<Sparkles size={15}/>}>
       <p className="text-[15px] mb-4 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
         Configure um ou mais provedores de IA. Só a configuração marcada como{' '}
-        <strong style={{ color: 'var(--text-primary)' }}>ativa</strong> é usada pelo chat com o mascote —
+        <strong style={{ color: 'var(--text-primary)' }}>ativa</strong> é usada pelo chat com o mentor —
         as outras ficam guardadas para troca rápida.
       </p>
 
@@ -480,6 +494,16 @@ function SecaoIA() {
                           <span className="text-[16px] font-semibold" style={{ color: 'var(--text-primary)' }}>
                             {p?.label ?? c.provedor}
                           </span>
+                          {p && (
+                            <span
+                              className="text-[11px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                              style={p.gratuito
+                                ? { background: 'rgba(0,200,150,0.15)', color: '#00c896' }
+                                : { background: 'rgba(240,180,41,0.12)', color: '#f0b429' }}
+                            >
+                              {p.gratuito ? 'Grátis' : 'Pago'}
+                            </span>
+                          )}
                           {c.nome && (
                             <span className="text-[14px] px-1.5 py-0.5 rounded" style={{ color: 'var(--text-secondary)', background: 'var(--tint-2)' }}>
                               {c.nome}
@@ -491,8 +515,13 @@ function SecaoIA() {
                             </span>
                           )}
                         </div>
-                        <p className="text-[13px] mt-0.5" style={{ color: 'var(--text-faint)' }}>
-                          Chave salva · oculta por segurança
+                        <p className="text-[13px] mt-0.5 font-mono" style={{ color: 'var(--text-faint)' }}>
+                          {c.mascara || 'chave criptografada'}
+                          {p && (
+                            <span className="ml-2" style={{ color: 'var(--text-muted)' }}>
+                              · {p.modelo}
+                            </span>
+                          )}
                         </p>
                       </div>
                       <div className="flex gap-1.5 flex-wrap">
@@ -507,6 +536,19 @@ function SecaoIA() {
                             Ativar
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => aoConversar(c.id)}
+                          disabled={ativandoId === c.id}
+                          className="px-2.5 py-1 rounded-lg text-[14px] font-medium transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                          style={{ color: '#4da6ff', border: '1px solid rgba(77,166,255,0.3)', background: 'rgba(77,166,255,0.08)' }}
+                          title={ehAtiva
+                            ? `Abrir chat com ${apelidoDe(mascote)}`
+                            : `Ativar esta configuração e abrir chat com ${apelidoDe(mascote)}`}
+                        >
+                          <MessageCircle size={13}/>
+                          {ativandoId === c.id ? 'Ativando…' : 'Conversar'}
+                        </button>
                         <button
                           type="button"
                           onClick={() => abrirEditar(c.id)}
@@ -597,9 +639,36 @@ function SecaoIA() {
                   }}
                 >
                   {PROVEDORES.map(p => (
-                    <option key={p.id} value={p.id}>{p.label}</option>
+                    <option key={p.id} value={p.id}>
+                      {p.label} {p.gratuito ? '— Grátis' : '— Pago'}
+                    </option>
                   ))}
                 </select>
+                {/* Badge embaixo do select reforça status + modelo do provedor selecionado */}
+                <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                  {provedorAtual.gratuito ? (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-semibold uppercase tracking-wider"
+                      style={{ background: 'rgba(0,200,150,0.15)', color: '#00c896', border: '1px solid rgba(0,200,150,0.4)' }}
+                    >
+                      ✓ Tier gratuito (sem cartão)
+                    </span>
+                  ) : (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-semibold uppercase tracking-wider"
+                      style={{ background: 'rgba(240,180,41,0.12)', color: '#f0b429', border: '1px solid rgba(240,180,41,0.35)' }}
+                    >
+                      $ Pago — exige cartão
+                    </span>
+                  )}
+                  <span
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-mono"
+                    style={{ background: 'var(--tint-2)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
+                    title="Modelo utilizado pelo chat do mentor"
+                  >
+                    {provedorAtual.modelo}
+                  </span>
+                </div>
               </div>
 
               <div>
@@ -705,10 +774,13 @@ function SecaoIA() {
       )}
 
       <p className="text-[13px] mt-4 leading-relaxed" style={{ color: 'var(--text-faint)' }}>
-        As chaves ficam em <code>arqvalor.usuarios.ia_configs</code> e só são acessíveis
-        a partir da sua conta (RLS). Cada conversa é enviada para o servidor do
-        provedor ATIVO.
+        🔒 Suas chaves ficam <strong style={{ color: 'var(--text-muted)' }}>guardadas em segredo</strong> — depois
+        de salvar, ninguém vê o valor de novo (nem você, nem nós). Para trocar a chave, é só digitar uma nova
+        aqui; deixar em branco mantém a anterior.
       </p>
+
+      {/* Chat com o mascote — abre ao clicar em "Conversar" num card */}
+      <ChatMascote nome={mascote} aberto={chatAberto} onFechar={() => setChatAberto(false)} />
     </Secao>
   )
 }

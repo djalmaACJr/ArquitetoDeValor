@@ -315,6 +315,14 @@ TEST_PASSWORD=...
 
 ```
 ALLOWED_ORIGIN=https://seu-dominio.com   # CORS em produção
+
+# Chave-mestra de 32 bytes (256-bit) para AES-256-GCM. Criptografa as
+# api_keys de IA armazenadas em arqvalor.usuarios.ia_configs.
+# Gere com:  openssl rand -base64 32
+# Defina:    supabase secrets set IA_KEYS_ENCRYPTION_KEY=<valor>
+# IMPORTANTE: se perder esta chave, todas as IA configs ficam inacessíveis
+# e usuários precisam re-cadastrar.
+IA_KEYS_ENCRYPTION_KEY=...
 ```
 
 ---

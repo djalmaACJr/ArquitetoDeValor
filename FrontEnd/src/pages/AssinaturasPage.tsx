@@ -17,6 +17,7 @@ import MascoteDica from '../components/ui/MascoteDica'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCategoria'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 
 ChartJS.register(ArcElement, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, Filler)
 
@@ -434,6 +435,29 @@ export default function AssinaturasPage() {
       porCat,
     }
   }, [recorrencias])
+
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  useRegistrarContextoIA(useMemo(() => ({
+    titulo:    'Gastos Recorrentes',
+    descricao: 'Análise de assinaturas e cobranças recorrentes detectadas nos últimos 12 meses',
+    dados: {
+      total_mensal_estimado: kpis.totalMensal,
+      total_anual_estimado:  kpis.totalAnual,
+      qtd_total:             recorrencias.length,
+      qtd_ativas:            kpis.ativas,
+      qtd_novas:             kpis.novas,
+      qtd_suspeitas_inatividade: kpis.inativos,
+      qtd_reajustadas:       kpis.reajustadas,
+      por_categoria:         kpis.porCat.slice(0, 10).map(([cat, total]) => ({ cat, total })),
+      top_recorrencias:      recorrencias.slice(0, 10).map(r => ({
+        descricao:    r.descricaoCanonica,
+        categoria:    r.categoria,
+        valor_mensal: r.valorMensal,
+        status:       r.status,
+        frequencia:   r.frequencia,
+      })),
+    },
+  }), [kpis, recorrencias]))
 
   const evolucao = useMemo(() => {
     const mes   = mesAtual()
