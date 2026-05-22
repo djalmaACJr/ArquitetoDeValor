@@ -12,7 +12,7 @@
 // Trocar o mascote em Perfil traz o tutorial de volta na voz nova —
 // reforça o vínculo com a personalidade.
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Shuffle } from 'lucide-react'
 import MascoteDica from './MascoteDica'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
@@ -38,6 +38,15 @@ export default function MascoteTutorial({
   // índice numérico (0..N-1) apontando pra DICAS[mascote][idx].
   const [estado, setEstado] = useState<'tutorial' | number | null>(null)
 
+  const idxRandomDica = useCallback((atual?: number): number => {
+    const p = DICAS[mascote]
+    if (p.length <= 1) return 0
+    let proximo = Math.floor(Math.random() * p.length)
+    // Evita repetir a mesma dica em sequência (se possível)
+    if (proximo === atual) proximo = (proximo + 1) % p.length
+    return proximo
+  }, [mascote])
+
   // Lê o "já viu tutorial" do localStorage ao montar / trocar mascote.
   useEffect(() => {
     // Limpeza one-shot: chaves do schema antigo (com X dispensável)
@@ -50,24 +59,18 @@ export default function MascoteTutorial({
     const jaViu = localStorage.getItem(storageKey) === '1'
     if (jaViu) {
       // Vai direto pra dica aleatória.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEstado(idxRandomDica())
     } else {
       // Mostra o tutorial e marca como visto.
       localStorage.setItem(storageKey, '1')
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEstado('tutorial')
     }
-  }, [storageKey])
+  }, [storageKey, idxRandomDica])
 
   const tutorial = useMemo(() => falaTutorial(pagina, mascote), [pagina, mascote])
   const pool = DICAS[mascote]
-
-  function idxRandomDica(atual?: number): number {
-    if (pool.length <= 1) return 0
-    let proximo = Math.floor(Math.random() * pool.length)
-    // Evita repetir a mesma dica em sequência (se possível)
-    if (proximo === atual) proximo = (proximo + 1) % pool.length
-    return proximo
-  }
 
   if (estado === null) return null  // 1º paint — evita flash
 

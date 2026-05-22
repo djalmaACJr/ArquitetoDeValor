@@ -56,6 +56,7 @@ function arquivoPara(nome: MascoteNome, pose: MascotePose): string {
   return `${nome}-${pose}`
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function srcMascote(nome: MascoteNome, pose: MascotePose): string {
   return `/mascotes/${arquivoPara(nome, pose)}.png`
 }

@@ -57,6 +57,7 @@ export function ContextoIAProvider({ children }: { children: ReactNode }) {
 }
 
 /** Lê o contexto atual. Só usado pelo ChatMascote. */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useContextoIA(): ContextoIA | null {
   return useContext(ValueCtx)
 }
@@ -70,6 +71,7 @@ export function useContextoIA(): ContextoIA | null {
  * re-render da página quando o contexto muda. Isso quebra o ciclo
  * descrito no header do arquivo.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useRegistrarContextoIA(contexto: ContextoIA | null) {
   const definir = useContext(SetterCtx)
   useEffect(() => {
@@ -82,6 +84,7 @@ export function useRegistrarContextoIA(contexto: ContextoIA | null) {
  * Serializa o contexto pra texto que será injetado na conversa com a IA.
  * Formato compacto pra economizar tokens.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function serializarContexto(c: ContextoIA): string {
   const partes: string[] = []
   partes.push(`[Contexto da página: ${c.titulo}]`)
@@ -94,4 +97,5 @@ export function serializarContexto(c: ContextoIA): string {
 // `useMemo` é importado apenas porque outros arquivos (consumidores) o
 // reexportam indiretamente — mantém a forma compatível com a versão
 // anterior do módulo.
+// eslint-disable-next-line react-refresh/only-export-components
 export { useMemo }

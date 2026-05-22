@@ -14,14 +14,8 @@ export default function AppLayout() {
   const { primeiroAcesso } = useMascotePreferido()
 
   // Fecha o menu mobile ao navegar (UX)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMobileNavOpen(false) }, [pathname])
-
-  // Primeiro acesso: redireciona pra tela de apresentação dos mascotes.
-  // `primeiroAcesso === undefined` significa "ainda carregando do banco" —
-  // espera (não redireciona, evita flicker).
-  if (primeiroAcesso === true) {
-    return <Navigate to="/apresentacao" replace/>
-  }
 
   // Pré-aquece o cache dos meses vizinhos ao mês atual logo após o login,
   // antes mesmo do usuário navegar para a tela de Lançamentos.
@@ -88,6 +82,13 @@ export default function AppLayout() {
     window.addEventListener('keydown', fn)
     return () => window.removeEventListener('keydown', fn)
   }, [])
+
+  // Primeiro acesso: redireciona pra tela de apresentação dos mascotes.
+  // `primeiroAcesso === undefined` significa "ainda carregando do banco" —
+  // espera (não redireciona, evita flicker).
+  if (primeiroAcesso === true) {
+    return <Navigate to="/apresentacao" replace/>
+  }
 
   return (
     <div className="flex flex-col md:flex-row h-screen" style={{ background: 'var(--bg-page)' }}>

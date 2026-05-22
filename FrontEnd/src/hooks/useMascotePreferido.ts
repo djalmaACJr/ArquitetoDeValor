@@ -62,6 +62,7 @@ export function useMascotePreferido() {
   // Sincroniza com o banco ao logar.
   useEffect(() => {
     if (!userId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPrimeiroAcesso(undefined)
       return
     }
