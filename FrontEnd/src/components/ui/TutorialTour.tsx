@@ -138,16 +138,26 @@ export default function TutorialTour({ pageKey, passos, onStep }: Props) {
   //   'acima'  → 'end'     (elemento no rodapé do viewport, maximiza espaço acima para o painel)
   //   elementos altos (>40% vh) → 'nearest' (scroll mínimo, evita jogar o topo para cima da tela)
   //   demais   → 'center'  (elemento centralizado, espaço razoável em todas as direções)
+  // Se o elemento NÃO for encontrado (ex.: header colapsado no extrato), rola ao topo
+  // para forçar a expansão do header e re-mede após a transição.
   useEffect(() => {
     if (!aberto || !passo || passo.flutuante) return
     const el = document.querySelector<HTMLElement>(passo.seletor)
-    if (!el) return
+    if (!el) {
+      const main = document.querySelector('main') as HTMLElement | null
+      if (main && main.scrollTop > 10) {
+        main.scrollTo({ top: 0, behavior: 'smooth' })
+        const t = setTimeout(() => atualizarRect(), 450)
+        return () => clearTimeout(t)
+      }
+      return
+    }
     const r = el.getBoundingClientRect()
     const block: ScrollLogicalPosition =
       passo.posicao === 'acima'          ? 'end'     :
       r.height > window.innerHeight * 0.4 ? 'nearest' : 'center'
     el.scrollIntoView({ behavior: 'smooth', block })
-  }, [aberto, idx, passo])
+  }, [aberto, idx, passo, atualizarRect])
 
   // Notifica a página-pai de cada passo + retry de rect apenas para passos
   // cujos elementos aparecem no DOM após uma ação assíncrona (ex.: grupo 'drawer').
