@@ -210,6 +210,20 @@ html:not(.dark)[data-theme="raposa"] {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 2px; }
 
+/* Autofill fix: Chrome/Edge sobrescreve o fundo do input com cor clara,
+   tornando o texto (branco ou claro) invisível em fundos escuros.
+   O truque do box-shadow inset é a única forma confiável de neutralizar isso.
+   Usa as variáveis do tema ativo; o fallback cobre a tela de login (fundo escuro fixo). */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-input, #131825) inset !important;
+  -webkit-text-fill-color: var(--text-primary, #e8eaf0) !important;
+  caret-color: var(--text-primary, #e8eaf0);
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 *, *::before, *::after {
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
