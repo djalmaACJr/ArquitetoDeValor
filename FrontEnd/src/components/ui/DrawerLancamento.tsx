@@ -791,7 +791,7 @@ export default function DrawerLancamento({
         }
       >
         {/* Tipo */}
-        <Field label="Tipo">
+        <Field label="Tipo" data-tutorial="drawer-tipo">
           <div ref={tipoRef} tabIndex={-1} className="outline-none">
           <Segmented
             opcoes={[
@@ -809,7 +809,7 @@ export default function DrawerLancamento({
         </Field>
 
         {/* Descrição */}
-        <Field label="Descrição *">
+        <Field label="Descrição *" data-tutorial="drawer-descricao">
           <div className="relative">
             <Input ref={descricaoRef} value={form.descricao}
               onChange={e => set({ descricao: e.target.value })}
@@ -935,7 +935,7 @@ export default function DrawerLancamento({
         </Field>
 
         {/* Valor */}
-        <Field label="Valor *">
+        <Field label="Valor *" data-tutorial="drawer-valor">
           <button
             ref={valorBtnRef}
             type="button"
@@ -961,7 +961,7 @@ export default function DrawerLancamento({
         </Field>
 
         {/* Conta origem */}
-        <Field label={form.tipo === 'TRANSFERENCIA' ? 'Conta origem *' : 'Conta *'}>
+        <Field label={form.tipo === 'TRANSFERENCIA' ? 'Conta origem *' : 'Conta *'} data-tutorial="drawer-conta">
           <SearchableSelect
             opcoes={opcoesContas}
             value={form.conta_id}
@@ -984,7 +984,7 @@ export default function DrawerLancamento({
 
         {/* Categoria */}
         {form.tipo !== 'TRANSFERENCIA' && (
-          <Field label="Categoria">
+          <Field label="Categoria" data-tutorial="drawer-categoria">
             <SearchableSelect
               opcoes={opcoesCategorias}
               value={form.categoria_id}
@@ -995,7 +995,7 @@ export default function DrawerLancamento({
         )}
 
         {/* Status */}
-        <Field label="Status">
+        <Field label="Status" data-tutorial="drawer-status">
           <Segmented
             opcoes={[
               { value: 'PAGO',     label: 'Pago'     },
@@ -1007,7 +1007,7 @@ export default function DrawerLancamento({
 
         {/* Recorrência */}
         {(
-          <Field label="Recorrência">
+          <Field label="Recorrência" data-tutorial="drawer-recorrencia">
             {!editando ? (
               <>
                 <Toggle checked={form.recorrente} onChange={v => set({ recorrente: v })}

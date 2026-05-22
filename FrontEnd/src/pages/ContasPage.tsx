@@ -13,6 +13,8 @@ import {
 import type { Conta, TipoConta } from '../types'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
+import TutorialTour from '../components/ui/TutorialTour'
+import { TUTORIAL_CONTAS } from '../lib/tutoriaisPaginas'
 
 interface PayloadEditarConta {
   nome: string; tipo: TipoConta
@@ -199,8 +201,10 @@ export default function ContasPage() {
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-[21px] font-bold" style={{ color: '#e8eaf0' }}>Contas</h1>
         <div className="flex items-center gap-2">
-          <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
-          <button onClick={abrirNova}
+          <div data-tutorial="contas-ocultar">
+            <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+          </div>
+          <button data-tutorial="contas-nova" onClick={abrirNova}
             className="flex items-center gap-1.5 bg-av-green text-[16px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
             style={{ color: '#0a0f1a' }}>
             <Plus size={14} /> Nova conta
@@ -228,7 +232,7 @@ export default function ContasPage() {
           Cada grupo com contas ocupa 1 célula.
           O usuário reordena com os botões ◀ ▶ no cabeçalho de cada grupo.
         */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-start" data-tutorial="contas-lista">
           {gruposComContas.map(({ g, idx, lista }) => {
             const total = lista.reduce((s, c) => s + c.saldo_atual, 0)
             // Posição entre os grupos COM contas (para setas)
@@ -335,7 +339,7 @@ export default function ContasPage() {
           </>
         }
       >
-        <Field label="Nome da conta *">
+        <Field label="Nome da conta *" data-tutorial="conta-nome">
           <div className="relative">
             <Input value={form.nome} onChange={e => set({ nome: e.target.value })}
               placeholder="Ex: Nubank, Sofisa..." maxLength={50} />
@@ -344,7 +348,7 @@ export default function ContasPage() {
           </div>
         </Field>
 
-        <Field label="Tipo">
+        <Field label="Tipo" data-tutorial="conta-tipo">
           <SelectDark value={form.tipo} onChange={e => set({ tipo: e.target.value as TipoConta })}>
             {TIPOS.map(t => (
               <option key={t.value} value={t.value} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
@@ -383,7 +387,7 @@ export default function ContasPage() {
           </div>
         )}
 
-        <Field label={contaEditar ? 'Saldo inicial (não editável)' : 'Saldo inicial'}>
+        <Field label={contaEditar ? 'Saldo inicial (não editável)' : 'Saldo inicial'} data-tutorial="conta-saldo">
           <Input
             type="number" step="0.01"
             value={form.saldo_inicial}
@@ -398,7 +402,7 @@ export default function ContasPage() {
           )}
         </Field>
 
-        <Field label="Ícone / Logo">
+        <Field label="Ícone / Logo" data-tutorial="conta-icone">
           <div className="flex items-start gap-3">
             <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden border border-white/10"
               style={{ background: form.cor ? `${form.cor}22` : 'rgba(77,166,255,0.12)' }}>
@@ -484,6 +488,14 @@ export default function ContasPage() {
           salvando={salvando}
         />
       )}
+
+      <TutorialTour
+        pageKey="contas-v1"
+        passos={TUTORIAL_CONTAS}
+        onStep={(_idx, passo) => {
+          if (passo.grupo === 'drawer-conta' && !drawerOpen) abrirNova()
+        }}
+      />
     </div>
   )
 }

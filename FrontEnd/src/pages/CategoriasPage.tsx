@@ -11,6 +11,8 @@ import { apiFetch, apiMutate, extrairLista } from '../lib/api'
 import { formatBRL, formatData, STATUS_LABEL, STATUS_COR } from '../lib/utils'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
+import TutorialTour from '../components/ui/TutorialTour'
+import { TUTORIAL_CATEGORIAS } from '../lib/tutoriaisPaginas'
 
 // ── Helpers de importação paralela ───────────────────────────────────────────
 const _sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -414,7 +416,7 @@ export default function CategoriasPage() {
       {/* Topbar */}
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-[21px] font-bold" style={{ color: '#e8eaf0' }}>Categorias</h1>
-        <button onClick={abrirNovo}
+        <button data-tutorial="cats-nova" onClick={abrirNovo}
           className="flex items-center gap-1.5 bg-av-green text-[16px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
           style={{ color: '#0a0f1a' }}>
           <Plus size={14} /> Nova categoria
@@ -428,7 +430,7 @@ export default function CategoriasPage() {
       </div>
 
       {/* Busca */}
-      <input value={busca} onChange={e => setBusca(e.target.value)}
+      <input data-tutorial="cats-busca" value={busca} onChange={e => setBusca(e.target.value)}
         placeholder="Buscar categoria..."
         className="mb-4 w-full max-w-xs bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
           text-[17px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
@@ -443,7 +445,7 @@ export default function CategoriasPage() {
 
       {/* Lista hierárquica */}
       {!loading && !error && (
-        <div className="space-y-1.5">
+        <div className="space-y-1.5" data-tutorial="cats-lista">
           {paisFiltrados.map(p => {
             const subs  = subsOf(p.id).filter(s =>
               !q || p.descricao.toLowerCase().includes(q) || s.descricao.toLowerCase().includes(q)
@@ -571,7 +573,7 @@ export default function CategoriasPage() {
             labelSalvar="Salvar categoria" labelEditar="Atualizar" /></>
         }>
 
-        <Field label="Nível">
+        <Field label="Nível" data-tutorial="cat-nivel">
           <Segmented
             opcoes={[{ value: 'pai', label: 'Categoria pai' }, { value: 'sub', label: 'Subcategoria' }]}
             value={form.nivel} onChange={v => set({ nivel: v as Nivel, id_pai: '' })} />
@@ -590,7 +592,7 @@ export default function CategoriasPage() {
           </Field>
         )}
 
-        <Field label="Descrição *">
+        <Field label="Descrição *" data-tutorial="cat-descricao">
           <div className="relative">
             <Input value={form.descricao} onChange={e => set({ descricao: e.target.value })}
               placeholder="Ex: Alimentação" maxLength={50} />
@@ -599,7 +601,7 @@ export default function CategoriasPage() {
           </div>
         </Field>
 
-        <Field label="Ícone">
+        <Field label="Ícone" data-tutorial="cat-icone">
           <IconPicker value={form.icone} onChange={v => set({ icone: v })} />
         </Field>
 
@@ -614,7 +616,7 @@ export default function CategoriasPage() {
           </Field>
         )}
 
-        <Field label="Pré-visualização">
+        <Field label="Pré-visualização" data-tutorial="cat-preview">
           <PreviewBadge icone={form.icone} label={form.descricao || 'Nova categoria'} cor={form.cor} />
         </Field>
 
@@ -638,6 +640,14 @@ export default function CategoriasPage() {
           mensagem="Categorias com subcategorias ou lançamentos vinculados não podem ser excluídas."
           onConfirmar={confirmarExclusao} onCancelar={() => setExcluindo(null)} salvando={salvando} />
       )}
+
+      <TutorialTour
+        pageKey="categorias-v1"
+        passos={TUTORIAL_CATEGORIAS}
+        onStep={(_idx, passo) => {
+          if (passo.grupo === 'drawer-cat' && !drawerOpen) abrirNovo()
+        }}
+      />
     </div>
   )
 }

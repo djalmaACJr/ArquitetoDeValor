@@ -1572,12 +1572,14 @@ export default function DashboardPage() {
       {/* Topbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
-        <div className="flex flex-wrap items-center gap-2" data-tutorial="dashboard-filtros">
-          <FiltrosLancamentos
-            pagina="dashboard"
-            filtContas={contasFiltro} filtCats={filtCats} filtStatus={filtStatus}
-            setFiltContas={setContasFiltro} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
-          />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2" data-tutorial="dashboard-filtros">
+            <FiltrosLancamentos
+              pagina="dashboard"
+              filtContas={contasFiltro} filtCats={filtCats} filtStatus={filtStatus}
+              setFiltContas={setContasFiltro} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
+            />
+          </div>
 
           {/* Botao atualizar */}
           <button
@@ -1589,7 +1591,9 @@ export default function DashboardPage() {
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''}/>
           </button>
 
-          <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+          <div data-tutorial="dashboard-ocultar">
+            <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+          </div>
 
           <div data-tutorial="dashboard-mes">
             <MonthPicker
@@ -1600,10 +1604,12 @@ export default function DashboardPage() {
             />
           </div>
 
-          <BotaoNovoLancamento
-            onSelect={tipo => navigate('/lancamentos', { state: { novoLancamento: true, tipoInicial: tipo } })}
-            onLembrete={() => { setLembreteEditando(null); setDataInicialLembrete(undefined); setModalLembreteAberto(true) }}
-          />
+          <div data-tutorial="dashboard-novo-lancamento">
+            <BotaoNovoLancamento
+              onSelect={tipo => navigate('/lancamentos', { state: { novoLancamento: true, tipoInicial: tipo } })}
+              onLembrete={() => { setLembreteEditando(null); setDataInicialLembrete(undefined); setModalLembreteAberto(true) }}
+            />
+          </div>
         </div>
       </div>
 

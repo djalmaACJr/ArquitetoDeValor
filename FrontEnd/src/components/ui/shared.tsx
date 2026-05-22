@@ -601,9 +601,9 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
 }
 
 // ── Field ─────────────────────────────────────────────────────
-export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+export function Field({ label, children, ...rest }: { label: string; children: React.ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5" {...rest}>
       <p className="text-[15px] font-semibold uppercase tracking-wide" style={{ color: '#8b92a8' }}>{label}</p>
       {children}
     </div>

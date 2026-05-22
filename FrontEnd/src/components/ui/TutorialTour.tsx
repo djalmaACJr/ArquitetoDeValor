@@ -45,6 +45,8 @@ export interface PassoTutorial {
    *               (renderizado com flip vertical sobre a sprite "acima")
    */
   posicao?: 'auto' | 'abaixo' | 'direita' | 'esquerda' | 'acima'
+  /** Grupo lógico do passo — usado pela página-pai via `onStep` para coordenar ações (ex.: abrir drawer). */
+  grupo?: string
 }
 
 interface Props {
@@ -52,13 +54,15 @@ interface Props {
   pageKey: string
   /** Lista ordenada de passos. */
   passos:  PassoTutorial[]
+  /** Callback disparado ao entrar em cada passo. A página-pai pode reagir (ex.: abrir um drawer). */
+  onStep?: (idx: number, passo: PassoTutorial) => void
 }
 
 const STORAGE_PREFIX = 'av-tut-tour-'
 
 interface BoxRect { x: number; y: number; w: number; h: number }
 
-export default function TutorialTour({ pageKey, passos }: Props) {
+export default function TutorialTour({ pageKey, passos, onStep }: Props) {
   const { mascote } = useMascotePreferido()
   const [aberto,  setAberto]  = useState(false)
   const [idx,     setIdx]     = useState(0)
@@ -137,6 +141,36 @@ export default function TutorialTour({ pageKey, passos }: Props) {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [aberto, idx, passo])
 
+  // Notifica a página-pai de cada passo + retry de rect apenas para passos
+  // cujos elementos aparecem no DOM após uma ação assíncrona (ex.: grupo 'drawer').
+  // Passos normais já são cobertos pelo useLayoutEffect acima — não interferir neles.
+  useEffect(() => {
+    if (!aberto) return
+    const p = passos[idx]
+    if (!p) return
+    onStep?.(idx, p)
+    // Retry só para passos que dependem de DOM atrasado (drawer aberto via onStep).
+    // Grupos válidos: 'drawer' (extrato), 'drawer-conta', 'drawer-cat', e futuros.
+    const gruposComDomAtrasado = ['drawer', 'drawer-conta', 'drawer-cat']
+    if (!gruposComDomAtrasado.includes(p.grupo ?? '') || !p.seletor) return
+    let cancelled = false
+    let attempts = 0
+    function retry() {
+      if (cancelled) return
+      const el = document.querySelector<HTMLElement>(p.seletor)
+      if (el) {
+        const r = el.getBoundingClientRect()
+        setRect({ x: r.left, y: r.top, w: r.width, h: r.height })
+      } else if (attempts++ < 8) {
+        setTimeout(retry, 150)
+      }
+    }
+    // Aguarda animação de entrada do drawer (~300ms) antes de medir
+    const t = setTimeout(retry, 300)
+    return () => { cancelled = true; clearTimeout(t) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aberto, idx])
+
   // ESC fecha
   useEffect(() => {
     if (!aberto) return
@@ -208,39 +242,39 @@ export default function TutorialTour({ pageKey, passos }: Props) {
       mascoteAEsquerda: mascoteEsq,
     }
   }
-  /** Calcula posicao 'acima' do elemento. Sprites apontando-X (sem "acima")
-   *  apontam pra baixo-lateral, então funcionam direto sem flip. */
+  /** Calcula posicao 'acima' do elemento.
+   *  Usa `bottom` em vez de `top` para ancorar a borda inferior do painel
+   *  a rect.y − GAP, garantindo que o painel cresce para cima sem cobrir o elemento. */
   function posAcima(): Posicao {
     const centroEl = rect!.x + rect!.w / 2
     const mascoteEsq = centroEl > vw / 2
     const totalW    = PAINEL_W + MASCOTE_W + GAP
     let left = centroEl - totalW / 2
     left = Math.max(GAP, Math.min(vw - totalW - GAP, left))
-    const top = Math.max(GAP, rect!.y - PAINEL_H - GAP)
     return {
-      estilo:           { top, left },
-      // Mascote à esquerda do balão → corpo aponta pra direita-baixo
-      // Mascote à direita do balão → corpo aponta pra esquerda-baixo
+      estilo:           { bottom: vh - rect!.y + GAP, left },
       pose:             mascoteEsq ? 'apontando-direita' : 'apontando-esquerda',
       mascoteAEsquerda: mascoteEsq,
     }
   }
-  /** Calcula posicao lateral direita (mascote à esquerda do painel, apontando esquerda). */
+  /** Calcula posicao lateral direita.
+   *  Mascote fica entre o elemento e o balão (lado esquerdo), apontando para o elemento. */
   function posDireita(): Posicao {
     const top = Math.max(GAP, Math.min(vh - PAINEL_H - GAP, rect!.y))
     return {
       estilo:           { top, left: rect!.x + rect!.w + GAP },
       pose:             'apontando-esquerda',
-      mascoteAEsquerda: false,
+      mascoteAEsquerda: true,
     }
   }
-  /** Calcula posicao lateral esquerda. */
+  /** Calcula posicao lateral esquerda.
+   *  Mascote fica entre o elemento e o balão (lado direito), apontando para o elemento. */
   function posEsquerda(): Posicao {
     const top = Math.max(GAP, Math.min(vh - PAINEL_H - GAP, rect!.y))
     return {
       estilo:           { top, right: vw - rect!.x + GAP },
       pose:             'apontando-direita',
-      mascoteAEsquerda: true,
+      mascoteAEsquerda: false,
     }
   }
 
