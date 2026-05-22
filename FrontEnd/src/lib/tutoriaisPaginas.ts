@@ -554,7 +554,7 @@ export const TUTORIAL_PROJECAO: PassoTutorial[] = [
   },
   {
     titulo: 'Insights automáticos',
-    texto: 'O mascote e os cards de insight interpretam os números: taxa de poupança em relação à meta de 20%, potencial de economia com cortes e impacto de cada categoria de gasto.',
+    texto: 'O mentor e os cards de insight interpretam os números: taxa de poupança em relação à meta de 20%, potencial de economia com cortes e impacto de cada categoria de gasto.',
     seletor: '[data-tutorial="projecao-insights"]',
     posicao: 'acima',
   },
