@@ -13,6 +13,13 @@ export default function RedefinirSenhaPage() {
   const [sucesso,  setSucesso]  = useState(false)
 
   useEffect(() => {
+    const html = document.documentElement
+    const hadDark = html.classList.contains('dark')
+    html.classList.add('dark')
+    return () => { if (!hadDark) html.classList.remove('dark') }
+  }, [])
+
+  useEffect(() => {
     // O SDK processa o hash da URL durante createClient (antes do mount).
     // getSession() pega a sessão já estabelecida; onAuthStateChange cobre
     // o caso em que o evento ainda não disparou.
@@ -65,7 +72,7 @@ export default function RedefinirSenhaPage() {
   }
 
   const bgGrid = 'repeating-linear-gradient(0deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px),repeating-linear-gradient(90deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px)'
-  const inputCls = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors'
+  const inputCls = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/30 focus:outline-none focus:bg-white/10 focus:border-av-green/70 transition-colors'
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-av-dark">

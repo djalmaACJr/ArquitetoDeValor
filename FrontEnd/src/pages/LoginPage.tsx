@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
@@ -41,6 +41,13 @@ const inputCls = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.
 export default function LoginPage() {
   const { signIn } = useAuth()
   const navigate   = useNavigate()
+
+  useEffect(() => {
+    const html = document.documentElement
+    const hadDark = html.classList.contains('dark')
+    html.classList.add('dark')
+    return () => { if (!hadDark) html.classList.remove('dark') }
+  }, [])
 
   const [modo, setModo]         = useState<'login' | 'esqueci'>('login')
   const [email, setEmail]       = useState('')

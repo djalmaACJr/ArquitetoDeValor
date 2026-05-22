@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -36,6 +36,14 @@ const Logo = () => (
 
 export default function CadastroPage() {
   const navigate = useNavigate()
+
+  useEffect(() => {
+    const html = document.documentElement
+    const hadDark = html.classList.contains('dark')
+    html.classList.add('dark')
+    return () => { if (!hadDark) html.classList.remove('dark') }
+  }, [])
+
   const [nome, setNome]             = useState('')
   const [email, setEmail]           = useState('')
   const [password, setPassword]     = useState('')
