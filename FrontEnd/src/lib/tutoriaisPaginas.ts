@@ -106,7 +106,7 @@ export const TUTORIAL_CONTAS: PassoTutorial[] = [
   },
   {
     titulo: 'Nova conta',
-    texto: 'Adiciona uma conta ao seu perfil financeiro. Você pode cadastrar qualquer tipo: conta corrente, poupança/remunerada, cartão de crédito, conta de investimento ou carteira física.',
+    texto: 'Adiciona uma conta ao seu perfil financeiro. Você pode cadastrar qualquer tipo: conta corrente, remunerada, cartão de crédito, conta de investimento ou carteira física.',
     seletor: '[data-tutorial="contas-nova"]',
   },
   {
@@ -242,7 +242,7 @@ export const TUTORIAL_EXTRATO: PassoTutorial[] = [
   },
   {
     titulo: 'Novo lançamento',
-    texto: 'Cria um novo lançamento. Clique na seta ao lado para escolher entre receita, despesa ou lembrete antes de abrir o formulário.',
+    texto: 'Cria um novo lançamento. Aponte para a seta ao lado para escolher entre receita, despesa ou lembrete antes de abrir o formulário.',
     seletor: '[data-tutorial="extrato-novo-lancamento"]',
   },
   {
@@ -257,7 +257,7 @@ export const TUTORIAL_EXTRATO: PassoTutorial[] = [
   },
   {
     titulo: 'Filtros',
-    texto: 'Filtre por conta, categoria e status. Combine filtros para afunilar exatamente o que quer ver. O botão de saldo acumulado aparece como opção extra dentro dos filtros.',
+    texto: 'Filtre por conta, categoria e status. Combine filtros para afunilar exatamente o que quer ver. O botão de s aldo acumulado aparece como opção extra dentro dos filtros.',
     seletor: '[data-tutorial="extrato-filtros"]',
   },
   {

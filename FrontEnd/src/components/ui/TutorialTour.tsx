@@ -133,12 +133,20 @@ export default function TutorialTour({ pageKey, passos, onStep }: Props) {
     }
   }, [aberto, atualizarRect])
 
-  // Scroll automático até o elemento destacado
+  // Scroll automático até o elemento destacado.
+  // Estratégia por posicao forçada:
+  //   'acima'  → 'end'     (elemento no rodapé do viewport, maximiza espaço acima para o painel)
+  //   elementos altos (>40% vh) → 'nearest' (scroll mínimo, evita jogar o topo para cima da tela)
+  //   demais   → 'center'  (elemento centralizado, espaço razoável em todas as direções)
   useEffect(() => {
     if (!aberto || !passo || passo.flutuante) return
     const el = document.querySelector<HTMLElement>(passo.seletor)
     if (!el) return
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const r = el.getBoundingClientRect()
+    const block: ScrollLogicalPosition =
+      passo.posicao === 'acima'          ? 'end'     :
+      r.height > window.innerHeight * 0.4 ? 'nearest' : 'center'
+    el.scrollIntoView({ behavior: 'smooth', block })
   }, [aberto, idx, passo])
 
   // Notifica a página-pai de cada passo + retry de rect apenas para passos
@@ -268,13 +276,14 @@ export default function TutorialTour({ pageKey, passos, onStep }: Props) {
     }
   }
   /** Calcula posicao lateral esquerda.
-   *  Mascote fica entre o elemento e o balão (lado direito), apontando para o elemento. */
+   *  Balão fica mais próximo do elemento (lado direito do grupo); mascote fica à esquerda.
+   *  Isso garante que o balão não transborde para fora da tela em telas menores. */
   function posEsquerda(): Posicao {
     const top = Math.max(GAP, Math.min(vh - PAINEL_H - GAP, rect!.y))
     return {
       estilo:           { top, right: vw - rect!.x + GAP },
       pose:             'apontando-direita',
-      mascoteAEsquerda: false,
+      mascoteAEsquerda: true,
     }
   }
 
@@ -283,17 +292,43 @@ export default function TutorialTour({ pageKey, passos, onStep }: Props) {
     const fitAbaixo = vh - (rect.y + rect.h) >= PAINEL_H + GAP
     const fitDir    = vw - (rect.x + rect.w) >= totalW + GAP
     const fitEsq    = rect.x                  >= totalW + GAP
+    const fitAcima  = rect.y                  >= PAINEL_H + GAP
 
-    // Override explícito via PassoTutorial.posicao
+    // Elemento muito grande (ocupa >50% da altura ou >80% da largura):
+    // painel flutuante centralizado — elemento ainda fica destacado no backdrop.
+    const elementoGrande = rect.h > vh * 0.5 || rect.w > vw * 0.8
+    const flutuanteCentral: Posicao = {
+      estilo: { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' },
+      pose:   'comprimento-inicio',
+      mascoteAEsquerda: true,
+    }
+
+    // Último recurso para elementos médios sem espaço em nenhuma direção.
+    function posUltimoRecurso(): Posicao {
+      const mascoteEsq = (rect!.x + rect!.w / 2) > vw / 2
+      const left = Math.max(GAP, Math.min(vw - totalW - GAP, vw / 2 - totalW / 2))
+      return {
+        estilo:           { bottom: GAP * 2, left },
+        pose:             mascoteEsq ? 'apontando-direita-acima' : 'apontando-esquerda-acima',
+        mascoteAEsquerda: mascoteEsq,
+      }
+    }
+
+    // Posições forçadas são respeitadas SOMENTE se o espaço for suficiente;
+    // caso contrário caem no fluxo automático abaixo (evita overflow em telas pequenas).
+    // elementoGrande é último recurso antes de posUltimoRecurso — só usado quando nenhuma
+    // das 4 direções cabe (ex.: listas que ocupam toda a tela).
     const forcada = passo?.posicao && passo.posicao !== 'auto' ? passo.posicao : null
-    if (forcada === 'abaixo')         posicao = posAbaixo()
-    else if (forcada === 'direita')   posicao = posDireita()
-    else if (forcada === 'esquerda')  posicao = posEsquerda()
-    else if (forcada === 'acima')     posicao = posAcima()
-    else if (fitAbaixo)               posicao = posAbaixo()
-    else if (fitDir)                  posicao = posDireita()
-    else if (fitEsq)                  posicao = posEsquerda()
-    else                              posicao = posAcima()
+    if      (forcada === 'abaixo'   && fitAbaixo) posicao = posAbaixo()
+    else if (forcada === 'acima'    && fitAcima)  posicao = posAcima()
+    else if (forcada === 'direita'  && fitDir)    posicao = posDireita()
+    else if (forcada === 'esquerda' && fitEsq)    posicao = posEsquerda()
+    else if (fitAbaixo)                           posicao = posAbaixo()
+    else if (fitDir)                              posicao = posDireita()
+    else if (fitEsq)                              posicao = posEsquerda()
+    else if (fitAcima)                            posicao = posAcima()
+    else if (elementoGrande)                      posicao = flutuanteCentral
+    else                                          posicao = posUltimoRecurso()
   } else {
     // Flutuante (1º e último passo): mascote no centro da tela em pose
     // de boas-vindas / despedida (sem apontar pra nada específico).
