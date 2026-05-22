@@ -20,7 +20,6 @@ import { ArrowLeft, Check, Sun, Moon } from 'lucide-react'
 import { srcMascote, type MascoteNome, type MascotePose } from '../components/ui/Mascote'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { useTheme } from '../hooks/useTheme'
-import { FAMILIAS } from '../lib/themes'
 import type { Familia, Modo } from '../lib/themes'
 
 interface MascoteInfo {
