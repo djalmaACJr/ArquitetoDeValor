@@ -23,9 +23,11 @@ import { useExpansaoCategoria } from '../lib/agrupamentoCategoria'
 import MascoteDica from '../components/ui/MascoteDica'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
+import TutorialTour from '../components/ui/TutorialTour'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { falaComparativoPeriodos } from '../lib/conteudoMascotes'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
+import { TUTORIAL_COMPARATIVO } from '../lib/tutoriaisPaginas'
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, LineElement,
@@ -862,7 +864,9 @@ export default function ComparativoMensalPage() {
             Análise período a período · receitas, despesas e tendências
           </p>
         </div>
-        <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+        <div data-tutorial="comparativo-ocultar">
+          <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+        </div>
       </div>
 
       <div className="mb-5">
@@ -870,7 +874,7 @@ export default function ComparativoMensalPage() {
       </div>
 
       {/* Filters */}
-      <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5">
+      <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5" data-tutorial="comparativo-filtros">
         <div className="flex flex-wrap gap-4 items-end">
 
           {/* Period A */}
@@ -923,12 +927,13 @@ export default function ComparativoMensalPage() {
             )}
             {buscado && (
               <button onClick={exportar}
+                data-tutorial="comparativo-exportar"
                 className="flex items-center gap-2 px-3 py-[7px] rounded-lg text-[16px] font-semibold border transition-all hover:opacity-90"
                 style={{ color: '#4da6ff', background: 'rgba(77,166,255,0.08)', borderColor: 'rgba(77,166,255,0.2)' }}>
                 <Download size={13} /> Exportar
               </button>
             )}
-            <button onClick={buscar}
+            <button onClick={buscar} data-tutorial="comparativo-comparar"
               disabled={loading || !diasOk || periodoInvalido}
               className="flex items-center gap-2 px-4 py-[7px] rounded-lg text-[16px] font-semibold transition-all hover:opacity-90"
               style={{ background: '#00c896', color: '#0a0f1a', opacity: (loading || !diasOk || periodoInvalido) ? 0.5 : 1 }}>
@@ -980,7 +985,7 @@ export default function ComparativoMensalPage() {
       {buscado && !loading && (
         <>
           {/* KPI Cards — B = 2º período (atual), A = 1º período (base) */}
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6" data-tutorial="comparativo-kpis">
             <KpiCard label="Receita Total"
               valor={resumoB.totalReceitas} valorAnterior={resumoA.totalReceitas}
               variacao={calcVariacao(resumoB.totalReceitas, resumoA.totalReceitas)}
@@ -1028,7 +1033,7 @@ export default function ComparativoMensalPage() {
           </div>
 
           {/* Charts row */}
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-4">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-4" data-tutorial="comparativo-graficos">
             <div className="lg:col-span-2 bg-[#1a1f2e] border border-white/10 rounded-2xl p-4">
               <p className="text-[16px] font-bold mb-0.5" style={{ color: '#e8eaf0' }}>Receitas vs Despesas</p>
               <p className="text-[14px] mb-3" style={{ color: '#4a5168' }}>Comparativo direto dos dois períodos</p>
@@ -1043,7 +1048,7 @@ export default function ComparativoMensalPage() {
 
           {/* Trend chart */}
           {tendencia.length > 0 && (
-            <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-4">
+            <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-4" data-tutorial="comparativo-tendencia">
               <p className="text-[16px] font-bold mb-0.5" style={{ color: '#e8eaf0' }}>Tendência Financeira</p>
               <p className="text-[14px] mb-3" style={{ color: '#4a5168' }}>
                 Últimos 12 meses completos{tendPeriodo ? ` · ${tendPeriodo}` : ''}
@@ -1143,7 +1148,7 @@ export default function ComparativoMensalPage() {
           )}
 
           {/* Table + Insights */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" data-tutorial="comparativo-analise">
             <div ref={tabelaRef} className="lg:col-span-2 bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden">
               <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between gap-3 flex-wrap">
                 <div>
@@ -1733,6 +1738,8 @@ export default function ComparativoMensalPage() {
           onExcluido={() => { setEditandoId(null); buscar() }}
         />
       )}
+
+      <TutorialTour pageKey="comparativo-v1" passos={TUTORIAL_COMPARATIVO} />
     </div>
   )
 }

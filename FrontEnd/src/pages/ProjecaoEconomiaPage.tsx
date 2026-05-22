@@ -10,8 +10,10 @@ import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLan
 import { formatBRL, mesLabel } from '../lib/utils'
 import MascoteDica from '../components/ui/MascoteDica'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
+import TutorialTour from '../components/ui/TutorialTour'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
+import { TUTORIAL_PROJECAO } from '../lib/tutoriaisPaginas'
 
 ChartJS.register(CategoryScale, LinearScale, LineElement, BarElement, PointElement, Tooltip, Legend, Filler)
 
@@ -294,7 +296,7 @@ export default function ProjecaoEconomiaPage() {
       </div>
 
       {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-tutorial="projecao-kpis">
         <KpiCard label="Economia Média/Mês"
           value={formatBRL(medias.economia)}
           color={medias.economia >= 0 ? '#00c896' : '#f87171'}
@@ -331,7 +333,7 @@ export default function ProjecaoEconomiaPage() {
       ) : (
         <>
           {/* ── Simulador Interativo ── */}
-          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-5">
+          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-5" data-tutorial="projecao-simulador">
             <p className="text-[17px] font-semibold text-white mb-1">Simulador Interativo</p>
             <p className="text-[15px] mb-4" style={{ color: '#8b92a8' }}>
               Ajuste os parâmetros e veja o impacto em tempo real nas projeções.
@@ -375,7 +377,7 @@ export default function ProjecaoEconomiaPage() {
           </div>
 
           {/* ── Charts ── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-tutorial="projecao-graficos">
 
             {/* Evolução patrimonial */}
             <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
@@ -463,7 +465,7 @@ export default function ProjecaoEconomiaPage() {
           </div>
 
           {/* ── Comparativo de cenários ── */}
-          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
+          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden" data-tutorial="projecao-comparativo">
             <div className="px-4 py-3 border-b border-white/10">
               <p className="text-[17px] font-semibold text-white">Comparativo de Cenários</p>
             </div>
@@ -511,7 +513,7 @@ export default function ProjecaoEconomiaPage() {
 
           {/* ── Insights ── */}
           {insights.length > 0 && (
-            <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
+            <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4" data-tutorial="projecao-insights">
               <p className="text-[17px] font-semibold text-white mb-3">Insights Automáticos</p>
               {/* Dica narrada — pose contextual ao cenário projetado */}
               <div className="mb-3">
@@ -547,6 +549,8 @@ export default function ProjecaoEconomiaPage() {
           )}
         </>
       )}
+
+      <TutorialTour pageKey="projecao-v1" passos={TUTORIAL_PROJECAO} />
     </div>
   )
 }

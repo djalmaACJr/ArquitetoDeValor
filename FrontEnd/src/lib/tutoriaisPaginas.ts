@@ -408,3 +408,160 @@ export const TUTORIAL_EXTRATO: PassoTutorial[] = [
     flutuante: true,
   },
 ]
+
+export const TUTORIAL_COMPARATIVO: PassoTutorial[] = [
+  {
+    titulo: 'Comparativo Períodos',
+    texto: 'Aqui você compara dois períodos lado a lado — receitas, despesas, resultado e variação por categoria. Ideal pra responder "gastei mais esse trimestre que o anterior?"',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Configurar os períodos',
+    texto: 'Defina o Período inicial (base) e o Período final (atual). Os dois devem ter a mesma duração para a comparação fazer sentido — use "Auto-ajustar" se precisar. O sistema já sugere datas ao abrir.',
+    seletor: '[data-tutorial="comparativo-filtros"]',
+  },
+  {
+    titulo: 'Comparar',
+    texto: 'Após definir os períodos, clique em Comparar para carregar os dados. O botão só fica ativo quando os dois períodos têm a mesma duração.',
+    seletor: '[data-tutorial="comparativo-comparar"]',
+  },
+  {
+    titulo: 'Ocultar valores',
+    texto: 'Esconde todos os valores monetários de uma vez — prático para reuniões ou capturas de tela.',
+    seletor: '[data-tutorial="comparativo-ocultar"]',
+  },
+  {
+    titulo: 'Cards de resumo',
+    texto: 'Receita total, despesa total, resultado líquido e variações percentuais entre os dois períodos. Os cards "Maior Aumento" e "Maior Redução" destacam as categorias com mais impacto.',
+    seletor: '[data-tutorial="comparativo-kpis"]',
+    flutuante: true,
+  },
+  {
+    titulo: 'Gráficos comparativos',
+    texto: '"Receitas vs Despesas" mostra os totais dos dois períodos lado a lado. "Top Categorias" exibe as 10 com maior variação absoluta entre os períodos.',
+    seletor: '[data-tutorial="comparativo-graficos"]',
+    flutuante: true,
+  },
+  {
+    titulo: 'Tendência Financeira',
+    texto: 'Evolução mês a mês dos últimos 12 meses — receitas, despesas e saldo. A tabela abaixo do gráfico mostra os valores exatos alinhados com o eixo X.',
+    seletor: '[data-tutorial="comparativo-tendencia"]',
+    flutuante: true,
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Análise por Categoria',
+    texto: 'Tabela com todas as categorias e suas variações. Clique em qualquer valor para ver os lançamentos daquela categoria no período. Use os toggles "Tabela/Pareto" e "Categoria/Resumo" para mudar a visualização.',
+    seletor: '[data-tutorial="comparativo-analise"]',
+    flutuante: true,
+  },
+  {
+    titulo: 'Insights automáticos',
+    texto: 'O painel de insights lista alertas gerados automaticamente — aumentos de despesas, reduções relevantes e novas categorias. Clique em um insight para destacar as categorias relacionadas na tabela.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Exportar',
+    texto: 'Exporta o comparativo para Excel refletindo o agrupamento, filtro e insights ativos no momento.',
+    seletor: '[data-tutorial="comparativo-exportar"]',
+    flutuante: true,
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Você pode reabrir este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
+    seletor: '',
+    flutuante: true,
+  },
+]
+
+export const TUTORIAL_ASSINATURAS: PassoTutorial[] = [
+  {
+    titulo: 'Assinaturas & Recorrências',
+    texto: 'Esta página detecta automaticamente cobranças recorrentes nos seus últimos 13 meses — assinaturas, mensalidades, contas fixas. A detecção é baseada em padrão de repetição: mesma descrição + intervalo regular.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Resumo de recorrências',
+    texto: 'Custo mensal e anual estimados de todas as recorrências detectadas. "Reajustes Recentes" indica serviços com aumento de preço. "Suspeita Inatividade" alerta cobranças que pararam há mais de 45 dias.',
+    seletor: '[data-tutorial="assinaturas-kpis"]',
+  },
+  {
+    titulo: 'Distribuição & Evolução',
+    texto: 'O donut mostra quanto cada categoria representa do total mensal. O gráfico de linha acompanha a evolução dos gastos recorrentes mês a mês nos últimos 12 meses.',
+    seletor: '[data-tutorial="assinaturas-graficos"]',
+  },
+  {
+    titulo: 'Top Recorrências',
+    texto: 'Ranking das 10 cobranças com maior custo mensal. Cores indicam status: verde = ativa, azul = nova, amarelo = reajuste recente, vermelho = suspeita de inatividade.',
+    seletor: '[data-tutorial="assinaturas-top"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Insights automáticos',
+    texto: 'Alertas sobre reajustes, cobranças possivelmente canceladas e o impacto anual total das recorrências.',
+    seletor: '[data-tutorial="assinaturas-insights"]',
+  },
+  {
+    titulo: 'Tabela de detalhamento',
+    texto: 'Lista completa de todas as recorrências. Clique em uma linha para ver o histórico de lançamentos. Use o toggle "Categoria/Resumo" para agrupar por categoria pai.',
+    seletor: '[data-tutorial="assinaturas-tabela"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Reclassificar em massa',
+    texto: 'Ao abrir o detalhe de uma recorrência, o botão "Reclassificar em massa" permite alterar descrição ou categoria de todos os lançamentos do grupo de uma só vez.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Você pode reabrir este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
+    seletor: '',
+    flutuante: true,
+  },
+]
+
+export const TUTORIAL_PROJECAO: PassoTutorial[] = [
+  {
+    titulo: 'Projeção de Economia',
+    texto: 'Esta página projeta seu patrimônio futuro baseado nos últimos 6 meses de histórico. Ajuste os parâmetros do simulador e veja em tempo real o impacto de poupar mais ou investir com rendimento.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Indicadores financeiros',
+    texto: 'Economia média mensal, projeção de 12 meses, taxa de poupança e patrimônio projetado — calculados a partir do histórico recente. O card "Patrimônio" já considera os juros compostos do simulador.',
+    seletor: '[data-tutorial="projecao-kpis"]',
+  },
+  {
+    titulo: 'Simulador interativo',
+    texto: 'Ajuste os três controles:\n• Horizonte — quantos meses/anos projetar\n• Rendimento — taxa mensal de investimento (ex.: 0.8% a.m. ≈ CDB/Tesouro)\n• Redução de despesas — % de corte nos gastos atuais\n\nOs mini-cards mostram os resultados dos dois cenários em tempo real.',
+    seletor: '[data-tutorial="projecao-simulador"]',
+  },
+  {
+    titulo: 'Evolução patrimonial',
+    texto: 'Gráfico comparando o "Cenário Atual" com o "Cenário Otimista". O impacto dos juros compostos fica evidente no longo prazo. O segundo gráfico mostra oportunidades de corte por categoria.',
+    seletor: '[data-tutorial="projecao-graficos"]',
+  },
+  {
+    titulo: 'Comparativo de cenários',
+    texto: 'Tabela resumindo poupança mensal, poupança anual, patrimônio final e ganho adicional do cenário otimista — para o horizonte definido no simulador.',
+    seletor: '[data-tutorial="projecao-comparativo"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Insights automáticos',
+    texto: 'O mascote e os cards de insight interpretam os números: taxa de poupança em relação à meta de 20%, potencial de economia com cortes e impacto de cada categoria de gasto.',
+    seletor: '[data-tutorial="projecao-insights"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Você pode reabrir este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
+    seletor: '',
+    flutuante: true,
+  },
+]

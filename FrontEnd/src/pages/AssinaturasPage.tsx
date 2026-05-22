@@ -15,9 +15,11 @@ import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteDica from '../components/ui/MascoteDica'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
+import TutorialTour from '../components/ui/TutorialTour'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCategoria'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
+import { TUTORIAL_ASSINATURAS } from '../lib/tutoriaisPaginas'
 
 ChartJS.register(ArcElement, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, Filler)
 
@@ -617,7 +619,7 @@ export default function AssinaturasPage() {
       </div>
 
       {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-tutorial="assinaturas-kpis">
         <KpiCard label="Custo Mensal"         value={formatBRL(totalMensal)}          color="#00c896" />
         <KpiCard label="Projeção Anual"        value={formatBRL(totalAnual)}           color="#4da6ff" />
         <KpiCard label="Recorrências Ativas"   value={String(ativas)}                  color="#e8eaf0"
@@ -644,7 +646,7 @@ export default function AssinaturasPage() {
       ) : (
         <>
           {/* ── Charts ── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-tutorial="assinaturas-graficos">
 
             {/* Donut por categoria */}
             <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
@@ -702,7 +704,7 @@ export default function AssinaturasPage() {
           </div>
 
           {/* Top recorrências — barra horizontal */}
-          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
+          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4" data-tutorial="assinaturas-top">
             <p className="text-[17px] font-semibold text-white mb-3">Top Recorrências por Custo Mensal</p>
             <div style={{ height: Math.max(200, Math.min(recorrencias.length, 10) * 34 + 48) }}>
               <Bar
@@ -756,7 +758,7 @@ export default function AssinaturasPage() {
 
           {/* Insights */}
           {insights.length > 0 && (
-            <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
+            <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4" data-tutorial="assinaturas-insights">
               <p className="text-[17px] font-semibold text-white mb-3">Insights Automáticos</p>
               {/* Dica narrada — pose varia com o teor dos insights */}
               <div className="mb-3">
@@ -791,7 +793,7 @@ export default function AssinaturasPage() {
           )}
 
           {/* Tabela detalhada */}
-          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
+          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden" data-tutorial="assinaturas-tabela">
             <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3 flex-wrap">
               <p className="text-[17px] font-semibold text-white flex-1">Detalhamento</p>
 
@@ -1252,6 +1254,8 @@ export default function AssinaturasPage() {
           onExcluido={() => { setEditandoId(null); carregar(true) }}
         />
       )}
+
+      <TutorialTour pageKey="assinaturas-v1" passos={TUTORIAL_ASSINATURAS} />
     </div>
   )
 }
