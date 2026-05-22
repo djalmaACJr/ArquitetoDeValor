@@ -4,7 +4,9 @@ import { ChevronDown, ChevronRight, Download, RefreshCw, Filter, Pencil } from '
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
+import TutorialTour from '../components/ui/TutorialTour'
 import ParetoChart from '../components/relatorios/ParetoChart'
+import { TUTORIAL_RELATORIOS } from '../lib/tutoriaisPaginas'
 
 import { apiFetch } from '../lib/api'
 import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
@@ -900,7 +902,9 @@ export default function RelatoriosPage() {
           <h1 className="text-[22px] font-bold" style={{ color: '#e8eaf0' }}>Relatório por categoria</h1>
           <p className="text-[15px] mt-0.5" style={{ color: '#8b92a8' }}>Receitas e despesas agrupadas por categoria</p>
         </div>
-        <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+        <div data-tutorial="relatorios-ocultar">
+          <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+        </div>
       </div>
 
       <div className="mb-5">
@@ -911,39 +915,42 @@ export default function RelatoriosPage() {
       <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5">
         <div className="flex flex-wrap gap-3 items-end">
           {/* Periodo */}
-          <div>
-            <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>De</p>
-            <MonthPicker value={inicio} onChange={setInicio} />
-          </div>
-          <div>
-            <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Até</p>
-            <MonthPicker value={fim} onChange={setFim} />
-          </div>
-
-          {/* Contas + Categorias + Status + Filtros salvos (componente unificado) */}
-          <div>
-            <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Filtros</p>
-            <div className="flex gap-2">
-              <FiltrosLancamentos
-                pagina="relatorios"
-                filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
-                setFiltContas={setFiltContas} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
-                classNameContas="w-44" classNameCats="w-48" classNameStatus="w-40"
-                extras={{ incluirTransf }}
-                extrasFiltroAtivo={incluirTransf}
-                onAplicarExtras={d => {
-                  const novo = (d.incluirTransf as boolean) ?? false
-                  setIncluirTransf(novo)
-                  if (buscado) buscar((d.filtContas as string[]) ?? [])
-                }}
-                onLimparExtras={() => setIncluirTransf(false)}
-              />
+          <div className="flex gap-3 items-end" data-tutorial="relatorios-periodo">
+            <div>
+              <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>De</p>
+              <MonthPicker value={inicio} onChange={setInicio} />
+            </div>
+            <div>
+              <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Até</p>
+              <MonthPicker value={fim} onChange={setFim} />
             </div>
           </div>
 
-          {/* Transferencias toggle */}
-          <div>
-            <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Transferências</p>
+          {/* Contas + Categorias + Status + Transferências */}
+          <div className="flex gap-3 items-end flex-wrap" data-tutorial="relatorios-filtros">
+            <div>
+              <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Filtros</p>
+              <div className="flex gap-2">
+                <FiltrosLancamentos
+                  pagina="relatorios"
+                  filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
+                  setFiltContas={setFiltContas} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
+                  classNameContas="w-44" classNameCats="w-48" classNameStatus="w-40"
+                  extras={{ incluirTransf }}
+                  extrasFiltroAtivo={incluirTransf}
+                  onAplicarExtras={d => {
+                    const novo = (d.incluirTransf as boolean) ?? false
+                    setIncluirTransf(novo)
+                    if (buscado) buscar((d.filtContas as string[]) ?? [])
+                  }}
+                  onLimparExtras={() => setIncluirTransf(false)}
+                />
+              </div>
+            </div>
+
+            {/* Transferencias toggle */}
+            <div>
+              <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Transferências</p>
             <button
               onClick={() => setIncluirTransf(!incluirTransf)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[15px] transition-all"
@@ -965,11 +972,13 @@ export default function RelatoriosPage() {
               Incluir
             </button>
           </div>
+          </div>{/* /relatorios-filtros */}
 
           {/* Botoes */}
           <div className="flex items-center gap-2 ml-auto flex-wrap">
             {buscado && (
               <button
+                data-tutorial="relatorios-exportar"
                 onClick={exportar}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[16px] font-semibold transition-all hover:opacity-90 border border-white/10"
                 style={{ color: '#4da6ff', background: 'rgba(77,166,255,0.08)' }}
@@ -984,6 +993,7 @@ export default function RelatoriosPage() {
               </button>
             )}
             <button
+              data-tutorial="relatorios-gerar"
               onClick={() => buscar()}
               disabled={loading || meses.length === 0}
               className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[16px] font-semibold transition-all hover:opacity-90"
@@ -1009,7 +1019,7 @@ export default function RelatoriosPage() {
       {buscado && !loading && (
         <>
           {/* Cards resumo */}
-          <div className="grid grid-cols-3 gap-3 mb-5">
+          <div className="grid grid-cols-3 gap-3 mb-5" data-tutorial="relatorios-cards">
             {[
               { label: 'Total Receitas',  valor: grandTotalEntradas, cor: '#00c896' },
               { label: 'Total Despesas',  valor: grandTotalDespesas, cor: '#f87171' },
@@ -1024,7 +1034,7 @@ export default function RelatoriosPage() {
 
           {/* Seletor de visualização */}
           <div className="flex items-center gap-4 mb-3 flex-wrap">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" data-tutorial="relatorios-visualizacao">
               <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Visualização</span>
               {([
                 { id: false, label: 'Tabela' },
@@ -1047,7 +1057,7 @@ export default function RelatoriosPage() {
 
             {/* Controle de detalhamento — visível apenas na vista Tabela */}
             {!vistaPareto && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2" data-tutorial="relatorios-detalhamento">
                 <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Detalhamento</span>
                 {([
                   { n: 1 as const, label: 'Resumo',     title: 'Só Crédito / Débito / Resultado' },
@@ -1127,7 +1137,7 @@ export default function RelatoriosPage() {
           )}
 
           {/* Tabela principal */}
-          {!vistaPareto && <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden">
+          {!vistaPareto && <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden" data-tutorial="relatorios-tabela">
             <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
               <table className="w-full border-collapse" style={{ minWidth: 600 }}>
                 {/* Cabecalho */}
@@ -1494,6 +1504,8 @@ export default function RelatoriosPage() {
           <p className="text-[16px]" style={{ color: '#8b92a8' }}>Selecione o período e clique em Gerar relatório</p>
         </div>
       )}
+
+      <TutorialTour pageKey="relatorios-v1" passos={TUTORIAL_RELATORIOS} />
     </div>
   )
 }

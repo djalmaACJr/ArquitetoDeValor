@@ -233,6 +233,73 @@ export const TUTORIAL_CATEGORIAS: PassoTutorial[] = [
   },
 ]
 
+export const TUTORIAL_RELATORIOS: PassoTutorial[] = [
+  {
+    titulo: 'Bem-vindo aos Relatórios',
+    texto: 'Aqui você analisa receitas e despesas agrupadas por categoria em qualquer intervalo de meses — de um único mês até anos completos. É a visão de longo prazo das suas finanças.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Período',
+    texto: 'Defina o intervalo de análise — de um mês único até vários anos. A tabela gera uma coluna por mês no período escolhido, permitindo comparar a evolução mês a mês.',
+    seletor: '[data-tutorial="relatorios-periodo"]',
+  },
+  {
+    titulo: 'Filtros',
+    texto: 'Afunile os dados por conta, categoria e status de pagamento. O toggle "Transferências" define se movimentos entre suas próprias contas entram no relatório (útil para excluir ruído quando analisa receitas reais).',
+    seletor: '[data-tutorial="relatorios-filtros"]',
+  },
+  {
+    titulo: 'Gerar relatório',
+    texto: 'Clique para carregar e consolidar os lançamentos de todos os meses do período. Quanto maior o intervalo, mais alguns segundos pode levar — o sistema busca mês a mês em paralelo.',
+    seletor: '[data-tutorial="relatorios-gerar"]',
+  },
+  {
+    titulo: 'Ocultar valores',
+    texto: 'Esconde todos os números da tela de uma vez. Útil ao compartilhar a tela, apresentar ou tirar capturas sem expor valores. Clique novamente para revelar.',
+    seletor: '[data-tutorial="relatorios-ocultar"]',
+  },
+  {
+    titulo: 'Resumo do período',
+    texto: 'Total consolidado de receitas, despesas e resultado líquido no período inteiro. Verde = sobrou; vermelho = estourou. Esses números refletem todos os filtros ativos.',
+    seletor: '[data-tutorial="relatorios-cards"]',
+  },
+  {
+    titulo: 'Visualização',
+    texto: 'Alterne entre duas análises:\n• Tabela — detalhamento por categoria e mês em matriz.\n• Pareto — quais categorias concentram ~80% do valor. Revela onde está a maior parte dos gastos com poucos itens.',
+    seletor: '[data-tutorial="relatorios-visualizacao"]',
+  },
+  {
+    titulo: 'Detalhamento',
+    texto: 'Controla o nível de detalhe da tabela:\n• Resumo — só o total de créditos, débitos e resultado.\n• Categorias — grupos pai sem subcategorias.\n• Completo — tudo, incluindo subcategorias. Clique em qualquer nome de subcategoria para expandir os lançamentos por descrição.',
+    seletor: '[data-tutorial="relatorios-detalhamento"]',
+  },
+  {
+    titulo: 'Tabela por categoria',
+    texto: 'Colunas fixas: Total do período e Média mensal. Colunas dinâmicas: um mês por coluna. Clique em qualquer célula com valor para abrir o drill-down com os lançamentos individuais. Clique numa linha de categoria pai para expandir suas subcategorias.',
+    seletor: '[data-tutorial="relatorios-tabela"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Exportar para Excel',
+    texto: 'Gera um arquivo .xlsx com exatamente o que está na tela — seja a tabela no nível atual (Resumo, Categorias ou Completo) ou a análise Pareto. O export preserva a hierarquia expandida e os meses do período.',
+    seletor: '[data-tutorial="relatorios-exportar"]',
+  },
+  {
+    titulo: 'Análise Pareto',
+    texto: 'Na vista Pareto, as categorias são ordenadas do maior para o menor valor. A linha acumulada mostra qual subconjunto responde por ~80% do total (princípio 80/20). Use "Agrupar por Resumo" para consolidar subcategorias no pai e ver a foto de alto nível.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Você pode reabrir este tutorial a qualquer momento pelo botão ❓ na sidebar ou pelo atalho F1.',
+    seletor: '',
+    flutuante: true,
+  },
+]
+
 export const TUTORIAL_EXTRATO: PassoTutorial[] = [
   {
     titulo: 'Bem-vindo ao Extrato',
