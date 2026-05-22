@@ -35,31 +35,42 @@ TOLERANCIA = 50
 def detectar_bg(arr: np.ndarray) -> np.ndarray:
     """Estima cor de fundo.
 
-    1ª tentativa: ring interior 12..20px in from edges (evita borda/moldura).
-    Pega mediana de pixels OPACOS na faixa.
-    Se vazio (ex.: já tudo transparente nessa faixa), cai pra cantos.
+    Estratégia: ao longo do anel externo da imagem, considera cada *coluna*
+    vertical e cada *linha* horizontal. Pra cada uma, ignora pixels totalmente
+    transparentes e pula a moldura (faixa colorida fina nos primeiros pixels
+    opacos), registrando o primeiro pixel opaco "estável" — esse é o bg.
+    Pega a mediana dessas amostras.
     """
     h, w = arr.shape[:2]
-    inset = 12
-    band = 8
-    # Faixa anelar OPACA: pixels em [inset .. inset+band] da borda
-    mask_ring = np.zeros((h, w), dtype=bool)
-    mask_ring[inset:inset+band, :] = True
-    mask_ring[h-inset-band:h-inset, :] = True
-    mask_ring[:, inset:inset+band] = True
-    mask_ring[:, w-inset-band:w-inset] = True
-    opacos = arr[mask_ring & (arr[:, :, 3] > 128)]
-    if opacos.size > 0:
-        return np.median(opacos[:, :3], axis=0)
-    # Fallback: cantos opacos
-    s = 8
-    candidatos = []
-    for y in [0, h-1]:
-        for x in [0, w-1]:
-            patch = arr[max(0, y-s):y+s, max(0, x-s):x+s]
-            op = patch[patch[:, :, 3] > 128]
-            if op.size > 0:
-                candidatos.append(np.median(op[:, :3], axis=0))
+    candidatos: list[np.ndarray] = []
+
+    def primeiro_estavel(linha: np.ndarray) -> np.ndarray | None:
+        # linha: (N, 4). Acha o primeiro pixel opaco que tenha vizinhança parecida.
+        opaco_idx = np.where(linha[:, 3] > 128)[0]
+        if opaco_idx.size < 6:
+            return None
+        for k in range(opaco_idx.size - 5):
+            i = opaco_idx[k]
+            vizinhos = linha[i:i+6]
+            if (vizinhos[:, 3] > 128).all():
+                # estabilidade: desvio padrão baixo
+                if vizinhos[:, :3].std(axis=0).max() < 15:
+                    return vizinhos[:, :3].mean(axis=0)
+        return None
+
+    for col in range(0, w, max(1, w // 40)):
+        for sentido in ("topo", "fundo"):
+            linha = arr[:, col] if sentido == "topo" else arr[::-1, col]
+            v = primeiro_estavel(linha)
+            if v is not None:
+                candidatos.append(v)
+    for row in range(0, h, max(1, h // 40)):
+        for sentido in ("esq", "dir"):
+            linha = arr[row, :] if sentido == "esq" else arr[row, ::-1]
+            v = primeiro_estavel(linha)
+            if v is not None:
+                candidatos.append(v)
+
     if not candidatos:
         return np.array([255, 255, 255])
     return np.median(np.array(candidatos), axis=0)
