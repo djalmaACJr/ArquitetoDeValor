@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { X, Send, Trash2, Paperclip, Camera, HelpCircle, Users } from 'lucide-react'
+import { X, Send, Trash2, Paperclip, Camera, Users } from 'lucide-react'
 import Mascote, { type MascoteNome, type MascotePose } from './Mascote'
 import { useChatMascote } from '../../hooks/useChatMascote'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'

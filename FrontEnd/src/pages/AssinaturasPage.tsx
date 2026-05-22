@@ -450,7 +450,7 @@ export default function AssinaturasPage() {
       qtd_reajustadas:       kpis.reajustadas,
       por_categoria:         kpis.porCat.slice(0, 10).map(([cat, total]) => ({ cat, total })),
       top_recorrencias:      recorrencias.slice(0, 10).map(r => ({
-        descricao:    r.descricaoCanonica,
+        descricao:    r.nome,
         categoria:    r.categoria,
         valor_mensal: r.valorMensal,
         status:       r.status,

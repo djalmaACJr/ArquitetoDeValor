@@ -1463,8 +1463,8 @@ export default function DashboardPage() {
         total: totalProximas,
         qtd:   proximasNoMes.length,
       },
-      receitas_por_categoria: receitasCat.slice(0, 6).map(c => ({ cat: c.categoria, total: c.total })),
-      despesas_por_categoria: despesasCat.slice(0, 6).map(c => ({ cat: c.categoria, total: c.total })),
+      receitas_por_categoria: receitasCat.slice(0, 6).map(c => ({ cat: c.categoria_nome, total: c.total })),
+      despesas_por_categoria: despesasCat.slice(0, 6).map(c => ({ cat: c.categoria_nome, total: c.total })),
       evolucao_6m: historico.slice(-6).map(h => ({
         mes:      h.mes,
         receitas: h.total_entradas,

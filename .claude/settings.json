@@ -16,7 +16,16 @@
       "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" -m pip install av)",
       "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" -m pip install scipy)",
       "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" scripts/remover_fundo_branco.py FrontEnd/public/mascotes/sabio-comprimentando.webm)",
-      "Bash('C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe' scripts/remover_fundo_branco.py FrontEnd/public/mascotes/arquiteta-comprimentando.webm FrontEnd/public/mascotes/gato-comprimentando.webm FrontEnd/public/mascotes/raposa-comprimentando.webm FrontEnd/public/mascotes/sabio-curioso.png)"
+      "Bash('C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe' scripts/remover_fundo_branco.py FrontEnd/public/mascotes/arquiteta-comprimentando.webm FrontEnd/public/mascotes/gato-comprimentando.webm FrontEnd/public/mascotes/raposa-comprimentando.webm FrontEnd/public/mascotes/sabio-curioso.png)",
+      "Bash('C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe' c:/Pessoal/ArquitetoDeValor/scripts/remover_fundo_apontando.py c:/Pessoal/ArquitetoDeValor/FrontEnd/public/mascotes/arquiteta-apontando-esquerda.png c:/Pessoal/ArquitetoDeValor/FrontEnd/public/mascotes/raposa-apontando-esquerda.png)",
+      "Bash(git diff *)",
+      "Bash(git checkout *)",
+      "Bash(python scripts/remover_fundo_apontando.py --tol 90 FrontEnd/public/mascotes/sabio-apontando-direita.png FrontEnd/public/mascotes/sabio-apontando-esquerda.png FrontEnd/public/mascotes/sabio-apontando-direita-acima.png FrontEnd/public/mascotes/sabio-apontando-esquerda-acima.png)",
+      "Bash(py -3 -c \"import numpy, scipy, PIL; print\\('ok'\\)\")",
+      "Bash(python3 -c \"import numpy, scipy, PIL; print\\('ok'\\)\")",
+      "Bash(py -3 scripts/remover_fundo_apontando.py --tol 90 FrontEnd/public/mascotes/sabio-apontando-direita.png FrontEnd/public/mascotes/sabio-apontando-esquerda.png FrontEnd/public/mascotes/sabio-apontando-direita-acima.png FrontEnd/public/mascotes/sabio-apontando-esquerda-acima.png)",
+      "Bash(py -3 scripts/remover_fundo_apontando.py FrontEnd/public/mascotes/sabio-apontando-direita-acima.png FrontEnd/public/mascotes/sabio-apontando-esquerda-acima.png)",
+      "Bash(py -3 -c ' *)"
     ]
   }
 }

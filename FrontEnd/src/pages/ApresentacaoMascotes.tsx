@@ -16,9 +16,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
-import Mascote, { srcMascote, type MascoteNome, type MascotePose } from '../components/ui/Mascote'
+import { ArrowLeft, Check, Sun, Moon } from 'lucide-react'
+import { srcMascote, type MascoteNome, type MascotePose } from '../components/ui/Mascote'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import { useTheme } from '../hooks/useTheme'
+import { FAMILIAS } from '../lib/themes'
+import type { Familia, Modo } from '../lib/themes'
 
 interface MascoteInfo {
   id:        MascoteNome
@@ -58,7 +61,7 @@ const MASCOTES: MascoteInfo[] = [
 // trocas instantâneas (sem flash de imagem ausente)
 const POSES_PRELOAD: MascotePose[] = ['curioso', 'feliz', 'triste', 'sentado', 'comprimento-inicio']
 
-type Fase = 'apresentando' | 'aguardando' | 'escolhido' | 'sentar' | 'nomeando'
+type Fase = 'apresentando' | 'aguardando' | 'escolhido' | 'sentar' | 'nomeando' | 'tema'
 
 export default function ApresentacaoMascotes() {
   const navigate = useNavigate()
@@ -107,12 +110,16 @@ export default function ApresentacaoMascotes() {
       await definirApelido(escolhido, apelido.trim())
     }
     setSalvando(false)
-    navigate('/', { replace: true })
+    setFase('tema')
   }
 
   function aoPularNome() {
     if (!escolhido) return
     setMascote(escolhido)
+    setFase('tema')
+  }
+
+  function aoConcluirTema() {
     navigate('/', { replace: true })
   }
 
@@ -141,6 +148,11 @@ export default function ApresentacaoMascotes() {
       onEscolherOutro={aoEscolherOutro}
       salvando={salvando}
     />
+  }
+
+  // Última etapa: escolha de tema (família + modo dia/noite)
+  if (fase === 'tema') {
+    return <LayoutTema onConcluir={aoConcluirTema}/>
   }
 
   return (
@@ -396,6 +408,117 @@ function LayoutNomeando({ escolhido, apelido, onApelidoChange, onSalvar, onPular
             />
           ))}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Layout dedicado para fase TEMA ────────────────────────────────────
+// Última etapa: usuário escolhe a família de tema (Clássico ou um dos 4
+// mascotes) e o modo (dia/noite). Os tokens CSS aplicam imediatamente
+// na preview ao redor — assim ele vê o resultado antes de confirmar.
+
+function LayoutTema({ onConcluir }: { onConcluir: () => void }) {
+  const { familia, modo, familias, setFamilia, toggle } = useTheme()
+
+  return (
+    <div
+      className="min-h-screen w-full flex flex-col items-center justify-start py-6 px-3"
+      style={{ background: 'var(--bg-page)' }}
+    >
+      <div className="max-w-3xl w-full">
+        <h1
+          className="text-[22px] md:text-[26px] font-bold text-center mb-1"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          Escolha o visual do app
+        </h1>
+        <p
+          className="text-[14px] text-center mb-4 max-w-xl mx-auto"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          A cor de fundo e os destaques mudam imediatamente — você pode trocar depois em Perfil → Aparência.
+        </p>
+
+        {/* Toggle dia/noite no topo */}
+        <div className="flex justify-center mb-4">
+          <button
+            type="button"
+            onClick={toggle}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-full border text-[14px] font-semibold transition-all hover:opacity-80"
+            style={{
+              borderColor: 'rgba(255,255,255,0.15)',
+              background:  modo === 'noite' ? 'rgba(77,166,255,0.12)' : 'rgba(240,180,41,0.12)',
+              color:       modo === 'noite' ? '#4da6ff' : '#f0b429',
+            }}
+          >
+            {modo === 'noite' ? <Moon size={14}/> : <Sun size={14}/>}
+            Modo: {modo === 'noite' ? 'Noite' : 'Dia'}
+          </button>
+        </div>
+
+        {/* Grid de famílias */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-5">
+          {familias.map((f: Familia) => {
+            const ativo = f.id === familia.id
+            const cor   = f.cores[modo as Modo]
+            return (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setFamilia(f.id)}
+                className="text-left rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02]"
+                style={{
+                  borderColor: ativo ? '#00c896' : 'rgba(255,255,255,0.10)',
+                  background:  cor.bg,
+                }}
+              >
+                <div className="flex items-center gap-2 px-3 pt-3">
+                  {f.mascote ? (
+                    <img
+                      src={srcMascote(f.mascote, 'feliz')}
+                      alt=""
+                      width={36}
+                      height={36}
+                      className="object-contain flex-shrink-0"
+                      style={{ height: 36, width: 'auto' }}
+                    />
+                  ) : (
+                    <div
+                      className="w-9 h-9 rounded-lg flex-shrink-0 flex items-center justify-center text-[18px]"
+                      style={{ background: cor.accent + '22', color: cor.accent }}
+                    >★</div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-semibold truncate" style={{ color: cor.text }}>
+                      {f.label}
+                    </p>
+                    <p className="text-[12px] truncate" style={{ color: cor.text, opacity: 0.55 }}>
+                      {f.descricao}
+                    </p>
+                  </div>
+                  {ativo && (
+                    <Check size={16} style={{ color: '#00c896', flexShrink: 0 }}/>
+                  )}
+                </div>
+                {/* Faixa de cores accent + bg */}
+                <div className="flex h-2 mt-2">
+                  <div style={{ background: cor.accent, flex: 1 }}/>
+                  <div style={{ background: cor.text,   flex: 1, opacity: 0.4 }}/>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={onConcluir}
+          className="w-full py-3 rounded-xl text-[16px] font-semibold transition-colors hover:opacity-90"
+          style={{ background: '#00c896', color: '#0a0f1a' }}
+        >
+          Pronto, vamos lá!
+        </button>
       </div>
     </div>
   )

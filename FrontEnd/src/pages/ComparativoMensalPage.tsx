@@ -570,7 +570,7 @@ export default function ComparativoMensalPage() {
           .filter(c => c.variacao !== null)
           .sort((a, b) => Math.abs((b.variacao ?? 0)) - Math.abs((a.variacao ?? 0)))
           .slice(0, 10)
-          .map(c => ({ categoria: c.nome, tipo: c.tipo, valorA: c.valorA, valorB: c.valorB, variacao_pct: c.variacao })),
+          .map(c => ({ categoria: c.nome, tipo: c.tipo, valorA: c.anterior, valorB: c.atual, variacao_pct: c.variacao })),
       },
     }
   }, [buscado, inicioA, fimA, inicioB, fimB, diasA, diasB, resumoA, resumoB, insights, comparativo]))
