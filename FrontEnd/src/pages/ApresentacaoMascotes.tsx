@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Check, Sun, Moon } from 'lucide-react'
+import { ArrowLeft, Check, Sun, Moon, Sparkles, Trash2, Wrench } from 'lucide-react'
 import { srcMascote, type MascoteNome, type MascotePose } from '../components/ui/Mascote'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { useTheme } from '../hooks/useTheme'
@@ -60,7 +60,7 @@ const MASCOTES: MascoteInfo[] = [
 // trocas instantâneas (sem flash de imagem ausente)
 const POSES_PRELOAD: MascotePose[] = ['curioso', 'feliz', 'triste', 'sentado', 'comprimento-inicio']
 
-type Fase = 'apresentando' | 'aguardando' | 'escolhido' | 'sentar' | 'nomeando' | 'tema'
+type Fase = 'apresentando' | 'aguardando' | 'escolhido' | 'sentar' | 'nomeando' | 'tema' | 'aviso-dados'
 
 export default function ApresentacaoMascotes() {
   const navigate = useNavigate()
@@ -119,6 +119,17 @@ export default function ApresentacaoMascotes() {
   }
 
   function aoConcluirTema() {
+    // Em primeiro acesso, mostra o aviso sobre os dados de exemplo
+    // criados pelo seed (Carteira, cartões, categorias). Em retomada
+    // (trocando o mascote pelo perfil), pula esse aviso.
+    if (primeiroAcesso) {
+      setFase('aviso-dados')
+    } else {
+      navigate('/', { replace: true })
+    }
+  }
+
+  function aoConcluirAvisoDados() {
     navigate('/', { replace: true })
   }
 
@@ -149,9 +160,14 @@ export default function ApresentacaoMascotes() {
     />
   }
 
-  // Última etapa: escolha de tema (família + modo dia/noite)
+  // Etapa: escolha de tema (família + modo dia/noite)
   if (fase === 'tema') {
     return <LayoutTema onConcluir={aoConcluirTema}/>
+  }
+
+  // Última etapa do 1º acesso: avisa sobre os dados de exemplo
+  if (fase === 'aviso-dados' && escolhido) {
+    return <LayoutAvisoDados mascote={escolhido} onConcluir={aoConcluirAvisoDados}/>
   }
 
   return (
@@ -517,6 +533,93 @@ function LayoutTema({ onConcluir }: { onConcluir: () => void }) {
           style={{ background: '#00c896', color: '#0a0f1a' }}
         >
           Pronto, vamos lá!
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── LayoutAvisoDados ─────────────────────────────────────────────────
+// Tela final do 1º acesso: avisa que dados de exemplo foram criados pelo
+// seed (Carteira, cartões pré-cadastrados, categorias-base) e onde achar
+// a opção de limpar tudo.
+function LayoutAvisoDados({ mascote, onConcluir }: {
+  mascote: MascoteNome
+  onConcluir: () => void
+}) {
+  return (
+    <div
+      className="min-h-screen w-full flex items-center justify-center px-4 py-6"
+      style={{ background: 'var(--bg-page)' }}
+    >
+      <div
+        className="max-w-lg w-full rounded-2xl p-6 md:p-8"
+        style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-subtle)',
+        }}
+      >
+        <div className="flex items-start gap-4 mb-5">
+          <img
+            src={srcMascote(mascote, 'feliz')}
+            alt=""
+            className="w-20 h-20 md:w-24 md:h-24 object-contain flex-shrink-0"
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1.5">
+              <Sparkles size={16} style={{ color: '#f0b429' }}/>
+              <h2 className="text-[20px] md:text-[22px] font-bold"
+                style={{ color: 'var(--text-primary)' }}>
+                Antes de começar
+              </h2>
+            </div>
+            <p className="text-[15px] leading-relaxed"
+              style={{ color: 'var(--text-secondary)' }}>
+              Pra você navegar e conhecer o app com calma, já deixei criadas
+              algumas <strong>contas</strong> (Carteira, Nubank, Inter, C6) e
+              <strong> categorias</strong> de exemplo (Moradia, Alimentação,
+              Transporte, Saúde, Renda e Transferências).
+            </p>
+          </div>
+        </div>
+
+        <div
+          className="rounded-xl p-4 mb-5"
+          style={{
+            background: 'rgba(0,200,150,0.06)',
+            border: '1px solid rgba(0,200,150,0.2)',
+          }}
+        >
+          <div className="flex items-start gap-2.5">
+            <Trash2 size={16} className="flex-shrink-0 mt-0.5" style={{ color: '#00c896' }}/>
+            <div className="flex-1">
+              <p className="text-[15px] font-semibold mb-1"
+                style={{ color: 'var(--text-primary)' }}>
+                Quando quiser, pode limpar tudo
+              </p>
+              <p className="text-[14px] leading-relaxed"
+                style={{ color: 'var(--text-secondary)' }}>
+                No menu lateral, abra{' '}
+                <span className="inline-flex items-center gap-1 font-medium"
+                  style={{ color: 'var(--text-primary)' }}>
+                  <Wrench size={12}/> Ferramentas
+                </span>{' '}
+                e use <strong>Limpar tudo</strong> (apaga contas, categorias
+                e lançamentos) ou <strong>Limpar transações</strong> (mantém
+                a estrutura). Não tem volta — então faça quando estiver
+                pronto pra começar do zero com seus próprios dados.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={onConcluir}
+          className="w-full py-3 rounded-xl text-[16px] font-semibold transition-colors hover:opacity-90"
+          style={{ background: '#00c896', color: '#0a0f1a' }}
+        >
+          Entendi, vamos começar
         </button>
       </div>
     </div>
