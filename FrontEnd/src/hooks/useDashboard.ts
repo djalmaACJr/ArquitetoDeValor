@@ -3,6 +3,7 @@ import { useMemo, useEffect, useState } from 'react'
 import { useQuery, useQueries, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiFetch, extrairLista } from '../lib/api'
 import { qk } from '../lib/queryKeys'
+import { hojeLocal } from '../lib/utils'
 import type { Conta, Transacao, ResumoMensal, DespesaCategoria } from '../types'
 
 /** Gera array com os últimos N meses a partir de ano/mes, em ordem cronológica */
@@ -15,29 +16,51 @@ function gerarUltimosMeses(ano: number, mes: number, n: number): string[] {
   return meses
 }
 
+/**
+ * Agrupa transações por categoria classificando cada categoria como RECEITA
+ * ou DESPESA pelo SALDO LÍQUIDO (somaReceitas − somaDespesas) naquele recorte.
+ *
+ * Motivo: o schema não tem categorias específicas de receita ou despesa — a
+ * mesma categoria pode receber lançamentos de ambos os tipos (ex.: "Salário"
+ * com estorno pontual, "Supermercado" com cashback). Aqui a categoria aparece
+ * em UM donut só, classificada pelo sinal do líquido.
+ *
+ * Regra:
+ *  - liquido > 0 → categoria classificada como RECEITA; total exibido = liquido.
+ *  - liquido < 0 → categoria classificada como DESPESA; total exibido = |liquido|.
+ *  - liquido = 0 → não entra em nenhum donut.
+ */
 function agruparPorCategoria(
   transacoes: Transacao[],
-  tipo: 'RECEITA' | 'DESPESA',
-  limite: number,
+  tipoDesejado: 'RECEITA' | 'DESPESA',
 ): DespesaCategoria[] {
-  const comCat = transacoes.filter(
-    t => t.tipo === tipo && t.categoria_id && t.categoria_nome,
-  )
-  const map = new Map<string, DespesaCategoria>()
-  comCat.forEach(t => {
-    const key = t.categoria_id!
-    const ex  = map.get(key)
-    if (ex) { ex.total += t.valor }
-    else {
-      map.set(key, {
-        categoria_id:    t.categoria_id!,
-        categoria_nome:  t.categoria_nome!,
-        categoria_icone: t.categoria_icone ?? '',
-        total:           t.valor,
-      })
+  interface Acc {
+    nome:  string; icone: string
+    somaR: number; somaD:  number
+  }
+  const map = new Map<string, Acc>()
+  for (const t of transacoes) {
+    if (!t.categoria_id || !t.categoria_nome) continue
+    const ex = map.get(t.categoria_id) ?? {
+      nome:  t.categoria_nome,
+      icone: t.categoria_icone ?? '',
+      somaR: 0, somaD: 0,
     }
-  })
-  return [...map.values()].sort((a, b) => b.total - a.total).slice(0, limite)
+    if (t.tipo === 'RECEITA') ex.somaR += t.valor
+    else                       ex.somaD += t.valor
+    map.set(t.categoria_id, ex)
+  }
+
+  const resultado: DespesaCategoria[] = []
+  for (const [id, v] of map) {
+    const liquido = v.somaR - v.somaD
+    if (tipoDesejado === 'RECEITA' && liquido > 0) {
+      resultado.push({ categoria_id: id, categoria_nome: v.nome, categoria_icone: v.icone, total: liquido })
+    } else if (tipoDesejado === 'DESPESA' && liquido < 0) {
+      resultado.push({ categoria_id: id, categoria_nome: v.nome, categoria_icone: v.icone, total: -liquido })
+    }
+  }
+  return resultado.sort((a, b) => b.total - a.total)
 }
 
 /** Parseia "YYYY-MM" com segurança — retorna null se inválido */
@@ -204,7 +227,7 @@ export function useDashboard(
   )
 
   // ── Derivados (useMemo para evitar recomputação desnecessária) ─────
-  const hoje = new Date().toISOString().split('T')[0]
+  const hoje = hojeLocal()
 
   // Filtros: passa contas (sempre) + categorias + status (com_status para alguns cálculos)
   const filtros = useMemo(() => {
@@ -245,8 +268,8 @@ export function useDashboard(
       proximas:    todasPend.filter(t => t.data > hoje),
       proximasRaw: [...pendMes, ...pendProx].filter(t => t.data > hoje),
       resumo:      { mes, total_entradas: entradas, total_saidas: saidas },
-      despesasCat: agruparPorCategoria(doMes, 'DESPESA', 5),
-      receitasCat: agruparPorCategoria(doMes, 'RECEITA', 4),
+      despesasCat: agruparPorCategoria(doMes, 'DESPESA'),
+      receitasCat: agruparPorCategoria(doMes, 'RECEITA'),
     }
   }, [fase1Q.data, filtros, hoje, mes, parsed])
 
@@ -301,6 +324,27 @@ export function useDashboard(
   }, [fase1Q.data, historicoData, filtros, parsed,
       contasFiltro.length, filtCats.length, filtStatus.length])
 
+  /**
+   * Data do lançamento mais recente por conta, considerando os 6 meses já
+   * carregados (histórico + mês exibido). Usado pelo card "Minhas contas"
+   * para anotar contas zeradas com a data do último movimento.
+   *
+   * Se a conta não tiver lançamentos nessa janela, a chave simplesmente não
+   * aparece no objeto.
+   */
+  const ultimaTxPorConta = useMemo<Record<string, string>>(() => {
+    if (!fase1Q.data) return {}
+    const map: Record<string, string> = {}
+    const fontes = [...historicoData, fase1Q.data.doMesRaw]
+    for (const fonte of fontes) {
+      for (const tx of fonte) {
+        const atual = map[tx.conta_id]
+        if (!atual || tx.data > atual) map[tx.conta_id] = tx.data
+      }
+    }
+    return map
+  }, [fase1Q.data, historicoData])
+
   const refetch = async () => {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ['dashboard-fase1', mes] }),
@@ -336,6 +380,7 @@ export function useDashboard(
     // Todas as transações do mês exibido (qualquer status) — usado para
     // calcular saldo dia-a-dia (ex.: detecção de dias negativos).
     doMesRaw: fase1Q.data?.doMesRaw ?? ([] as Transacao[]),
+    ultimaTxPorConta,
     resumo, despesasCat, receitasCat,
     historico, pagos, pendentesStatus, projecoes,
     loading:          fase1Q.isLoading,

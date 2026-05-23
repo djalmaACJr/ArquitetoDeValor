@@ -9,7 +9,9 @@ test.describe('Relatórios', () => {
 
   test('E2E-REL01 — página carrega com filtros', async ({ page }) => {
     await expect(page.getByRole('button', { name: /gerar relatório/i })).toBeVisible()
-    await expect(page.getByText(/período/i)).toBeVisible()
+    // Escopa pra `<main>` — o sidebar passou a ter o link "Comparativo Períodos"
+    // que casaria com /período/i e causaria strict-mode violation.
+    await expect(page.locator('main').getByText(/período/i).first()).toBeVisible()
   })
 
   test('E2E-REL02 — gerar relatório exibe tabela', async ({ page }) => {
@@ -67,13 +69,16 @@ test.describe('Relatórios', () => {
   })
 
   test('E2E-REL07 — ocultar/mostrar valores no relatório', async ({ page }) => {
-    const btnOcultar = page.getByRole('button', { name: /ocultar/i })
+    // Usa .first() pra evitar strict-mode caso outro botão com texto similar
+    // apareça na página (ex.: tooltip de outro componente).
+    const btnOcultar = page.getByRole('button', { name: /ocultar/i }).first()
     await expect(btnOcultar).toBeVisible({ timeout: 8_000 })
     await btnOcultar.click()
-    await expect(page.getByRole('button', { name: /mostrar/i })).toBeVisible({ timeout: 3_000 })
+    const btnMostrar = page.getByRole('button', { name: /mostrar/i }).first()
+    await expect(btnMostrar).toBeVisible({ timeout: 6_000 })
     // Restaura
-    await page.getByRole('button', { name: /mostrar/i }).click()
-    await expect(page.getByRole('button', { name: /ocultar/i })).toBeVisible({ timeout: 3_000 })
+    await btnMostrar.click()
+    await expect(page.getByRole('button', { name: /ocultar/i }).first()).toBeVisible({ timeout: 6_000 })
   })
 
   test('E2E-REL06 — filtros persistem ao navegar entre páginas', async ({ page }) => {

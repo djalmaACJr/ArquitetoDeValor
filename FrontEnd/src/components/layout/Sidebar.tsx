@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, List, CreditCard, Tag,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
-  ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2, TrendingUp,
+  ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2, TrendingUp, X,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
@@ -121,39 +121,94 @@ function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChi
   const [open, setOpen] = useState(anyActive)
 
   if (collapsed) {
+    // Sidebar recolhido: o pai segue como ícone único, mas ao passar o mouse
+    // (ou foco via teclado) revela um flyout à direita com os filhos. Garante
+    // que todos os relatórios fiquem acessíveis sem aumentar a barra.
     return (
-      <NavLink
-        to={item.to}
-        title={item.label}
-        className={`flex items-center justify-center px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
-          anyActive ? 'bg-av-green/15 text-av-green font-medium' : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
-        }`}
-      >
-        {item.icon}
-      </NavLink>
+      <div className="relative group">
+        <NavLink
+          to={item.to}
+          title={item.label}
+          className={`flex items-center justify-center px-2 py-[7px] rounded-lg text-[17px] mb-[1px] transition-colors ${
+            anyActive ? 'bg-av-green/15 text-av-green font-medium' : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
+          }`}
+        >
+          {item.icon}
+        </NavLink>
+        {/* Flyout. O wrapper tem `pl-2` (transparente) servindo de "bridge"
+            entre o ícone e o painel — sem essa ponte, o cursor saía do ícone
+            antes de entrar no flyout e o hover quebrava. O painel visual é a
+            div interna. */}
+        <div
+          className="absolute left-full top-0 pl-2 z-50 opacity-0 invisible pointer-events-none group-hover:opacity-100 group-hover:visible group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:visible group-focus-within:pointer-events-auto transition-opacity duration-100"
+          role="menu"
+        >
+          <div className="min-w-[200px] py-1 rounded-lg bg-av-dark border border-blue-400/30 shadow-xl">
+            <p className="px-3 pt-1.5 pb-1 text-[13px] uppercase tracking-widest text-blue-400/60">
+              {item.label}
+            </p>
+            {item.children.map(child => (
+              <NavLink
+                key={child.to}
+                to={child.to}
+                end={child.to === item.to}
+                className={({ isActive }) =>
+                  `flex items-center gap-2 px-3 py-1.5 text-[16px] transition-colors ${
+                    isActive
+                      ? 'bg-av-green/15 text-av-green font-medium'
+                      : 'text-white/70 hover:bg-blue-400/10 hover:text-white'
+                  }`
+                }
+              >
+                {child.icon}
+                <span className="flex-1">{child.label}</span>
+              </NavLink>
+            ))}
+          </div>
+        </div>
+      </div>
     )
   }
 
   return (
     <div>
-      <button
-        onClick={() => setOpen(v => !v)}
-        className={`w-full flex items-center gap-2 px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
-          anyActive ? 'bg-av-green/10 text-av-green' : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
-        }`}
-      >
-        {item.icon}
-        <span className="flex-1 text-left">{item.label}</span>
-        {open ? <ChevronDown size={11}/> : <ChevronRight size={11}/>}
-      </button>
+      {/* Linha do pai: NavLink (vai para o destino default — Resumo geral) com
+          um chevron-button separado à direita pra abrir/fechar o submenu.
+          Manter como link garante que ferramentas que buscam por `role="link"`
+          (testes E2E, navegação por teclado) continuem encontrando "Relatórios". */}
+      <div className="flex items-center gap-1">
+        <NavLink
+          to={item.to}
+          className={({ isActive }) =>
+            `flex-1 flex items-center gap-2 px-2 py-[7px] rounded-lg text-[17px] mb-[1px] transition-colors ${
+              isActive || anyActive
+                ? 'bg-av-green/10 text-av-green'
+                : 'text-white/60 hover:bg-blue-400/8 hover:text-white/90'
+            }`
+          }
+        >
+          {item.icon}
+          <span className="flex-1 text-left">{item.label}</span>
+        </NavLink>
+        <button
+          onClick={() => setOpen(v => !v)}
+          title={open ? 'Recolher' : 'Expandir'}
+          className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-blue-400/8 transition-colors"
+          aria-expanded={open}
+          aria-label={open ? 'Recolher submenu' : 'Expandir submenu'}
+        >
+          {open ? <ChevronDown size={11}/> : <ChevronRight size={11}/>}
+        </button>
+      </div>
       {open && (
         <div className="ml-3 border-l border-blue-400/15 pl-2 mb-1">
           {item.children.map(child => (
             <NavLink
               key={child.to}
               to={child.to}
+              end={child.to === item.to}
               className={({ isActive }) =>
-                `flex items-center gap-2 px-2 py-[6px] rounded-lg text-[12px] mb-[1px] transition-colors ${
+                `flex items-center gap-2 px-2 py-[6px] rounded-lg text-[16px] mb-[1px] transition-colors ${
                   isActive
                     ? 'bg-av-green/15 text-av-green font-medium'
                     : 'text-white/50 hover:bg-blue-400/8 hover:text-white/80'
@@ -174,7 +229,7 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
   return (
     <div className="mb-2">
       {!collapsed && (
-        <p className="text-[10px] uppercase tracking-widest text-blue-400/50 px-2 mb-1">{label}</p>
+        <p className="text-[14px] uppercase tracking-widest text-blue-400/50 px-2 mb-1">{label}</p>
       )}
       {items.map(item =>
         item.children && item.children.length > 0 ? (
@@ -186,7 +241,7 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
             end={item.to === '/'}
             title={collapsed ? item.label : undefined}
             className={({ isActive }) =>
-              `flex items-center gap-2 px-2 py-[7px] rounded-lg text-[13px] mb-[1px] transition-colors ${
+              `flex items-center gap-2 px-2 py-[7px] rounded-lg text-[17px] mb-[1px] transition-colors ${
                 collapsed ? 'justify-center' : ''
               } ${
                 isActive
@@ -200,7 +255,7 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
               <>
                 <span className="flex-1">{item.label}</span>
                 {item.soon && (
-                  <span className="text-[9px] px-[6px] py-[2px] rounded-full bg-av-amber/15 text-av-amber">
+                  <span className="text-[13px] px-[6px] py-[2px] rounded-full bg-av-amber/15 text-av-amber">
                     em breve
                   </span>
                 )}
@@ -213,7 +268,13 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
   )
 }
 
-export default function Sidebar() {
+interface SidebarProps {
+  /** Em telas < md a Sidebar vira um overlay deslizante controlado por este flag. */
+  mobileOpen?:    boolean
+  onMobileClose?: () => void
+}
+
+export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}) {
   const { dark, toggle } = useTheme()
   const { signOut, session } = useAuth()
   const navigate = useNavigate()
@@ -224,53 +285,97 @@ export default function Sidebar() {
     ?? 'Usuário'
   const email = session?.user?.email ?? ''
 
+  // `collapsed` só deve afetar a renderizaçao em desktop (md+). Em mobile
+  // o overlay é sempre expandido — usamos `colapsado` (efetivo) abaixo.
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)')
+    const fn = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+    mq.addEventListener('change', fn)
+    return () => mq.removeEventListener('change', fn)
+  }, [])
+  const colapsado = isDesktop && collapsed
+
   return (
-    <nav
-      className={`flex-shrink-0 bg-av-dark flex flex-col px-3 py-5 rounded-r-2xl transition-all duration-300 relative sticky top-0 h-screen ${
-        collapsed ? 'w-[60px]' : 'w-[216px]'
-      }`}
-    >
-      {/* Botão de colapso */}
-      <button
-        onClick={() => setCollapsed(v => !v)}
-        title={collapsed ? 'Expandir menu' : 'Recolher menu'}
-        className="absolute -right-3 top-6 z-10 w-6 h-6 rounded-full bg-av-dark border border-blue-400/30 flex items-center justify-center text-white/60 hover:text-av-green hover:border-av-green/50 transition-colors shadow-md"
+    <>
+      {/* Backdrop — renderiza só quando mobile aberto, pra não interceptar
+          cliques na sidebar desktop nem ficar no DOM à toa. */}
+      {!isDesktop && mobileOpen && (
+        <div
+          onClick={onMobileClose}
+          className="fixed inset-0 z-40 bg-black/60 transition-opacity duration-300"
+        />
+      )}
+
+      <nav
+        className={
+          isDesktop
+            // Desktop: parte do layout, largura controlada por `colapsado`.
+            ? `flex flex-col px-3 py-5 bg-av-dark sticky top-0 h-screen rounded-r-2xl flex-shrink-0 transition-all duration-300 ${
+                colapsado ? 'w-[60px]' : 'w-[216px]'
+              }`
+            // Mobile: overlay deslizante.
+            : `flex flex-col px-3 py-5 bg-av-dark fixed top-0 left-0 h-screen z-50 w-[260px] transition-transform duration-300 ${
+                mobileOpen ? 'translate-x-0' : '-translate-x-full'
+              }`
+        }
       >
-        {collapsed ? <ChevronRight size={12}/> : <ChevronLeft size={12}/>}
-      </button>
+        {/* Fechar — só no mobile */}
+        {!isDesktop && (
+          <button
+            onClick={onMobileClose}
+            aria-label="Fechar menu"
+            className="absolute top-3 right-3 z-10 w-8 h-8 rounded-lg border border-blue-400/30 flex items-center justify-center text-white/70 hover:text-white hover:border-white/40 transition-colors"
+          >
+            <X size={14}/>
+          </button>
+        )}
+
+        {/* Colapsar — só no desktop */}
+        {isDesktop && (
+          <button
+            onClick={() => setCollapsed(v => !v)}
+            title={collapsed ? 'Expandir menu' : 'Recolher menu'}
+            className="absolute -right-3 top-6 z-10 w-6 h-6 rounded-full bg-av-dark border border-blue-400/30 flex items-center justify-center text-white/60 hover:text-av-green hover:border-av-green/50 transition-colors shadow-md"
+          >
+            {collapsed ? <ChevronRight size={12}/> : <ChevronLeft size={12}/>}
+          </button>
+        )}
 
       {/* Logo */}
-      <div className={`flex items-center gap-3 mb-7 pb-4 border-b border-blue-400/20 ${collapsed ? 'justify-center' : ''}`}>
+      <div className={`flex items-center gap-3 mb-7 pb-4 border-b border-blue-400/20 ${colapsado ? 'justify-center' : ''}`}>
         <div className="w-9 h-9 rounded-[10px] bg-av-dark border border-blue-400/30 flex items-center justify-center flex-shrink-0">
           <Logo />
         </div>
-        {!collapsed && (
+        {!colapsado && (
           <div>
-            <p className="text-[13px] font-bold text-white leading-tight">Arquiteto<br/>de Valor</p>
-            <p className="text-[9px] text-av-green tracking-[2px]">BLUEPRINT</p>
+            <p className="text-[17px] font-bold text-white leading-tight">Arquiteto<br/>de Valor</p>
+            <p className="text-[13px] text-av-green tracking-[2px]">BLUEPRINT</p>
           </div>
         )}
       </div>
 
-      <NavGroup label="Principal"   items={navPrincipal}   collapsed={collapsed} />
+      <NavGroup label="Principal"   items={navPrincipal}   collapsed={colapsado} />
       <div className="h-px bg-blue-400/15 my-2" />
-      <NavGroup label="Cadastros"   items={navCadastros}   collapsed={collapsed} />
+      <NavGroup label="Cadastros"   items={navCadastros}   collapsed={colapsado} />
       <div className="h-px bg-blue-400/15 my-2" />
-      <NavGroup label="Relatórios"  items={navRelatorios}  collapsed={collapsed} />
+      <NavGroup label="Relatórios"  items={navRelatorios}  collapsed={colapsado} />
       <div className="h-px bg-blue-400/15 my-2" />
-      <NavGroup label="Ferramentas" items={navFerramentas} collapsed={collapsed} />
+      <NavGroup label="Ferramentas" items={navFerramentas} collapsed={colapsado} />
 
       <div className="flex-1" />
 
       {/* Rodapé - fixo no fundo, sempre visível */}
-      <div className={`pt-3 border-t border-blue-400/30 bg-av-dark ${collapsed ? 'flex flex-col items-center gap-2' : ''}`}>
-        {!collapsed && (
+      <div className={`pt-3 border-t border-blue-400/30 bg-av-dark ${colapsado ? 'flex flex-col items-center gap-2' : ''}`}>
+        {!colapsado && (
           <div className="w-full mb-2 px-1 py-1">
-            <p className="text-[12px] font-semibold text-white truncate">{nome}</p>
-            <p className="text-[10px] text-blue-300/60 truncate">{email}</p>
+            <p className="text-[16px] font-semibold text-white truncate">{nome}</p>
+            <p className="text-[14px] text-blue-300/60 truncate">{email}</p>
           </div>
         )}
-        <div className={`flex items-center gap-1 ${collapsed ? 'flex-col' : 'px-1'}`}>
+        <div className={`flex items-center gap-1 ${colapsado ? 'flex-col' : 'px-1'}`}>
           <button
             onClick={() => navigate('/perfil')}
             className="p-2 rounded-lg text-white/70 hover:text-blue-400 hover:bg-blue-400/10 transition-colors flex-shrink-0"
@@ -291,15 +396,16 @@ export default function Sidebar() {
             title="Sair"
           >
             <LogOut size={15}/>
-            {!collapsed && <span className="text-[12px] font-medium">Sair</span>}
+            {!colapsado && <span className="text-[16px] font-medium">Sair</span>}
           </button>
         </div>
-        {!collapsed && (
+        {!colapsado && (
           <div className="mt-2 px-1">
             <AppVersion />
           </div>
         )}
       </div>
     </nav>
+    </>
   )
 }

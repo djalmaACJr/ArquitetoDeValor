@@ -113,6 +113,9 @@ supabase/functions/
 ├── filtros/index.ts            # CRUD de filtros nomeados (Dashboard/Extrato/Relatórios)
 ├── excluir_conta/index.ts      # apaga todos os dados do usuário (chama fn_excluir_dados_usuario)
 ├── version/index.ts            # /version — endpoint de introspecção
+├── ia_configs/index.ts         # CRUD de configs de IA do usuário; criptografa api_key (AES-256-GCM); POST /:id/ping testa credencial
+├── chat_mascote/index.ts       # proxy autenticado para o provedor escolhido — recebe contexto opcional (texto + screenshot)
+├── _shared/cripto.ts           # helpers AES-256-GCM (Web Crypto) usando o secret IA_KEYS_ENCRYPTION_KEY
 └── limpar/index.ts             # usado em testes (reativa contas inativas antes do UPDATE/DELETE)
 ```
 
@@ -194,12 +197,14 @@ Tudo vive em **`arqvalor`** — `search_path` é configurado nas migrations. Ext
 ### Tabelas
 
 #### `usuarios`
-`id (PK = auth.uid)`, `email UNIQUE`, `nome`, `ocultar_valores BOOLEAN NOT NULL DEFAULT false`, `criado_em`.
+`id (PK = auth.uid)`, `email UNIQUE`, `nome`, `ocultar_valores BOOLEAN NOT NULL DEFAULT false`, `mascote_preferido TEXT`, `layout JSONB` (apelido do mascote + tema), `ia_preferencia TEXT` (provedor padrão), `ia_configs JSONB` (array de configs `{id,provedor,apelido,modelo,api_key_cripto}` — `api_key_cripto` é AES-256-GCM via secret `IA_KEYS_ENCRYPTION_KEY`), `criado_em`.
+Adições posteriores ao schema base (migrations `20260513..20260521`). `mascote_preferido IS NULL` ⇒ primeiro acesso.
 
 #### `contas`
-`id`, `user_id → usuarios`, `nome (1..100)`, `tipo (tipo_conta)`, `saldo_inicial NUMERIC(15,2)`, `icone`, `cor (#RRGGBB)`, `ativa`, `dia_fechamento (1..31)`, `dia_pagamento (1..31)`, `criado_em`, `atualizado_em`.
+`id`, `user_id → usuarios`, `nome (1..100)`, `tipo (tipo_conta)`, `saldo_inicial NUMERIC(15,2)`, `icone`, `cor (#RRGGBB)`, `ativa`, `dia_fechamento (1..31)`, `dia_pagamento (1..31)`, `limite_credito NUMERIC(15,2) (>= 0)`, `criado_em`, `atualizado_em`.
 Índices: `(user_id)`, `(user_id, ativa)`.
 Colunas `dia_fechamento` / `dia_pagamento` adicionadas por `20260429000008`.
+Coluna `limite_credito` adicionada por `20260522000001` (apenas relevante para `tipo = CARTAO`; backend zera para outros tipos). A view `vw_saldo_contas` é recriada na mesma migration para expor o campo.
 
 #### `categorias`
 `id`, `user_id`, `id_pai → categorias`, `descricao (1..20)`, `icone`, `cor`, `ativa`, `protegida` (flag de bloqueio para "Transferências"), timestamps.
@@ -227,9 +232,6 @@ Constraints:
 - `valor > 0`, `valor_projetado > 0` quando presente.
 
 Índices: `user_id`, `conta_id`, `categoria_id`, `data`, `status`, `id_recorrencia`, `criado_em`, listagem `(user_id, conta_id, data, criado_em)`, `(user_id, ano_tx, mes_tx)`, parcial `id_par_transferencia` (não-nulos).
-
-#### `auditoria`
-`id`, `user_id`, `tabela`, `registro_id`, `acao` (`INSERT|UPDATE|DELETE|ANTECIPAR`), `payload_old/new JSONB`, `ip`, `criado_em`.
 
 #### `filtros_salvos`
 `id`, `user_id → auth.users` (cascade DELETE), `pagina`, `nome`, `dados JSONB`, `criado_em`.
@@ -301,8 +303,6 @@ USING      (user_id = auth.uid())
 WITH CHECK (user_id = auth.uid());
 ```
 
-Auditoria tem apenas `USING` (somente leitura para o dono).
-
 ### Migrations
 
 Em `supabase/migrations/`:
@@ -322,6 +322,19 @@ Em `supabase/migrations/`:
 - `20260511000001_lembretes.sql` — tabela `lembretes` + RLS + trigger `trg_atualizar_lembrete`
 - `20260511000002_assistente_lancamentos.sql` — tabela `assistente_lancamentos` + RLS + índices + trigger
 - `20260513000001_ocultar_valores_usuario.sql` — coluna `ocultar_valores BOOLEAN` em `usuarios`
+- `20260517000001_layout_usuario.sql` — coluna `layout` (preferência de tema/layout) em `usuarios`
+- `20260517000002_mascote_preferido.sql` — coluna `mascote_preferido` em `usuarios`
+- `20260519000001_ia_preferencia_usuario.sql` — preferência de provedor de IA por usuário
+- `20260519000002_apelidos_e_multi_ia.sql` — apelidos e múltiplas configurações de IA
+- `20260521000001_ia_configs_criptografada.sql` — `ia_configs JSONB` com api_keys criptografadas (AES-256-GCM via secret `IA_KEYS_ENCRYPTION_KEY`)
+- `20260522000001_limite_credito_cartao.sql` — coluna `limite_credito` em `contas` + recria `vw_saldo_contas`
+- `20260522000002_fix_rls_saldos_contas_ate_data.sql` — **fix de segurança**: `fn_saldos_contas_ate_data` e `fn_saldo_conta_ate_data` viram `SECURITY INVOKER` com validação de `auth.uid()` (antes vazavam dados entre usuários)
+- `20260522000003_fix_excluir_dados_usuario_completa.sql` — **fix duplo de exclusão**:
+  - **Segurança crítica**: `fn_excluir_dados_usuario` agora valida `p_user_id = auth.uid()` e REVOKE EXECUTE para anon/public. Antes, qualquer chamador (até anônimo) podia apagar dados de outro usuário passando o UUID dele.
+  - **Completude**: passa a apagar também `lembretes`, `filtros_salvos` e `assistente_lancamentos` (antes só removia `transacoes/categorias/contas/usuarios`, deixando órfãos).
+  - Edge Function `excluir_conta` foi ajustada para propagar o JWT do usuário ao chamar a RPC (antes usava `service_role`, o que faria `auth.uid()` ser NULL e bloquearia a checagem).
+- `20260523000001_limpar_orfaos_e_fks.sql` — limpeza de órfãos, FK em `auditoria.user_id`, normalização de `filtros_salvos.user_id`, e bypass admin (`postgres`/`service_role`) na `fn_excluir_dados_usuario` para permitir cleanup operacional pelo SQL editor.
+- `20260523000002_remover_tabela_auditoria.sql` — DROP da tabela `arqvalor.auditoria`. Estava criada desde o dia 1 sem produtor (nenhum trigger/função gravava nela, 0 registros em 7 semanas). `fn_excluir_dados_usuario` recriada sem o DELETE de auditoria.
 
 **Todas idempotentes** (`IF NOT EXISTS`, `CREATE OR REPLACE`, blocos `DO/EXCEPTION`, `DROP POLICY/TRIGGER IF EXISTS`).
 
@@ -336,6 +349,7 @@ Em `supabase/migrations/`:
 | Defesa em profundidade | Trigger `fn_validar_isolamento_usuario` valida posse de `conta_id`/`categoria_id` |
 | CORS | `ALLOWED_ORIGIN` via secret em produção |
 | Edge Function | Sempre usa `db(req)` (JWT), nunca `service_role` em código de usuário |
+| RPCs com user_id | Funções que aceitam `p_user_id` ou `p_conta_id` (`fn_saldos_contas_ate_data`, `fn_saldo_conta_ate_data`, `fn_excluir_dados_usuario`) validam contra `auth.uid()` e levantam `ACESSO_NEGADO` em caso de divergência. `fn_excluir_dados_usuario` adicionalmente revoga EXECUTE de anon/public |
 | Frontend | Nunca armazena `service_role`; só `anon_key` pública |
 
 ---
@@ -344,7 +358,7 @@ Em `supabase/migrations/`:
 
 - **Transferências** exigem consistência dupla — o lado que falhar deixa par órfão; tratar como transação atômica.
 - **Recorrência** propaga em série; sempre respeitar o `escopo` recebido.
-- **Antecipação** é destrutiva para parcelas seguintes (DELETE) — registrar em auditoria.
+- **Antecipação** é destrutiva para parcelas seguintes (DELETE) — sem possibilidade de undo.
 - **Categorias protegidas** (`protegida = true`, ex.: "Transferências") não podem ser editadas ou excluídas — frontend e backend devem validar.
 - **Soft delete vs hard delete** — contas/categorias têm `ativa` (soft); transações são removidas (hard) com escopo.
 - **`atualizado_em`** é gerenciado por trigger — não setar manualmente.

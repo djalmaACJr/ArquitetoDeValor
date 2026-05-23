@@ -17,15 +17,25 @@ Deno.serve(async (req: Request) => {
   const userId = auth;
 
   try {
-    // Cliente admin (service_role) para chamadas privilegiadas
-    const admin = createClient(
+    // 1. Apaga todos os dados do usuário via RPC.
+    //    A função fn_excluir_dados_usuario valida p_user_id = auth.uid(),
+    //    então precisamos propagar o JWT do usuário (não usar service_role,
+    //    que tornaria auth.uid() = NULL e bloquearia a chamada).
+    const authHeader = req.headers.get("Authorization");
+    const anonKey    = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY");
+    if (!authHeader || !anonKey) {
+      return erro("Credenciais ausentes", 401);
+    }
+    const userClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-      { db: { schema: "arqvalor" } }
+      anonKey,
+      {
+        db: { schema: "arqvalor" },
+        global: { headers: { Authorization: authHeader } },
+      }
     );
 
-    // 1. Apaga todos os dados do usuário via função SECURITY DEFINER
-    const { error: errDados } = await admin.rpc("fn_excluir_dados_usuario", {
+    const { error: errDados } = await userClient.rpc("fn_excluir_dados_usuario", {
       p_user_id: userId,
     });
 

@@ -187,11 +187,24 @@ test.describe('Lembretes', () => {
     const checkboxLabel = drawer.getByText(/criar lembrete/i)
     await expect(checkboxLabel).toBeVisible({ timeout: 3_000 })
 
-    // Checkbox deve ser clicável
+    // Checkbox deve estar visível, habilitado (data > hoje) e clicável.
     const checkbox = drawer.locator('input[type="checkbox"]').first()
     await expect(checkbox).toBeVisible()
-    await checkbox.check()
-    await expect(checkbox).toBeChecked()
+    await expect(checkbox).toBeEnabled({ timeout: 2_000 })
+
+    // No Firefox controlado, click direto no <input> não dispara onChange
+    // de forma confiável. O React rastreia mudanças via override do setter
+    // nativo de `checked`; precisamos chamar o setter nativo para que ele
+    // detecte e propague o evento.
+    await checkbox.evaluate((el: HTMLInputElement) => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'checked',
+      )?.set
+      setter?.call(el, true)
+      el.dispatchEvent(new Event('input',  { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await expect(checkbox).toBeChecked({ timeout: 3_000 })
 
     await page.keyboard.press('Escape')
   })

@@ -1,5 +1,13 @@
 // src/lib/utils.ts
 
+// ── Meses ─────────────────────────────────────────────────────────────────────
+// Único array de meses abreviados pt-BR — usado por utils, CalendarioDashboard,
+// MonthPicker e quem mais precisar.
+export const MESES_ABREV = [
+  'Jan','Fev','Mar','Abr','Mai','Jun',
+  'Jul','Ago','Set','Out','Nov','Dez',
+] as const
+
 // ── Formatação de moeda — instância singleton (performance) ───────────────────
 const _BRL = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
@@ -8,6 +16,12 @@ const _BRL = new Intl.NumberFormat('pt-BR', {
 })
 export function formatBRL(value: number): string {
   return _BRL.format(value)
+}
+
+// Parse de string no formato BR ("1.234,56" → 1234.56). Aceita também
+// formato direto ("1234.56"). Retorna 0 quando não consegue interpretar.
+export function parsearValorBR(v: string): number {
+  return parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0
 }
 
 // ── Datas ─────────────────────────────────────────────────────────────────────
@@ -35,8 +49,7 @@ export function mesLabel(
   const date = new Date(y, m - 1, 1)
 
   if (formato === 'curto') {
-    const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
-    return `${nomes[m - 1]}/${String(y).slice(2)}`
+    return `${MESES_ABREV[m - 1]}/${String(y).slice(2)}`
   }
   if (formato === 'longo') {
     const nome = date.toLocaleDateString('pt-BR', { month: 'long' })
@@ -50,6 +63,36 @@ export function mesLabel(
 export function mesAtual(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+// Data de hoje no fuso LOCAL no formato YYYY-MM-DD.
+// Não usar `new Date().toISOString().split('T')[0]` — toISOString devolve UTC
+// e em UTC-3 vira o dia seguinte a partir das 21h local.
+export function hojeLocal(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Avança/retrocede `delta` meses sobre "YYYY-MM". Retorna nova string "YYYY-MM".
+export function proximoMes(ym: string, delta: number): string {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(y, m - 1 + delta, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+// Última data (YYYY-MM-DD) do mês "YYYY-MM".
+export function ultimoDiaMes(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(y, m, 0) // dia 0 do mês seguinte = último dia do mês atual
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Última data (YYYY-MM-DD) do mês anterior a "YYYY-MM". Útil para
+// calcular saldo-base usado por Dashboard / Extrato.
+export function ultimoDiaMesAnterior(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(y, m - 1, 0)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 export function mesesDisponiveis(qtd = 12): string[] {

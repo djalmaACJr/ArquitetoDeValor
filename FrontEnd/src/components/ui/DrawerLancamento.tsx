@@ -7,7 +7,7 @@ import { Repeat2, Trash2, Zap, Sparkles } from 'lucide-react'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
 import { apiFetch, apiMutate } from '../../lib/api'
-import { formatBRL } from '../../lib/utils'
+import { formatBRL, parsearValorBR } from '../../lib/utils'
 import { buscarSugestoes, buscarTodasSugestoes, salvarSugestao, type SugestaoLancamento } from '../../hooks/useAssistente'
 // Logger desativado — reativar removendo o comentário desta linha e dos log() abaixo
 // import { log } from '../../lib/logger'
@@ -90,9 +90,6 @@ interface FormState {
 }
 
 // ── Máscara BR ─────────────────────────────────────────────────
-function parsearValorBR(v: string): number {
-  return parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0
-}
 function valorParaMascara(v: number): string {
   return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -758,7 +755,7 @@ export default function DrawerLancamento({
               <div className="flex gap-2 mr-auto">
                 <button
                   onClick={() => setConfirmandoExclusao(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[16px] font-semibold transition-colors"
                   style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
                 >
                   <Trash2 size={13} /> Excluir
@@ -766,7 +763,7 @@ export default function DrawerLancamento({
                 {podeAntecipar && (
                   <button
                     onClick={() => setConfirmandoAntecip(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[16px] font-semibold transition-colors"
                     style={{ background: 'rgba(240,180,41,0.1)', color: '#f0b429', border: '1px solid rgba(240,180,41,0.3)' }}
                   >
                     <Zap size={13} /> Antecipar
@@ -779,7 +776,7 @@ export default function DrawerLancamento({
               <button
                 onClick={() => salvar(true)}
                 disabled={salvando}
-                className="px-3 py-2.5 rounded-lg border text-[12px] font-semibold transition-all hover:bg-av-green/5"
+                className="px-3 py-2.5 rounded-lg border text-[16px] font-semibold transition-all hover:bg-av-green/5"
                 style={{ borderColor: 'rgba(0,200,150,0.3)', color: '#00c896' }}
               >
                 {salvando ? 'Salvando…' : '+ Criar novo'}
@@ -791,7 +788,7 @@ export default function DrawerLancamento({
         }
       >
         {/* Tipo */}
-        <Field label="Tipo">
+        <Field label="Tipo" data-tutorial="drawer-tipo">
           <div ref={tipoRef} tabIndex={-1} className="outline-none">
           <Segmented
             opcoes={[
@@ -809,7 +806,7 @@ export default function DrawerLancamento({
         </Field>
 
         {/* Descrição */}
-        <Field label="Descrição *">
+        <Field label="Descrição *" data-tutorial="drawer-descricao">
           <div className="relative">
             <Input ref={descricaoRef} value={form.descricao}
               onChange={e => set({ descricao: e.target.value })}
@@ -836,7 +833,16 @@ export default function DrawerLancamento({
                   }
                   return
                 }
-                if (e.key === 'Escape') { setSugestoesAbertas(false); return }
+                if (e.key === 'Escape') {
+                  if (sugestoesAbertas) {
+                    // Drawer também escuta Escape no document e fecharia.
+                    // Bloqueia o native event para que Escape feche apenas
+                    // o dropdown enquanto ele estiver aberto.
+                    e.nativeEvent.stopImmediatePropagation()
+                    setSugestoesAbertas(false)
+                  }
+                  return
+                }
                 if (!sugestoesAbertas || sugestoes.length === 0) return
                 if (e.key === 'ArrowDown') {
                   e.preventDefault()
@@ -855,7 +861,7 @@ export default function DrawerLancamento({
                 }
               }}
               placeholder="Ex: Conta de luz, Salário..." maxLength={200} />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px]"
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[14px]"
               style={{ color: '#8b92a8' }}>
               {sugestaoAplicada && !editando && (
                 <Sparkles size={11} style={{ color: '#a78bfa' }} className="opacity-80"
@@ -873,10 +879,10 @@ export default function DrawerLancamento({
               >
                 <div className="px-3 py-1.5 border-b border-white/5 flex items-center gap-1.5">
                   <Sparkles size={11} style={{ color: '#a78bfa' }} />
-                  <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#a78bfa' }}>
+                  <span className="text-[14px] font-semibold uppercase tracking-wide" style={{ color: '#a78bfa' }}>
                     Sugestões do assistente ({sugestoes.length})
                   </span>
-                  <span className="ml-auto text-[9px]" style={{ color: '#4a5168' }}>
+                  <span className="ml-auto text-[13px]" style={{ color: '#4a5168' }}>
                     ↑↓ navegar · Enter selecionar · Esc fechar · Ctrl+␣ abrir
                   </span>
                 </div>
@@ -900,17 +906,17 @@ export default function DrawerLancamento({
                       }}
                     >
                       <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-[12px] font-semibold flex-1 truncate" style={{ color: '#e8eaf0' }}>
+                        <span className="text-[16px] font-semibold flex-1 truncate" style={{ color: '#e8eaf0' }}>
                           {s.descricao}
                         </span>
                         {s.is_transferencia && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded"
+                          <span className="text-[13px] px-1.5 py-0.5 rounded"
                             style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa' }}>
                             Transf.
                           </span>
                         )}
                       </div>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]" style={{ color: '#8b92a8' }}>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[14px]" style={{ color: '#8b92a8' }}>
                         {cat && (
                           <span>
                             {cat.icone ? `${cat.icone} ` : ''}{catPai ? `${catPai.descricao} / ` : ''}{cat.descricao}
@@ -928,21 +934,21 @@ export default function DrawerLancamento({
             )}
           </div>
           {sugestaoAplicada && !editando && (
-            <p className="text-[10px] mt-1" style={{ color: '#a78bfa' }}>
+            <p className="text-[14px] mt-1" style={{ color: '#a78bfa' }}>
               Sugestão aplicada — confira os campos antes de salvar.
             </p>
           )}
         </Field>
 
         {/* Valor */}
-        <Field label="Valor *">
+        <Field label="Valor *" data-tutorial="drawer-valor">
           <button
             ref={valorBtnRef}
             type="button"
             aria-label="Valor"
             onClick={abrirCalc}
             onFocus={() => { if (!ignorarFoco.current) abrirCalc() }}
-            className="w-full text-left px-3 py-2 rounded-lg border transition-colors text-[13px]"
+            className="w-full text-left px-3 py-2 rounded-lg border transition-colors text-[17px]"
             style={{
               background: '#252d42',
               borderColor: calcAberta ? '#00c896' : 'rgba(255,255,255,0.1)',
@@ -961,7 +967,7 @@ export default function DrawerLancamento({
         </Field>
 
         {/* Conta origem */}
-        <Field label={form.tipo === 'TRANSFERENCIA' ? 'Conta origem *' : 'Conta *'}>
+        <Field label={form.tipo === 'TRANSFERENCIA' ? 'Conta origem *' : 'Conta *'} data-tutorial="drawer-conta">
           <SearchableSelect
             opcoes={opcoesContas}
             value={form.conta_id}
@@ -984,7 +990,7 @@ export default function DrawerLancamento({
 
         {/* Categoria */}
         {form.tipo !== 'TRANSFERENCIA' && (
-          <Field label="Categoria">
+          <Field label="Categoria" data-tutorial="drawer-categoria">
             <SearchableSelect
               opcoes={opcoesCategorias}
               value={form.categoria_id}
@@ -995,7 +1001,7 @@ export default function DrawerLancamento({
         )}
 
         {/* Status */}
-        <Field label="Status">
+        <Field label="Status" data-tutorial="drawer-status">
           <Segmented
             opcoes={[
               { value: 'PAGO',     label: 'Pago'     },
@@ -1007,7 +1013,7 @@ export default function DrawerLancamento({
 
         {/* Recorrência */}
         {(
-          <Field label="Recorrência">
+          <Field label="Recorrência" data-tutorial="drawer-recorrencia">
             {!editando ? (
               <>
                 <Toggle checked={form.recorrente} onChange={v => set({ recorrente: v })}
@@ -1015,12 +1021,12 @@ export default function DrawerLancamento({
                 {form.recorrente && (
                   <div className="mt-2 flex gap-2">
                     <div className="w-20">
-                      <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
+                      <p className="text-[14px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
                       <Input type="number" min="1" max="99" value={form.intervalo_recorrencia}
                         onChange={e => set({ intervalo_recorrencia: e.target.value })} />
                     </div>
                     <div className="flex-1">
-                      <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
+                      <p className="text-[14px] mb-1" style={{ color: '#8b92a8' }}>
                         {parseInt(form.intervalo_recorrencia) > 1
                           ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as Record<string, string>)[form.tipo_recorrencia] ?? 'períodos'
                           : 'Frequência'}
@@ -1028,7 +1034,7 @@ export default function DrawerLancamento({
                       <select
                         value={form.tipo_recorrencia}
                         onChange={e => set({ tipo_recorrencia: e.target.value })}
-                        className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-av-green transition-colors"
+                        className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[17px] outline-none focus:border-av-green transition-colors"
                         style={{ color: '#e8eaf0' }}
                       >
                         <option value="MENSAL">Mensal</option>
@@ -1038,7 +1044,7 @@ export default function DrawerLancamento({
                       </select>
                     </div>
                     <div className="w-20">
-                      <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
+                      <p className="text-[14px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
                       <Input type="number" min="2" max="999" value={form.total_parcelas}
                         onChange={e => set({ total_parcelas: e.target.value })} />
                     </div>
@@ -1051,10 +1057,10 @@ export default function DrawerLancamento({
                   <div className="flex items-center gap-2 bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 mb-2">
                     <Repeat2 size={14} style={{ color: '#f0b429', flexShrink: 0 }} />
                     <div>
-                      <p className="text-[12px] font-semibold" style={{ color: '#e8eaf0' }}>
+                      <p className="text-[16px] font-semibold" style={{ color: '#e8eaf0' }}>
                         Parcela {editando.nr_parcela} de {editando.total_parcelas}
                       </p>
-                      <p className="text-[10px]" style={{ color: '#8b92a8' }}>
+                      <p className="text-[14px]" style={{ color: '#8b92a8' }}>
                         {editando.tipo_recorrencia === 'PARCELA' ? 'Parcelado' :
                          editando.tipo_recorrencia === 'PROJECAO' ? 'Projeção recorrente' : 'Recorrente'}
                       </p>
@@ -1062,7 +1068,7 @@ export default function DrawerLancamento({
                   </div>
                   
                   <>
-                    <p className="text-[10px] mb-1.5" style={{ color: '#8b92a8' }}>Alterar</p>
+                    <p className="text-[14px] mb-1.5" style={{ color: '#8b92a8' }}>Alterar</p>
                     <div className="flex flex-col gap-1">
                       {([
                         { value: 'SOMENTE_ESTE',    label: 'Somente este lançamento' },
@@ -1096,7 +1102,7 @@ export default function DrawerLancamento({
                                 transition: 'all 0.2s ease'
                               }}
                             />
-                            <span className="text-[12px]" style={{ color: escopo === op.value ? '#e8eaf0' : '#8b92a8' }}>
+                            <span className="text-[16px]" style={{ color: escopo === op.value ? '#e8eaf0' : '#8b92a8' }}>
                               {op.label}
                             </span>
                           </label>
@@ -1106,15 +1112,15 @@ export default function DrawerLancamento({
                     {/* Campos de edição da recorrência - só aparecem com ESTE_E_SEGUINTES */}
                     {escopo === 'ESTE_E_SEGUINTES' && !expandindo && (
                         <div className="mt-2">
-                          <p className="text-[10px] mb-1.5" style={{ color: '#8b92a8' }}>Parâmetros da recorrência</p>
+                          <p className="text-[14px] mb-1.5" style={{ color: '#8b92a8' }}>Parâmetros da recorrência</p>
                           <div className="flex gap-2">
                             <div className="w-20">
-                              <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
+                              <p className="text-[14px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
                               <Input type="number" min="1" max="99" value={form.intervalo_recorrencia}
                                 onChange={e => set({ intervalo_recorrencia: e.target.value })} />
                             </div>
                             <div className="flex-1">
-                              <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
+                              <p className="text-[14px] mb-1" style={{ color: '#8b92a8' }}>
                                 {parseInt(form.intervalo_recorrencia) > 1
                                   ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as Record<string, string>)[form.tipo_recorrencia] ?? 'períodos'
                                   : 'Frequência'}
@@ -1122,7 +1128,7 @@ export default function DrawerLancamento({
                               <select
                                 value={form.tipo_recorrencia}
                                 onChange={e => set({ tipo_recorrencia: e.target.value })}
-                                className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-av-green transition-colors"
+                                className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[17px] outline-none focus:border-av-green transition-colors"
                                 style={{ color: '#e8eaf0' }}
                               >
                                 <option value="MENSAL">Mensal</option>
@@ -1132,7 +1138,7 @@ export default function DrawerLancamento({
                               </select>
                             </div>
                             <div className="w-20">
-                              <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
+                              <p className="text-[14px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
                               <Input type="number" min="2" max="999" value={form.total_parcelas}
                                 onChange={e => set({ total_parcelas: e.target.value })} />
                             </div>
@@ -1147,7 +1153,7 @@ export default function DrawerLancamento({
                           <button
                             type="button"
                             onClick={() => { setExpandindo(true); setEscopo('SOMENTE_ESTE') }}
-                            className="w-full flex items-center justify-center gap-1.5 rounded-lg border py-2 text-[12px] font-medium transition-colors hover:bg-white/5"
+                            className="w-full flex items-center justify-center gap-1.5 rounded-lg border py-2 text-[16px] font-medium transition-colors hover:bg-white/5"
                             style={{ borderColor: 'rgba(96,165,250,0.3)', color: '#60a5fa' }}
                           >
                             <Repeat2 size={13} /> Expandir recorrência
@@ -1158,13 +1164,13 @@ export default function DrawerLancamento({
                             style={{ borderColor: 'rgba(96,165,250,0.3)', background: 'rgba(96,165,250,0.06)' }}
                           >
                             <div className="flex items-center justify-between mb-2">
-                              <p className="text-[11px] font-semibold" style={{ color: '#60a5fa' }}>
+                              <p className="text-[15px] font-semibold" style={{ color: '#60a5fa' }}>
                                 Expandir recorrência
                               </p>
                               <button
                                 type="button"
                                 onClick={() => setExpandindo(false)}
-                                className="text-[10px] hover:underline"
+                                className="text-[14px] hover:underline"
                                 style={{ color: '#8b92a8' }}
                               >
                                 cancelar
@@ -1172,7 +1178,7 @@ export default function DrawerLancamento({
                             </div>
 
                             {/* Resumo da série atual (somente leitura) */}
-                            <p className="text-[10px] mb-2" style={{ color: '#8b92a8' }}>
+                            <p className="text-[14px] mb-2" style={{ color: '#8b92a8' }}>
                               Frequência: <span style={{ color: '#e8eaf0' }}>
                                 {({ MENSAL: 'Mensal', SEMANAL: 'Semanal', ANUAL: 'Anual', DIARIA: 'Diária' } as Record<string, string>)[form.tipo_recorrencia] ?? form.tipo_recorrencia}
                                 {parseInt(form.intervalo_recorrencia) > 1 ? ` · a cada ${form.intervalo_recorrencia}` : ''}
@@ -1186,7 +1192,7 @@ export default function DrawerLancamento({
                                   key={n}
                                   type="button"
                                   onClick={() => setQtdAdicional(n)}
-                                  className="flex-1 rounded-lg py-1.5 text-[12px] font-semibold transition-colors"
+                                  className="flex-1 rounded-lg py-1.5 text-[16px] font-semibold transition-colors"
                                   style={{
                                     background: qtdAdicional === n ? 'rgba(96,165,250,0.2)' : '#252d42',
                                     borderWidth: 1,
@@ -1202,14 +1208,14 @@ export default function DrawerLancamento({
 
                             {/* Input manual */}
                             <div className="flex items-center gap-2">
-                              <p className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Adicionar</p>
+                              <p className="text-[15px] whitespace-nowrap" style={{ color: '#8b92a8' }}>Adicionar</p>
                               <Input
                                 type="number" min="1" max="999"
                                 value={qtdAdicional}
                                 onChange={e => setQtdAdicional(e.target.value)}
                                 className="w-20"
                               />
-                              <p className="text-[11px] whitespace-nowrap" style={{ color: '#8b92a8' }}>
+                              <p className="text-[15px] whitespace-nowrap" style={{ color: '#8b92a8' }}>
                                 parcelas →&nbsp;
                                 <span style={{ color: '#e8eaf0', fontWeight: 600 }}>
                                   total {(editando.total_parcelas ?? 0) + (parseInt(qtdAdicional) || 0)}
@@ -1232,12 +1238,12 @@ export default function DrawerLancamento({
                       <>
                         <div className="mt-2 flex gap-2">
                           <div className="w-20">
-                            <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
+                            <p className="text-[14px] mb-1" style={{ color: '#8b92a8' }}>A cada</p>
                             <Input type="number" min="1" max="99" value={form.intervalo_recorrencia}
                               onChange={e => set({ intervalo_recorrencia: e.target.value })} />
                           </div>
                           <div className="flex-1">
-                            <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>
+                            <p className="text-[14px] mb-1" style={{ color: '#8b92a8' }}>
                               {parseInt(form.intervalo_recorrencia) > 1
                                 ? ({ MENSAL: 'meses', SEMANAL: 'semanas', ANUAL: 'anos', DIARIA: 'dias' } as Record<string, string>)[form.tipo_recorrencia] ?? 'períodos'
                                 : 'Frequência'}
@@ -1245,7 +1251,7 @@ export default function DrawerLancamento({
                             <select
                               value={form.tipo_recorrencia}
                               onChange={e => set({ tipo_recorrencia: e.target.value })}
-                              className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-av-green transition-colors"
+                              className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[17px] outline-none focus:border-av-green transition-colors"
                               style={{ color: '#e8eaf0' }}
                             >
                               <option value="MENSAL">Mensal</option>
@@ -1255,12 +1261,12 @@ export default function DrawerLancamento({
                             </select>
                           </div>
                           <div className="w-20">
-                            <p className="text-[10px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
+                            <p className="text-[14px] mb-1" style={{ color: '#8b92a8' }}>Parcelas</p>
                             <Input type="number" min="2" max="999" value={form.total_parcelas}
                               onChange={e => set({ total_parcelas: e.target.value })} />
                           </div>
                         </div>
-                        <p className="text-[10px] mt-2 px-2 py-1.5 rounded-lg" style={{ color: '#f0b429', background: 'rgba(240,180,41,0.08)', border: '1px solid rgba(240,180,41,0.2)' }}>
+                        <p className="text-[14px] mt-2 px-2 py-1.5 rounded-lg" style={{ color: '#f0b429', background: 'rgba(240,180,41,0.08)', border: '1px solid rgba(240,180,41,0.2)' }}>
                           Este lançamento será substituído por {form.total_parcelas || 2} parcelas recorrentes.
                         </p>
                       </>
@@ -1280,7 +1286,7 @@ export default function DrawerLancamento({
             placeholder="Observação opcional..."
             rows={2}
             className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-              text-[13px] outline-none focus:border-av-green transition-colors
+              text-[17px] outline-none focus:border-av-green transition-colors
               placeholder:text-white/30 resize-none"
             style={{ color: '#e8eaf0' }}
           />
@@ -1299,11 +1305,11 @@ export default function DrawerLancamento({
               onChange={e => set({ criarLembrete: e.target.checked })}
               className="w-4 h-4 rounded accent-yellow-400"
             />
-            <span className="text-[12px]" style={{ color: '#f0b429' }}>
+            <span className="text-[16px]" style={{ color: '#f0b429' }}>
               Criar lembrete para este lançamento
             </span>
             {form.data <= hojeStr && (
-              <span className="text-[10px]" style={{ color: '#8b92a8' }}>
+              <span className="text-[14px]" style={{ color: '#8b92a8' }}>
                 (data deve ser futura)
               </span>
             )}
@@ -1321,7 +1327,7 @@ export default function DrawerLancamento({
               className="w-4 h-4 rounded accent-purple-400"
             />
             <Sparkles size={12} style={{ color: '#a78bfa' }} />
-            <span className="text-[12px]" style={{ color: '#a78bfa' }}>
+            <span className="text-[16px]" style={{ color: '#a78bfa' }}>
               Salvar como padrão (auto-preencher da próxima vez)
             </span>
           </label>
@@ -1329,7 +1335,7 @@ export default function DrawerLancamento({
 
         {erro && (
           <p 
-            className="text-[12px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
+            className="text-[16px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
             style={{ color: '#f87171' }}
             data-error-message
           >{erro}</p>
@@ -1365,48 +1371,48 @@ export default function DrawerLancamento({
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-yellow-400/10">
                   <Zap size={16} style={{ color: '#f0b429' }} />
                 </div>
-                <p className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar antecipação</p>
+                <p className="text-[18px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar antecipação</p>
               </div>
 
               <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Descrição</span>
-                  <span className="text-[12px] font-medium" style={{ color: '#e8eaf0' }}>{editando.descricao}</span>
+                  <span className="text-[15px]" style={{ color: '#8b92a8' }}>Descrição</span>
+                  <span className="text-[16px] font-medium" style={{ color: '#e8eaf0' }}>{editando.descricao}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcela atual</span>
-                  <span className="text-[12px]" style={{ color: '#e8eaf0' }}>
+                  <span className="text-[15px]" style={{ color: '#8b92a8' }}>Parcela atual</span>
+                  <span className="text-[16px]" style={{ color: '#e8eaf0' }}>
                     {nrAtual}/{totalParc} — {formatBRL(valorUnitario)}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Parcelas a eliminar</span>
-                  <span className="text-[12px]" style={{ color: corValor }}>
+                  <span className="text-[15px]" style={{ color: '#8b92a8' }}>Parcelas a eliminar</span>
+                  <span className="text-[16px]" style={{ color: corValor }}>
                     {nFuturas}× — {sinal}{formatBRL(nFuturas * valorUnitario)}
                   </span>
                 </div>
                 <div className="border-t border-white/5 pt-2 flex justify-between">
-                  <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>
+                  <span className="text-[15px] font-semibold" style={{ color: '#8b92a8' }}>
                     Total antecipado ({nFuturas + 1} parcelas)
                   </span>
-                  <span className="text-[13px] font-bold" style={{ color: corValor }}>
+                  <span className="text-[17px] font-bold" style={{ color: corValor }}>
                     {sinal}{formatBRL(valorTotal)}
                   </span>
                 </div>
               </div>
 
-              <p className="text-[11px] mb-4 text-center" style={{ color: '#8b92a8' }}>
+              <p className="text-[15px] mb-4 text-center" style={{ color: '#8b92a8' }}>
                 A parcela atual será marcada como <span style={{ color: '#00c896' }}>PAGA</span> com o valor consolidado e as {nFuturas} parcelas seguintes serão removidas.
               </p>
 
               <div className="flex gap-2">
                 <button onClick={() => setConfirmandoAntecip(false)} disabled={antecipando}
-                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[12px] font-semibold transition-all hover:border-white/20 disabled:opacity-50"
+                  className="flex-1 py-2.5 rounded-lg border border-white/10 text-[16px] font-semibold transition-all hover:border-white/20 disabled:opacity-50"
                   style={{ color: '#8b92a8' }}>
                   Cancelar
                 </button>
                 <button onClick={confirmarAntecipar} disabled={antecipando}
-                  className="flex-1 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:bg-yellow-400/90 disabled:opacity-50"
+                  className="flex-1 py-2.5 rounded-lg text-[16px] font-semibold transition-all hover:bg-yellow-400/90 disabled:opacity-50"
                   style={{ background: '#f0b429', color: '#0a0f1a' }}>
                   {antecipando ? 'Antecipando…' : <><Zap size={12} className="inline mr-1" /> Antecipar</>}
                 </button>

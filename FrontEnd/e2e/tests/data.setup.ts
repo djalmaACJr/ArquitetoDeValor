@@ -23,6 +23,25 @@ setup('criar dados basicos', async ({ page, request }) => {
   // 1) Pega JWT do localStorage (já autenticado pelo auth.setup.ts)
   await page.goto('/')
   await page.waitForLoadState('domcontentloaded')
+
+  // Marca todos os tutoriais como "já vistos" para que o overlay de tutorial
+  // não bloqueie cliques nos testes E2E (em CI o localStorage está limpo).
+  await page.evaluate(() => {
+    const keys = [
+      'av-tut-tour-dashboard-v1',
+      'av-tut-tour-extrato-v1',
+      'av-tut-tour-contas-v1',
+      'av-tut-tour-categorias-v1',
+      'av-tut-tour-relatorios-v1',
+      'av-tut-tour-comparativo-v1',
+      'av-tut-tour-assinaturas-v1',
+      'av-tut-tour-projecao-v1',
+    ]
+    keys.forEach(k => localStorage.setItem(k, '1'))
+  })
+  // Persiste o localStorage atualizado em auth.json para todos os testes herdarem.
+  await page.context().storageState({ path: './fixtures/auth.json' })
+
   const token = await page.evaluate(() => {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)

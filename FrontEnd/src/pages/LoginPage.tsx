@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
@@ -36,11 +36,18 @@ const LogoSVG = () => (
 )
 
 const bgGrid = 'repeating-linear-gradient(0deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px),repeating-linear-gradient(90deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px)'
-const inputCls = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors'
+const inputCls = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/30 focus:outline-none focus:bg-white/10 focus:border-av-green/70 transition-colors'
 
 export default function LoginPage() {
   const { signIn } = useAuth()
   const navigate   = useNavigate()
+
+  useEffect(() => {
+    const html = document.documentElement
+    const hadDark = html.classList.contains('dark')
+    html.classList.add('dark')
+    return () => { if (!hadDark) html.classList.remove('dark') }
+  }, [])
 
   const [modo, setModo]         = useState<'login' | 'esqueci'>('login')
   const [email, setEmail]       = useState('')
@@ -79,20 +86,43 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-av-dark">
-      <div className="absolute inset-0 opacity-[0.06]" style={{ backgroundImage: bgGrid }} />
+    <div className="min-h-screen bg-av-dark relative overflow-hidden">
+      {/* Cena com mascotes ao fundo (logn.jpg). */}
+      <div
+        className="absolute inset-0 bg-no-repeat bg-cover bg-center"
+        style={{ backgroundImage: 'url(/mascotes/zlogin-bg.jpg)' }}
+        aria-hidden="true"
+      />
+      {/* Gradiente lateral: escurece o lado esquerdo (onde o card fica) e
+          deixa o lado direito (mascotes Engenheira/Mago/Sábio) visível.
+          Em mobile vira gradiente vertical pra continuar legível. */}
+      <div
+        className="absolute inset-0 md:hidden"
+        style={{ background: 'linear-gradient(to bottom, rgba(13,18,32,0.92) 0%, rgba(13,18,32,0.55) 45%, rgba(13,18,32,0.85) 100%)' }}
+        aria-hidden="true"
+      />
+      <div
+        className="absolute inset-0 hidden md:block"
+        style={{ background: 'linear-gradient(to right, rgba(13,18,32,0.92) 0%, rgba(13,18,32,0.78) 28%, rgba(13,18,32,0.25) 55%, transparent 70%)' }}
+        aria-hidden="true"
+      />
+      <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: bgGrid }} />
 
-      <div className="relative w-full max-w-sm mx-4">
+      {/* Card alinhado à ESQUERDA em telas ≥ md, centralizado no mobile.
+          Posicionamento evita sobrepor os personagens (que ficam à direita
+          do gradiente). */}
+      <div className="relative min-h-screen flex items-center justify-center md:justify-start px-4 md:pl-16 lg:pl-24 xl:pl-32">
+      <div className="relative w-full max-w-sm">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 rounded-2xl bg-av-dark border border-blue-400/30 flex items-center justify-center mb-4">
             <LogoSVG />
           </div>
           <h1 className="text-2xl font-bold text-white">Arquiteto de Valor</h1>
-          <p className="text-[11px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
+          <p className="text-[15px] text-av-green tracking-[3px] mt-1">CONTROLE FINANCEIRO PESSOAL</p>
         </div>
 
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-sm">
+        <div className="bg-[#0d1220]/85 border border-white/10 rounded-2xl p-6 backdrop-blur-md shadow-2xl">
 
           {/* ── Modo: login ─────────────────────────────────── */}
           {modo === 'login' && (
@@ -100,18 +130,18 @@ export default function LoginPage() {
               <h2 className="text-base font-semibold text-white mb-5">Entrar na sua conta</h2>
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
-                  <label className="block text-[12px] text-white/50 mb-1.5">Email</label>
+                  <label className="block text-[16px] text-white/50 mb-1.5">Email</label>
                   <input type="email" required value={email}
                     onChange={e => setEmail(e.target.value)}
                     className={inputCls} placeholder="seu@email.com" />
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[12px] text-white/50">Senha</label>
+                    <label className="text-[16px] text-white/50">Senha</label>
                     <button
                       type="button"
                       onClick={() => { setModo('esqueci'); setError('') }}
-                      className="text-[11px] text-blue-400/70 hover:text-blue-300 transition-colors"
+                      className="text-[15px] text-blue-400/70 hover:text-blue-300 transition-colors"
                     >
                       Esqueci minha senha
                     </button>
@@ -121,17 +151,17 @@ export default function LoginPage() {
                     className={inputCls} placeholder="••••••••" />
                 </div>
                 {error && (
-                  <p className="text-[12px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
+                  <p className="text-[16px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
                 )}
                 <button type="submit" disabled={loading}
-                  className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[13px] hover:bg-av-green/90 disabled:opacity-50 transition-colors mt-2">
+                  className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[17px] hover:bg-av-green/90 disabled:opacity-50 transition-colors mt-2">
                   {loading ? 'Entrando...' : 'Entrar'}
                 </button>
               </form>
 
               <div className="mt-4 pt-4 border-t border-white/8 text-center">
-                <span className="text-[12px] text-white/30">Não tem uma conta? </span>
-                <Link to="/cadastro" className="text-[12px] text-av-green hover:text-av-green/80 transition-colors">
+                <span className="text-[16px] text-white/30">Não tem uma conta? </span>
+                <Link to="/cadastro" className="text-[16px] text-av-green hover:text-av-green/80 transition-colors">
                   Criar conta
                 </Link>
               </div>
@@ -142,27 +172,27 @@ export default function LoginPage() {
           {modo === 'esqueci' && !linkEnviado && (
             <>
               <h2 className="text-base font-semibold text-white mb-1">Recuperar senha</h2>
-              <p className="text-[12px] text-white/40 mb-5">
+              <p className="text-[16px] text-white/40 mb-5">
                 Informe seu e-mail e enviaremos um link para redefinir sua senha.
               </p>
               <form onSubmit={handleEsqueci} className="space-y-4">
                 <div>
-                  <label className="block text-[12px] text-white/50 mb-1.5">Email</label>
+                  <label className="block text-[16px] text-white/50 mb-1.5">Email</label>
                   <input type="email" required value={email}
                     onChange={e => setEmail(e.target.value)}
                     className={inputCls} placeholder="seu@email.com" />
                 </div>
                 {error && (
-                  <p className="text-[12px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
+                  <p className="text-[16px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2">{error}</p>
                 )}
                 <button type="submit" disabled={loading}
-                  className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[13px] hover:bg-av-green/90 disabled:opacity-50 transition-colors mt-2">
+                  className="w-full bg-av-green text-av-dark font-semibold rounded-lg py-2.5 text-[17px] hover:bg-av-green/90 disabled:opacity-50 transition-colors mt-2">
                   {loading ? 'Enviando...' : 'Enviar link de recuperação'}
                 </button>
               </form>
               <div className="mt-4 pt-4 border-t border-white/8 text-center">
                 <button onClick={voltarLogin}
-                  className="text-[12px] text-white/40 hover:text-white/70 transition-colors">
+                  className="text-[16px] text-white/40 hover:text-white/70 transition-colors">
                   ← Voltar para o login
                 </button>
               </div>
@@ -180,11 +210,11 @@ export default function LoginPage() {
                   </svg>
                 </div>
                 <h2 className="text-base font-semibold text-white mb-2">Link enviado!</h2>
-                <p className="text-[12px] text-white/40 text-center leading-relaxed mb-5">
+                <p className="text-[16px] text-white/40 text-center leading-relaxed mb-5">
                   Verifique sua caixa de entrada em <span className="text-white/70">{email}</span> e clique no link para redefinir sua senha.
                 </p>
                 <button onClick={voltarLogin}
-                  className="text-[12px] text-av-green hover:text-av-green/80 transition-colors">
+                  className="text-[16px] text-av-green hover:text-av-green/80 transition-colors">
                   ← Voltar para o login
                 </button>
               </div>
@@ -192,9 +222,10 @@ export default function LoginPage() {
           )}
         </div>
 
-        <p className="text-center text-[11px] text-white/20 mt-4">
+        <p className="text-center text-[15px] text-white/20 mt-4">
           Arquiteto de Valor · BLUEPRINT
         </p>
+      </div>
       </div>
     </div>
   )

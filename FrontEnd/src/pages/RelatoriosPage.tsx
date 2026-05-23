@@ -2,9 +2,14 @@
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react'
 import { ChevronDown, ChevronRight, Download, RefreshCw, Filter, Pencil } from 'lucide-react'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
+import LoadingMascote from '../components/ui/LoadingMascote'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
+import TutorialTour from '../components/ui/TutorialTour'
 import ParetoChart from '../components/relatorios/ParetoChart'
+import { TUTORIAL_RELATORIOS } from '../lib/tutoriaisPaginas'
 
 import { apiFetch } from '../lib/api'
+import { log } from '../lib/logger'
 import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
 import { useCategorias } from '../hooks/useCategorias'
@@ -12,6 +17,9 @@ import { useOcultarValores } from '../hooks/useOcultarValores'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
+import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
+import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCategoria'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 
 // -- Tipos -----------------------------------------------------
 interface Lancamento {
@@ -78,30 +86,27 @@ function gerarMeses(inicio: string, fim: string): string[] {
 
 
 // -- Linha expansivel -------------------------------------------
-function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
+function LinhaGrupo({
+  grupo, meses, oculto, onCelulaClick,
+  aberto, onToggleAberto, expandidosSubs, onToggleSub,
+}: {
   grupo: GrupoPai
   meses: string[]
   oculto: boolean
-  nivel?: number
   onCelulaClick: (catId: string | null, catNome: string, mes: string | null, titulo: string) => void
+  aberto: boolean
+  onToggleAberto: () => void
+  expandidosSubs: Set<string>
+  onToggleSub: (key: string) => void
 }) {
-  const [aberto, setAberto] = useState(nivel === 3)
-  const [expandidosSubs, setExpandidosSubs] = useState<Set<string>>(new Set())
   const cor = grupo.tipo === 'RECEITA' ? '#00c896' : '#f87171'
-
-  function toggleSub(key: string) {
-    setExpandidosSubs(prev => {
-      const n = new Set(prev)
-      if (n.has(key)) { n.delete(key) } else { n.add(key) }
-      return n
-    })
-  }
+  const toggleSub = onToggleSub
 
   return (
     <>
       {/* Linha pai — clica na linha toda para expandir/colapsar */}
       <tr
-        onClick={() => setAberto(a => !a)}
+        onClick={onToggleAberto}
         className="border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-pointer"
         style={{ background: 'rgba(255,255,255,0.02)' }}
       >
@@ -110,7 +115,7 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
             <span className="w-4 h-4 flex items-center justify-center flex-shrink-0" style={{ color: '#8b92a8' }}>
               {aberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
             </span>
-            <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: cor }}>
+            <span className="text-[15px] font-bold uppercase tracking-wider" style={{ color: cor }}>
               {grupo.nome}
             </span>
           </div>
@@ -120,12 +125,12 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
           onClick={e => { e.stopPropagation(); onCelulaClick(null, grupo.nome, null, `${grupo.nome} - Total período`) }}
           title="Ver todos os lançamentos desta categoria no período"
         >
-          <span className="text-[12px] font-bold" style={{ color: cor }}>
+          <span className="text-[16px] font-bold" style={{ color: cor }}>
             {oculto ? '????' : formatBRL(grupo.total)}
           </span>
         </td>
         <td className="px-3 py-2.5 text-right border-l border-white/5">
-          <span className="text-[11px] font-semibold" style={{ color: cor, opacity: 0.65 }}>
+          <span className="text-[15px] font-semibold" style={{ color: cor, opacity: 0.65 }}>
             {oculto ? '????' : formatBRL(grupo.total / meses.length)}
           </span>
         </td>
@@ -135,7 +140,7 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
             onClick={e => { e.stopPropagation(); if (grupo.totalPorMes[m]) onCelulaClick(null, grupo.nome, m, `${grupo.nome} - ${mesLabel(m)}`) }}
             title={grupo.totalPorMes[m] ? 'Ver lançamentos' : undefined}
           >
-            <span className="text-[11px] font-semibold" style={{ color: grupo.totalPorMes[m] ? cor : '#4a5168' }}>
+            <span className="text-[15px] font-semibold" style={{ color: grupo.totalPorMes[m] ? cor : '#4a5168' }}>
               {grupo.totalPorMes[m] ? (oculto ? '????' : formatBRL(grupo.totalPorMes[m])) : '-'}
             </span>
           </td>
@@ -164,7 +169,7 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
                   </span>
                   <span
                     onClick={temDescricoes ? () => toggleSub(subKey) : undefined}
-                    className={`text-[11px] ${temDescricoes ? 'cursor-pointer hover:underline' : ''}`}
+                    className={`text-[15px] ${temDescricoes ? 'cursor-pointer hover:underline' : ''}`}
                     style={{ color: '#c5cad8' }}
                   >
                     {sub.categoria_nome}
@@ -176,12 +181,12 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
                 onClick={() => onCelulaClick(sub.categoria_id, sub.categoria_nome, null, `${sub.categoria_nome} - Total período`)}
                 title="Ver todos os lançamentos desta categoria no período"
               >
-                <span className="text-[11px] font-medium" style={{ color: '#e8eaf0' }}>
+                <span className="text-[15px] font-medium" style={{ color: '#e8eaf0' }}>
                   {oculto ? '????' : formatBRL(sub.total)}
                 </span>
               </td>
               <td className="px-3 py-2 text-right border-l border-white/5">
-                <span className="text-[11px]" style={{ color: '#8b92a8' }}>
+                <span className="text-[15px]" style={{ color: '#8b92a8' }}>
                   {oculto ? '????' : formatBRL(sub.total / meses.length)}
                 </span>
               </td>
@@ -191,7 +196,7 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
                   onClick={() => { if (sub.porMes[m]) onCelulaClick(sub.categoria_id, sub.categoria_nome, m, `${sub.categoria_nome} - ${mesLabel(m)}`) }}
                   title={sub.porMes[m] ? 'Ver lançamentos' : undefined}
                 >
-                  <span className="text-[11px]" style={{ color: sub.porMes[m] ? '#c5cad8' : '#4a5168' }}>
+                  <span className="text-[15px]" style={{ color: sub.porMes[m] ? '#c5cad8' : '#4a5168' }}>
                     {sub.porMes[m] ? (oculto ? '????' : formatBRL(sub.porMes[m])) : '-'}
                   </span>
                 </td>
@@ -209,22 +214,22 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
                   <td className="px-4 py-1.5 sticky left-0 z-10" style={{ background: 'inherit', minWidth: 220 }}>
                     <div className="flex items-center gap-2 pl-10">
                       <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: '#4a5168' }}/>
-                      <span className="text-[10px] truncate" style={{ color: '#8b92a8' }}>{d.descricao}</span>
+                      <span className="text-[14px] truncate" style={{ color: '#8b92a8' }}>{d.descricao}</span>
                     </div>
                   </td>
                   <td className="px-3 py-1.5 text-right">
-                    <span className="text-[10px]" style={{ color: '#6b7280' }}>
+                    <span className="text-[14px]" style={{ color: '#6b7280' }}>
                       {oculto ? '????' : formatBRL(d.total)}
                     </span>
                   </td>
                   <td className="px-3 py-1.5 text-right border-l border-white/5">
-                    <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                    <span className="text-[14px]" style={{ color: '#4a5168' }}>
                       {oculto ? '????' : formatBRL(d.total / meses.length)}
                     </span>
                   </td>
                   {meses.map(m => (
                     <td key={m} className="px-3 py-1.5 text-right">
-                      <span className="text-[10px]" style={{ color: d.porMes[m] ? '#8b92a8' : '#2d3348' }}>
+                      <span className="text-[14px]" style={{ color: d.porMes[m] ? '#8b92a8' : '#2d3348' }}>
                         {d.porMes[m] ? (oculto ? '????' : formatBRL(d.porMes[m])) : '-'}
                       </span>
                     </td>
@@ -239,23 +244,23 @@ function LinhaGrupo({ grupo, meses, oculto, onCelulaClick, nivel = 3 }: {
       {aberto && (
         <tr className="border-b border-white/10">
           <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', minWidth: 220 }}>
-            <span className="text-[10px] font-bold uppercase tracking-widest pl-6" style={{ color: cor, opacity: 0.7 }}>
+            <span className="text-[14px] font-bold uppercase tracking-widest pl-6" style={{ color: cor, opacity: 0.7 }}>
               Total - {grupo.nome}
             </span>
           </td>
           <td className="px-3 py-2 text-right">
-            <span className="text-[12px] font-bold" style={{ color: cor }}>
+            <span className="text-[16px] font-bold" style={{ color: cor }}>
               {oculto ? '????' : formatBRL(grupo.total)}
             </span>
           </td>
           <td className="px-3 py-2 text-right border-l border-white/5">
-            <span className="text-[11px] font-bold" style={{ color: cor, opacity: 0.65 }}>
+            <span className="text-[15px] font-bold" style={{ color: cor, opacity: 0.65 }}>
               {oculto ? '????' : formatBRL(grupo.total / meses.length)}
             </span>
           </td>
           {meses.map(m => (
             <td key={m} className="px-3 py-2 text-right">
-              <span className="text-[11px] font-bold" style={{ color: grupo.totalPorMes[m] ? cor : '#4a5168' }}>
+              <span className="text-[15px] font-bold" style={{ color: grupo.totalPorMes[m] ? cor : '#4a5168' }}>
                 {grupo.totalPorMes[m] ? (oculto ? '????' : formatBRL(grupo.totalPorMes[m])) : '-'}
               </span>
             </td>
@@ -289,10 +294,28 @@ export default function RelatoriosPage() {
   const [debAberto,   setDebAberto]   = useState(true)
   const [nivel,       setNivel]       = useState<1|2|3>(3)
   const [vistaPareto, setVistaPareto] = useState(false)
+  // Granularidade do Pareto: 'cat' = todas categorias (incl. subs);
+  // 'pai' = consolida subs no pai.
+  const [paretoAgrup, setParetoAgrup] = useState<'cat' | 'pai'>('cat')
+  // Estado de expansão (compartilhado via hook) — mantido fora do componente
+  // do Pareto para que a exportação reflita exatamente o que está na tela.
+  const expPareto = useExpansaoCategoria()
+  const expandidosPareto = expPareto.expandidos
   const drillRef    = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [lancamentoEditando, setLancamentoEditando] = useState<any | null>(null)
   const [expandidosDrill,   setExpandidosDrill]    = useState<Set<string>>(new Set())
+
+  // Estado de expansão da tabela — mantido aqui (não nos componentes filhos)
+  // para que a exportação possa refletir exatamente o que está na tela.
+  const [gruposAbertos,  setGruposAbertos]  = useState<Set<string>>(new Set())
+  const [subsExpandidos, setSubsExpandidos] = useState<Set<string>>(new Set())
+  const toggleGrupo = useCallback((nome: string) => setGruposAbertos(prev => {
+    const n = new Set(prev); if (n.has(nome)) n.delete(nome); else n.add(nome); return n
+  }), [])
+  const toggleSub = useCallback((key: string) => setSubsExpandidos(prev => {
+    const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n
+  }), [])
   const [drillDown,   setDrillDown]   = useState<{
     titulo: string
     categoria_id: string | null
@@ -318,13 +341,13 @@ export default function RelatoriosPage() {
         todos.push(...lista)
       }))
       setPgState({ lancamentos: todos, buscado: true })
-      // Debug: ver estrutura dos dados
+      // Debug (no-op em produção via lib/logger)
       if (todos.length > 0) {
         const ex = todos.find(l => l.categoria_id)
-        console.log('[Relatório] Exemplo lançamento com categoria:', ex)
-        console.log('[Relatório] Total lançamentos:', todos.length)
+        log('[Relatório] Exemplo lançamento com categoria:', ex)
+        log('[Relatório] Total lançamentos:', todos.length)
         const semCat = todos.filter(l => !l.categoria_id).length
-        console.log('[Relatório] Sem categoria:', semCat)
+        log('[Relatório] Sem categoria:', semCat)
       }
     } finally {
       setLoading(false)
@@ -458,56 +481,8 @@ export default function RelatoriosPage() {
     return { grupos, totaisMes, grandTotalEntradas, grandTotalDespesas }
   }, [lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias])
 
-  const exportarExcel = useCallback(async () => {
-    if (!buscado || grupos.length === 0) return
-
-    // Monta linhas da planilha
-    const header = ['Categoria', 'Total', ...meses.map(m => mesLabel(m))]
-    const rows: (string | number)[][] = [header]
-
-    for (const grupo of grupos) {
-      // Linha do grupo pai
-      rows.push([
-        grupo.nome,
-        grupo.total,
-        ...meses.map(m => grupo.totalPorMes[m] ?? 0),
-      ])
-      if (grupo.aberto !== false) {
-        for (const sub of grupo.subcategorias) {
-          rows.push([
-            `  ${sub.categoria_nome}`,
-            sub.total,
-            ...meses.map(m => sub.porMes[m] ?? 0),
-          ])
-        }
-        // Linha de total do grupo
-        rows.push([
-          `Total - ${grupo.nome}`,
-          grupo.total,
-          ...meses.map(m => grupo.totalPorMes[m] ?? 0),
-        ])
-      }
-      rows.push([]) // linha em branco entre grupos
-    }
-
-    // Linha de totais gerais
-    rows.push(['TOTAL RECEITAS', grandTotalEntradas, ...meses.map(m => totaisMes[m]?.entradas ?? 0)])
-    rows.push(['TOTAL DESPESAS', grandTotalDespesas, ...meses.map(m => totaisMes[m]?.despesas ?? 0)])
-    rows.push(['RESULTADO', grandTotalEntradas - grandTotalDespesas, ...meses.map(m => (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0))])
-
-    // Gerar xlsx via SheetJS (mesmo CDN usado em Ferramentas)
-    // @ts-expect-error dynamic CDN import
-    const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
-    const ws = XLSX.utils.aoa_to_sheet(rows)
-    ws['!cols'] = [
-      { wch: 35 },
-      { wch: 16 },
-      ...meses.map(() => ({ wch: 14 })),
-    ]
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Relatório')
-    XLSX.writeFile(wb, `relatorio_${inicio}_${fim}.xlsx`)
-    }, [buscado, grupos, meses, totaisMes, grandTotalEntradas, grandTotalDespesas, inicio, fim])
+  // Funções de exportação declaradas após `dadosPareto` para evitar
+  // referência forward — ver mais adiante no arquivo.
 
 
   const resultado = grandTotalEntradas - grandTotalDespesas
@@ -520,6 +495,29 @@ export default function RelatoriosPage() {
       }, 50)
     }
   }, [drillDown])
+
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  useRegistrarContextoIA(useMemo(() => {
+    if (!buscado) return null
+    return {
+      titulo:    `Relatório: ${inicio} a ${fim}`,
+      descricao: 'Resumo agregado por categoria e mês no período selecionado',
+      dados: {
+        periodo: { inicio, fim },
+        filtros: { contas: filtContas, categorias: filtCats, status: filtStatus },
+        totais: {
+          receitas: grandTotalEntradas,
+          despesas: grandTotalDespesas,
+          resultado: grandTotalEntradas - grandTotalDespesas,
+        },
+        meses_no_periodo: meses.length,
+        // Top 10 grupos (categorias) por valor absoluto
+        top_categorias: grupos
+          .slice(0, 10)
+          .map(g => ({ nome: g.nome, tipo: g.tipo, total: g.total })),
+      },
+    }
+  }, [buscado, inicio, fim, filtContas, filtCats, filtStatus, grandTotalEntradas, grandTotalDespesas, meses.length, grupos]))
 
   // Lancamentos do drill-down
   const lancamentosDrill = useMemo(() => {
@@ -606,71 +604,357 @@ export default function RelatoriosPage() {
     const recMap  = new Map<string, { categoria_id: string | null; categoria_nome: string; total: number }>()
     const despMap = new Map<string, { categoria_id: string | null; categoria_nome: string; total: number }>()
 
+    // Mapa categoria_id -> { id raiz, nome raiz } usado quando paretoAgrup === 'pai'.
+    // Resolve subcategoria até o pai (1 nível na hierarquia do projeto).
+    const raizPorId = paiPorCategoriaId(categorias)
+
     for (const l of lista) {
-      const key  = l.categoria_id ?? '__sem__'
-      const nome = l.categoria_nome ?? 'Sem categoria'
-      const map  = l.tipo === 'RECEITA' ? recMap : despMap
-      if (!map.has(key)) map.set(key, { categoria_id: l.categoria_id, categoria_nome: nome, total: 0 })
+      let key:  string
+      let nome: string
+      if (paretoAgrup === 'pai' && l.categoria_id) {
+        const raiz = raizPorId.get(l.categoria_id)
+        key  = raiz?.id   ?? l.categoria_id
+        nome = raiz?.nome ?? l.categoria_nome ?? 'Sem categoria'
+      } else {
+        key  = l.categoria_id ?? '__sem__'
+        nome = l.categoria_nome ?? 'Sem categoria'
+      }
+      const map = l.tipo === 'RECEITA' ? recMap : despMap
+      if (!map.has(key)) map.set(key, { categoria_id: key === '__sem__' ? null : key, categoria_nome: nome, total: 0 })
       map.get(key)!.total += l.valor
     }
 
     return { receitas: [...recMap.values()], despesas: [...despMap.values()] }
-  }, [lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias])
+  }, [lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias, paretoAgrup])
+
+  /**
+   * Submaps usados quando o Paretto está agrupado por categoria pai ('Resumo').
+   * Para cada pai presente em `dadosPareto`, lista as subcategorias com seus
+   * totais (consolidados nos mesmos filtros/período).
+   *
+   * IMPORTANTE: os totais são separados por tipo (RECEITA vs DESPESA) — uma
+   * mesma subcategoria pode ter movimentos dos dois tipos, e o pai pode
+   * aparecer em ambas as tabelas; sem essa separação as subs vazariam entre
+   * Receitas e Despesas.
+   *
+   * Em modo 'cat' retorna mapas vazios — não há nada para expandir, pois cada
+   * linha já é uma categoria.
+   */
+  const submapPareto = useMemo<{
+    receitas: Map<string, { categoria_id: string; categoria_nome: string; total: number }[]>
+    despesas: Map<string, { categoria_id: string; categoria_nome: string; total: number }[]>
+    pais:     Set<string>
+  }>(() => {
+    const rec  = new Map<string, { categoria_id: string; categoria_nome: string; total: number }[]>()
+    const desp = new Map<string, { categoria_id: string; categoria_nome: string; total: number }[]>()
+    const pais = new Set<string>()
+    if (paretoAgrup !== 'pai' || !buscado || lancamentos.length === 0) {
+      return { receitas: rec, despesas: desp, pais }
+    }
+
+    const isTransfP = (l: Lancamento) =>
+      !!l.id_par_transferencia ||
+      l.descricao?.startsWith('[Transf.') ||
+      l.categoria_nome === 'Transferências'
+
+    const catsSel = filtCats.length > 0
+      ? new Set(filtCats.flatMap(id => {
+          const cat = categorias.find(c => c.id === id)
+          if (!cat) return [id]
+          if (!cat.id_pai) return [cat.id, ...categorias.filter(c => c.id_pai === cat.id).map(c => c.id)]
+          return [cat.id]
+        }))
+      : null
+
+    let lista = lancamentos
+    if (!incluirTransf) lista = lista.filter(l => !isTransfP(l))
+    if (filtStatus.length > 0) lista = lista.filter(l => filtStatus.includes(l.status))
+    if (filtContas.length > 0) lista = lista.filter(l => filtContas.includes(l.conta_id))
+    if (catsSel)               lista = lista.filter(l => catsSel.has(l.categoria_id ?? ''))
+    lista = lista.filter(l => meses.includes(l.data.slice(0, 7)))
+
+    // Lookup de categoria por id — usado para descobrir id_pai/descricao da sub.
+    const catById = new Map<string, { id: string; nome: string; idPai: string | null }>()
+    for (const c of categorias) catById.set(c.id, { id: c.id, nome: c.descricao, idPai: c.id_pai })
+
+    // Acumula por (tipo, paiId, subId)
+    const buckets = {
+      RECEITA: new Map<string, Map<string, { categoria_id: string; categoria_nome: string; total: number }>>(),
+      DESPESA: new Map<string, Map<string, { categoria_id: string; categoria_nome: string; total: number }>>(),
+    }
+    for (const l of lista) {
+      if (!l.categoria_id) continue
+      const cat = catById.get(l.categoria_id)
+      if (!cat?.idPai) continue            // já é raiz: nada a expandir
+      const paiId = cat.idPai
+      const tipoBucket = buckets[l.tipo]
+      if (!tipoBucket.has(paiId)) tipoBucket.set(paiId, new Map())
+      const subMap = tipoBucket.get(paiId)!
+      if (!subMap.has(cat.id)) subMap.set(cat.id, { categoria_id: cat.id, categoria_nome: cat.nome, total: 0 })
+      subMap.get(cat.id)!.total += l.valor
+      pais.add(paiId)
+    }
+
+    for (const [paiId, subMap] of buckets.RECEITA) rec.set(paiId, [...subMap.values()])
+    for (const [paiId, subMap] of buckets.DESPESA) desp.set(paiId, [...subMap.values()])
+    return { receitas: rec, despesas: desp, pais }
+  }, [paretoAgrup, lancamentos, buscado, filtStatus, filtContas, filtCats, incluirTransf, meses, categorias])
+
+  /**
+   * Exporta a TABELA conforme está visível na tela:
+   *  - Nível 1 (Resumo): só Total Receitas/Despesas/Resultado
+   *  - Nível 2 (Categorias): apenas grupos pai
+   *  - Nível 3 (Completo): grupos pai abertos (gruposAbertos) com subcategorias.
+   *    Subs expandidas (subsExpandidos) levam junto suas descrições.
+   */
+  const exportarTabela = useCallback(async () => {
+    if (!buscado || grupos.length === 0) return
+    const { exportToExcel } = await import('../lib/exportUtils')
+
+    const nMeses = Math.max(meses.length, 1)
+    const media = (n: number) => n / nMeses
+
+    // Colunas dinâmicas: Categoria + Total + Média + 1 por mês (todos currency)
+    const columns: import('../lib/exportUtils').ExportColumn[] = [
+      { key: 'cat',   label: 'Categoria',  type: 'text',     width: 38 },
+      { key: 'total', label: 'Total',      type: 'currency', width: 16 },
+      { key: 'media', label: 'Média/mês',  type: 'currency', width: 14 },
+      ...meses.map(m => ({ key: `m_${m}`, label: mesLabel(m), type: 'currency' as const, width: 14 })),
+    ]
+
+    const linhaMes = (extra: Record<string, number>) =>
+      Object.fromEntries(meses.map(m => [`m_${m}`, extra[m] ?? 0]))
+
+    const rows: import('../lib/exportUtils').ExportRow[] = []
+
+    if (nivel === 1) {
+      rows.push({ cat: 'TOTAL RECEITAS', total: grandTotalEntradas,  media: media(grandTotalEntradas),
+        ...linhaMes(Object.fromEntries(meses.map(m => [m, totaisMes[m]?.entradas ?? 0]))), _style: 'subtotal' })
+      rows.push({ cat: 'TOTAL DESPESAS', total: grandTotalDespesas,  media: media(grandTotalDespesas),
+        ...linhaMes(Object.fromEntries(meses.map(m => [m, totaisMes[m]?.despesas ?? 0]))), _style: 'subtotal' })
+      const resultado = grandTotalEntradas - grandTotalDespesas
+      rows.push({ cat: 'RESULTADO', total: resultado, media: media(resultado),
+        ...linhaMes(Object.fromEntries(meses.map(m => [m, (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0)]))), _style: 'total' })
+    } else {
+      for (const grupo of grupos) {
+        const grupoAberto = gruposAbertos.has(grupo.nome)
+        rows.push({ cat: grupo.nome, total: grupo.total, media: media(grupo.total),
+          ...linhaMes(grupo.totalPorMes), _style: 'group' })
+
+        if (nivel === 3 && grupoAberto) {
+          for (const sub of grupo.subcategorias) {
+            rows.push({ cat: `  ${sub.categoria_nome}`, total: sub.total, media: media(sub.total),
+              ...linhaMes(sub.porMes) })
+
+            const subKey = sub.categoria_id ?? sub.categoria_nome
+            if (subsExpandidos.has(subKey)) {
+              for (const d of [...sub.porDescricao].sort((a, b) => b.total - a.total)) {
+                rows.push({ cat: `    ${d.descricao}`, total: d.total, media: media(d.total),
+                  ...linhaMes(d.porMes) })
+              }
+            }
+          }
+          rows.push({ cat: `Total — ${grupo.nome}`, total: grupo.total, media: media(grupo.total),
+            ...linhaMes(grupo.totalPorMes), _style: 'subtotal' })
+        }
+      }
+      // Totais gerais
+      rows.push({ cat: 'TOTAL RECEITAS', total: grandTotalEntradas, media: media(grandTotalEntradas),
+        ...linhaMes(Object.fromEntries(meses.map(m => [m, totaisMes[m]?.entradas ?? 0]))), _style: 'subtotal' })
+      rows.push({ cat: 'TOTAL DESPESAS', total: grandTotalDespesas, media: media(grandTotalDespesas),
+        ...linhaMes(Object.fromEntries(meses.map(m => [m, totaisMes[m]?.despesas ?? 0]))), _style: 'subtotal' })
+      const resultado = grandTotalEntradas - grandTotalDespesas
+      rows.push({ cat: 'RESULTADO', total: resultado, media: media(resultado),
+        ...linhaMes(Object.fromEntries(meses.map(m => [m, (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0)]))), _style: 'total' })
+    }
+
+    const sufixoNivel = nivel === 1 ? 'resumo' : nivel === 2 ? 'categorias' : 'completo'
+    await exportToExcel({
+      filename: `relatorio_${sufixoNivel}_${inicio}_${fim}`,
+      sheets: [{
+        name:     'Relatório',
+        title:    'Relatório por Categoria',
+        subtitle: `${mesLabel(meses[0])} – ${mesLabel(meses[meses.length - 1])} · ${nivel === 1 ? 'Resumo' : nivel === 2 ? 'Categorias' : 'Completo'}`,
+        columns,
+        rows,
+      }],
+    })
+  }, [buscado, grupos, meses, totaisMes, grandTotalEntradas, grandTotalDespesas, inicio, fim, nivel, gruposAbertos, subsExpandidos])
+
+  /**
+   * Exporta os dados da análise PARETO em 2 abas (Receitas / Despesas),
+   * com %, acumulado e marcação dos itens que compõem ~80%.
+   */
+  const exportarPareto = useCallback(async () => {
+    if (!buscado) return
+    const { calcularParetto } = await import('../lib/paretoAnalysis')
+    const { exportToExcel } = await import('../lib/exportUtils')
+
+    type Col = import('../lib/exportUtils').ExportColumn
+    type Row = import('../lib/exportUtils').ExportRow
+    type Sheet = import('../lib/exportUtils').ExportSheet
+
+    const sheets: Sheet[] = []
+    const columns: Col[] = [
+      { key: 'n',    label: '#',           type: 'integer',  width: 5  },
+      { key: 'cat',  label: 'Categoria',   type: 'text',     width: 40 },
+      { key: 'val',  label: 'Valor',       type: 'currency', width: 16 },
+      { key: 'pct',  label: '%',           type: 'percent',  width: 10 },
+      { key: 'acu',  label: '% Acumulado', type: 'percent',  width: 14 },
+      { key: 'd80',  label: 'Dentro 80%',  type: 'text',     width: 12, align: 'center' },
+    ]
+
+    const montarAba = (
+      lista: { categoria_id: string | null; categoria_nome: string; total: number }[],
+      tipo: 'RECEITA' | 'DESPESA',
+      nomeAba: string,
+    ) => {
+      const resumo = calcularParetto(lista, tipo)
+      if (resumo.quantidadeCategorias === 0) return
+
+      const ultimoIdxAte80 = resumo.quantidadeAte80 - 1
+      const rows: Row[] = []
+      resumo.itens.forEach((item, idx) => {
+        rows.push({
+          n:   idx + 1,
+          cat: item.categoria_nome,
+          val: item.total,
+          pct: item.percentual          / 100,  // exceljs espera decimal 0-1 para `0.0%`
+          acu: item.percentualAcumulado / 100,
+          d80: idx <= ultimoIdxAte80 ? 'Sim' : 'Não',
+          _style: idx <= ultimoIdxAte80 ? 'highlight' : 'normal',
+        })
+        // Subcategorias só entram no export se o pai estiver expandido em tela
+        // (reflete exatamente o que o usuário vê). Usa o submap do MESMO tipo
+        // da aba sendo montada — senão receitas/despesas vazariam entre si.
+        if (paretoAgrup === 'pai' && item.categoria_id && expandidosPareto.has(item.categoria_id)) {
+          const mapaSub = tipo === 'RECEITA' ? submapPareto.receitas : submapPareto.despesas
+          const subs = mapaSub.get(item.categoria_id) ?? []
+          subs.slice().sort((a, b) => b.total - a.total).forEach(s => {
+            const pctPai = item.total > 0 ? (s.total / item.total) * 100 : 0
+            rows.push({
+              n:   '',
+              cat: `   └ ${s.categoria_nome} (${pctPai.toFixed(1)}% da pai)`,
+              val: s.total,
+              pct: '', acu: '', d80: '',
+              _style: 'normal',
+            })
+          })
+        }
+      })
+
+      rows.push({
+        n: '', cat: 'Total', val: resumo.total, pct: 1, acu: '', d80: '',
+        _style: 'total',
+      })
+      rows.push({
+        n: '',
+        cat: `${resumo.quantidadeAte80} de ${resumo.quantidadeCategorias} categorias respondem por ~80%`,
+        val: '', pct: '', acu: '', d80: '',
+      })
+
+      sheets.push({
+        name:     nomeAba,
+        title:    nomeAba,
+        subtitle: `${mesLabel(meses[0])} – ${mesLabel(meses[meses.length - 1])}`,
+        columns,
+        rows,
+      })
+    }
+
+    montarAba(dadosPareto.receitas, 'RECEITA', 'Pareto Receitas')
+    montarAba(dadosPareto.despesas, 'DESPESA', 'Pareto Despesas')
+
+    if (sheets.length === 0) return
+    await exportToExcel({
+      filename: `relatorio_pareto_${inicio}_${fim}`,
+      sheets,
+    })
+  }, [buscado, dadosPareto, inicio, fim, meses, paretoAgrup, expandidosPareto, submapPareto])
+
+  /** Roteador: exporta a vista atualmente visível. */
+  const exportar = useCallback(() => {
+    if (vistaPareto) exportarPareto()
+    else             exportarTabela()
+  }, [vistaPareto, exportarPareto, exportarTabela])
 
   // Reset expansão ao trocar de drill-down
   useEffect(() => { setExpandidosDrill(new Set()) }, [drillDown])
+
+  // Sincroniza expansão dos grupos com o nível selecionado:
+  //  - Nível 3 (Completo): todos os grupos abertos por padrão
+  //  - Nível 2 (Categorias): todos fechados (subs nem aparecem)
+  //  - Nível 1 (Resumo): irrelevante (tabela não mostra grupos)
+  // Também limpa subs expandidas ao mudar nível ou ao re-buscar.
+  useEffect(() => {
+    if (nivel === 3) {
+      setGruposAbertos(new Set(grupos.map(g => g.nome)))
+    } else {
+      setGruposAbertos(new Set())
+    }
+    setSubsExpandidos(new Set())
+  }, [nivel, grupos])
 
   return (
     <div className="p-5 min-h-screen" style={{ background: '#0e1320' }}>
       {/* Topbar */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-[18px] font-bold" style={{ color: '#e8eaf0' }}>Relatório por categoria</h1>
-          <p className="text-[11px] mt-0.5" style={{ color: '#8b92a8' }}>Receitas e despesas agrupadas por categoria</p>
+          <h1 className="text-[22px] font-bold" style={{ color: '#e8eaf0' }}>Relatório por categoria</h1>
+          <p className="text-[15px] mt-0.5" style={{ color: '#8b92a8' }}>Receitas e despesas agrupadas por categoria</p>
         </div>
-        <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+        <div data-tutorial="relatorios-ocultar">
+          <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+        </div>
+      </div>
+
+      <div className="mb-5">
+        <MascoteTutorial pagina="relatorios" />
       </div>
 
       {/* Filtros */}
       <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5">
         <div className="flex flex-wrap gap-3 items-end">
           {/* Periodo */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>De</p>
-            <MonthPicker value={inicio} onChange={setInicio} />
-          </div>
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Até</p>
-            <MonthPicker value={fim} onChange={setFim} />
-          </div>
-
-          {/* Contas + Categorias + Status + Filtros salvos (componente unificado) */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Filtros</p>
-            <div className="flex gap-2">
-              <FiltrosLancamentos
-                pagina="relatorios"
-                filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
-                setFiltContas={setFiltContas} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
-                classNameContas="w-44" classNameCats="w-48" classNameStatus="w-40"
-                extras={{ incluirTransf }}
-                extrasFiltroAtivo={incluirTransf}
-                onAplicarExtras={d => {
-                  const novo = (d.incluirTransf as boolean) ?? false
-                  setIncluirTransf(novo)
-                  if (buscado) buscar((d.filtContas as string[]) ?? [])
-                }}
-                onLimparExtras={() => setIncluirTransf(false)}
-              />
+          <div className="flex gap-3 items-end" data-tutorial="relatorios-periodo">
+            <div>
+              <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>De</p>
+              <MonthPicker value={inicio} onChange={setInicio} />
+            </div>
+            <div>
+              <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Até</p>
+              <MonthPicker value={fim} onChange={setFim} />
             </div>
           </div>
 
-          {/* Transferencias toggle */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Transferências</p>
+          {/* Contas + Categorias + Status + Transferências */}
+          <div className="flex gap-3 items-end flex-wrap" data-tutorial="relatorios-filtros">
+            <div>
+              <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Filtros</p>
+              <div className="flex gap-2">
+                <FiltrosLancamentos
+                  pagina="relatorios"
+                  filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
+                  setFiltContas={setFiltContas} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
+                  classNameContas="w-44" classNameCats="w-48" classNameStatus="w-40"
+                  extras={{ incluirTransf }}
+                  extrasFiltroAtivo={incluirTransf}
+                  onAplicarExtras={d => {
+                    const novo = (d.incluirTransf as boolean) ?? false
+                    setIncluirTransf(novo)
+                    if (buscado) buscar((d.filtContas as string[]) ?? [])
+                  }}
+                  onLimparExtras={() => setIncluirTransf(false)}
+                />
+              </div>
+            </div>
+
+            {/* Transferencias toggle */}
+            <div>
+              <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Transferências</p>
             <button
               onClick={() => setIncluirTransf(!incluirTransf)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[11px] transition-all"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[15px] transition-all"
               style={{
                 borderColor: incluirTransf ? 'rgba(0,200,150,0.4)' : 'rgba(255,255,255,0.1)',
                 background:  incluirTransf ? 'rgba(0,200,150,0.08)' : 'transparent',
@@ -689,23 +973,31 @@ export default function RelatoriosPage() {
               Incluir
             </button>
           </div>
+          </div>{/* /relatorios-filtros */}
 
           {/* Botoes */}
           <div className="flex items-center gap-2 ml-auto flex-wrap">
             {buscado && (
               <button
-                onClick={exportarExcel}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all hover:opacity-90 border border-white/10"
+                data-tutorial="relatorios-exportar"
+                onClick={exportar}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[16px] font-semibold transition-all hover:opacity-90 border border-white/10"
                 style={{ color: '#4da6ff', background: 'rgba(77,166,255,0.08)' }}
-                title="Exportar para Excel (.xlsx)"
+                title={
+                  vistaPareto
+                    ? 'Exportar análise Pareto (Receitas + Despesas) para Excel'
+                    : `Exportar tabela (${nivel === 1 ? 'Resumo' : nivel === 2 ? 'Categorias' : 'Completo'}) para Excel`
+                }
               >
-                <Download size={13} /> Exportar
+                <Download size={13} />
+                {vistaPareto ? 'Exportar Pareto' : 'Exportar tabela'}
               </button>
             )}
             <button
+              data-tutorial="relatorios-gerar"
               onClick={() => buscar()}
               disabled={loading || meses.length === 0}
-              className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-all hover:opacity-90"
+              className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[16px] font-semibold transition-all hover:opacity-90"
               style={{ background: '#00c896', color: '#0a0f1a', opacity: loading ? 0.7 : 1 }}
             >
               {loading
@@ -718,7 +1010,7 @@ export default function RelatoriosPage() {
 
         {/* Info periodo */}
         {meses.length > 0 && (
-          <p className="text-[10px] mt-3" style={{ color: '#4a5168' }}>
+          <p className="text-[14px] mt-3" style={{ color: '#4a5168' }}>
             {meses.length} {meses.length === 1 ? 'mês' : 'meses'}: {mesLabel(meses[0])} {">"} {mesLabel(meses[meses.length - 1])}
           </p>
         )}
@@ -728,23 +1020,23 @@ export default function RelatoriosPage() {
       {buscado && !loading && (
         <>
           {/* Cards resumo */}
-          <div className="grid grid-cols-3 gap-3 mb-5">
+          <div className="grid grid-cols-3 gap-3 mb-5" data-tutorial="relatorios-cards">
             {[
               { label: 'Total Receitas',  valor: grandTotalEntradas, cor: '#00c896' },
               { label: 'Total Despesas',  valor: grandTotalDespesas, cor: '#f87171' },
               { label: 'Resultado',       valor: resultado,          cor: resultado >= 0 ? '#00c896' : '#f87171' },
             ].map(c => (
               <div key={c.label} className="bg-[#1a1f2e] border border-white/10 rounded-xl px-4 py-3">
-                <p className="text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#8b92a8' }}>{c.label}</p>
-                <p className="text-[18px] font-bold" style={{ color: c.cor }}>{oculto ? '??????' : formatBRL(c.valor)}</p>
+                <p className="text-[14px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#8b92a8' }}>{c.label}</p>
+                <p className="text-[22px] font-bold" style={{ color: c.cor }}>{oculto ? '??????' : formatBRL(c.valor)}</p>
               </div>
             ))}
           </div>
 
           {/* Seletor de visualização */}
           <div className="flex items-center gap-4 mb-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Visualização</span>
+            <div className="flex items-center gap-2" data-tutorial="relatorios-visualizacao">
+              <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Visualização</span>
               {([
                 { id: false, label: 'Tabela' },
                 { id: true,  label: 'Pareto' },
@@ -752,7 +1044,7 @@ export default function RelatoriosPage() {
                 <button
                   key={String(id)}
                   onClick={() => setVistaPareto(id)}
-                  className="px-3 py-1 rounded-lg text-[11px] font-semibold transition-all border"
+                  className="px-3 py-1 rounded-lg text-[15px] font-semibold transition-all border"
                   style={{
                     background:  vistaPareto === id ? 'rgba(0,200,150,0.12)' : 'transparent',
                     borderColor: vistaPareto === id ? 'rgba(0,200,150,0.4)'  : 'rgba(255,255,255,0.08)',
@@ -766,8 +1058,8 @@ export default function RelatoriosPage() {
 
             {/* Controle de detalhamento — visível apenas na vista Tabela */}
             {!vistaPareto && (
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Detalhamento</span>
+              <div className="flex items-center gap-2" data-tutorial="relatorios-detalhamento">
+                <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Detalhamento</span>
                 {([
                   { n: 1 as const, label: 'Resumo',     title: 'Só Crédito / Débito / Resultado' },
                   { n: 2 as const, label: 'Categorias', title: 'Categorias pai sem subcategorias' },
@@ -777,7 +1069,7 @@ export default function RelatoriosPage() {
                     key={n}
                     title={title}
                     onClick={() => { setNivel(n); setCredAberto(n > 1); setDebAberto(n > 1) }}
-                    className="px-3 py-1 rounded-lg text-[11px] font-semibold transition-all border"
+                    className="px-3 py-1 rounded-lg text-[15px] font-semibold transition-all border"
                     style={{
                       background:   nivel === n ? 'rgba(0,200,150,0.12)' : 'transparent',
                       borderColor:  nivel === n ? 'rgba(0,200,150,0.4)'  : 'rgba(255,255,255,0.08)',
@@ -787,6 +1079,39 @@ export default function RelatoriosPage() {
                     {label}
                   </button>
                 ))}
+              </div>
+            )}
+
+            {/* Agrupamento — visível apenas na vista Pareto */}
+            {vistaPareto && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#4a5168' }}>Agrupar por</span>
+                {([
+                  { id: 'cat' as const, label: 'Categoria', title: 'Cada categoria (incluindo subcategorias) entra como linha separada' },
+                  { id: 'pai' as const, label: 'Resumo',    title: 'Consolida as subcategorias na categoria pai · clique numa categoria para ver as subs' },
+                ]).map(({ id, label, title }) => (
+                  <button
+                    key={id}
+                    title={title}
+                    onClick={() => setParetoAgrup(id)}
+                    className="px-3 py-1 rounded-lg text-[15px] font-semibold transition-all border"
+                    style={{
+                      background:   paretoAgrup === id ? 'rgba(0,200,150,0.12)' : 'transparent',
+                      borderColor:  paretoAgrup === id ? 'rgba(0,200,150,0.4)'  : 'rgba(255,255,255,0.08)',
+                      color:        paretoAgrup === id ? '#00c896'               : '#8b92a8',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+                {paretoAgrup === 'pai' && submapPareto.pais.size > 0 && (
+                  <BotaoExpandirTodas
+                    todasExpandidas={expPareto.todasExpandidas(submapPareto.pais)}
+                    onClick={() => expPareto.todasExpandidas(submapPareto.pais)
+                      ? expPareto.colapsar()
+                      : expPareto.expandirTodas(submapPareto.pais)}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -800,11 +1125,20 @@ export default function RelatoriosPage() {
               onClickCategoria={(catId, catNome) =>
                 setDrillDown({ titulo: `${catNome} — Pareto`, categoria_id: catId, categoria_nome: catNome, mes: null })
               }
+              subsDe={paretoAgrup === 'pai'
+                ? ((catId, tipo) => {
+                    if (!catId) return undefined
+                    const m = tipo === 'RECEITA' ? submapPareto.receitas : submapPareto.despesas
+                    return m.get(catId)
+                  })
+                : undefined}
+              expandidos={expandidosPareto}
+              onToggleExp={expPareto.toggle}
             />
           )}
 
           {/* Tabela principal */}
-          {!vistaPareto && <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden">
+          {!vistaPareto && <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden" data-tutorial="relatorios-tabela">
             <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
               <table className="w-full border-collapse" style={{ minWidth: 600 }}>
                 {/* Cabecalho */}
@@ -812,20 +1146,20 @@ export default function RelatoriosPage() {
                   <tr style={{ background: '#1a1f2e' }}>
                     <th className="px-4 py-3 text-left sticky left-0 z-40 border-b border-white/10"
                       style={{ background: '#1a1f2e', minWidth: 220 }}>
-                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Categoria</span>
+                      <span className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Categoria</span>
                     </th>
                     <th className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
                       style={{ background: '#1a1f2e' }}>
-                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Total</span>
+                      <span className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Total</span>
                     </th>
                     <th className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
                       style={{ background: '#1a1f2e', minWidth: 96 }}>
-                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Média/mês</span>
+                      <span className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Média/mês</span>
                     </th>
                     {meses.map(m => (
                       <th key={m} className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
                         style={{ minWidth: 100, background: '#1a1f2e' }}>
-                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>
+                        <span className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>
                           {mesLabel(m)}
                         </span>
                       </th>
@@ -844,13 +1178,19 @@ export default function RelatoriosPage() {
                         <span style={{ color: '#00c896' }}>
                           {credAberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
                         </span>
-                        <span className="text-[10px] font-bold uppercase tracking-[3px]" style={{ color: '#00c896' }}>Créditos</span>
+                        <span className="text-[14px] font-bold uppercase tracking-[3px]" style={{ color: '#00c896' }}>Créditos</span>
                         <div className="flex-1 h-px" style={{ background: 'rgba(0,200,150,0.2)' }}/>
                       </div>
                     </td>
                   </tr>
                   {credAberto && grupos.filter(g => g.tipo === 'RECEITA').map((g, i) => (
-                    <LinhaGrupo key={`${i}-${nivel}`} grupo={g} meses={meses} oculto={oculto} nivel={nivel}
+                    <LinhaGrupo
+                      key={`${i}-${nivel}`}
+                      grupo={g} meses={meses} oculto={oculto}
+                      aberto={gruposAbertos.has(g.nome)}
+                      onToggleAberto={() => toggleGrupo(g.nome)}
+                      expandidosSubs={subsExpandidos}
+                      onToggleSub={toggleSub}
                       onCelulaClick={(catId, catNome, mes, titulo) => setDrillDown({ titulo, categoria_id: catId, categoria_nome: catNome, mes })} />
                   ))}
                   {/* Total Créditos — sempre visível */}
@@ -858,27 +1198,27 @@ export default function RelatoriosPage() {
                     <td className="px-4 sticky left-0 z-10"
                       style={{ background: nivel === 1 ? 'rgba(0,200,150,0.1)' : 'rgba(0,200,150,0.06)', minWidth: 220,
                                paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
-                      <span className={`font-bold uppercase tracking-widest pl-1 ${nivel === 1 ? 'text-[12px]' : 'text-[10px]'}`}
+                      <span className={`font-bold uppercase tracking-widest pl-1 ${nivel === 1 ? 'text-[16px]' : 'text-[14px]'}`}
                         style={{ color: '#00c896' }}>
                         {nivel === 1 ? 'Créditos' : 'Total Créditos'}
                       </span>
                     </td>
                     <td className="px-3 text-right"
                       style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
-                      <span className={`font-bold ${nivel === 1 ? 'text-[14px]' : 'text-[12px]'}`} style={{ color: '#00c896' }}>
+                      <span className={`font-bold ${nivel === 1 ? 'text-[18px]' : 'text-[16px]'}`} style={{ color: '#00c896' }}>
                         {oculto ? '????' : formatBRL(grandTotalEntradas)}
                       </span>
                     </td>
                     <td className="px-3 text-right border-l border-white/5"
                       style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
-                      <span className={`font-bold ${nivel === 1 ? 'text-[12px]' : 'text-[11px]'}`} style={{ color: '#00c896', opacity: 0.65 }}>
+                      <span className={`font-bold ${nivel === 1 ? 'text-[16px]' : 'text-[15px]'}`} style={{ color: '#00c896', opacity: 0.65 }}>
                         {oculto ? '????' : formatBRL(grandTotalEntradas / meses.length)}
                       </span>
                     </td>
                     {meses.map(m => (
                       <td key={m} className="px-3 text-right"
                         style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
-                        <span className={`font-bold ${nivel === 1 ? 'text-[12px]' : 'text-[11px]'}`}
+                        <span className={`font-bold ${nivel === 1 ? 'text-[16px]' : 'text-[15px]'}`}
                           style={{ color: totaisMes[m]?.entradas ? '#00c896' : '#4a5168' }}>
                           {totaisMes[m]?.entradas ? (oculto ? '????' : formatBRL(totaisMes[m].entradas)) : '-'}
                         </span>
@@ -896,13 +1236,19 @@ export default function RelatoriosPage() {
                         <span style={{ color: '#f87171' }}>
                           {debAberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
                         </span>
-                        <span className="text-[10px] font-bold uppercase tracking-[3px]" style={{ color: '#f87171' }}>Débitos</span>
+                        <span className="text-[14px] font-bold uppercase tracking-[3px]" style={{ color: '#f87171' }}>Débitos</span>
                         <div className="flex-1 h-px" style={{ background: 'rgba(248,113,113,0.2)' }}/>
                       </div>
                     </td>
                   </tr>
                   {debAberto && grupos.filter(g => g.tipo === 'DESPESA').map((g, i) => (
-                    <LinhaGrupo key={`${i}-${nivel}`} grupo={g} meses={meses} oculto={oculto} nivel={nivel}
+                    <LinhaGrupo
+                      key={`${i}-${nivel}`}
+                      grupo={g} meses={meses} oculto={oculto}
+                      aberto={gruposAbertos.has(g.nome)}
+                      onToggleAberto={() => toggleGrupo(g.nome)}
+                      expandidosSubs={subsExpandidos}
+                      onToggleSub={toggleSub}
                       onCelulaClick={(catId, catNome, mes, titulo) => setDrillDown({ titulo, categoria_id: catId, categoria_nome: catNome, mes })} />
                   ))}
                   {/* Total Débitos — sempre visível */}
@@ -910,27 +1256,27 @@ export default function RelatoriosPage() {
                     <td className="px-4 sticky left-0 z-10"
                       style={{ background: nivel === 1 ? 'rgba(248,113,113,0.1)' : 'rgba(248,113,113,0.06)', minWidth: 220,
                                paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
-                      <span className={`font-bold uppercase tracking-widest pl-1 ${nivel === 1 ? 'text-[12px]' : 'text-[10px]'}`}
+                      <span className={`font-bold uppercase tracking-widest pl-1 ${nivel === 1 ? 'text-[16px]' : 'text-[14px]'}`}
                         style={{ color: '#f87171' }}>
                         {nivel === 1 ? 'Débitos' : 'Total Débitos'}
                       </span>
                     </td>
                     <td className="px-3 text-right"
                       style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
-                      <span className={`font-bold ${nivel === 1 ? 'text-[14px]' : 'text-[12px]'}`} style={{ color: '#f87171' }}>
+                      <span className={`font-bold ${nivel === 1 ? 'text-[18px]' : 'text-[16px]'}`} style={{ color: '#f87171' }}>
                         {oculto ? '????' : formatBRL(grandTotalDespesas)}
                       </span>
                     </td>
                     <td className="px-3 text-right border-l border-white/5"
                       style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
-                      <span className={`font-bold ${nivel === 1 ? 'text-[12px]' : 'text-[11px]'}`} style={{ color: '#f87171', opacity: 0.65 }}>
+                      <span className={`font-bold ${nivel === 1 ? 'text-[16px]' : 'text-[15px]'}`} style={{ color: '#f87171', opacity: 0.65 }}>
                         {oculto ? '????' : formatBRL(grandTotalDespesas / meses.length)}
                       </span>
                     </td>
                     {meses.map(m => (
                       <td key={m} className="px-3 text-right"
                         style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
-                        <span className={`font-bold ${nivel === 1 ? 'text-[12px]' : 'text-[11px]'}`}
+                        <span className={`font-bold ${nivel === 1 ? 'text-[16px]' : 'text-[15px]'}`}
                           style={{ color: totaisMes[m]?.despesas ? '#f87171' : '#4a5168' }}>
                           {totaisMes[m]?.despesas ? (oculto ? '????' : formatBRL(totaisMes[m].despesas)) : '-'}
                         </span>
@@ -942,15 +1288,15 @@ export default function RelatoriosPage() {
                   <tr style={{ background: 'rgba(0,200,150,0.04)' }}>
                     <td className="px-4 py-3 sticky left-0 z-10 border-t-2"
                       style={{ background: 'rgba(0,200,150,0.04)', borderColor: 'rgba(0,200,150,0.2)', minWidth: 220 }}>
-                      <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: '#00c896' }}>Resultado</span>
+                      <span className="text-[15px] font-bold uppercase tracking-widest" style={{ color: '#00c896' }}>Resultado</span>
                     </td>
                     <td className="px-3 py-3 text-right border-t-2" style={{ borderColor: 'rgba(0,200,150,0.2)' }}>
-                      <span className="text-[13px] font-bold" style={{ color: resultado >= 0 ? '#00c896' : '#f87171' }}>
+                      <span className="text-[17px] font-bold" style={{ color: resultado >= 0 ? '#00c896' : '#f87171' }}>
                         {oculto ? '????' : formatBRL(resultado)}
                       </span>
                     </td>
                     <td className="px-3 py-3 text-right border-t-2 border-l border-white/5" style={{ borderColor: 'rgba(0,200,150,0.2)' }}>
-                      <span className="text-[12px] font-bold" style={{ color: resultado >= 0 ? '#00c896' : '#f87171', opacity: 0.65 }}>
+                      <span className="text-[16px] font-bold" style={{ color: resultado >= 0 ? '#00c896' : '#f87171', opacity: 0.65 }}>
                         {oculto ? '????' : formatBRL(resultado / meses.length)}
                       </span>
                     </td>
@@ -958,7 +1304,7 @@ export default function RelatoriosPage() {
                       const res = (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0)
                       return (
                         <td key={m} className="px-3 py-3 text-right border-t-2" style={{ borderColor: 'rgba(0,200,150,0.2)' }}>
-                          <span className="text-[12px] font-bold" style={{ color: res >= 0 ? '#00c896' : '#f87171' }}>
+                          <span className="text-[16px] font-bold" style={{ color: res >= 0 ? '#00c896' : '#f87171' }}>
                             {oculto ? '????' : formatBRL(res)}
                           </span>
                         </td>
@@ -978,14 +1324,14 @@ export default function RelatoriosPage() {
           {/* Cabecalho do painel */}
           <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
             <div>
-              <p className="text-[13px] font-bold" style={{ color: '#e8eaf0' }}>{drillDown.titulo}</p>
-              <p className="text-[10px] mt-0.5" style={{ color: '#8b92a8' }}>
+              <p className="text-[17px] font-bold" style={{ color: '#e8eaf0' }}>{drillDown.titulo}</p>
+              <p className="text-[14px] mt-0.5" style={{ color: '#8b92a8' }}>
                 {gruposDescricao.length} descrição(ões) · {lancamentosDrill.length} lançamento(s)
               </p>
             </div>
             <button
               onClick={() => setDrillDown(null)}
-              className="text-[11px] px-3 py-1.5 rounded-lg border transition-all hover:bg-white/5"
+              className="text-[15px] px-3 py-1.5 rounded-lg border transition-all hover:bg-white/5"
               style={{ borderColor: 'rgba(255,255,255,0.1)', color: '#8b92a8' }}
             >
               x Fechar
@@ -994,7 +1340,7 @@ export default function RelatoriosPage() {
 
           {/* Grid de lancamentos */}
           {lancamentosDrill.length === 0 ? (
-            <p className="text-[12px] text-center py-8" style={{ color: '#8b92a8' }}>Nenhum lançamento encontrado</p>
+            <p className="text-[16px] text-center py-8" style={{ color: '#8b92a8' }}>Nenhum lançamento encontrado</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse" style={{ tableLayout: 'fixed' }}>
@@ -1009,12 +1355,12 @@ export default function RelatoriosPage() {
                 </colgroup>
                 <thead>
                   <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
-                    <th className="px-4 py-2.5 text-left border-b border-white/5"><span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Data</span></th>
-                    <th className="px-4 py-2.5 text-left border-b border-white/5"><span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Descrição</span></th>
-                    <th className="px-4 py-2.5 text-left border-b border-white/5"><span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Categoria</span></th>
-                    <th className="px-4 py-2.5 text-left border-b border-white/5"><span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Conta</span></th>
-                    <th className="px-4 py-2.5 text-left border-b border-white/5"><span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Status</span></th>
-                    <th className="px-4 py-2.5 text-right border-b border-white/5"><span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Valor</span></th>
+                    <th className="px-4 py-2.5 text-left border-b border-white/5"><span className="text-[14px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Data</span></th>
+                    <th className="px-4 py-2.5 text-left border-b border-white/5"><span className="text-[14px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Descrição</span></th>
+                    <th className="px-4 py-2.5 text-left border-b border-white/5"><span className="text-[14px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Categoria</span></th>
+                    <th className="px-4 py-2.5 text-left border-b border-white/5"><span className="text-[14px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Conta</span></th>
+                    <th className="px-4 py-2.5 text-left border-b border-white/5"><span className="text-[14px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Status</span></th>
+                    <th className="px-4 py-2.5 text-right border-b border-white/5"><span className="text-[14px] font-bold uppercase tracking-wider" style={{ color: '#4a5168' }}>Valor</span></th>
                     <th className="px-2 py-2.5 border-b border-white/5"/>
                   </tr>
                 </thead>
@@ -1040,15 +1386,15 @@ export default function RelatoriosPage() {
                               {expandido
                                 ? <ChevronDown size={12} style={{ color: '#4a5168', flexShrink: 0 }}/>
                                 : <ChevronRight size={12} style={{ color: '#4a5168', flexShrink: 0 }}/>}
-                              <span className="text-[12px] font-medium truncate" style={{ color: '#e8eaf0' }}>{g.descricao}</span>
-                              <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0"
+                              <span className="text-[16px] font-medium truncate" style={{ color: '#e8eaf0' }}>{g.descricao}</span>
+                              <span className="text-[13px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0"
                                 style={{ background: 'rgba(255,255,255,0.06)', color: '#8b92a8' }}>
                                 {g.qtd}×
                               </span>
                             </div>
                           </td>
                           <td className="px-4 py-2.5 text-right">
-                            <span className="text-[12px] font-bold whitespace-nowrap" style={{ color: cor }}>
+                            <span className="text-[16px] font-bold whitespace-nowrap" style={{ color: cor }}>
                               {formatBRL(g.total)}
                             </span>
                           </td>
@@ -1061,23 +1407,23 @@ export default function RelatoriosPage() {
                             className="cursor-pointer border-b border-white/[0.02] hover:bg-white/[0.04] transition-colors"
                             style={{ background: 'rgba(255,255,255,0.015)' }}>
                             <td className="px-4 py-2 pl-10">
-                              <span className="text-[10px]" style={{ color: '#8b92a8' }}>
+                              <span className="text-[14px]" style={{ color: '#8b92a8' }}>
                                 {l.data.split('-').reverse().join('/')}
                               </span>
                             </td>
                             <td className="px-4 py-2">
-                              <span className="text-[11px] truncate block" style={{ color: '#c5cad8' }}>{l.descricao}</span>
+                              <span className="text-[15px] truncate block" style={{ color: '#c5cad8' }}>{l.descricao}</span>
                             </td>
                             <td className="px-4 py-2">
-                              <span className="text-[10px] truncate block" style={{ color: '#c5cad8' }}>
+                              <span className="text-[14px] truncate block" style={{ color: '#c5cad8' }}>
                                 {l.categoria_pai_nome ? `${l.categoria_pai_nome} / ${l.categoria_nome}` : (l.categoria_nome ?? '-')}
                               </span>
                             </td>
                             <td className="px-4 py-2">
-                              <span className="text-[10px]" style={{ color: '#c5cad8' }}>{l.conta_nome ?? '-'}</span>
+                              <span className="text-[14px]" style={{ color: '#c5cad8' }}>{l.conta_nome ?? '-'}</span>
                             </td>
                             <td className="px-4 py-2">
-                              <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap"
+                              <span className="text-[13px] px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap"
                                 style={{
                                   background: STATUS_BG[l.status]  ?? STATUS_BG.PENDENTE,
                                   color:      STATUS_COR[l.status] ?? STATUS_COR.PENDENTE,
@@ -1086,7 +1432,7 @@ export default function RelatoriosPage() {
                               </span>
                             </td>
                             <td className="px-4 py-2 text-right">
-                              <span className="text-[11px] font-bold whitespace-nowrap" style={{ color: cor }}>
+                              <span className="text-[15px] font-bold whitespace-nowrap" style={{ color: cor }}>
                                 {l.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(l.valor)}
                               </span>
                             </td>
@@ -1110,13 +1456,13 @@ export default function RelatoriosPage() {
                 <tfoot>
                   <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
                     <td colSpan={5} className="px-4 py-2.5 border-t border-white/10">
-                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Total</span>
+                      <span className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Total</span>
                     </td>
                     <td className="px-4 py-2.5 text-right border-t border-white/10">
                       {(() => {
                         const tot = lancamentosDrill.reduce((s, l) => s + (l.tipo === 'RECEITA' ? l.valor : -l.valor), 0)
                         return (
-                          <span className="text-[13px] font-bold" style={{ color: tot >= 0 ? '#00c896' : '#f87171' }}>
+                          <span className="text-[17px] font-bold" style={{ color: tot >= 0 ? '#00c896' : '#f87171' }}>
                             {formatBRL(Math.abs(tot))}
                           </span>
                         )
@@ -1141,6 +1487,13 @@ export default function RelatoriosPage() {
         />
       )}
 
+      {/* Loading enquanto busca */}
+      {loading && (
+        <div className="py-12">
+          <LoadingMascote texto="Gerando relatório…" size={150} />
+        </div>
+      )}
+
       {/* Estado vazio */}
       {!buscado && !loading && (
         <div className="flex flex-col items-center justify-center py-20">
@@ -1148,10 +1501,12 @@ export default function RelatoriosPage() {
             style={{ background: 'rgba(0,200,150,0.08)', border: '1px solid rgba(0,200,150,0.15)' }}>
             <Filter size={24} style={{ color: '#00c896' }} />
           </div>
-          <p className="text-[14px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>Configure os filtros</p>
-          <p className="text-[12px]" style={{ color: '#8b92a8' }}>Selecione o período e clique em Gerar relatório</p>
+          <p className="text-[18px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>Configure os filtros</p>
+          <p className="text-[16px]" style={{ color: '#8b92a8' }}>Selecione o período e clique em Gerar relatório</p>
         </div>
       )}
+
+      <TutorialTour pageKey="relatorios-v1" passos={TUTORIAL_RELATORIOS} />
     </div>
   )
 }

@@ -1,16 +1,25 @@
 // src/pages/AssinaturasPage.tsx
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from 'react'
 import { Doughnut, Bar, Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS, ArcElement, CategoryScale, LinearScale,
   BarElement, LineElement, PointElement, Tooltip, Legend, Filler,
 } from 'chart.js'
-import { Download, RefreshCw, Search, X, Pencil, ChevronDown, Tags, Check, AlertCircle } from 'lucide-react'
+import { Download, RefreshCw, Search, X, Pencil, ChevronDown, ChevronRight, Tags, Check, AlertCircle } from 'lucide-react'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useCategorias } from '../hooks/useCategorias'
 import { apiMutate } from '../lib/api'
 import { formatBRL, mesLabel } from '../lib/utils'
+import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
+import LoadingMascote from '../components/ui/LoadingMascote'
+import MascoteDica from '../components/ui/MascoteDica'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
+import TutorialTour from '../components/ui/TutorialTour'
+import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCategoria'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
+import { TUTORIAL_ASSINATURAS } from '../lib/tutoriaisPaginas'
 
 ChartJS.register(ArcElement, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, Filler)
 
@@ -280,7 +289,7 @@ function StatusBadge({ status }: { status: StatusRec }) {
   return (
     <span style={{
       background: s.bg, color: s.color,
-      fontSize: 10, fontWeight: 700, padding: '2px 8px',
+      fontSize: 14, fontWeight: 700, padding: '2px 8px',
       borderRadius: 20, letterSpacing: '0.3px', whiteSpace: 'nowrap',
     }}>{s.label}</span>
   )
@@ -291,9 +300,9 @@ function KpiCard({ label, value, sub, color = '#e8eaf0' }: {
 }) {
   return (
     <div className="bg-[#1a1f2e] border border-white/10 rounded-xl px-4 py-3">
-      <p className="text-[9px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>{label}</p>
-      <p className="text-[18px] font-bold leading-tight" style={{ color }}>{value}</p>
-      {sub && <p className="text-[10px] mt-1 truncate" style={{ color: '#8b92a8' }}>{sub}</p>}
+      <p className="text-[13px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>{label}</p>
+      <p className="text-[22px] font-bold leading-tight" style={{ color }}>{value}</p>
+      {sub && <p className="text-[14px] mt-1 truncate" style={{ color: '#8b92a8' }}>{sub}</p>}
     </div>
   )
 }
@@ -303,7 +312,7 @@ interface PageCache { lancamentos: Lancamento[] }
 let _saved: PageCache | null = null
 
 // ── Chart defaults ───────────────────────────────────────────────
-const TICK_STYLE  = { color: '#8b92a8', font: { size: 10 as const } }
+const TICK_STYLE  = { color: '#8b92a8', font: { size: 14 as const } }
 const GRID_STYLE  = { color: 'rgba(255,255,255,0.04)' as const }
 const tipFmt      = (v: unknown) => formatBRL(Number(v))
 
@@ -316,9 +325,14 @@ export default function AssinaturasPage() {
   const [recSelecionada, setRecSelecionada] = useState<Recorrencia | null>(null)
   const [editandoId, setEditandoId]         = useState<string | null>(null)
   const detalheRef = useRef<HTMLDivElement>(null)
+  // Granularidade da tabela: 'cat' = cada recorrência é uma linha (modo atual);
+  // 'pai' = consolida recorrências por categoria pai, com expansão.
+  const [agrupCat, setAgrupCat] = useState<'cat' | 'pai'>('cat')
+  const expCat = useExpansaoCategoria()
 
   // ── Reclassificação em massa ──────────────────────────────
   const { categorias } = useCategorias()
+  const { mascote } = useMascotePreferido()
   const [reclassificando, setReclassificando] = useState<Recorrencia | null>(null)
   const [novaDescricao,   setNovaDescricao]   = useState('')
   const [novaCategoriaId, setNovaCategoriaId] = useState('')
@@ -426,6 +440,29 @@ export default function AssinaturasPage() {
     }
   }, [recorrencias])
 
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  useRegistrarContextoIA(useMemo(() => ({
+    titulo:    'Gastos Recorrentes',
+    descricao: 'Análise de assinaturas e cobranças recorrentes detectadas nos últimos 12 meses',
+    dados: {
+      total_mensal_estimado: kpis.totalMensal,
+      total_anual_estimado:  kpis.totalAnual,
+      qtd_total:             recorrencias.length,
+      qtd_ativas:            kpis.ativas,
+      qtd_novas:             kpis.novas,
+      qtd_suspeitas_inatividade: kpis.inativos,
+      qtd_reajustadas:       kpis.reajustadas,
+      por_categoria:         kpis.porCat.slice(0, 10).map(([cat, total]) => ({ cat, total })),
+      top_recorrencias:      recorrencias.slice(0, 10).map(r => ({
+        descricao:    r.nome,
+        categoria:    r.categoria,
+        valor_mensal: r.valorMensal,
+        status:       r.status,
+        frequencia:   r.frequencia,
+      })),
+    },
+  }), [kpis, recorrencias]))
+
   const evolucao = useMemo(() => {
     const mes   = mesAtual()
     const meses = Array.from({ length: 12 }, (_, i) => mesAdjacente(mes, -(11 - i)))
@@ -463,16 +500,82 @@ export default function AssinaturasPage() {
     return recorrencias.filter(r => r.nome.toLowerCase().includes(t) || r.categoria.toLowerCase().includes(t))
   }, [recorrencias, busca])
 
+  /**
+   * Agrupamento "Resumo" (por categoria pai). Consolida as recorrências
+   * filtradas em pais; cada pai vira uma linha com totais agregados e a lista
+   * original como subs expansíveis.
+   *
+   *  - Para recorrências SEM `categoriaId`, usa o próprio nome de categoria
+   *    como fallback.
+   *  - Recorrências cujo `categoriaId` é raiz (sem id_pai) caem no bucket
+   *    do próprio nome.
+   *
+   * `paisComSub` lista os pais que têm >1 sub (ou cujo único sub é diferente
+   * do pai); usado pelo botão "Expandir todas".
+   */
+  const agrupado = useMemo(() => {
+    const paiMap = paiPorCategoriaId(categorias)
+    const buckets = new Map<string, { paiKey: string; nome: string; recs: Recorrencia[] }>()
+    for (const r of filtradas) {
+      const paiInfo = r.categoriaId ? paiMap.get(r.categoriaId) : undefined
+      const paiNome = paiInfo?.nome ?? r.categoria ?? 'Sem categoria'
+      const paiKey  = `pai:${paiNome}`
+      if (!buckets.has(paiKey)) buckets.set(paiKey, { paiKey, nome: paiNome, recs: [] })
+      buckets.get(paiKey)!.recs.push(r)
+    }
+    const lista = [...buckets.values()]
+      .map(b => ({
+        ...b,
+        valorMensal: b.recs.reduce((s, r) => s + r.valorMensal, 0),
+        ocorrencias: b.recs.reduce((s, r) => s + r.ocorrencias, 0),
+        ultimaCobranca: b.recs.reduce((m, r) => r.ultimaCobranca > m ? r.ultimaCobranca : m, ''),
+      }))
+      .sort((a, b) => b.valorMensal - a.valorMensal)
+    const paisComSub = new Set(
+      lista
+        .filter(p => p.recs.length > 1 || (p.recs.length === 1 && p.recs[0].nome !== p.nome))
+        .map(p => p.paiKey)
+    )
+    return { lista, paisComSub }
+  }, [filtradas, categorias])
+
+  /**
+   * Exporta CSV refletindo o modo atual da tabela:
+   *  - 'cat': lista plana de recorrências (como antes)
+   *  - 'pai': linha do pai + sub-linhas (└ ...) das recorrências, somente
+   *           para pais expandidos na tela.
+   */
   const exportar = () => {
-    const rows = [
-      ['Serviço', 'Categoria', 'Frequência', 'Custo Mensal', 'Custo Anual', 'Última Cobrança', 'Ocorrências', 'Status'],
-      ...recorrencias.map(r => [
-        r.nome, r.categoria, FREQ_LABEL[r.frequencia],
-        r.valorMensal.toFixed(2).replace('.', ','),
-        (r.valorMensal * 12).toFixed(2).replace('.', ','),
-        r.ultimaCobranca, String(r.ocorrencias), STATUS_INFO[r.status].label,
-      ]),
+    const header = ['Serviço', 'Categoria', 'Frequência', 'Custo Mensal', 'Custo Anual', 'Última Cobrança', 'Ocorrências', 'Status']
+    const linhaRec = (r: Recorrencia, prefixo = ''): string[] => [
+      `${prefixo}${r.nome}`, r.categoria, FREQ_LABEL[r.frequencia],
+      r.valorMensal.toFixed(2).replace('.', ','),
+      (r.valorMensal * 12).toFixed(2).replace('.', ','),
+      r.ultimaCobranca, String(r.ocorrencias), STATUS_INFO[r.status].label,
     ]
+
+    const rows: string[][] = [header]
+    if (agrupCat === 'pai') {
+      for (const p of agrupado.lista) {
+        rows.push([
+          p.nome,
+          `${p.recs.length} recorrência${p.recs.length !== 1 ? 's' : ''}`,
+          '—',
+          p.valorMensal.toFixed(2).replace('.', ','),
+          (p.valorMensal * 12).toFixed(2).replace('.', ','),
+          p.ultimaCobranca,
+          String(p.ocorrencias),
+          '—',
+        ])
+        if (expCat.expandidos.has(p.paiKey)) {
+          p.recs
+            .slice().sort((a, b) => b.valorMensal - a.valorMensal)
+            .forEach(r => rows.push(linhaRec(r, '   └ ')))
+        }
+      }
+    } else {
+      filtradas.forEach(r => rows.push(linhaRec(r)))
+    }
     const csv  = rows.map(r => r.map(c => `"${c}"`).join(';')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
     const a    = Object.assign(document.createElement('a'), {
@@ -484,10 +587,7 @@ export default function AssinaturasPage() {
   // ── Render: loading ──────────────────────────────────────────
   if (loading) return (
     <div className="flex items-center justify-center py-24">
-      <div className="text-center">
-        <RefreshCw size={24} className="animate-spin mx-auto mb-3" style={{ color: '#4da6ff' }} />
-        <p className="text-[13px]" style={{ color: '#8b92a8' }}>Analisando histórico de transações…</p>
-      </div>
+      <LoadingMascote texto="Analisando histórico de transações…" size={150} />
     </div>
   )
 
@@ -496,22 +596,24 @@ export default function AssinaturasPage() {
   return (
     <div className="space-y-6">
 
+      <MascoteTutorial pagina="assinaturas" />
+
       {/* ── Header ── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-[20px] font-bold text-white">Assinaturas &amp; Recorrências</h1>
-          <p className="text-[12px] mt-0.5" style={{ color: '#8b92a8' }}>
+          <h1 className="text-[24px] font-bold text-white">Assinaturas &amp; Recorrências</h1>
+          <p className="text-[16px] mt-0.5" style={{ color: '#8b92a8' }}>
             Últimos 13 meses · {recorrencias.length} recorrências detectadas
           </p>
         </div>
         <div className="flex gap-2">
           <button onClick={exportar} disabled={!recorrencias.length}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[12px] font-medium transition-all disabled:opacity-40 hover:border-white/30"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[16px] font-medium transition-all disabled:opacity-40 hover:border-white/30"
             style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#8b92a8' }}>
             <Download size={13} /> Exportar CSV
           </button>
           <button onClick={() => carregar(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[12px] font-medium transition-all hover:border-white/30"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[16px] font-medium transition-all hover:border-white/30"
             style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#8b92a8' }}>
             <RefreshCw size={13} /> Atualizar
           </button>
@@ -519,7 +621,7 @@ export default function AssinaturasPage() {
       </div>
 
       {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-tutorial="assinaturas-kpis">
         <KpiCard label="Custo Mensal"         value={formatBRL(totalMensal)}          color="#00c896" />
         <KpiCard label="Projeção Anual"        value={formatBRL(totalAnual)}           color="#4da6ff" />
         <KpiCard label="Recorrências Ativas"   value={String(ativas)}                  color="#e8eaf0"
@@ -537,8 +639,8 @@ export default function AssinaturasPage() {
 
       {recorrencias.length === 0 ? (
         <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-12 text-center">
-          <p className="text-[14px] font-semibold text-white mb-2">Nenhuma recorrência detectada</p>
-          <p className="text-[12px] max-w-md mx-auto" style={{ color: '#8b92a8' }}>
+          <p className="text-[18px] font-semibold text-white mb-2">Nenhuma recorrência detectada</p>
+          <p className="text-[16px] max-w-md mx-auto" style={{ color: '#8b92a8' }}>
             O sistema analisa despesas com padrão de repetição (mesmo serviço, intervalos regulares).
             São necessários pelo menos 2 lançamentos semelhantes para detecção automática.
           </p>
@@ -546,11 +648,11 @@ export default function AssinaturasPage() {
       ) : (
         <>
           {/* ── Charts ── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-tutorial="assinaturas-graficos">
 
             {/* Donut por categoria */}
             <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
-              <p className="text-[13px] font-semibold text-white mb-3">Distribuição por Categoria</p>
+              <p className="text-[17px] font-semibold text-white mb-3">Distribuição por Categoria</p>
               <div className="h-56">
                 <Doughnut
                   data={{
@@ -564,7 +666,7 @@ export default function AssinaturasPage() {
                   options={{
                     responsive: true, maintainAspectRatio: false, cutout: '65%',
                     plugins: {
-                      legend: { position: 'right', labels: { color: '#8b92a8', font: { size: 11 }, padding: 10 } },
+                      legend: { position: 'right', labels: { color: '#8b92a8', font: { size: 15 }, padding: 10 } },
                       tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${tipFmt(ctx.raw)}/mês` } },
                     },
                   }}
@@ -574,7 +676,7 @@ export default function AssinaturasPage() {
 
             {/* Evolução mensal */}
             <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
-              <p className="text-[13px] font-semibold text-white mb-3">Evolução Mensal (12 meses)</p>
+              <p className="text-[17px] font-semibold text-white mb-3">Evolução Mensal (12 meses)</p>
               <div className="h-56">
                 <Line
                   data={{
@@ -604,8 +706,8 @@ export default function AssinaturasPage() {
           </div>
 
           {/* Top recorrências — barra horizontal */}
-          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
-            <p className="text-[13px] font-semibold text-white mb-3">Top Recorrências por Custo Mensal</p>
+          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4" data-tutorial="assinaturas-top">
+            <p className="text-[17px] font-semibold text-white mb-3">Top Recorrências por Custo Mensal</p>
             <div style={{ height: Math.max(200, Math.min(recorrencias.length, 10) * 34 + 48) }}>
               <Bar
                 data={{
@@ -635,7 +737,7 @@ export default function AssinaturasPage() {
                   },
                   scales: {
                     x: { grid: GRID_STYLE, ticks: { ...TICK_STYLE, callback: v => formatBRL(Number(v)) } },
-                    y: { grid: { display: false }, ticks: { color: '#e8eaf0', font: { size: 11 } } },
+                    y: { grid: { display: false }, ticks: { color: '#e8eaf0', font: { size: 15 } } },
                   },
                 }}
               />
@@ -650,7 +752,7 @@ export default function AssinaturasPage() {
               ] as const).map(([bg, label]) => (
                 <div key={label} className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: bg }} />
-                  <span className="text-[10px]" style={{ color: '#8b92a8' }}>{label}</span>
+                  <span className="text-[14px]" style={{ color: '#8b92a8' }}>{label}</span>
                 </div>
               ))}
             </div>
@@ -658,14 +760,34 @@ export default function AssinaturasPage() {
 
           {/* Insights */}
           {insights.length > 0 && (
-            <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
-              <p className="text-[13px] font-semibold text-white mb-3">Insights Automáticos</p>
+            <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4" data-tutorial="assinaturas-insights">
+              <p className="text-[17px] font-semibold text-white mb-3">Insights Automáticos</p>
+              {/* Dica narrada — pose varia com o teor dos insights */}
+              <div className="mb-3">
+                <MascoteDica
+                  nome={mascote}
+                  pose={
+                    kpis.reajustadas > 0 || kpis.inativos > 0 ? 'espantado'
+                    : kpis.totalMensal > 0 ? 'sentado'
+                    : 'curioso'
+                  }
+                  texto={
+                    kpis.reajustadas > 0
+                      ? `Detectei ${kpis.reajustadas} reajuste${kpis.reajustadas > 1 ? 's' : ''} recente${kpis.reajustadas > 1 ? 's' : ''}. Vale revisar se ainda compensa.`
+                    : kpis.inativos > 0
+                      ? `${kpis.inativos} cobrança${kpis.inativos > 1 ? 's' : ''} parou${kpis.inativos > 1 ? 'aram' : ''} de aparecer há mais de 45 dias — confira se foi cancelada de fato.`
+                    : kpis.totalMensal > 0
+                      ? `Você compromete ${formatBRL(kpis.totalMensal)}/mês em recorrências. Pequenos cortes têm efeito grande no ano.`
+                    : 'Ainda não identifiquei assinaturas no seu histórico. Conforme você lançar despesas, padrões vão aparecer aqui.'
+                  }
+                />
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {insights.map((ins, i) => (
                   <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg"
                     style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                    <span className="text-[15px] leading-none mt-0.5 flex-shrink-0">{ins.icon}</span>
-                    <p className="text-[11px] leading-relaxed" style={{ color: '#c8cad8' }}>{ins.text}</p>
+                    <span className="text-[19px] leading-none mt-0.5 flex-shrink-0">{ins.icon}</span>
+                    <p className="text-[15px] leading-relaxed" style={{ color: '#c8cad8' }}>{ins.text}</p>
                   </div>
                 ))}
               </div>
@@ -673,9 +795,42 @@ export default function AssinaturasPage() {
           )}
 
           {/* Tabela detalhada */}
-          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
+          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden" data-tutorial="assinaturas-tabela">
             <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3 flex-wrap">
-              <p className="text-[13px] font-semibold text-white flex-1">Detalhamento</p>
+              <p className="text-[17px] font-semibold text-white flex-1">Detalhamento</p>
+
+              {/* Toggle Categoria / Resumo */}
+              <div className="flex rounded-lg overflow-hidden border border-white/10 text-[14px] font-semibold">
+                {([
+                  { id: 'cat' as const, label: 'Categoria', title: 'Cada recorrência aparece como uma linha' },
+                  { id: 'pai' as const, label: 'Resumo',    title: 'Consolida as recorrências por categoria pai · clique para expandir' },
+                ]).map(({ id, label, title }, idx) => (
+                  <button
+                    key={id}
+                    title={title}
+                    onClick={() => setAgrupCat(id)}
+                    className="px-2.5 py-1 transition-colors"
+                    style={{
+                      background:  agrupCat === id ? 'rgba(0,200,150,0.15)' : 'transparent',
+                      color:       agrupCat === id ? '#00c896' : '#8b92a8',
+                      borderRight: idx === 0 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {agrupCat === 'pai' && agrupado.paisComSub.size > 0 && (
+                <BotaoExpandirTodas
+                  compacto
+                  todasExpandidas={expCat.todasExpandidas(agrupado.paisComSub)}
+                  onClick={() => expCat.todasExpandidas(agrupado.paisComSub)
+                    ? expCat.colapsar()
+                    : expCat.expandirTodas(agrupado.paisComSub)}
+                />
+              )}
+
               <div className="flex items-center gap-2 rounded-lg px-3 py-1.5 border"
                 style={{ background: '#131825', borderColor: busca ? 'rgba(77,166,255,0.4)' : 'rgba(255,255,255,0.1)', minWidth: 220 }}>
                 <Search size={12} style={{ color: '#8b92a8' }} />
@@ -683,7 +838,7 @@ export default function AssinaturasPage() {
                   value={busca}
                   onChange={e => setBusca(e.target.value)}
                   placeholder="Buscar serviço ou categoria…"
-                  className="flex-1 bg-transparent text-[12px] text-white placeholder-[#4a5168] focus:outline-none"
+                  className="flex-1 bg-transparent text-[16px] text-white placeholder-[#4a5168] focus:outline-none"
                 />
                 {busca && <button onClick={() => setBusca('')}><X size={11} style={{ color: '#8b92a8' }} /></button>}
               </div>
@@ -695,85 +850,163 @@ export default function AssinaturasPage() {
                   <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
                     {['Serviço', 'Categoria', 'Frequência', 'Custo Mensal', 'Custo Anual', 'Última Cobrança', 'Ocorr.', 'Status'].map(h => (
                       <th key={h} className="px-4 py-2.5 text-left border-b border-white/5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{h}</span>
+                        <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{h}</span>
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {filtradas.map(r => {
-                    const ativa = recSelecionada?.id === r.id
-                    return (
-                    <tr
-                      key={r.id}
-                      onClick={() => setRecSelecionada(ativa ? null : r)}
-                      className="border-b border-white/5 transition-colors cursor-pointer"
-                      style={{ background: ativa ? 'rgba(77,166,255,0.08)' : undefined }}
-                      onMouseEnter={e => { if (!ativa) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)' }}
-                      onMouseLeave={e => { if (!ativa) (e.currentTarget as HTMLElement).style.background = '' }}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <ChevronDown
-                            size={12}
-                            style={{
-                              color: ativa ? '#4da6ff' : '#4a5168',
-                              transform: ativa ? 'rotate(0deg)' : 'rotate(-90deg)',
-                              transition: 'transform 0.2s',
-                              flexShrink: 0,
-                            }}
-                          />
-                          <span className="text-[12px] font-medium" style={{ color: ativa ? '#4da6ff' : '#e8eaf0' }}>{r.nome}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[11px]" style={{ color: '#8b92a8' }}>{r.categoria}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[11px]" style={{ color: '#8b92a8' }}>{FREQ_LABEL[r.frequencia]}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="text-[12px] font-semibold" style={{ color: '#00c896' }}>{formatBRL(r.valorMensal)}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="text-[11px]" style={{ color: '#4da6ff' }}>{formatBRL(r.valorMensal * 12)}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[11px]" style={{ color: '#8b92a8' }}>
-                          {new Date(r.ultimaCobranca + 'T12:00:00').toLocaleDateString('pt-BR')}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="text-[11px]" style={{ color: '#8b92a8' }}>{r.ocorrencias}×</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={r.status} />
-                      </td>
-                    </tr>
-                  )})}
-                  {filtradas.length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center">
-                        <span className="text-[12px]" style={{ color: '#8b92a8' }}>Nenhuma recorrência encontrada</span>
-                      </td>
-                    </tr>
-                  )}
+                  {(() => {
+                    // Row de uma recorrência (modo Categoria, ou sub do modo Resumo).
+                    const renderRec = (r: Recorrencia, opts?: { sub?: boolean }) => {
+                      const isSub = !!opts?.sub
+                      const ativa = recSelecionada?.id === r.id
+                      return (
+                        <tr
+                          key={r.id + (isSub ? '-sub' : '')}
+                          onClick={() => setRecSelecionada(ativa ? null : r)}
+                          className="border-b border-white/5 transition-colors cursor-pointer"
+                          style={{
+                            background: ativa
+                              ? 'rgba(77,166,255,0.08)'
+                              : (isSub ? 'rgba(255,255,255,0.015)' : undefined),
+                          }}
+                          onMouseEnter={e => { if (!ativa) (e.currentTarget as HTMLElement).style.background = isSub ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.03)' }}
+                          onMouseLeave={e => { if (!ativa) (e.currentTarget as HTMLElement).style.background = isSub ? 'rgba(255,255,255,0.015)' : '' }}
+                        >
+                          <td className={`py-3 ${isSub ? 'pl-10 pr-4' : 'px-4'}`}>
+                            <div className="flex items-center gap-1.5">
+                              {isSub
+                                ? <span style={{ color: '#4a5168' }}>└</span>
+                                : <ChevronDown
+                                    size={12}
+                                    style={{
+                                      color: ativa ? '#4da6ff' : '#4a5168',
+                                      transform: ativa ? 'rotate(0deg)' : 'rotate(-90deg)',
+                                      transition: 'transform 0.2s',
+                                      flexShrink: 0,
+                                    }}
+                                  />}
+                              <span className="text-[16px] font-medium" style={{ color: ativa ? '#4da6ff' : (isSub ? '#c5cad8' : '#e8eaf0') }}>{r.nome}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>{r.categoria}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>{FREQ_LABEL[r.frequencia]}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[16px] font-semibold" style={{ color: '#00c896' }}>{formatBRL(r.valorMensal)}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[15px]" style={{ color: '#4da6ff' }}>{formatBRL(r.valorMensal * 12)}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>
+                              {new Date(r.ultimaCobranca + 'T12:00:00').toLocaleDateString('pt-BR')}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>{r.ocorrencias}×</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={r.status} />
+                          </td>
+                        </tr>
+                      )
+                    }
+
+                    // Modo Categoria: lista plana.
+                    if (agrupCat !== 'pai') {
+                      if (filtradas.length === 0) return (
+                        <tr><td colSpan={8} className="px-4 py-8 text-center">
+                          <span className="text-[16px]" style={{ color: '#8b92a8' }}>Nenhuma recorrência encontrada</span>
+                        </td></tr>
+                      )
+                      return filtradas.map(r => renderRec(r))
+                    }
+
+                    // Modo Resumo: linha por pai + subs expansíveis.
+                    if (agrupado.lista.length === 0) return (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center">
+                        <span className="text-[16px]" style={{ color: '#8b92a8' }}>Nenhuma recorrência encontrada</span>
+                      </td></tr>
+                    )
+                    return agrupado.lista.flatMap(p => {
+                      const podeExpandir = agrupado.paisComSub.has(p.paiKey)
+                      const expanded = podeExpandir && expCat.expandidos.has(p.paiKey)
+                      const out: ReactNode[] = [
+                        <tr
+                          key={p.paiKey}
+                          onClick={podeExpandir ? () => expCat.toggle(p.paiKey) : undefined}
+                          className={`border-b border-white/5 transition-colors ${podeExpandir ? 'cursor-pointer' : ''}`}
+                          style={{ background: expanded ? 'rgba(255,255,255,0.03)' : undefined }}
+                          onMouseEnter={e => { if (!expanded) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.02)' }}
+                          onMouseLeave={e => { if (!expanded) (e.currentTarget as HTMLElement).style.background = '' }}
+                        >
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              {podeExpandir
+                                ? (expanded
+                                    ? <ChevronDown  size={12} style={{ color: '#8b92a8', flexShrink: 0 }} />
+                                    : <ChevronRight size={12} style={{ color: '#8b92a8', flexShrink: 0 }} />)
+                                : <span style={{ width: 12, display: 'inline-block' }} />}
+                              <span className="text-[16px] font-semibold" style={{ color: '#e8eaf0' }}>{p.nome}</span>
+                              {podeExpandir && (
+                                <span className="text-[13px] ml-1" style={{ color: '#4a5168' }}>({p.recs.length})</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[15px]" style={{ color: '#4a5168' }}>
+                              {p.recs.length} recorrência{p.recs.length !== 1 ? 's' : ''}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3"><span className="text-[15px]" style={{ color: '#4a5168' }}>—</span></td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[16px] font-bold" style={{ color: '#00c896' }}>{formatBRL(p.valorMensal)}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[15px] font-semibold" style={{ color: '#4da6ff' }}>{formatBRL(p.valorMensal * 12)}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>
+                              {p.ultimaCobranca
+                                ? new Date(p.ultimaCobranca + 'T12:00:00').toLocaleDateString('pt-BR')
+                                : '—'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>{p.ocorrencias}×</span>
+                          </td>
+                          <td className="px-4 py-3"><span className="text-[15px]" style={{ color: '#4a5168' }}>—</span></td>
+                        </tr>,
+                      ]
+                      if (expanded) {
+                        p.recs
+                          .slice().sort((a, b) => b.valorMensal - a.valorMensal)
+                          .forEach(r => out.push(renderRec(r, { sub: true })))
+                      }
+                      return out
+                    })
+                  })()}
                 </tbody>
                 {filtradas.length > 0 && (
                   <tfoot>
                     <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
                       <td colSpan={3} className="px-4 py-2.5 border-t border-white/10">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>
+                        <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>
                           Total ({filtradas.length})
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-right border-t border-white/10">
-                        <span className="text-[12px] font-bold" style={{ color: '#00c896' }}>
+                        <span className="text-[16px] font-bold" style={{ color: '#00c896' }}>
                           {formatBRL(filtradas.reduce((s, r) => s + r.valorMensal, 0))}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-right border-t border-white/10">
-                        <span className="text-[11px] font-semibold" style={{ color: '#4da6ff' }}>
+                        <span className="text-[15px] font-semibold" style={{ color: '#4da6ff' }}>
                           {formatBRL(filtradas.reduce((s, r) => s + r.valorMensal * 12, 0))}
                         </span>
                       </td>
@@ -792,8 +1025,8 @@ export default function AssinaturasPage() {
               <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-3"
                 style={{ background: 'rgba(77,166,255,0.06)' }}>
                 <div>
-                  <p className="text-[13px] font-semibold text-white">{recSelecionada.nome}</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: '#8b92a8' }}>
+                  <p className="text-[17px] font-semibold text-white">{recSelecionada.nome}</p>
+                  <p className="text-[14px] mt-0.5" style={{ color: '#8b92a8' }}>
                     {recSelecionada.ocorrencias} lançamento{recSelecionada.ocorrencias !== 1 ? 's' : ''} ·{' '}
                     {FREQ_LABEL[recSelecionada.frequencia]} · {formatBRL(recSelecionada.valorMensal)}/mês
                   </p>
@@ -801,7 +1034,7 @@ export default function AssinaturasPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={e => { e.stopPropagation(); abrirReclassificar(recSelecionada) }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-medium transition-all hover:border-purple-400/50 hover:text-purple-300"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[15px] font-medium transition-all hover:border-purple-400/50 hover:text-purple-300"
                     style={{ borderColor: 'rgba(167,139,250,0.35)', color: '#a78bfa' }}
                     title="Reclassificar todos os lançamentos deste grupo"
                   >
@@ -823,7 +1056,7 @@ export default function AssinaturasPage() {
                     <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
                       {['Data', 'Descrição', 'Valor', ''].map(h => (
                         <th key={h} className="px-4 py-2 text-left border-b border-white/5">
-                          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{h}</span>
+                          <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{h}</span>
                         </th>
                       ))}
                     </tr>
@@ -834,15 +1067,15 @@ export default function AssinaturasPage() {
                       .map(l => (
                         <tr key={l.id} className="border-b border-white/5 hover:bg-white/[0.03] transition-colors">
                           <td className="px-4 py-2.5 whitespace-nowrap">
-                            <span className="text-[11px]" style={{ color: '#8b92a8' }}>
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>
                               {new Date(l.data + 'T12:00:00').toLocaleDateString('pt-BR')}
                             </span>
                           </td>
                           <td className="px-4 py-2.5">
-                            <span className="text-[12px] text-white">{l.descricao}</span>
+                            <span className="text-[16px] text-white">{l.descricao}</span>
                           </td>
                           <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                            <span className="text-[12px] font-semibold" style={{ color: '#f87171' }}>
+                            <span className="text-[16px] font-semibold" style={{ color: '#f87171' }}>
                               {formatBRL(l.valor)}
                             </span>
                           </td>
@@ -862,12 +1095,12 @@ export default function AssinaturasPage() {
                   <tfoot>
                     <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
                       <td colSpan={2} className="px-4 py-2 border-t border-white/10">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>
+                        <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>
                           Total gasto no período
                         </span>
                       </td>
                       <td className="px-4 py-2 text-right border-t border-white/10">
-                        <span className="text-[12px] font-bold" style={{ color: '#f87171' }}>
+                        <span className="text-[16px] font-bold" style={{ color: '#f87171' }}>
                           {formatBRL(recSelecionada.lancamentos.reduce((s, l) => s + l.valor, 0))}
                         </span>
                       </td>
@@ -893,8 +1126,8 @@ export default function AssinaturasPage() {
                 <Tags size={16} style={{ color: '#a78bfa' }} />
               </div>
               <div>
-                <p className="text-[14px] font-semibold text-white">Reclassificar em massa</p>
-                <p className="text-[10px]" style={{ color: '#8b92a8' }}>
+                <p className="text-[18px] font-semibold text-white">Reclassificar em massa</p>
+                <p className="text-[14px]" style={{ color: '#8b92a8' }}>
                   {reclassificando.ocorrencias} lançamento{reclassificando.ocorrencias !== 1 ? 's' : ''} serão alterados
                 </p>
               </div>
@@ -902,13 +1135,13 @@ export default function AssinaturasPage() {
 
             {/* Origem */}
             <div className="rounded-xl p-3 mb-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <p className="text-[9px] font-semibold uppercase tracking-wider mb-2" style={{ color: '#4a5168' }}>Grupo atual</p>
+              <p className="text-[13px] font-semibold uppercase tracking-wider mb-2" style={{ color: '#4a5168' }}>Grupo atual</p>
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="text-[12px] font-medium text-white">{reclassificando.nome}</p>
-                  <p className="text-[11px]" style={{ color: '#8b92a8' }}>{reclassificando.categoria}</p>
+                  <p className="text-[16px] font-medium text-white">{reclassificando.nome}</p>
+                  <p className="text-[15px]" style={{ color: '#8b92a8' }}>{reclassificando.categoria}</p>
                 </div>
-                <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(167,139,250,0.12)', color: '#a78bfa' }}>
+                <span className="text-[14px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(167,139,250,0.12)', color: '#a78bfa' }}>
                   {reclassificando.ocorrencias}×
                 </span>
               </div>
@@ -918,7 +1151,7 @@ export default function AssinaturasPage() {
             <div className="space-y-3 mb-5">
               {/* Nova descrição */}
               <div>
-                <label className="text-[11px] font-medium block mb-1.5" style={{ color: '#8b92a8' }}>
+                <label className="text-[15px] font-medium block mb-1.5" style={{ color: '#8b92a8' }}>
                   Nova descrição
                 </label>
                 <input
@@ -926,7 +1159,7 @@ export default function AssinaturasPage() {
                   value={novaDescricao}
                   onChange={e => setNovaDescricao(e.target.value)}
                   disabled={!!progresso}
-                  className="w-full rounded-lg px-3 py-2 text-[13px] text-white focus:outline-none disabled:opacity-50"
+                  className="w-full rounded-lg px-3 py-2 text-[17px] text-white focus:outline-none disabled:opacity-50"
                   style={{ background: '#131825', border: '1px solid rgba(255,255,255,0.12)' }}
                   onFocus={e => { (e.target as HTMLElement).style.borderColor = 'rgba(167,139,250,0.5)' }}
                   onBlur={e  => { (e.target as HTMLElement).style.borderColor = 'rgba(255,255,255,0.12)' }}
@@ -935,14 +1168,14 @@ export default function AssinaturasPage() {
 
               {/* Nova categoria */}
               <div>
-                <label className="text-[11px] font-medium block mb-1.5" style={{ color: '#8b92a8' }}>
+                <label className="text-[15px] font-medium block mb-1.5" style={{ color: '#8b92a8' }}>
                   Nova categoria
                 </label>
                 <select
                   value={novaCategoriaId}
                   onChange={e => setNovaCategoriaId(e.target.value)}
                   disabled={!!progresso}
-                  className="w-full rounded-lg px-3 py-2 text-[13px] focus:outline-none disabled:opacity-50"
+                  className="w-full rounded-lg px-3 py-2 text-[17px] focus:outline-none disabled:opacity-50"
                   style={{
                     background: '#131825', border: '1px solid rgba(255,255,255,0.12)',
                     color: novaCategoriaId ? '#e8eaf0' : '#4a5168',
@@ -968,8 +1201,8 @@ export default function AssinaturasPage() {
             {progresso && (
               <div className="mb-4">
                 <div className="flex justify-between mb-1">
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>Atualizando…</span>
-                  <span className="text-[11px]" style={{ color: '#8b92a8' }}>{progresso.atual}/{progresso.total}</span>
+                  <span className="text-[15px]" style={{ color: '#8b92a8' }}>Atualizando…</span>
+                  <span className="text-[15px]" style={{ color: '#8b92a8' }}>{progresso.atual}/{progresso.total}</span>
                 </div>
                 <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
                   <div
@@ -984,7 +1217,7 @@ export default function AssinaturasPage() {
             {erroRec && (
               <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)' }}>
                 <AlertCircle size={13} style={{ color: '#f87171', flexShrink: 0 }} />
-                <p className="text-[11px]" style={{ color: '#f87171' }}>{erroRec}</p>
+                <p className="text-[15px]" style={{ color: '#f87171' }}>{erroRec}</p>
               </div>
             )}
 
@@ -993,7 +1226,7 @@ export default function AssinaturasPage() {
               <button
                 onClick={() => setReclassificando(null)}
                 disabled={!!progresso}
-                className="flex-1 py-2.5 rounded-lg border text-[12px] font-semibold transition-all hover:border-white/20 disabled:opacity-50"
+                className="flex-1 py-2.5 rounded-lg border text-[16px] font-semibold transition-all hover:border-white/20 disabled:opacity-50"
                 style={{ borderColor: 'rgba(255,255,255,0.1)', color: '#8b92a8' }}
               >
                 Cancelar
@@ -1001,7 +1234,7 @@ export default function AssinaturasPage() {
               <button
                 onClick={executarReclassificacao}
                 disabled={!!progresso}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-[12px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-[16px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
                 style={{ background: '#a78bfa', color: '#0a0f1a' }}
               >
                 {progresso
@@ -1023,6 +1256,8 @@ export default function AssinaturasPage() {
           onExcluido={() => { setEditandoId(null); carregar(true) }}
         />
       )}
+
+      <TutorialTour pageKey="assinaturas-v1" passos={TUTORIAL_ASSINATURAS} />
     </div>
   )
 }

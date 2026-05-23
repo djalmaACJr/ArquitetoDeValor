@@ -8,6 +8,12 @@ import {
 import { Download, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { formatBRL, mesLabel } from '../lib/utils'
+import MascoteDica from '../components/ui/MascoteDica'
+import MascoteTutorial from '../components/ui/MascoteTutorial'
+import TutorialTour from '../components/ui/TutorialTour'
+import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
+import { TUTORIAL_PROJECAO } from '../lib/tutoriaisPaginas'
 
 ChartJS.register(CategoryScale, LinearScale, LineElement, BarElement, PointElement, Tooltip, Legend, Filler)
 
@@ -40,7 +46,7 @@ function serieMensal(pmt: number, taxa: number, n: number): number[] {
 
 // ── Constants ─────────────────────────────────────────────────────
 const GRID  = { color: 'rgba(255,255,255,0.04)' as const }
-const TICKS = { color: '#8b92a8', font: { size: 10 as const } }
+const TICKS = { color: '#8b92a8', font: { size: 14 as const } }
 
 // ── KpiCard ───────────────────────────────────────────────────────
 function KpiCard({ label, value, sub, color = '#e8eaf0', trend }: {
@@ -52,11 +58,11 @@ function KpiCard({ label, value, sub, color = '#e8eaf0', trend }: {
   return (
     <div className="bg-[#1a1f2e] border border-white/10 rounded-xl px-4 py-3">
       <div className="flex items-center justify-between mb-1.5">
-        <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{label}</p>
+        <p className="text-[13px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{label}</p>
         {trend && <Icon size={13} style={{ color: tColor }} />}
       </div>
-      <p className="text-[18px] font-bold leading-tight" style={{ color }}>{value}</p>
-      {sub && <p className="text-[10px] mt-1 truncate" style={{ color: '#8b92a8' }}>{sub}</p>}
+      <p className="text-[22px] font-bold leading-tight" style={{ color }}>{value}</p>
+      {sub && <p className="text-[14px] mt-1 truncate" style={{ color: '#8b92a8' }}>{sub}</p>}
     </div>
   )
 }
@@ -69,8 +75,8 @@ function Slider({ label, value, min, max, step, fmt, onChange, color = '#4da6ff'
   return (
     <div>
       <div className="flex justify-between items-center mb-1.5">
-        <span className="text-[11px]" style={{ color: '#8b92a8' }}>{label}</span>
-        <span className="text-[12px] font-bold" style={{ color }}>{fmt(value)}</span>
+        <span className="text-[15px]" style={{ color: '#8b92a8' }}>{label}</span>
+        <span className="text-[16px] font-bold" style={{ color }}>{fmt(value)}</span>
       </div>
       <input
         type="range" min={min} max={max} step={step} value={value}
@@ -79,8 +85,8 @@ function Slider({ label, value, min, max, step, fmt, onChange, color = '#4da6ff'
         style={{ accentColor: color }}
       />
       <div className="flex justify-between mt-0.5">
-        <span className="text-[9px]" style={{ color: '#4a5168' }}>{fmt(min)}</span>
-        <span className="text-[9px]" style={{ color: '#4a5168' }}>{fmt(max)}</span>
+        <span className="text-[13px]" style={{ color: '#4a5168' }}>{fmt(min)}</span>
+        <span className="text-[13px]" style={{ color: '#4a5168' }}>{fmt(max)}</span>
       </div>
     </div>
   )
@@ -94,6 +100,7 @@ let _saved: PageCache | null = null
 export default function ProjecaoEconomiaPage() {
   const [lancamentos, setLancamentos] = useState<Lancamento[]>(() => _saved?.lancamentos ?? [])
   const [loading, setLoading]         = useState(!_saved)
+  const { mascote } = useMascotePreferido()
 
   // Simulador
   const [rendimento,  setRendimento]  = useState(0.8)   // % a.m.
@@ -191,6 +198,30 @@ export default function ProjecaoEconomiaPage() {
     ? `${(horizonte / 12).toFixed(0)} anos`
     : `${(horizonte / 12).toFixed(0)} anos`
 
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  useRegistrarContextoIA(useMemo(() => ({
+    titulo:    `Projeção de Economia · ${hLabel}`,
+    descricao: 'Simulação de patrimônio futuro a partir das médias atuais de receita/despesa/economia',
+    dados: {
+      horizonte_meses: horizonte,
+      rendimento_anual_pct: rendimento * 12 * 100,  // mensal → anual aprox
+      rendimento_mensal_pct: rendimento * 100,
+      reducao_despesas_pct: reducaoPerc,
+      medias: {
+        receitas:     medias.receitas,
+        despesas:     medias.despesas,
+        economia:     medias.economia,
+        taxa_poupanca_pct: medias.taxaPoupanca,
+      },
+      projecao: {
+        cenario_atual_aporte_mensal:    economiaAtual,
+        cenario_otimista_aporte_mensal: economiaOtimista,
+        patrimonio_final_atual:    pvAtual,
+        patrimonio_final_otimista: pvOtimista,
+      },
+    },
+  }), [hLabel, horizonte, rendimento, reducaoPerc, medias, economiaAtual, economiaOtimista, pvAtual, pvOtimista]))
+
   // ── Insights ─────────────────────────────────────────────────
   const insights = useMemo(() => {
     const list: { icon: string; text: string }[] = []
@@ -232,7 +263,7 @@ export default function ProjecaoEconomiaPage() {
     <div className="flex items-center justify-center py-24">
       <div className="text-center">
         <RefreshCw size={24} className="animate-spin mx-auto mb-3" style={{ color: '#4da6ff' }} />
-        <p className="text-[13px]" style={{ color: '#8b92a8' }}>Analisando histórico financeiro…</p>
+        <p className="text-[17px]" style={{ color: '#8b92a8' }}>Analisando histórico financeiro…</p>
       </div>
     </div>
   )
@@ -240,22 +271,24 @@ export default function ProjecaoEconomiaPage() {
   return (
     <div className="space-y-6">
 
+      <MascoteTutorial pagina="projecao" />
+
       {/* ── Header ── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-[20px] font-bold text-white">Projeção de Economia</h1>
-          <p className="text-[12px] mt-0.5" style={{ color: '#8b92a8' }}>
+          <h1 className="text-[24px] font-bold text-white">Projeção de Economia</h1>
+          <p className="text-[16px] mt-0.5" style={{ color: '#8b92a8' }}>
             Baseado nos últimos {dadosMensais.length} meses · projeção para {hLabel}
           </p>
         </div>
         <div className="flex gap-2">
           <button onClick={exportar}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[12px] font-medium transition-all hover:border-white/30"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[16px] font-medium transition-all hover:border-white/30"
             style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#8b92a8' }}>
             <Download size={13} /> Exportar CSV
           </button>
           <button onClick={() => carregar(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[12px] font-medium transition-all hover:border-white/30"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[16px] font-medium transition-all hover:border-white/30"
             style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#8b92a8' }}>
             <RefreshCw size={13} /> Atualizar
           </button>
@@ -263,7 +296,7 @@ export default function ProjecaoEconomiaPage() {
       </div>
 
       {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-tutorial="projecao-kpis">
         <KpiCard label="Economia Média/Mês"
           value={formatBRL(medias.economia)}
           color={medias.economia >= 0 ? '#00c896' : '#f87171'}
@@ -292,17 +325,17 @@ export default function ProjecaoEconomiaPage() {
 
       {dadosMensais.length === 0 ? (
         <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-12 text-center">
-          <p className="text-[14px] font-semibold text-white mb-2">Sem dados suficientes</p>
-          <p className="text-[12px]" style={{ color: '#8b92a8' }}>
+          <p className="text-[18px] font-semibold text-white mb-2">Sem dados suficientes</p>
+          <p className="text-[16px]" style={{ color: '#8b92a8' }}>
             São necessários lançamentos dos meses anteriores para gerar projeções.
           </p>
         </div>
       ) : (
         <>
           {/* ── Simulador Interativo ── */}
-          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-5">
-            <p className="text-[13px] font-semibold text-white mb-1">Simulador Interativo</p>
-            <p className="text-[11px] mb-4" style={{ color: '#8b92a8' }}>
+          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-5" data-tutorial="projecao-simulador">
+            <p className="text-[17px] font-semibold text-white mb-1">Simulador Interativo</p>
+            <p className="text-[15px] mb-4" style={{ color: '#8b92a8' }}>
               Ajuste os parâmetros e veja o impacto em tempo real nas projeções.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-5">
@@ -336,20 +369,20 @@ export default function ProjecaoEconomiaPage() {
               ].map(s => (
                 <div key={s.label} className="rounded-lg px-3 py-2.5"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <p className="text-[9px] uppercase tracking-wider mb-1" style={{ color: '#8b92a8' }}>{s.label}</p>
-                  <p className="text-[15px] font-bold" style={{ color: s.c }}>{formatBRL(s.v)}</p>
+                  <p className="text-[13px] uppercase tracking-wider mb-1" style={{ color: '#8b92a8' }}>{s.label}</p>
+                  <p className="text-[19px] font-bold" style={{ color: s.c }}>{formatBRL(s.v)}</p>
                 </div>
               ))}
             </div>
           </div>
 
           {/* ── Charts ── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-tutorial="projecao-graficos">
 
             {/* Evolução patrimonial */}
             <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
-              <p className="text-[13px] font-semibold text-white mb-0.5">Evolução Patrimonial Projetada</p>
-              <p className="text-[10px] mb-3" style={{ color: '#8b92a8' }}>
+              <p className="text-[17px] font-semibold text-white mb-0.5">Evolução Patrimonial Projetada</p>
+              <p className="text-[14px] mb-3" style={{ color: '#8b92a8' }}>
                 Juros compostos · {rendimento}% a.m. · economia reinvestida mensalmente
               </p>
               <div className="h-56">
@@ -377,7 +410,7 @@ export default function ProjecaoEconomiaPage() {
                     responsive: true, maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
-                      legend: { labels: { color: '#8b92a8', font: { size: 11 }, boxWidth: 10 } },
+                      legend: { labels: { color: '#8b92a8', font: { size: 15 }, boxWidth: 10 } },
                       tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatBRL(Number(ctx.raw))}` } },
                     },
                     scales: {
@@ -391,8 +424,8 @@ export default function ProjecaoEconomiaPage() {
 
             {/* Despesa por categoria + oportunidade */}
             <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
-              <p className="text-[13px] font-semibold text-white mb-0.5">Oportunidades por Categoria</p>
-              <p className="text-[10px] mb-3" style={{ color: '#8b92a8' }}>
+              <p className="text-[17px] font-semibold text-white mb-0.5">Oportunidades por Categoria</p>
+              <p className="text-[14px] mb-3" style={{ color: '#8b92a8' }}>
                 Gasto médio mensal · verde = economia potencial com -{reducaoPerc}%
               </p>
               <div style={{ height: Math.max(200, categorias.length * 34 + 48) }}>
@@ -418,12 +451,12 @@ export default function ProjecaoEconomiaPage() {
                     indexAxis: 'y',
                     responsive: true, maintainAspectRatio: false,
                     plugins: {
-                      legend: { labels: { color: '#8b92a8', font: { size: 10 }, boxWidth: 10 } },
+                      legend: { labels: { color: '#8b92a8', font: { size: 14 }, boxWidth: 10 } },
                       tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatBRL(Number(ctx.raw))}` } },
                     },
                     scales: {
                       x: { grid: GRID, ticks: { ...TICKS, callback: v => formatBRL(Number(v)) } },
-                      y: { grid: { display: false }, ticks: { color: '#e8eaf0', font: { size: 11 } } },
+                      y: { grid: { display: false }, ticks: { color: '#e8eaf0', font: { size: 15 } } },
                     },
                   }}
                 />
@@ -432,9 +465,9 @@ export default function ProjecaoEconomiaPage() {
           </div>
 
           {/* ── Comparativo de cenários ── */}
-          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden">
+          <div className="bg-[#1a1f2e] border border-white/10 rounded-xl overflow-hidden" data-tutorial="projecao-comparativo">
             <div className="px-4 py-3 border-b border-white/10">
-              <p className="text-[13px] font-semibold text-white">Comparativo de Cenários</p>
+              <p className="text-[17px] font-semibold text-white">Comparativo de Cenários</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
@@ -442,7 +475,7 @@ export default function ProjecaoEconomiaPage() {
                   <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
                     {['Cenário', 'Poupança/Mês', 'Poupança Anual', `Patrimônio (${hLabel})`, 'Ganho vs. Atual'].map(h => (
                       <th key={h} className="px-4 py-2.5 text-left border-b border-white/5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{h}</span>
+                        <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{h}</span>
                       </th>
                     ))}
                   </tr>
@@ -454,21 +487,21 @@ export default function ProjecaoEconomiaPage() {
                   ].map(row => (
                     <tr key={row.nome} className="border-b border-white/5" style={{ background: row.bg }}>
                       <td className="px-4 py-3.5">
-                        <span className="text-[12px] font-semibold" style={{ color: row.color }}>{row.nome}</span>
+                        <span className="text-[16px] font-semibold" style={{ color: row.color }}>{row.nome}</span>
                       </td>
                       <td className="px-4 py-3.5">
-                        <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{formatBRL(row.ec)}</span>
+                        <span className="text-[16px]" style={{ color: '#e8eaf0' }}>{formatBRL(row.ec)}</span>
                       </td>
                       <td className="px-4 py-3.5">
-                        <span className="text-[12px]" style={{ color: '#e8eaf0' }}>{formatBRL(row.ec * 12)}</span>
+                        <span className="text-[16px]" style={{ color: '#e8eaf0' }}>{formatBRL(row.ec * 12)}</span>
                       </td>
                       <td className="px-4 py-3.5">
-                        <span className="text-[13px] font-bold" style={{ color: row.color }}>{formatBRL(row.pv)}</span>
+                        <span className="text-[17px] font-bold" style={{ color: row.color }}>{formatBRL(row.pv)}</span>
                       </td>
                       <td className="px-4 py-3.5">
                         {row.ganho > 0
-                          ? <span className="text-[12px] font-semibold" style={{ color: '#00c896' }}>+{formatBRL(row.ganho)}</span>
-                          : <span className="text-[11px]" style={{ color: '#4a5168' }}>—</span>
+                          ? <span className="text-[16px] font-semibold" style={{ color: '#00c896' }}>+{formatBRL(row.ganho)}</span>
+                          : <span className="text-[15px]" style={{ color: '#4a5168' }}>—</span>
                         }
                       </td>
                     </tr>
@@ -480,14 +513,35 @@ export default function ProjecaoEconomiaPage() {
 
           {/* ── Insights ── */}
           {insights.length > 0 && (
-            <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
-              <p className="text-[13px] font-semibold text-white mb-3">Insights Automáticos</p>
+            <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4" data-tutorial="projecao-insights">
+              <p className="text-[17px] font-semibold text-white mb-3">Insights Automáticos</p>
+              {/* Dica narrada — pose contextual ao cenário projetado */}
+              <div className="mb-3">
+                <MascoteDica
+                  nome={mascote}
+                  pose={
+                    medias.economia < 0 ? 'espantado'
+                    : medias.taxaPoupanca >= 20 ? 'feliz'
+                    : medias.economia > 0 ? 'sentado'
+                    : 'curioso'
+                  }
+                  texto={
+                    medias.economia < 0
+                      ? `Você está gastando mais do que recebe (${formatBRL(Math.abs(medias.economia))}/mês). Sem ajustes, o patrimônio diminui no horizonte de ${hLabel}.`
+                    : medias.taxaPoupanca >= 20
+                      ? `Excelente disciplina! Com ${medias.taxaPoupanca.toFixed(0)}% de taxa de poupança, em ${hLabel} você acumula ${formatBRL(pvAtual)} com rendimento de ${rendimento}% a.m.`
+                    : medias.economia > 0
+                      ? `Ritmo de poupança ${medias.taxaPoupanca.toFixed(0)}% — abaixo dos 20% recomendados. Pequenos cortes amplificam muito no horizonte de ${hLabel}.`
+                    : 'Ainda não tenho histórico suficiente pra projetar. Continue lançando para uma análise mais rica.'
+                  }
+                />
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {insights.map((ins, i) => (
                   <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg"
                     style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                    <span className="text-[15px] leading-none mt-0.5 flex-shrink-0">{ins.icon}</span>
-                    <p className="text-[11px] leading-relaxed" style={{ color: '#c8cad8' }}>{ins.text}</p>
+                    <span className="text-[19px] leading-none mt-0.5 flex-shrink-0">{ins.icon}</span>
+                    <p className="text-[15px] leading-relaxed" style={{ color: '#c8cad8' }}>{ins.text}</p>
                   </div>
                 ))}
               </div>
@@ -495,6 +549,8 @@ export default function ProjecaoEconomiaPage() {
           )}
         </>
       )}
+
+      <TutorialTour pageKey="projecao-v1" passos={TUTORIAL_PROJECAO} />
     </div>
   )
 }

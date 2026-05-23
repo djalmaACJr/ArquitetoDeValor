@@ -58,11 +58,15 @@ export function FiltrosLancamentos({
         className={classNameContas}
         values={filtContas}
         onChange={setFiltContas}
-        options={contas.filter(c => c.ativa).map(c => ({
-          value: c.conta_id,
-          label: c.nome,
-          cor:   c.cor ?? undefined,
-        }))}
+        options={contas
+          .filter(c => c.ativa)
+          .slice()
+          .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+          .map(c => ({
+            value: c.conta_id,
+            label: c.nome,
+            cor:   c.cor ?? undefined,
+          }))}
       />
 
       <MultiSelect

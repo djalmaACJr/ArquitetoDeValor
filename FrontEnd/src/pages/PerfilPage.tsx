@@ -3,7 +3,14 @@ import type { FormEvent } from 'react'
 import {
   User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown,
   Pencil, Sparkles, ArrowRight, Wand2, RefreshCw, Search, ChevronLeft, ChevronRight,
+  Palette, Users, MessageCircle,
 } from 'lucide-react'
+import ChatMascote from '../components/ui/ChatMascote'
+import { useTheme } from '../hooks/useTheme'
+import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import Mascote, { type MascoteNome, type MascotePose } from '../components/ui/Mascote'
+import { useIAPreferencia } from '../hooks/useIAPreferencia'
+import { PROVEDORES, PROVEDOR_PADRAO } from '../lib/iaProvedores'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -48,10 +55,10 @@ function Secao({ titulo, icone, children }: {
   children: React.ReactNode
 }) {
   return (
-    <div className="bg-white/4 border border-white/8 rounded-2xl p-5">
+    <div className="bg-white/4 border border-white/8 rounded-2xl p-5 h-full">
       <div className="flex items-center gap-2 mb-4 pb-3 border-b border-white/8">
         <span className="text-av-green/70">{icone}</span>
-        <h2 className="text-[13px] font-semibold text-white">{titulo}</h2>
+        <h2 className="text-[17px] font-semibold text-white">{titulo}</h2>
       </div>
       {children}
     </div>
@@ -62,12 +69,719 @@ function Alerta({ fb }: { fb: Feedback | null }) {
   if (!fb) return null
   const ok = fb.tipo === 'ok'
   return (
-    <div className={`flex items-center gap-2 text-[12px] rounded-lg px-3 py-2 mt-3 ${
+    <div className={`flex items-center gap-2 text-[16px] rounded-lg px-3 py-2 mt-3 ${
       ok ? 'bg-av-green/10 text-av-green' : 'bg-red-400/10 text-red-400'
     }`}>
       {ok ? <Check size={13}/> : <AlertCircle size={13}/>}
       {fb.msg}
     </div>
+  )
+}
+
+/** Picker de mascote preferido — grade 2x2 de cards. Poses por estado:
+ *  - sentado:     mascote NÃO selecionado (calmo, neutro)
+ *  - feliz:       mascote selecionado (ativo, contente)
+ *  - triste:      último mascote (perdeu a vaga durante a troca)
+ *
+ *  Quando o usuário clica em outro mascote, o anterior fica visualmente
+ *  "triste" por um instante antes de voltar para sentado — feedback de
+ *  transição. A escolha persiste em `arqvalor.usuarios.mascote_preferido`. */
+function SecaoMascote() {
+  const { mascote, setMascote, apelidos, apelidoDe, definirApelido } = useMascotePreferido()
+  // Mascote "deposto": fica triste por uns segundos após perder o ativo.
+  const [tristePassageiro, setTristePassageiro] = useState<MascoteNome | null>(null)
+  // Modal de apelido: aberto ao selecionar mascote SEM apelido ainda,
+  // ou ao clicar no botão de renomear.
+  const [modalApelido, setModalApelido] = useState<MascoteNome | null>(null)
+  const [apelidoInput, setApelidoInput] = useState('')
+
+  // Catálogo dos 4 mascotes
+  const catalogo: Array<{ id: MascoteNome; label: string; descricao: string }> = [
+    { id: 'sabio',     label: 'Conselheiro', descricao: 'Sabedoria e visão de longo prazo.' },
+    { id: 'arquiteta', label: 'Arquiteta', descricao: 'Estrutura, cálculo e disciplina.' },
+    { id: 'gato',      label: 'Mago Gato', descricao: 'A magia dos juros compostos.' },
+    { id: 'raposa',    label: 'Raposa',    descricao: 'Astúcia estratégica de mercado.' },
+  ]
+
+  // Abre o modal pra (re)nomear — chamado pelo botão dedicado.
+  const abrirRenomear = (id: MascoteNome) => {
+    setApelidoInput(apelidos[id] ?? '')
+    setModalApelido(id)
+  }
+
+  const aoTrocar = (id: MascoteNome) => {
+    if (id === mascote) return  // re-clique no ativo: não faz nada (use botão renomear)
+    const anterior = mascote
+    setMascote(id)
+    setTristePassageiro(anterior)
+    setTimeout(() => setTristePassageiro(p => (p === anterior ? null : p)), 2200)
+    // Só pede nome se o mascote escolhido ainda NÃO tem apelido salvo.
+    if (!apelidos[id]) {
+      setApelidoInput('')
+      setModalApelido(id)
+    }
+  }
+
+  const salvarApelido = async () => {
+    if (modalApelido) await definirApelido(modalApelido, apelidoInput)
+    setModalApelido(null)
+  }
+
+  return (
+    <Secao titulo="Mentor preferido" icone={<Users size={15}/>}>
+      <p className="text-[15px] text-white/40 mb-3 leading-relaxed">
+        Quem aparece nos balões contextuais (Dashboard, Comparativo, etc.).
+        A escolha é salva na sua conta.
+      </p>
+      <div className="grid grid-cols-2 gap-2.5">
+        {catalogo.map(m => {
+          const ativo = m.id === mascote
+          const triste = m.id === tristePassageiro
+          // Pose por estado: ativo→feliz, triste passageiro→triste, default→sentado
+          const pose: MascotePose = ativo ? 'feliz' : triste ? 'triste' : 'sentado'
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => aoTrocar(m.id)}
+              className="text-left rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-av-green/40 p-2.5"
+              style={{
+                borderColor: ativo ? '#00c896' : triste ? 'rgba(248,113,113,0.5)' : 'rgba(255,255,255,0.10)',
+                background:  ativo ? 'rgba(0,200,150,0.08)'
+                            : triste ? 'rgba(248,113,113,0.06)'
+                            : 'rgba(255,255,255,0.03)',
+              }}
+              aria-pressed={ativo}
+              title={m.descricao}
+            >
+              <div className="flex items-center gap-3">
+                <Mascote
+                  nome={m.id}
+                  pose={pose}
+                  size={84}
+                  className="flex-shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[16px] font-semibold text-white truncate">
+                    {apelidoDe(m.id)}
+                    {apelidoDe(m.id) !== m.label && (
+                      <span className="text-[12px] font-normal ml-1.5" style={{ color: '#8b92a8' }}>
+                        ({m.label})
+                      </span>
+                    )}
+                  </p>
+                  {ativo && (
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <span className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: '#00c896' }}>
+                        ✓ Em uso
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); abrirRenomear(m.id) }}
+                        className="text-[12px] font-medium underline hover:opacity-80"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
+                        renomear
+                      </button>
+                    </div>
+                  )}
+                  {triste && (
+                    <p className="text-[12px] font-semibold uppercase tracking-wider mt-0.5" style={{ color: '#f87171' }}>
+                      ✗ Trocado
+                    </p>
+                  )}
+                  <p className="text-[13px] mt-1 leading-snug" style={{ color: '#8b92a8' }}>
+                    {m.descricao}
+                  </p>
+                </div>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-[13px] text-white/30 mt-3 leading-relaxed">
+        Toque novamente no mentor ativo para renomeá-lo.
+      </p>
+
+      {/* Modal: pedir apelido para o mascote escolhido */}
+      {modalApelido && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setModalApelido(null)} />
+          <div
+            className="relative w-full max-w-sm rounded-2xl p-5 shadow-2xl"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
+          >
+            <div className="flex flex-col items-center mb-3">
+              <Mascote nome={modalApelido} pose="feliz" size={120} />
+            </div>
+            <p className="text-[17px] font-semibold text-center mb-1" style={{ color: 'var(--text-primary)' }}>
+              Como vou te chamar?
+            </p>
+            <p className="text-[14px] text-center mb-4" style={{ color: 'var(--text-muted)' }}>
+              Dê um apelido para o seu novo mentor. Você pode mudar depois.
+            </p>
+            <input
+              type="text"
+              value={apelidoInput}
+              onChange={e => setApelidoInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') salvarApelido() }}
+              autoFocus
+              maxLength={40}
+              placeholder={catalogo.find(c => c.id === modalApelido)?.label}
+              className="w-full rounded-lg px-3 py-2.5 text-[16px] focus:outline-none transition-colors"
+              style={{
+                background:  'var(--bg-input)',
+                color:       'var(--text-primary)',
+                border:      '1px solid var(--border-subtle)',
+              }}
+            />
+            <div className="flex gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setModalApelido(null)}
+                className="flex-1 py-2.5 rounded-lg text-[16px] font-medium transition-colors hover:opacity-80"
+                style={{ border: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}
+              >
+                Manter "{catalogo.find(c => c.id === modalApelido)?.label}"
+              </button>
+              <button
+                type="button"
+                onClick={salvarApelido}
+                className="flex-1 py-2.5 rounded-lg text-[16px] font-semibold transition-colors hover:opacity-90"
+                style={{ background: '#00c896', color: '#0a0f1a' }}
+              >
+                Salvar nome
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Secao>
+  )
+}
+
+/** Picker de família de layout — grade de cards com preview, mascote, e
+ *  preview lado-a-lado dos modos dia/noite. O modo é alternado pelo botão
+ *  sol/lua da sidebar (mesma origem do `toggle()`). A escolha persiste em
+ *  `arqvalor.usuarios.layout` via useTheme. */
+function SecaoTema() {
+  const { familia, modo, familias, setFamilia, toggle } = useTheme()
+  return (
+    <Secao titulo="Aparência" icone={<Palette size={15}/>}>
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <p className="text-[15px] text-white/40 leading-relaxed flex-1">
+          Escolha o layout do app. O ícone sol/lua na barra lateral alterna entre <strong>dia</strong> e <strong>noite</strong> dentro da família escolhida.
+        </p>
+        <button
+          type="button"
+          onClick={toggle}
+          className="px-2.5 py-1 rounded-lg border text-[13px] font-semibold transition-all hover:opacity-80 flex-shrink-0"
+          style={{
+            borderColor: 'rgba(255,255,255,0.15)',
+            background:  modo === 'noite' ? 'rgba(77,166,255,0.12)' : 'rgba(240,180,41,0.12)',
+            color:       modo === 'noite' ? '#4da6ff' : '#f0b429',
+          }}
+          title="Alternar entre modo dia e modo noite"
+        >
+          Modo: {modo === 'noite' ? '🌙 Noite' : '☀️ Dia'}
+        </button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        {familias.map(f => {
+          const ativo = f.id === familia.id
+          const cor   = f.cores[modo]  // preview da cor no modo atual
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setFamilia(f.id)}
+              className="text-left rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-av-green/40"
+              style={{
+                borderColor: ativo ? '#00c896' : 'rgba(255,255,255,0.10)',
+                background:  cor.bg,
+              }}
+              title={f.descricao}
+              aria-pressed={ativo}
+            >
+              {/* Faixa superior com mascote + nome + swatches dia/noite */}
+              <div className="flex items-center gap-2 px-3 pt-3">
+                {f.mascote ? (
+                  <img
+                    src={`/mascotes/${f.mascote}-hero.png`}
+                    alt=""
+                    width={40}
+                    height={40}
+                    className="object-contain flex-shrink-0"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                  />
+                ) : (
+                  <div
+                    className="w-10 h-10 rounded-lg flex-shrink-0 flex items-center justify-center text-[20px]"
+                    style={{ background: cor.accent + '22', color: cor.accent }}
+                  >★</div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[16px] font-semibold truncate" style={{ color: cor.text }}>
+                    {f.label}
+                  </p>
+                  <p
+                    className="text-[12.5px] truncate"
+                    style={{ color: cor.text, opacity: 0.55 }}
+                  >
+                    {ativo
+                      ? `Ativo · modo ${modo === 'noite' ? 'noite' : 'dia'}`
+                      : 'Toque para aplicar'}
+                  </p>
+                </div>
+                {/* Swatches mostrando dia + noite lado a lado */}
+                <div className="flex flex-col gap-1 flex-shrink-0" title="Cores dia / noite">
+                  <span
+                    className="w-3.5 h-3.5 rounded-full border"
+                    style={{ background: f.cores.dia.bg, borderColor: 'rgba(0,0,0,0.25)' }}
+                  />
+                  <span
+                    className="w-3.5 h-3.5 rounded-full border"
+                    style={{ background: f.cores.noite.bg, borderColor: 'rgba(255,255,255,0.25)' }}
+                  />
+                </div>
+              </div>
+              {/* Descrição */}
+              <p
+                className="text-[13px] px-3 pb-3 pt-2 leading-snug"
+                style={{ color: cor.text, opacity: 0.7 }}
+              >
+                {f.descricao}
+              </p>
+              {/* Barra de sotaque colorido (cor identidade da família) */}
+              <div
+                className="h-1 w-full"
+                style={{ background: cor.accent }}
+              />
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-[13px] text-white/30 mt-3 leading-relaxed">
+        Preferência salva em <code>arqvalor.usuarios.layout</code> e sincronizada entre dispositivos.
+      </p>
+    </Secao>
+  )
+}
+
+/** Configuração da integração com IA: MÚLTIPLAS configs, UMA ativa.
+ *  Cada usuário usa SUA própria chave (paga seu próprio uso). */
+function SecaoIA() {
+  const { ativa, configs, carregando, salvando, adicionar, atualizar, ativar, remover } = useIAPreferencia()
+  const { mascote, apelidoDe } = useMascotePreferido()
+  const [chatAberto, setChatAberto] = useState(false)
+  const [ativandoId, setAtivandoId] = useState<string | null>(null)
+
+  /** Abre o chat com o mascote. Se a config clicada não for a ativa, ativa antes. */
+  const aoConversar = async (configId: string) => {
+    if (configId !== ativa?.id) {
+      setAtivandoId(configId)
+      await ativar(configId)
+      setAtivandoId(null)
+    }
+    setChatAberto(true)
+  }
+
+  const [adicionando, setAdicionando] = useState(false)
+  const [editando,    setEditando]    = useState<string | null>(null)
+  const [provedorId,  setProvedorId]  = useState<string>(PROVEDOR_PADRAO)
+  const [chave,       setChave]       = useState('')
+  const [nome,        setNome]        = useState('')
+  const [expandido,   setExpandido]   = useState<string | null>(null)
+  const [fb,          setFb]          = useState<Feedback | null>(null)
+  const [confirmRemover, setConfirmRemover] = useState<string | null>(null)
+
+  const provedorAtual = PROVEDORES.find(p => p.id === provedorId) ?? PROVEDORES[0]
+
+  const abrirNova = () => {
+    setAdicionando(true)
+    setEditando(null)
+    setProvedorId(PROVEDOR_PADRAO)
+    setChave('')
+    setNome('')
+    setFb(null)
+  }
+
+  const abrirEditar = (configId: string) => {
+    const c = configs.find(x => x.id === configId)
+    if (!c) return
+    setAdicionando(false)
+    setEditando(configId)
+    setProvedorId(c.provedor)
+    setChave('')
+    setNome(c.nome ?? '')
+    setFb(null)
+  }
+
+  const cancelar = () => {
+    setAdicionando(false)
+    setEditando(null)
+    setFb(null)
+  }
+
+  const aoSalvar = async (e: FormEvent) => {
+    e.preventDefault()
+    setFb(null)
+    let r: { ok: boolean; erro?: string }
+    if (editando) {
+      r = await atualizar(editando, { provedor: provedorId, api_key: chave, nome })
+    } else {
+      r = await adicionar(provedorId, chave, nome)
+    }
+    if (r.ok) {
+      setFb({ tipo: 'ok', msg: 'Configuração salva.' })
+      setChave('')
+      setNome('')
+      setAdicionando(false)
+      setEditando(null)
+    } else {
+      setFb({ tipo: 'erro', msg: r.erro ?? 'Erro ao salvar.' })
+    }
+  }
+
+  const aoAtivar = async (configId: string) => {
+    setFb(null)
+    const r = await ativar(configId)
+    if (!r.ok) setFb({ tipo: 'erro', msg: r.erro ?? 'Erro ao ativar.' })
+  }
+
+  const aoRemover = async (configId: string) => {
+    setFb(null)
+    const r = await remover(configId)
+    if (r.ok) {
+      setConfirmRemover(null)
+    } else {
+      setFb({ tipo: 'erro', msg: r.erro ?? 'Erro ao remover.' })
+    }
+  }
+
+  const editandoFormulario = adicionando || editando !== null
+
+  return (
+    <Secao titulo="Integração com IA" icone={<Sparkles size={15}/>}>
+      <p className="text-[15px] mb-4 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+        Configure um ou mais provedores de IA. Só a configuração marcada como{' '}
+        <strong style={{ color: 'var(--text-primary)' }}>ativa</strong> é usada pelo chat com o mentor —
+        as outras ficam guardadas para troca rápida.
+      </p>
+
+      {carregando ? (
+        <p className="text-[15px]" style={{ color: 'var(--text-muted)' }}>Carregando configurações…</p>
+      ) : (
+        <>
+          {/* Lista de configs salvas */}
+          {configs.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {configs.map(c => {
+                const p = PROVEDORES.find(x => x.id === c.provedor)
+                const ehAtiva = c.id === ativa?.id
+                return (
+                  <div
+                    key={c.id}
+                    className="rounded-xl p-3 border transition-all"
+                    style={{
+                      background:  ehAtiva ? 'rgba(0,200,150,0.08)' : 'var(--bg-elevated)',
+                      borderColor: ehAtiva ? 'rgba(0,200,150,0.35)' : 'var(--border-subtle)',
+                    }}
+                  >
+                    <div className="flex items-start gap-2 flex-wrap">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[16px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                            {p?.label ?? c.provedor}
+                          </span>
+                          {p && (
+                            <span
+                              className="text-[11px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                              style={p.gratuito
+                                ? { background: 'rgba(0,200,150,0.15)', color: '#00c896' }
+                                : { background: 'rgba(240,180,41,0.12)', color: '#f0b429' }}
+                            >
+                              {p.gratuito ? 'Grátis' : 'Pago'}
+                            </span>
+                          )}
+                          {c.nome && (
+                            <span className="text-[14px] px-1.5 py-0.5 rounded" style={{ color: 'var(--text-secondary)', background: 'var(--tint-2)' }}>
+                              {c.nome}
+                            </span>
+                          )}
+                          {ehAtiva && (
+                            <span className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: '#00c896' }}>
+                              ✓ Ativa
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[13px] mt-0.5 font-mono" style={{ color: 'var(--text-faint)' }}>
+                          {c.mascara || 'chave criptografada'}
+                          {p && (
+                            <span className="ml-2" style={{ color: 'var(--text-muted)' }}>
+                              · {p.modelo}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {!ehAtiva && (
+                          <button
+                            type="button"
+                            onClick={() => aoAtivar(c.id)}
+                            disabled={salvando}
+                            className="px-2.5 py-1 rounded-lg text-[14px] font-semibold transition-colors disabled:opacity-50"
+                            style={{ background: 'rgba(0,200,150,0.12)', color: '#00c896', border: '1px solid rgba(0,200,150,0.3)' }}
+                          >
+                            Ativar
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => aoConversar(c.id)}
+                          disabled={ativandoId === c.id}
+                          className="px-2.5 py-1 rounded-lg text-[14px] font-medium transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                          style={{ color: '#4da6ff', border: '1px solid rgba(77,166,255,0.3)', background: 'rgba(77,166,255,0.08)' }}
+                          title={ehAtiva
+                            ? `Abrir chat com ${apelidoDe(mascote)}`
+                            : `Ativar esta configuração e abrir chat com ${apelidoDe(mascote)}`}
+                        >
+                          <MessageCircle size={13}/>
+                          {ativandoId === c.id ? 'Ativando…' : 'Conversar'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => abrirEditar(c.id)}
+                          disabled={salvando}
+                          className="px-2.5 py-1 rounded-lg text-[14px] font-medium transition-colors disabled:opacity-50"
+                          style={{ color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}
+                        >
+                          Editar
+                        </button>
+                        {confirmRemover === c.id ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => aoRemover(c.id)}
+                              disabled={salvando}
+                              className="px-2.5 py-1 rounded-lg text-[14px] font-semibold transition-colors disabled:opacity-50"
+                              style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171', border: '1px solid rgba(248,113,113,0.35)' }}
+                            >
+                              Confirmar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmRemover(null)}
+                              className="px-2 py-1 rounded-lg text-[14px]"
+                              style={{ color: 'var(--text-muted)' }}
+                            >
+                              ×
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmRemover(c.id)}
+                            className="px-2.5 py-1 rounded-lg text-[14px] font-medium transition-colors hover:text-red-300"
+                            style={{ color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}
+                          >
+                            Remover
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Botão adicionar (quando NÃO está editando) */}
+          {!editandoFormulario && (
+            <button
+              type="button"
+              onClick={abrirNova}
+              disabled={salvando}
+              className="w-full py-2.5 rounded-xl text-[15px] font-semibold transition-colors disabled:opacity-50"
+              style={{
+                background:  configs.length === 0 ? '#00c896' : 'var(--tint-2)',
+                color:       configs.length === 0 ? '#0a0f1a' : 'var(--text-primary)',
+                border:      configs.length === 0 ? 'none' : '1px dashed var(--border-subtle)',
+              }}
+            >
+              + {configs.length === 0 ? 'Configurar primeira integração' : 'Adicionar outra configuração'}
+            </button>
+          )}
+
+          {/* Formulário (criar / editar) */}
+          {editandoFormulario && (
+            <form
+              onSubmit={aoSalvar}
+              className="space-y-3 rounded-xl p-3 mt-1"
+              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
+            >
+              <p className="text-[15px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {editando ? 'Editar configuração' : 'Nova configuração'}
+              </p>
+
+              <div>
+                <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>Provedor</label>
+                <select
+                  value={provedorId}
+                  onChange={e => { setProvedorId(e.target.value); setFb(null) }}
+                  disabled={salvando}
+                  className="w-full rounded-lg px-3 py-2.5 text-[16px] focus:outline-none focus:border-av-green/50 disabled:opacity-50"
+                  style={{
+                    background:  'var(--bg-input)',
+                    color:       'var(--text-primary)',
+                    border:      '1px solid var(--border-subtle)',
+                    colorScheme: 'auto',
+                  }}
+                >
+                  {PROVEDORES.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.label} {p.gratuito ? '— Grátis' : '— Pago'}
+                    </option>
+                  ))}
+                </select>
+                {/* Badge embaixo do select reforça status + modelo do provedor selecionado */}
+                <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                  {provedorAtual.gratuito ? (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-semibold uppercase tracking-wider"
+                      style={{ background: 'rgba(0,200,150,0.15)', color: '#00c896', border: '1px solid rgba(0,200,150,0.4)' }}
+                    >
+                      ✓ Tier gratuito (sem cartão)
+                    </span>
+                  ) : (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-semibold uppercase tracking-wider"
+                      style={{ background: 'rgba(240,180,41,0.12)', color: '#f0b429', border: '1px solid rgba(240,180,41,0.35)' }}
+                    >
+                      $ Pago — exige cartão
+                    </span>
+                  )}
+                  <span
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-mono"
+                    style={{ background: 'var(--tint-2)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
+                    title="Modelo utilizado pelo chat do mentor"
+                  >
+                    {provedorAtual.modelo}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Apelido (opcional) <span className="text-[12px] ml-1" style={{ color: 'var(--text-faint)' }}>ex.: Pessoal, Trabalho</span>
+                </label>
+                <input
+                  type="text"
+                  value={nome}
+                  onChange={e => setNome(e.target.value)}
+                  disabled={salvando}
+                  maxLength={32}
+                  placeholder="Sem apelido"
+                  className="w-full rounded-lg px-3 py-2.5 text-[16px] focus:outline-none disabled:opacity-50"
+                  style={{
+                    background: 'var(--bg-input)',
+                    color:      'var(--text-primary)',
+                    border:     '1px solid var(--border-subtle)',
+                  }}
+                />
+              </div>
+
+              {/* Instruções específicas */}
+              <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tint-1)', border: '1px solid var(--border-subtle)' }}>
+                <button
+                  type="button"
+                  onClick={() => setExpandido(v => v === provedorAtual.id ? null : provedorAtual.id)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 hover:opacity-80 transition-opacity"
+                >
+                  <span className="text-[14px] font-medium flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
+                    <Sparkles size={13} style={{ color: '#f0b429' }}/>
+                    Como obter a chave do {provedorAtual.label}
+                  </span>
+                  <ChevronDown size={14} className="transition-transform"
+                    style={{ color: 'var(--text-muted)', transform: expandido === provedorAtual.id ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
+                </button>
+                {expandido === provedorAtual.id && (
+                  <div className="px-3 pb-3 pt-1 space-y-2" style={{ borderTop: '1px solid var(--border-faint)' }}>
+                    <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>{provedorAtual.custo}</p>
+                    <ol className="space-y-1 list-decimal list-inside">
+                      {provedorAtual.passos.map((p, i) => (
+                        <li key={i} className="text-[13px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{p}</li>
+                      ))}
+                    </ol>
+                    <a
+                      href={provedorAtual.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-[13px] hover:opacity-80"
+                      style={{ color: 'var(--av-blue)' }}
+                    >
+                      <ArrowRight size={12}/> Abrir página do {provedorAtual.label}
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Chave da API{editando && (
+                    <span className="text-[12px] ml-2" style={{ color: 'var(--text-faint)' }}>(em branco mantém a atual)</span>
+                  )}
+                </label>
+                <input
+                  type="password"
+                  value={chave}
+                  onChange={e => { setChave(e.target.value); setFb(null) }}
+                  disabled={salvando}
+                  placeholder={provedorAtual.formatoDica}
+                  className="w-full rounded-lg px-3 py-2.5 text-[16px] focus:outline-none font-mono disabled:opacity-50"
+                  style={{
+                    background: 'var(--bg-input)',
+                    color:      'var(--text-primary)',
+                    border:     '1px solid var(--border-subtle)',
+                  }}
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  type="submit"
+                  disabled={salvando}
+                  className="px-4 py-2 rounded-lg text-[15px] font-semibold transition-colors disabled:opacity-50"
+                  style={{ background: '#00c896', color: '#0a0f1a' }}
+                >
+                  {salvando ? 'Salvando…' : (editando ? 'Salvar alterações' : 'Adicionar')}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelar}
+                  className="px-4 py-2 rounded-lg text-[15px] font-medium transition-colors hover:opacity-80"
+                  style={{ color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          )}
+
+          <Alerta fb={fb}/>
+        </>
+      )}
+
+      <p className="text-[13px] mt-4 leading-relaxed" style={{ color: 'var(--text-faint)' }}>
+        🔒 Suas chaves ficam <strong style={{ color: 'var(--text-muted)' }}>guardadas em segredo</strong> — depois
+        de salvar, ninguém vê o valor de novo (nem você, nem nós). Para trocar a chave, é só digitar uma nova
+        aqui; deixar em branco mantém a anterior.
+      </p>
+
+      {/* Chat com o mascote — abre ao clicar em "Conversar" num card */}
+      <ChatMascote nome={mascote} aberto={chatAberto} onFechar={() => setChatAberto(false)} />
+    </Secao>
   )
 }
 
@@ -329,21 +1043,21 @@ export default function PerfilPage() {
     navigate('/login', { replace: true })
   }
 
-  const input = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors'
-  const label = 'block text-[12px] text-white/50 mb-1.5'
-  const btn   = 'px-4 py-2 rounded-lg text-[12px] font-semibold transition-colors disabled:opacity-50'
+  const input = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/20 focus:outline-none focus:border-av-green/50 transition-colors'
+  const label = 'block text-[16px] text-white/50 mb-1.5'
+  const btn   = 'px-4 py-2 rounded-lg text-[16px] font-semibold transition-colors disabled:opacity-50'
 
   return (
     <div className="p-5 max-w-5xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-[17px] font-bold text-white">Meu Perfil</h1>
-        <p className="text-[12px] text-white/40 mt-0.5">{emailAtual}</p>
+        <h1 className="text-[21px] font-bold text-white">Meu Perfil</h1>
+        <p className="text-[16px] text-white/40 mt-0.5">{emailAtual}</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+      <div className="space-y-4">
 
-        {/* ── Coluna esquerda ───────────────────────────────── */}
-        <div className="flex flex-col gap-4">
+        {/* ── Linha 1: Dados pessoais | Alterar senha ──────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
           {/* Dados pessoais */}
           <Secao titulo="Dados pessoais" icone={<User size={15}/>}>
@@ -357,7 +1071,7 @@ export default function PerfilPage() {
                 <label className={label}>E-mail</label>
                 <input type="email" disabled value={emailAtual}
                   className={`${input} opacity-40 cursor-not-allowed`}/>
-                <p className="text-[11px] text-white/25 mt-1">O e-mail não pode ser alterado por aqui.</p>
+                <p className="text-[15px] text-white/25 mt-1">O e-mail não pode ser alterado por aqui.</p>
               </div>
               <div className="flex justify-end pt-1">
                 <button type="submit" disabled={loadNome || nome.trim() === nomeAtual}
@@ -397,43 +1111,17 @@ export default function PerfilPage() {
             </form>
           </Secao>
 
-          {/* Zona de perigo */}
-          <div className="bg-red-500/5 border border-red-500/20 rounded-2xl overflow-hidden">
-            <button type="button"
-              onClick={() => setZonaPerigo(v => !v)}
-              className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-red-500/5 transition-colors">
-              <div className="flex items-center gap-2">
-                <span className="text-red-400/70"><Trash2 size={14}/></span>
-                <span className="text-[12px] font-semibold text-red-400">Zona de perigo</span>
-              </div>
-              <ChevronDown size={13} className="transition-transform flex-shrink-0"
-                style={{ color: '#f87171', transform: zonaPerigo ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
-            </button>
-            {zonaPerigo && (
-              <div className="px-4 pb-4 border-t border-red-500/15 pt-3">
-                <p className="text-[11px] text-white/35 mb-3 leading-relaxed">
-                  Remove permanentemente <strong className="text-red-400/60">todos</strong> os dados: lançamentos, contas, categorias e histórico. Ação irreversível.
-                </p>
-                <button type="button"
-                  onClick={() => { setModalExcluir(true); setConfirmText(''); setErroExcluir('') }}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
-                  Excluir minha conta
-                </button>
-              </div>
-            )}
-          </div>
+        </div>{/* fim Linha 1 */}
 
-        </div>
-
-        {/* ── Coluna direita ────────────────────────────────── */}
-        <div className="flex flex-col gap-4">
+        {/* ── Linha 2: Filtros salvos | Assistente de Lançamentos ─ */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
           {/* Filtros salvos */}
           <Secao titulo="Filtros salvos" icone={<Bookmark size={15}/>}>
             {carregandoFiltros ? (
-              <p className="text-[12px] text-white/40">Carregando…</p>
+              <p className="text-[16px] text-white/40">Carregando…</p>
             ) : filtros.length === 0 ? (
-              <p className="text-[12px] text-white/40">Nenhum filtro salvo.</p>
+              <p className="text-[16px] text-white/40">Nenhum filtro salvo.</p>
             ) : (
               <>
                 <div className="space-y-0.5">
@@ -445,7 +1133,7 @@ export default function PerfilPage() {
                       <div key={f.id}>
                         {editando ? (
                           <div className="flex items-center gap-2 px-2 py-1.5">
-                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                            <span className="text-[13px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
                               style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}>
                               {PAGINA_LABEL[f.pagina] ?? f.pagina}
                             </span>
@@ -454,7 +1142,7 @@ export default function PerfilPage() {
                                 if (e.key === 'Enter') confirmarEdicao(f.id)
                                 if (e.key === 'Escape') setEditandoId(null)
                               }}
-                              className="flex-1 text-[12px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
+                              className="flex-1 text-[16px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
                               style={{ color: '#e8eaf0' }} maxLength={50}/>
                             <button onClick={() => confirmarEdicao(f.id)} disabled={!editandoNome.trim() || salvandoNome}
                               title="Salvar nome"
@@ -467,11 +1155,11 @@ export default function PerfilPage() {
                         ) : (
                           <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] group cursor-pointer"
                             onClick={() => setFiltroExpandido(expandido ? null : f.id)}>
-                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                            <span className="text-[13px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
                               style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}>
                               {PAGINA_LABEL[f.pagina] ?? f.pagina}
                             </span>
-                            <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>{f.nome}</span>
+                            <span className="flex-1 text-[16px] truncate" style={{ color: '#c5cad8' }}>{f.nome}</span>
                             <ChevronDown size={12} className="flex-shrink-0 transition-transform"
                               style={{ color: '#4a5168', transform: expandido ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
                             <button onClick={e => { e.stopPropagation(); iniciarEdicao(f.id, f.nome) }} title="Renomear filtro"
@@ -486,13 +1174,13 @@ export default function PerfilPage() {
                           <div className="mx-2 mb-1 px-3 py-2 rounded-lg"
                             style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
                             {detalhes.length === 0 ? (
-                              <p className="text-[11px]" style={{ color: '#4a5168' }}>Sem filtros específicos definidos.</p>
+                              <p className="text-[15px]" style={{ color: '#4a5168' }}>Sem filtros específicos definidos.</p>
                             ) : (
                               <div className="space-y-1">
                                 {detalhes.map(d => (
                                   <div key={d.label} className="flex gap-2">
-                                    <span className="text-[10px] font-semibold w-24 flex-shrink-0" style={{ color: '#8b92a8' }}>{d.label}</span>
-                                    <span className="text-[11px]" style={{ color: '#c5cad8' }}>{d.valor}</span>
+                                    <span className="text-[14px] font-semibold w-24 flex-shrink-0" style={{ color: '#8b92a8' }}>{d.label}</span>
+                                    <span className="text-[15px]" style={{ color: '#c5cad8' }}>{d.valor}</span>
                                   </div>
                                 ))}
                               </div>
@@ -505,7 +1193,7 @@ export default function PerfilPage() {
                 </div>
                 <div className="flex justify-end pt-3 mt-2 border-t border-white/8">
                   <button onClick={excluirTodos}
-                    className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
+                    className="px-3 py-1.5 rounded-lg text-[15px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
                     Remover todos ({filtros.length})
                   </button>
                 </div>
@@ -523,12 +1211,12 @@ export default function PerfilPage() {
                 <input
                   type="text" value={buscaAss} onChange={e => mudarBusca(e.target.value)}
                   placeholder="Buscar padrão…"
-                  className="w-full bg-white/5 border border-white/10 rounded-lg pl-7 pr-3 py-1.5 text-[12px] placeholder-white/20 focus:outline-none focus:border-white/20 transition-colors"
+                  className="w-full bg-white/5 border border-white/10 rounded-lg pl-7 pr-3 py-1.5 text-[16px] placeholder-white/20 focus:outline-none focus:border-white/20 transition-colors"
                   style={{ color: '#c5cad8' }}
                 />
               </div>
               <button onClick={analisarPadroes} disabled={analisando}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-50 flex-shrink-0"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[15px] font-semibold transition-colors disabled:opacity-50 flex-shrink-0"
                 style={{ background: 'rgba(167,139,250,0.10)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.20)' }}>
                 {analisando
                   ? <><RefreshCw size={12} className="animate-spin"/> Analisando…</>
@@ -538,9 +1226,9 @@ export default function PerfilPage() {
             </div>
 
             {carregandoAss ? (
-              <p className="text-[12px] text-white/40">Carregando…</p>
+              <p className="text-[16px] text-white/40">Carregando…</p>
             ) : sugestoes.length === 0 ? (
-              <p className="text-[12px] text-white/40 leading-relaxed">
+              <p className="text-[16px] text-white/40 leading-relaxed">
                 Nenhum padrão registrado. Os padrões são criados automaticamente ao salvar lançamentos.
               </p>
             ) : (
@@ -557,7 +1245,7 @@ export default function PerfilPage() {
                         {editando ? (
                           <div className="flex items-center gap-2 px-2 py-1.5">
                             {s.is_transferencia && (
-                              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                              <span className="text-[13px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
                                 style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>Transf.</span>
                             )}
                             <input autoFocus value={editandoAssDesc} onChange={e => setEditandoAssDesc(e.target.value)}
@@ -565,7 +1253,7 @@ export default function PerfilPage() {
                                 if (e.key === 'Enter')  confirmarEdicaoAss(s.id)
                                 if (e.key === 'Escape') setEditandoAss(null)
                               }}
-                              className="flex-1 text-[12px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
+                              className="flex-1 text-[16px] bg-white/5 border border-white/15 rounded-md px-2 py-0.5 focus:outline-none focus:border-av-green/40"
                               style={{ color: '#e8eaf0' }} maxLength={200}/>
                             <button onClick={() => confirmarEdicaoAss(s.id)}
                               disabled={editandoAssDesc.trim().length < 2 || salvandoAss} title="Salvar"
@@ -579,10 +1267,10 @@ export default function PerfilPage() {
                           <div className="group px-2 py-1.5 rounded-lg hover:bg-white/[0.03]">
                             <div className="flex items-center gap-2">
                               {s.is_transferencia && (
-                                <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                                <span className="text-[13px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
                                   style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>Transf.</span>
                               )}
-                              <span className="flex-1 text-[12px] truncate" style={{ color: '#c5cad8' }}>{s.descricao}</span>
+                              <span className="flex-1 text-[16px] truncate" style={{ color: '#c5cad8' }}>{s.descricao}</span>
                               <button onClick={() => iniciarEdicaoAss(s.id, s.descricao)} title="Editar descrição"
                                 className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 flex-shrink-0"
                                 style={{ color: '#8b92a8' }}><Pencil size={11}/></button>
@@ -593,13 +1281,13 @@ export default function PerfilPage() {
                             {(catNome || contaOrigem) && (
                               <div className="flex items-center gap-2 mt-0.5 pl-0.5 flex-wrap">
                                 {contaOrigem && (
-                                  <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                                  <span className="text-[14px]" style={{ color: '#4a5168' }}>
                                     {contaOrigem}
                                     {contaDestino && <><ArrowRight size={9} className="inline mx-0.5"/>{contaDestino}</>}
                                   </span>
                                 )}
                                 {catNome && (
-                                  <span className="text-[10px]" style={{ color: '#4a5168' }}>
+                                  <span className="text-[14px]" style={{ color: '#4a5168' }}>
                                     {contaOrigem ? '· ' : ''}{catNome}
                                   </span>
                                 )}
@@ -612,7 +1300,7 @@ export default function PerfilPage() {
                   })}
 
                   {sugestoesFiltradas.length === 0 && buscaAss && (
-                    <p className="text-[12px] px-2 py-3 text-center" style={{ color: '#4a5168' }}>
+                    <p className="text-[16px] px-2 py-3 text-center" style={{ color: '#4a5168' }}>
                       Nenhum padrão encontrado para "{buscaAss}".
                     </p>
                   )}
@@ -625,25 +1313,25 @@ export default function PerfilPage() {
                       <button onClick={() => setPaginaAss(p => Math.max(0, p - 1))} disabled={paginaSegura === 0}
                         className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/5 disabled:opacity-30"
                         style={{ color: '#8b92a8' }}><ChevronLeft size={13}/></button>
-                      <span className="text-[11px] px-1 tabular-nums" style={{ color: '#4a5168' }}>
+                      <span className="text-[15px] px-1 tabular-nums" style={{ color: '#4a5168' }}>
                         {paginaSegura + 1} / {totalPaginas}
                       </span>
                       <button onClick={() => setPaginaAss(p => Math.min(totalPaginas - 1, p + 1))} disabled={paginaSegura === totalPaginas - 1}
                         className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/5 disabled:opacity-30"
                         style={{ color: '#8b92a8' }}><ChevronRight size={13}/></button>
-                      <span className="text-[11px] ml-1" style={{ color: '#4a5168' }}>
+                      <span className="text-[15px] ml-1" style={{ color: '#4a5168' }}>
                         ({sugestoesFiltradas.length} {buscaAss ? 'encontrado' : 'total'}{sugestoesFiltradas.length !== 1 ? 's' : ''})
                       </span>
                     </div>
                   ) : (
-                    <span className="text-[11px]" style={{ color: '#4a5168' }}>
+                    <span className="text-[15px]" style={{ color: '#4a5168' }}>
                       {sugestoesFiltradas.length} padrão{sugestoesFiltradas.length !== 1 ? 'ões' : ''}
                       {buscaAss ? ' encontrado' : ''}
                       {sugestoesFiltradas.length !== 1 && buscaAss ? 's' : ''}
                     </span>
                   )}
                   <button onClick={excluirTodasAss}
-                    className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
+                    className="px-3 py-1.5 rounded-lg text-[15px] font-semibold border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors">
                     Remover todos ({sugestoes.length})
                   </button>
                 </div>
@@ -651,8 +1339,44 @@ export default function PerfilPage() {
             )}
           </Secao>
 
-        </div>{/* fim coluna direita */}
-      </div>{/* fim grid */}
+        </div>{/* fim Linha 2 */}
+
+        {/* ── Linha 3: Mascote favorito | Aparência ──────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <SecaoMascote/>
+          <SecaoTema/>
+        </div>
+
+        {/* ── Linha 4: Integração com IA (largura cheia) ──────── */}
+        <SecaoIA/>
+
+        {/* ── Linha 5: Zona de perigo (largura cheia, recolhida) ─ */}
+        <div className="bg-red-500/5 border border-red-500/20 rounded-2xl overflow-hidden">
+          <button type="button"
+            onClick={() => setZonaPerigo(v => !v)}
+            className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-red-500/5 transition-colors">
+            <div className="flex items-center gap-2">
+              <span className="text-red-400/70"><Trash2 size={14}/></span>
+              <span className="text-[16px] font-semibold text-red-400">Zona de perigo</span>
+            </div>
+            <ChevronDown size={13} className="transition-transform flex-shrink-0"
+              style={{ color: '#f87171', transform: zonaPerigo ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
+          </button>
+          {zonaPerigo && (
+            <div className="px-4 pb-4 border-t border-red-500/15 pt-3">
+              <p className="text-[15px] text-white/35 mb-3 leading-relaxed">
+                Remove permanentemente <strong className="text-red-400/60">todos</strong> os dados: lançamentos, contas, categorias e histórico. Ação irreversível.
+              </p>
+              <button type="button"
+                onClick={() => { setModalExcluir(true); setConfirmText(''); setErroExcluir('') }}
+                className="px-3 py-1.5 rounded-lg text-[15px] font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
+                Excluir minha conta
+              </button>
+            </div>
+          )}
+        </div>
+
+      </div>{/* fim space-y-4 */}
 
       {/* ── Modal de padrões sugeridos ────────────────────────── */}
       {sugeridas !== null && (
@@ -664,9 +1388,9 @@ export default function PerfilPage() {
             <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-white/8 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <Wand2 size={15} style={{ color: '#a78bfa' }}/>
-                <span className="text-[14px] font-semibold text-white">Padrões detectados</span>
+                <span className="text-[18px] font-semibold text-white">Padrões detectados</span>
                 {sugeridas.length > 0 && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                  <span className="text-[14px] font-bold px-1.5 py-0.5 rounded-full"
                     style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa' }}>
                     {sugeridas.length}
                   </span>
@@ -679,7 +1403,7 @@ export default function PerfilPage() {
 
             {/* Feedback */}
             {resultadoSug && (
-              <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-[12px] flex items-center gap-2"
+              <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-[16px] flex items-center gap-2"
                 style={{ background: 'rgba(0,200,150,0.08)', color: '#00c896' }}>
                 <Check size={13}/>
                 {resultadoSug.ok} padrão{resultadoSug.ok !== 1 ? 'ões' : ''} adicionado{resultadoSug.ok !== 1 ? 's' : ''}
@@ -690,7 +1414,7 @@ export default function PerfilPage() {
             {/* Body */}
             <div className="flex-1 overflow-y-auto px-5 py-3">
               {sugeridas.length === 0 ? (
-                <p className="text-[12px] text-center py-6" style={{ color: '#8b92a8' }}>
+                <p className="text-[16px] text-center py-6" style={{ color: '#8b92a8' }}>
                   {resultadoSug
                     ? 'Todos os padrões selecionados foram adicionados.'
                     : 'Nenhum padrão novo encontrado nos últimos 12 meses.'}
@@ -702,7 +1426,7 @@ export default function PerfilPage() {
                       checked={selecionadas.size === sugeridas.length && sugeridas.length > 0}
                       onChange={e => setSelecionadas(e.target.checked ? new Set(sugeridas.map(s => s.key)) : new Set())}
                       className="accent-[#a78bfa] w-3.5 h-3.5"/>
-                    <span className="text-[11px] font-semibold" style={{ color: '#8b92a8' }}>Selecionar todos</span>
+                    <span className="text-[15px] font-semibold" style={{ color: '#8b92a8' }}>Selecionar todos</span>
                   </label>
                   <div className="space-y-0.5">
                     {sugeridas.map(s => (
@@ -717,17 +1441,17 @@ export default function PerfilPage() {
                           className="accent-[#a78bfa] w-3.5 h-3.5 mt-0.5 flex-shrink-0"/>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-[12px] truncate" style={{ color: '#e8eaf0' }}>{s.descricao}</span>
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                            <span className="text-[16px] truncate" style={{ color: '#e8eaf0' }}>{s.descricao}</span>
+                            <span className="text-[14px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
                               style={{ background: 'rgba(167,139,250,0.10)', color: '#a78bfa' }}>
                               {s.ocorrencias}×
                             </span>
                           </div>
                           {(s.conta_nome || s.categoria_nome) && (
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              {s.conta_nome && <span className="text-[10px]" style={{ color: '#4a5168' }}>{s.conta_nome}</span>}
-                              {s.conta_nome && s.categoria_nome && <span className="text-[10px]" style={{ color: '#4a5168' }}>·</span>}
-                              {s.categoria_nome && <span className="text-[10px]" style={{ color: '#4a5168' }}>{s.categoria_nome}</span>}
+                              {s.conta_nome && <span className="text-[14px]" style={{ color: '#4a5168' }}>{s.conta_nome}</span>}
+                              {s.conta_nome && s.categoria_nome && <span className="text-[14px]" style={{ color: '#4a5168' }}>·</span>}
+                              {s.categoria_nome && <span className="text-[14px]" style={{ color: '#4a5168' }}>{s.categoria_nome}</span>}
                             </div>
                           )}
                         </div>
@@ -741,16 +1465,16 @@ export default function PerfilPage() {
             {/* Footer */}
             {sugeridas.length > 0 && (
               <div className="flex items-center justify-between px-5 py-4 border-t border-white/8 flex-shrink-0">
-                <span className="text-[11px]" style={{ color: '#8b92a8' }}>
+                <span className="text-[15px]" style={{ color: '#8b92a8' }}>
                   {selecionadas.size} de {sugeridas.length} selecionado{selecionadas.size !== 1 ? 's' : ''}
                 </span>
                 <div className="flex gap-2">
                   <button onClick={() => { setSugeridas(null); setResultadoSug(null) }}
-                    className="px-3 py-1.5 rounded-lg text-[12px] text-white/40 hover:text-white/70 transition-colors">
+                    className="px-3 py-1.5 rounded-lg text-[16px] text-white/40 hover:text-white/70 transition-colors">
                     Fechar
                   </button>
                   <button onClick={adicionarSelecionadas} disabled={selecionadas.size === 0 || salvandoSug}
-                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-semibold transition-colors disabled:opacity-40"
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[16px] font-semibold transition-colors disabled:opacity-40"
                     style={{ background: 'rgba(167,139,250,0.15)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.25)' }}>
                     {salvandoSug
                       ? <><RefreshCw size={12} className="animate-spin"/> Salvando…</>
@@ -770,24 +1494,24 @@ export default function PerfilPage() {
           <div className="bg-[#0f1929] border border-white/10 rounded-2xl p-6 w-full max-w-sm">
             <div className="flex items-center gap-2 mb-4">
               <Trash2 size={16} className="text-red-400"/>
-              <h3 className="text-[14px] font-semibold text-white">Confirmar exclusão</h3>
+              <h3 className="text-[18px] font-semibold text-white">Confirmar exclusão</h3>
             </div>
-            <p className="text-[12px] text-white/50 mb-4 leading-relaxed">
+            <p className="text-[16px] text-white/50 mb-4 leading-relaxed">
               Para confirmar, digite <span className="text-white font-semibold">EXCLUIR</span> no campo abaixo.
             </p>
             <input type="text" value={confirmText} onChange={e => setConfirmText(e.target.value)}
               placeholder="EXCLUIR"
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[13px] text-white placeholder-white/20 focus:outline-none focus:border-red-500/50 transition-colors mb-3"/>
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/20 focus:outline-none focus:border-red-500/50 transition-colors mb-3"/>
             {erroExcluir && (
-              <p className="text-[12px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2 mb-3">{erroExcluir}</p>
+              <p className="text-[16px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2 mb-3">{erroExcluir}</p>
             )}
             <div className="flex gap-2 justify-end">
               <button type="button" disabled={loadExcluir} onClick={() => setModalExcluir(false)}
-                className="px-4 py-2 rounded-lg text-[12px] text-white/50 hover:text-white/80 transition-colors disabled:opacity-50">
+                className="px-4 py-2 rounded-lg text-[16px] text-white/50 hover:text-white/80 transition-colors disabled:opacity-50">
                 Cancelar
               </button>
               <button type="button" disabled={confirmText !== 'EXCLUIR' || loadExcluir} onClick={excluirConta}
-                className="px-4 py-2 rounded-lg text-[12px] font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-40">
+                className="px-4 py-2 rounded-lg text-[16px] font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-40">
                 {loadExcluir ? 'Excluindo...' : 'Excluir permanentemente'}
               </button>
             </div>

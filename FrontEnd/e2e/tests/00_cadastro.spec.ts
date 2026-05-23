@@ -126,6 +126,22 @@ test.describe('Tela de Cadastro', () => {
   // ─── Estado de loading ───────────────────────────────────────────────────────
 
   test('CAD11 — botão mostra "Criando conta..." durante o envio', async ({ page }) => {
+    // Intercepta /signup para NÃO criar usuário real no Supabase.
+    // Antes este teste acumulava um auth.users a cada execução de CI.
+    // Responde com 200 fake e atraso curto para permitir capturar o
+    // estado de loading do botão.
+    await page.route('**/auth/v1/signup**', async route => {
+      await new Promise(r => setTimeout(r, 200))
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          user: { id: '00000000-0000-0000-0000-000000000000', email: 'fake@e2e.local' },
+          session: null,
+        }),
+      })
+    })
+
     const email = `e2e+${Date.now()}@mailinator.com`
 
     await page.goto('/cadastro')
@@ -134,14 +150,12 @@ test.describe('Tela de Cadastro', () => {
     await page.locator('input[type="password"]').nth(0).fill('Senha@123')
     await page.locator('input[type="password"]').nth(1).fill('Senha@123')
 
-    // Intercepta antes de terminar para capturar estado de loading
     const [response] = await Promise.all([
-      page.waitForResponse(resp => resp.url().includes('supabase') && resp.url().includes('signup')),
+      page.waitForResponse(resp => resp.url().includes('/auth/v1/signup')),
       page.getByRole('button', { name: /Criar conta/i }).click(),
     ])
 
-    // Verifica que a chamada foi feita (status 200 ou 422 são aceitáveis)
-    expect([200, 422, 429].includes(response.status())).toBeTruthy()
+    expect(response.status()).toBe(200)
   })
 
 })

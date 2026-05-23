@@ -84,7 +84,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   const corInvalida = validarCor(body.cor);
   if (corInvalida) return corInvalida;
 
-  // Validar dia_fechamento e dia_pagamento (só para CARTAO)
+  // Validar dia_fechamento, dia_pagamento e limite_credito (só para CARTAO)
   if (body.tipo === "CARTAO") {
     if (body.dia_fechamento !== undefined && body.dia_fechamento !== null) {
       const d = Number(body.dia_fechamento)
@@ -96,14 +96,22 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
       if (!Number.isInteger(d) || d < 1 || d > 31)
         return erro("dia_pagamento deve ser um número entre 1 e 31")
     }
+    if (body.limite_credito !== undefined && body.limite_credito !== null) {
+      const v = Number(body.limite_credito)
+      if (!Number.isFinite(v) || v < 0)
+        return erro("limite_credito deve ser >= 0")
+    }
   }
 
+  const ehCartao = body.tipo === "CARTAO";
   const { data, error } = await c.from("contas").insert({
     user_id: userId, nome: body.nome, tipo: body.tipo,
-    saldo_inicial: body.saldo_inicial ?? 0,
+    // Cartão não tem saldo inicial (sempre 0); demais tipos usam o valor informado
+    saldo_inicial: ehCartao ? 0 : (body.saldo_inicial ?? 0),
     icone: body.icone ?? null, cor: body.cor ?? null, ativa: true,
-    dia_fechamento: body.tipo === "CARTAO" ? (body.dia_fechamento ?? null) : null,
-    dia_pagamento:  body.tipo === "CARTAO" ? (body.dia_pagamento  ?? null) : null,
+    dia_fechamento: ehCartao ? (body.dia_fechamento ?? null) : null,
+    dia_pagamento:  ehCartao ? (body.dia_pagamento  ?? null) : null,
+    limite_credito: ehCartao ? (body.limite_credito ?? null) : null,
   }).select().single();
 
   if (error) {
@@ -139,7 +147,7 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   const corInvalida = validarCor(body.cor);
   if (corInvalida) return corInvalida;
 
-  // Validar dia_fechamento e dia_pagamento se enviados
+  // Validar dia_fechamento, dia_pagamento e limite_credito se enviados
   if (body.dia_fechamento !== undefined && body.dia_fechamento !== null) {
     const d = Number(body.dia_fechamento)
     if (!Number.isInteger(d) || d < 1 || d > 31)
@@ -150,8 +158,13 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
     if (!Number.isInteger(d) || d < 1 || d > 31)
       return erro("dia_pagamento deve ser um número entre 1 e 31")
   }
+  if (body.limite_credito !== undefined && body.limite_credito !== null) {
+    const v = Number(body.limite_credito)
+    if (!Number.isFinite(v) || v < 0)
+      return erro("limite_credito deve ser >= 0")
+  }
 
-  const campos = camposParaAtualizar(body, ["nome","tipo","saldo_inicial","icone","cor","ativa","dia_fechamento","dia_pagamento"]);
+  const campos = camposParaAtualizar(body, ["nome","tipo","saldo_inicial","icone","cor","ativa","dia_fechamento","dia_pagamento","limite_credito"]);
   const { data, error } = await c.from("contas").update(campos).eq("id", id).select().single();
   
   if (error) {
