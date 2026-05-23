@@ -20,11 +20,13 @@ interface PayloadEditarConta {
   nome: string; tipo: TipoConta
   icone?: string; cor?: string; ativa: boolean
   dia_fechamento?: number | null; dia_pagamento?: number | null
+  limite_credito?: number | null
 }
 interface PayloadNovaConta {
   nome: string; tipo: TipoConta; saldo_inicial: number
   icone?: string; cor?: string
   dia_fechamento?: number | null; dia_pagamento?: number | null
+  limite_credito?: number | null
 }
 
 const TIPOS: { value: TipoConta; label: string }[] = [
@@ -48,16 +50,18 @@ interface FormState {
   nome: string; tipo: TipoConta; saldo_inicial: string
   icone: string; cor: string; ativa: boolean
   dia_fechamento: string; dia_pagamento: string
+  limite_credito: string
 }
 const FORM_VAZIO: FormState = {
   nome: '', tipo: 'CORRENTE', saldo_inicial: '0', icone: '', cor: '#00c896', ativa: true,
-  dia_fechamento: '', dia_pagamento: '',
+  dia_fechamento: '', dia_pagamento: '', limite_credito: '',
 }
 const formDeConta = (c: Conta): FormState => ({
   nome: c.nome, tipo: c.tipo, saldo_inicial: String(c.saldo_inicial),
   icone: c.icone ?? '', cor: c.cor ?? '#00c896', ativa: c.ativa,
   dia_fechamento: c.dia_fechamento != null ? String(c.dia_fechamento) : '',
   dia_pagamento:  c.dia_pagamento  != null ? String(c.dia_pagamento)  : '',
+  limite_credito: c.limite_credito != null ? String(c.limite_credito) : '',
 })
 
 function AcaoBtn({ onClick, title, danger = false, children }: {
@@ -159,6 +163,7 @@ export default function ContasPage() {
       if (form.tipo === 'CARTAO') {
         payload.dia_fechamento = form.dia_fechamento ? parseInt(form.dia_fechamento) : null
         payload.dia_pagamento  = form.dia_pagamento  ? parseInt(form.dia_pagamento)  : null
+        payload.limite_credito = form.limite_credito ? parseFloat(form.limite_credito) : null
       }
       const { ok, erro: e } = await editar(contaEditar.conta_id, payload)
       setSalvando(false)
@@ -166,12 +171,14 @@ export default function ContasPage() {
     } else {
       const payloadNovo: PayloadNovaConta = {
         nome: form.nome.trim(), tipo: form.tipo,
-        saldo_inicial: parseFloat(form.saldo_inicial) || 0,
+        // Cartão não tem saldo inicial; backend força 0
+        saldo_inicial: form.tipo === 'CARTAO' ? 0 : (parseFloat(form.saldo_inicial) || 0),
         icone: form.icone || undefined, cor: form.cor || undefined,
       }
       if (form.tipo === 'CARTAO') {
         payloadNovo.dia_fechamento = form.dia_fechamento ? parseInt(form.dia_fechamento) : null
         payloadNovo.dia_pagamento  = form.dia_pagamento  ? parseInt(form.dia_pagamento)  : null
+        payloadNovo.limite_credito = form.limite_credito ? parseFloat(form.limite_credito) : null
       }
       const { ok, erro: e } = await criar(payloadNovo)
       setSalvando(false)
@@ -359,48 +366,61 @@ export default function ContasPage() {
         </Field>
 
         {form.tipo === 'CARTAO' && (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Dia de fechamento">
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Dia de fechamento">
+                <Input
+                  type="number" min="1" max="31"
+                  value={form.dia_fechamento}
+                  onChange={e => {
+                    const v = e.target.value
+                    if (v === '' || (parseInt(v) >= 1 && parseInt(v) <= 31)) set({ dia_fechamento: v })
+                  }}
+                  placeholder="Ex: 5"
+                />
+                <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>Dia 1 a 31</p>
+              </Field>
+              <Field label="Dia de pagamento">
+                <Input
+                  type="number" min="1" max="31"
+                  value={form.dia_pagamento}
+                  onChange={e => {
+                    const v = e.target.value
+                    if (v === '' || (parseInt(v) >= 1 && parseInt(v) <= 31)) set({ dia_pagamento: v })
+                  }}
+                  placeholder="Ex: 10"
+                />
+                <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>Dia 1 a 31</p>
+              </Field>
+            </div>
+            <Field label="Limite de crédito" data-tutorial="conta-limite">
               <Input
-                type="number" min="1" max="31"
-                value={form.dia_fechamento}
-                onChange={e => {
-                  const v = e.target.value
-                  if (v === '' || (parseInt(v) >= 1 && parseInt(v) <= 31)) set({ dia_fechamento: v })
-                }}
-                placeholder="Ex: 5"
+                type="number" step="0.01" min="0"
+                value={form.limite_credito}
+                onChange={e => set({ limite_credito: e.target.value })}
+                placeholder="Ex: 5000.00"
               />
-              <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>Dia 1 a 31</p>
+              <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>Teto disponível no cartão</p>
             </Field>
-            <Field label="Dia de pagamento">
-              <Input
-                type="number" min="1" max="31"
-                value={form.dia_pagamento}
-                onChange={e => {
-                  const v = e.target.value
-                  if (v === '' || (parseInt(v) >= 1 && parseInt(v) <= 31)) set({ dia_pagamento: v })
-                }}
-                placeholder="Ex: 10"
-              />
-              <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>Dia 1 a 31</p>
-            </Field>
-          </div>
+          </>
         )}
 
-        <Field label={contaEditar ? 'Saldo inicial (não editável)' : 'Saldo inicial'} data-tutorial="conta-saldo">
-          <Input
-            type="number" step="0.01"
-            value={form.saldo_inicial}
-            onChange={e => { if (!contaEditar) set({ saldo_inicial: e.target.value }) }}
-            readOnly={!!contaEditar}
-            style={contaEditar ? { opacity: 0.5, cursor: 'not-allowed', color: '#e8eaf0' } : { color: '#e8eaf0' }}
-          />
-          {contaEditar && (
-            <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>
-              O saldo inicial não pode ser alterado. O saldo atual é calculado pelos lançamentos.
-            </p>
-          )}
-        </Field>
+        {form.tipo !== 'CARTAO' && (
+          <Field label={contaEditar ? 'Saldo inicial (não editável)' : 'Saldo inicial'} data-tutorial="conta-saldo">
+            <Input
+              type="number" step="0.01"
+              value={form.saldo_inicial}
+              onChange={e => { if (!contaEditar) set({ saldo_inicial: e.target.value }) }}
+              readOnly={!!contaEditar}
+              style={contaEditar ? { opacity: 0.5, cursor: 'not-allowed', color: '#e8eaf0' } : { color: '#e8eaf0' }}
+            />
+            {contaEditar && (
+              <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>
+                O saldo inicial não pode ser alterado. O saldo atual é calculado pelos lançamentos.
+              </p>
+            )}
+          </Field>
+        )}
 
         <Field label="Ícone / Logo" data-tutorial="conta-icone">
           <div className="flex items-start gap-3">

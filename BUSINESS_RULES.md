@@ -19,17 +19,18 @@
 ### Campos
 
 - `nome` — 1 a 100 caracteres, obrigatório.
-- `saldo_inicial` — `NUMERIC(15,2)`, default `0`.
+- `saldo_inicial` — `NUMERIC(15,2)`, default `0`. **Para tipo `CARTAO` é sempre `0`** (backend força mesmo se cliente enviar outro valor).
 - `cor` — formato hex `#RRGGBB` (validado por regex).
 - `icone` — texto livre (emoji ou URL de logo).
 - `ativa` — boolean (soft delete).
 - `dia_fechamento` / `dia_pagamento` — `INTEGER 1..31`, opcionais. Usados pelo tipo `CARTAO`.
+- `limite_credito` — `NUMERIC(15,2)`, opcional. Apenas para tipo `CARTAO` (backend zera o campo para os demais tipos). Check: `>= 0`.
 
 ### Saldo
 
-- **Saldo atual** = `saldo_inicial` + Σ(`RECEITA` PAGAS) − Σ(`DESPESA` PAGAS) — provido pela view `vw_saldo_contas` (apenas transações com `status = PAGO`).
+- **Saldo atual** = `saldo_inicial` + Σ(`RECEITA`) − Σ(`DESPESA`) — provido pela view `vw_saldo_contas`. ⚠️ **Soma TODAS as transações até a data, independente de status** (`PAGO`, `PENDENTE` e `PROJECAO` contam igual). NÃO filtre por status no cálculo de saldo — isso é regra de negócio canônica e foi violada várias vezes no passado.
 - Saldo nunca é armazenado denormalizado; sempre calculado.
-- A função `fn_saldos_contas_ate_data(p_data)` retorna saldo até uma data (usada no Dashboard).
+- A função `arqvalor.fn_saldos_contas_ate_data(p_user_id, p_data)` retorna saldo PAGO por conta até uma data (usada no Dashboard / Extrato). `SECURITY INVOKER`; rejeita chamada se `p_user_id <> auth.uid()` — corrigido em `20260522000002`. Antes era `SECURITY DEFINER` e permitia vazamento entre usuários.
 
 ### Restrições
 
@@ -40,8 +41,10 @@
 
 ### Cartões
 
-- Tipo `CARTAO` é uma conta como as outras, com a adição opcional de `dia_fechamento` e `dia_pagamento` para representar ciclo de fatura.
-- Frontend usa esses campos apenas para exibição; cálculos de saldo seguem a regra padrão (movimentação `PAGO`).
+- Tipo `CARTAO` é uma conta como as outras, com três campos extras opcionais: `dia_fechamento`, `dia_pagamento` (`1..31`) e `limite_credito` (`>= 0`).
+- `saldo_inicial` é forçado a `0` para cartão — o saldo é apenas a fatura aberta calculada pelos lançamentos.
+- O formulário de novo cartão **não** mostra "Saldo inicial"; mostra "Limite de crédito" no lugar.
+- Frontend usa esses campos apenas para exibição/calendário (eventos de fechamento e pagamento); cálculo de saldo segue a regra padrão (soma todas as transações até a data, qualquer status).
 
 ---
 
@@ -163,7 +166,6 @@ Função `fn_antecipar_parcelas`:
 1. Soma `valor` das parcelas com `nr_parcela > N` (mesma `id_recorrencia`).
 2. **Deleta** essas parcelas seguintes.
 3. Atualiza a parcela atual: `valor = valor + soma`, `total_parcelas = N`, `valor_projetado = valor original`.
-4. Registra em `auditoria` com ação `ANTECIPAR`.
 
 Erros possíveis:
 
@@ -352,17 +354,6 @@ Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `
 
 ---
 
-## 🧾 Auditoria
-
-Tabela `arqvalor.auditoria` registra ações sensíveis:
-
-- Ações: `INSERT`, `UPDATE`, `DELETE`, `ANTECIPAR`.
-- Payloads `JSONB` (`payload_old`, `payload_new`).
-- Inclui IP e `user_id`.
-- Visível apenas para o próprio usuário (RLS).
-
----
-
 ## ✅ Validações resumidas
 
 | Campo | Regra |
@@ -377,6 +368,7 @@ Tabela `arqvalor.auditoria` registra ações sensíveis:
 | `total_parcelas` | ≥ 1 |
 | `intervalo_recorrencia` | ≥ 1 |
 | `dia_fechamento` / `dia_pagamento` | 1..31 |
+| `limite_credito` (cartão) | ≥ 0 (NUMERIC 15,2) |
 | `nome` (filtro salvo) | 1..50 |
 | `descricao` (lembrete) | 1..200 |
 | `status` (lembrete) | `PENDENTE` \| `CONCLUIDO` |
@@ -387,6 +379,35 @@ Tabela `arqvalor.auditoria` registra ações sensíveis:
 | `tipo_conta` | `CORRENTE` \| `REMUNERACAO` \| `CARTAO` \| `INVESTIMENTO` \| `CARTEIRA` |
 | `tipo_transacao` | `RECEITA` \| `DESPESA` |
 | `escopo` | `SOMENTE_ESTE` \| `ESTE_E_SEGUINTES` \| `TODOS` |
+
+---
+
+## 🤖 Mascotes e Integração de IA
+
+### Mascotes
+
+- Quatro mascotes selecionáveis: `arquiteta`, `gato`, `raposa`, `sabio` (rótulo de UI: "Conselheiro"; id interno permanece `sabio`).
+- Cada mascote tem um tema visual associado (arquiteta=rosa-bebê, gato=azul, raposa=money green, conselheiro=marrom claro). O usuário pode trocar o tema independente do mascote depois do onboarding.
+- **Poses**: `sentado`, `curioso`, `andando`, `comprimentando`, `feliz`, `triste`, `espantado`, `apontando-direita`, `apontando-esquerda`, `apontando-direita-acima`, `apontando-esquerda-acima`.
+- Persistência: `arqvalor.usuarios.mascote_preferido` (texto) + `arqvalor.usuarios.layout` (JSONB com tema/apelido). `usuarios.mascote_preferido IS NULL` é tratado como primeiro acesso e dispara `ApresentacaoMascotes`.
+
+### Configurações de IA
+
+- Tabela: `arqvalor.usuarios.ia_configs JSONB` — array de objetos `{ id, provedor, apelido, modelo, api_key_cripto, atualizado_em }`.
+- A `api_key` **nunca** é armazenada em texto puro. Antes do INSERT/UPDATE, a Edge Function `ia_configs` cifra com AES-256-GCM usando o secret `IA_KEYS_ENCRYPTION_KEY` (32 bytes). O frontend só recebe uma máscara (`sk-ant-...f4a2`).
+- Provedores aceitos: `claude` | `gpt` | `gemini` | `deepseek` | `openrouter` | `mistral` | `cohere`. Cada um tem modelo padrão + flag `gratuito` + flag `visao` (suporta screenshot).
+- Endpoint `ia_configs` expõe POST/PUT/DELETE e um `POST /:id/ping` para testar a credencial (chama o provedor com uma mensagem trivial).
+
+### Chat com mascote
+
+- A Edge Function `chat_mascote` recebe `{ mensagem, ia_config_id, contexto?: { texto?: string, screenshot?: base64 } }`, descriptografa a `api_key`, monta o prompt incluindo o apelido do mascote e a persona, e proxia para o provedor escolhido.
+- Erros do provedor são traduzidos em mensagens amigáveis (`amigavel()`) — ex.: DeepSeek 402 = "saldo insuficiente"; Gemini 404 = itera modelos `gemini-2.5-flash` → `gemini-2.0-flash` → `gemini-flash-latest` → `gemini-1.5-flash-latest`.
+- O contexto (texto + screenshot) só é enviado se o usuário marcar o chip "Enviar dados da tela" no ChatMascote. Provedores sem `visao = true` recebem apenas o texto.
+
+### Tutorial
+
+- O botão da versão (`AppVersion`) abre o `TutorialTour` da página atual.
+- Cada passo aponta um seletor `[data-tutorial="..."]`. O mascote do usuário aparece apontando para o elemento. Direção (auto / abaixo / direita / esquerda / acima) configurável por passo em `lib/tutoriaisPaginas.ts`.
 
 ---
 

@@ -1,12 +1,9 @@
 import { useState } from 'react'
 import { Bell, CreditCard, Check, Trash2, Pencil, X, Plus, AlertTriangle, Flag, List } from 'lucide-react'
 import type { Lembrete, Conta } from '../../types'
+import { MESES_ABREV } from '../../lib/utils'
 
 const DOW_ABR = ['D','S','T','Q','Q','S','S']
-const MESES_NOME = [
-  'Jan','Fev','Mar','Abr','Mai','Jun',
-  'Jul','Ago','Set','Out','Nov','Dez',
-]
 
 export interface UltimaParcela {
   descricao: string
@@ -79,7 +76,7 @@ export default function CalendarioDashboard({
       {/* Cabeçalho compacto */}
       <div className="flex items-center justify-between mb-2">
         <span className="text-[16px] font-semibold" style={{ color: '#e8eaf0' }}>
-          {MESES_NOME[m - 1]} {ano}
+          {MESES_ABREV[m - 1]} {ano}
         </span>
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#f0b429' }} title="Lembretes criados por você" />

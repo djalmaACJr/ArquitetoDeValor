@@ -14,11 +14,11 @@ import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_EXTRATO } from '../lib/tutoriaisPaginas'
 import { useLancamentos, fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
-import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
+import { formatBRL, mesLabel, proximoMes, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { apiMutate } from '../lib/api'
 import { usePageState } from '../context/PageStateContext'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
-import { supabase } from '../lib/supabase'
+import { useSaldoBaseMes } from '../hooks/useSaldoBaseMes'
 import { IconeConta } from '../components/ui/IconeConta'
 import { Toast, ModalExcluir } from '../components/ui/shared'
 import { MonthPicker } from '../components/ui/MonthPicker'
@@ -195,35 +195,15 @@ export default function LancamentosPage() {
   const setFiltStatus  = (v: string[]) => setPgState({ filtStatus: v })
   const setComSaldo    = (v: boolean | ((prev: boolean) => boolean)) =>
     setPgState({ comSaldo: typeof v === 'function' ? v(pgState.comSaldo) : v })
-  const [saldoBaseConta, setSaldoBaseConta] = useState<Record<string, number>>({})
+  // Saldo-base por conta = saldo PAGO no fim do mês anterior. Só é necessário
+  // recalcular quando há exatamente UMA conta filtrada (para mostrar saldo
+  // acumulado no extrato dessa conta).
+  const saldoBaseConta = useSaldoBaseMes(mes, filtContas.length === 1)
 
   const { lancamentos, loading, fetching, error, carregar, removerLocal, prefetchAdj, editar, excluir, antecipar, alterarStatus } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus, com_saldo: comSaldo })
 
   const { contas }     = useContas()
-
-  // Busca o saldo de cada conta até o último dia do mês ANTERIOR
-  // para usar como base no recálculo do saldo_acumulado por conta
-  useEffect(() => {
-    if (filtContas.length !== 1) { setSaldoBaseConta({}); return }
-    const [ano, m] = mes.split('-').map(Number)
-    const ultimoDiaMesAnterior = new Date(ano, m - 1, 0).toISOString().split('T')[0]
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session?.user?.id) return
-      supabase.schema('arqvalor').rpc('fn_saldos_contas_ate_data', {
-        p_user_id: session.user.id,
-        p_data:    ultimoDiaMesAnterior,
-      }).then(({ data }) => {
-        if (data) {
-          const mapa: Record<string, number> = {}
-          ;(data as { conta_id: string; saldo: number }[]).forEach(r => {
-            mapa[r.conta_id] = r.saldo
-          })
-          setSaldoBaseConta(mapa)
-        }
-      })
-    })
-  }, [filtContas, mes])
 
   const [drawerAberto,       setDrawerAberto]       = useState(false)
   const [lancamentoEditando, setLancamentoEditando] = useState<Lancamento | null>(null)
@@ -235,9 +215,7 @@ export default function LancamentosPage() {
 
   // Navegação por teclado ← → entre meses
   const navMes = useCallback((delta: number) => {
-    const [y, m] = mes.split('-').map(Number)
-    const d = new Date(y, m - 1 + delta, 1)
-    setPgState({ mes: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })
+    setPgState({ mes: proximoMes(mes, delta) })
   }, [mes, setPgState])
 
   useEffect(() => {

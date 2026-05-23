@@ -9,6 +9,7 @@ import ParetoChart from '../components/relatorios/ParetoChart'
 import { TUTORIAL_RELATORIOS } from '../lib/tutoriaisPaginas'
 
 import { apiFetch } from '../lib/api'
+import { log } from '../lib/logger'
 import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
 import { useCategorias } from '../hooks/useCategorias'
@@ -340,13 +341,13 @@ export default function RelatoriosPage() {
         todos.push(...lista)
       }))
       setPgState({ lancamentos: todos, buscado: true })
-      // Debug: ver estrutura dos dados
+      // Debug (no-op em produção via lib/logger)
       if (todos.length > 0) {
         const ex = todos.find(l => l.categoria_id)
-        console.log('[Relatório] Exemplo lançamento com categoria:', ex)
-        console.log('[Relatório] Total lançamentos:', todos.length)
+        log('[Relatório] Exemplo lançamento com categoria:', ex)
+        log('[Relatório] Total lançamentos:', todos.length)
         const semCat = todos.filter(l => !l.categoria_id).length
-        console.log('[Relatório] Sem categoria:', semCat)
+        log('[Relatório] Sem categoria:', semCat)
       }
     } finally {
       setLoading(false)

@@ -4,10 +4,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
-import { mesLabel } from '../../lib/utils'
-
-const MESES_ABREV = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-                     'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+import { mesLabel, MESES_ABREV } from '../../lib/utils'
 
 interface MonthPickerProps {
   value: string                   // formato "YYYY-MM"

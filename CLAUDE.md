@@ -64,11 +64,11 @@ Permite:
 
 | Pasta | Conteúdo |
 |---|---|
-| `pages/` | `DashboardPage`, `LancamentosPage`, `ContasPage`, `CategoriasPage`, `RelatoriosPage`, `ImportExportPage`, `PerfilPage`, `LoginPage` |
+| `pages/` | `DashboardPage`, `LancamentosPage`, `ContasPage`, `CategoriasPage`, `RelatoriosPage`, `ImportExportPage`, `PerfilPage`, `LoginPage`, `ApresentacaoMascotes` (onboarding 1º acesso) |
 | `components/layout/` | `AppLayout`, `Sidebar` |
-| `components/ui/` | `DrawerLancamento`, `Calculadora`, `BotaoNovoLancamento`, `BotaoOcultar`, `FiltrosLancamentos`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion`, `ModalLembrete`, `CalendarioDashboard`, `shared` |
-| `hooks/` | `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useOcultarValores`, `useTheme` |
-| `context/` | `AuthContext`, `PageStateContext` (persiste filtros entre páginas) |
+| `components/ui/` | `DrawerLancamento`, `Calculadora`, `BotaoNovoLancamento`, `BotaoOcultar`, `FiltrosLancamentos`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion` (botão da versão = abre tutorial da página), `ModalLembrete`, `CalendarioDashboard`, `Mascote`, `MascoteDica`, `MascoteTutorial`, `ChatMascote` (chat com IA via mascote escolhido), `TutorialTour` (overlay guiado com mascote apontando), `LoadingMascote`, `shared` |
+| `hooks/` | `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useOcultarValores`, `useTheme`, `useMascotePreferido` (apelido, tema, primeiro acesso), `useIAPreferencia`, `useChatMascote` |
+| `context/` | `AuthContext`, `PageStateContext` (persiste filtros entre páginas), `ContextoIAContext` (split SetterCtx + ValueCtx — páginas registram o que estão exibindo para o ChatMascote enviar à IA) |
 | `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums), `queryKeys.ts` (chaves do React Query), `logger.ts` (log condicional dev-only) |
 | `types/index.ts` | Tipos compartilhados (`Conta`, `Transacao`, `Transferencia`, `Categoria`, …) — re-exporta enums de `lib/constants.ts` |
 
@@ -87,6 +87,8 @@ Permite:
 | `functions/excluir_conta/` | Exclui todos os dados do usuário (chama `fn_excluir_dados_usuario`) |
 | `functions/version/` | Endpoint de versão (introspecção) |
 | `functions/limpar/` | Limpeza usada nos testes (reativa contas inativas para destravar UPDATE) |
+| `functions/ia_configs/` | CRUD das configs de IA por provedor (apelido, modelo, api_key). API key é criptografada em AES-256-GCM antes de ser persistida; frontend só vê máscara (`sk-...f4a2`). Inclui ping para testar credencial. |
+| `functions/chat_mascote/` | Recebe mensagem + contexto opcional (texto + screenshot base64) da página, descriptografa a api_key da config escolhida e proxia a chamada para o provedor (Claude / GPT / Gemini / DeepSeek / OpenRouter / Mistral / Cohere). |
 | `migrations/` | DDL idempotente (schema, ENUMs, triggers, views, RLS, seed de usuário) |
 
 ### Testes
@@ -130,9 +132,20 @@ Permite:
 ### Contas
 
 - Tipos: `CORRENTE` | `REMUNERACAO` | `CARTAO` | `INVESTIMENTO` | `CARTEIRA`
-- Cartão: campos opcionais `dia_fechamento` e `dia_pagamento` (1..31).
+- Cartão: campos opcionais `dia_fechamento` / `dia_pagamento` (1..31) e `limite_credito` (NUMERIC, ≥ 0). Para `CARTAO` o backend força `saldo_inicial = 0`; o formulário esconde "Saldo inicial" e mostra "Limite de crédito" no lugar.
 - Banco bloqueia exclusão se houver lançamentos (trigger `fn_bloquear_exclusao_conta`).
-- Saldo calculado pela view `vw_saldo_contas` (= `saldo_inicial` + soma de receitas - despesas, somente `status = PAGO`).
+- Saldo calculado pela view `vw_saldo_contas` (= `saldo_inicial` + soma de receitas − despesas). ⚠️ **Saldo soma TODAS as transações até a data, independente de `status`** (PAGO, PENDENTE, PROJECAO contam igual). Não reintroduzir filtro `t.status = 'PAGO'` em views/funções de saldo.
+- RPCs `fn_saldos_contas_ate_data(p_user_id, p_data)` e `fn_saldo_conta_ate_data(p_conta_id, p_data)` são `SECURITY INVOKER` e validam `auth.uid()` — chamadas com user/conta de outro usuário levantam `ACESSO_NEGADO` (corrigido em `20260522000002`).
+
+### Mascotes + IA
+
+- **Quatro mascotes**: `arquiteta` (rosa-bebê), `gato` (azul), `raposa` (money green), `sabio` (exibido como "Conselheiro", marrom claro). O `id` interno é sempre `sabio`; o rótulo "Conselheiro" é só de apresentação.
+- **Onboarding (1º acesso)**: `ApresentacaoMascotes` força escolher mascote → dar apelido → escolher tema antes de liberar o app. Estado vem de `arqvalor.usuarios.mascote_preferido` + `usuarios.layout` + flag derivada `primeiroAcesso` exposta por `useMascotePreferido`.
+- **Poses suportadas**: `sentado` | `curioso` | `andando` | `comprimentando` | `feliz` | `triste` | `espantado` | `apontando-{direita,esquerda}[-acima]`. Animações WebM (`mascote-andando.webm`, `mascote-comprimentando.webm`) com fallback MP4 para compatibilidade. Sprites em `FrontEnd/public/mascotes/`.
+- **Chat com IA** (`ChatMascote`): o usuário cadastra uma ou mais credenciais em `arqvalor.usuarios.ia_configs` (JSONB). A `api_key` é criptografada em AES-256-GCM via secret `IA_KEYS_ENCRYPTION_KEY` — frontend só recebe máscara.
+- **Provedores**: `claude` | `gpt` | `gemini` | `deepseek` | `openrouter` | `mistral` | `cohere`. Metadados em `FrontEnd/src/lib/iaProvedores.ts` (gratuito, modelo padrão, visão).
+- **Contexto da página**: `ContextoIAContext` é um split context (SetterCtx + ValueCtx) — páginas (Dashboard, etc.) registram em `SetterCtx` o que estão exibindo; só o `ChatMascote` consome `ValueCtx`, evitando loop de re-render. O usuário escolhe enviar texto e/ou screenshot junto da mensagem.
+- **Tutorial guiado**: `TutorialTour` é um overlay com o mascote escolhido apontando para elementos via `data-tutorial="..."` em alvos espalhados pelas páginas. Disparado pelo botão da versão (`AppVersion`). Passos definidos em `FrontEnd/src/lib/tutoriaisPaginas.ts` com `posicao` opcional (`auto` | `abaixo` | `direita` | `esquerda` | `acima`).
 
 ---
 

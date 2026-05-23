@@ -33,47 +33,28 @@ TOLERANCIA = 50
 
 
 def detectar_bg(arr: np.ndarray) -> np.ndarray:
-    """Estima cor de fundo.
+    """Estima cor de fundo via cor mais frequente entre pixels opacos.
 
-    Estratégia: ao longo do anel externo da imagem, considera cada *coluna*
-    vertical e cada *linha* horizontal. Pra cada uma, ignora pixels totalmente
-    transparentes e pula a moldura (faixa colorida fina nos primeiros pixels
-    opacos), registrando o primeiro pixel opaco "estável" — esse é o bg.
-    Pega a mediana dessas amostras.
+    Quantiza RGB em buckets de 16 e pega o bucket mais populoso (modo).
+    O fundo é tipicamente a maior área de cor uniforme da imagem, então
+    domina o histograma. Funciona pra bg branco, verde, etc — e ignora
+    cantos transparentes (alpha=0) que poderiam confundir amostragem
+    de bordas.
     """
-    h, w = arr.shape[:2]
-    candidatos: list[np.ndarray] = []
-
-    def primeiro_estavel(linha: np.ndarray) -> np.ndarray | None:
-        # linha: (N, 4). Acha o primeiro pixel opaco que tenha vizinhança parecida.
-        opaco_idx = np.where(linha[:, 3] > 128)[0]
-        if opaco_idx.size < 6:
-            return None
-        for k in range(opaco_idx.size - 5):
-            i = opaco_idx[k]
-            vizinhos = linha[i:i+6]
-            if (vizinhos[:, 3] > 128).all():
-                # estabilidade: desvio padrão baixo
-                if vizinhos[:, :3].std(axis=0).max() < 15:
-                    return vizinhos[:, :3].mean(axis=0)
-        return None
-
-    for col in range(0, w, max(1, w // 40)):
-        for sentido in ("topo", "fundo"):
-            linha = arr[:, col] if sentido == "topo" else arr[::-1, col]
-            v = primeiro_estavel(linha)
-            if v is not None:
-                candidatos.append(v)
-    for row in range(0, h, max(1, h // 40)):
-        for sentido in ("esq", "dir"):
-            linha = arr[row, :] if sentido == "esq" else arr[row, ::-1]
-            v = primeiro_estavel(linha)
-            if v is not None:
-                candidatos.append(v)
-
-    if not candidatos:
+    opacos = arr[arr[:, :, 3] > 128, :3]
+    if opacos.size == 0:
         return np.array([255, 255, 255])
-    return np.median(np.array(candidatos), axis=0)
+    # Quantização: bucket = (R//16, G//16, B//16) → chave inteira
+    q = (opacos // 16).astype(np.int32)
+    chaves = q[:, 0] * 1024 + q[:, 1] * 32 + q[:, 2]
+    vals, contagens = np.unique(chaves, return_counts=True)
+    chave_top = vals[contagens.argmax()]
+    # Reconstrói RGB do bucket vencedor + refinamento: mediana dos pixels nesse bucket
+    r_b = (chave_top // 1024) & 31
+    g_b = (chave_top // 32) & 31
+    b_b = chave_top & 31
+    mask = (q[:, 0] == r_b) & (q[:, 1] == g_b) & (q[:, 2] == b_b)
+    return np.median(opacos[mask], axis=0)
 
 
 def processar(caminho: Path, tol: float = TOLERANCIA) -> None:

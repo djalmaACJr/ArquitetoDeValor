@@ -18,6 +18,7 @@ export interface Conta {
   saldo_atual:   number
   dia_fechamento?: number | null
   dia_pagamento?:  number | null
+  limite_credito?: number | null
 }
 
 // ── Categorias ────────────────────────────────────────────

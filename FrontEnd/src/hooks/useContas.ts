@@ -30,6 +30,7 @@ export function useContas() {
     nome: string; tipo: TipoConta; saldo_inicial?: number
     icone?: string; cor?: string
     dia_fechamento?: number | null; dia_pagamento?: number | null
+    limite_credito?: number | null
   }): Promise<OpResult> => {
     const res = await apiMutate('/contas', 'POST', payload)
     if (res.ok) await qc.invalidateQueries({ queryKey: qk.contas() })
@@ -40,6 +41,7 @@ export function useContas() {
     nome: string; tipo: TipoConta; saldo_inicial: number
     icone: string; cor: string; ativa: boolean
     dia_fechamento: number | null; dia_pagamento: number | null
+    limite_credito: number | null
   }>): Promise<OpResult> => {
     const res = await apiMutate(`/contas/${id}`, 'PUT', payload)
     if (res.ok) await qc.invalidateQueries({ queryKey: qk.contas() })

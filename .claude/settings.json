@@ -25,7 +25,13 @@
       "Bash(python3 -c \"import numpy, scipy, PIL; print\\('ok'\\)\")",
       "Bash(py -3 scripts/remover_fundo_apontando.py --tol 90 FrontEnd/public/mascotes/sabio-apontando-direita.png FrontEnd/public/mascotes/sabio-apontando-esquerda.png FrontEnd/public/mascotes/sabio-apontando-direita-acima.png FrontEnd/public/mascotes/sabio-apontando-esquerda-acima.png)",
       "Bash(py -3 scripts/remover_fundo_apontando.py FrontEnd/public/mascotes/sabio-apontando-direita-acima.png FrontEnd/public/mascotes/sabio-apontando-esquerda-acima.png)",
-      "Bash(py -3 -c ' *)"
+      "Bash(py -3 -c ' *)",
+      "Bash(py -3 scripts/remover_fundo_apontando.py FrontEnd/public/mascotes/raposa-apontando-direita.png FrontEnd/public/mascotes/raposa-apontando-esquerda.png FrontEnd/public/mascotes/raposa-apontando-direita-acima.png FrontEnd/public/mascotes/raposa-apontando-esquerda-acima.png FrontEnd/public/mascotes/gato-apontando-direita.png FrontEnd/public/mascotes/gato-apontando-esquerda.png FrontEnd/public/mascotes/gato-apontando-direita-acima.png FrontEnd/public/mascotes/gato-apontando-esquerda-acima.png)",
+      "Bash(py -3 scripts/limpar_bolsoes_apontando.py FrontEnd/public/mascotes/raposa-apontando-direita-acima.png FrontEnd/public/mascotes/raposa-apontando-esquerda-acima.png FrontEnd/public/mascotes/raposa-apontando-direita.png FrontEnd/public/mascotes/raposa-apontando-esquerda.png FrontEnd/public/mascotes/gato-apontando-direita.png FrontEnd/public/mascotes/gato-apontando-direita-acima.png FrontEnd/public/mascotes/gato-apontando-esquerda-acima.png)",
+      "Bash(py -3 scripts/limpar_bolsoes_apontando.py FrontEnd/public/mascotes/gato-apontando-esquerda.png)",
+      "mcp__supabase__execute_sql",
+      "mcp__supabase__apply_migration",
+      "Bash(xargs wc -l)"
     ]
   }
 }

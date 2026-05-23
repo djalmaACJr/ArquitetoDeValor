@@ -1,23 +1,28 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './hooks/useAuth'
 import AppLayout from './components/layout/AppLayout'
 import LoginPage from './pages/LoginPage'
 import CadastroPage from './pages/CadastroPage'
-import PerfilPage from './pages/PerfilPage'
 import RedefinirSenhaPage from './pages/RedefinirSenhaPage'
-import DashboardPage from './pages/DashboardPage'
-import RelatoriosPage from './pages/RelatoriosPage'
-import ContasPage from './pages/ContasPage'
-import CategoriasPage from './pages/CategoriasPage'
-import LancamentosPage from './pages/LancamentosPage'
-import ImportExportPage from './pages/ImportExportPage'
-import ComparativoMensalPage from './pages/ComparativoMensalPage'
-import AssinaturasPage from './pages/AssinaturasPage'
-import ProjecaoEconomiaPage from './pages/ProjecaoEconomiaPage'
-import ApresentacaoMascotes from './pages/ApresentacaoMascotes'
 import { PageStateProvider } from './context/PageStateContext'
 import { ContextoIAProvider } from './context/ContextoIAContext'
 import { LoadingMascoteEstatico } from './components/ui/LoadingMascote'
+
+// Páginas autenticadas são carregadas sob demanda (code-splitting).
+// Reduz o bundle inicial em ~50% — antes essas 11 páginas (≈14 mil LoC)
+// vinham todas no JS de entrada.
+const DashboardPage          = lazy(() => import('./pages/DashboardPage'))
+const RelatoriosPage         = lazy(() => import('./pages/RelatoriosPage'))
+const ContasPage             = lazy(() => import('./pages/ContasPage'))
+const CategoriasPage         = lazy(() => import('./pages/CategoriasPage'))
+const LancamentosPage        = lazy(() => import('./pages/LancamentosPage'))
+const ImportExportPage       = lazy(() => import('./pages/ImportExportPage'))
+const ComparativoMensalPage  = lazy(() => import('./pages/ComparativoMensalPage'))
+const AssinaturasPage        = lazy(() => import('./pages/AssinaturasPage'))
+const ProjecaoEconomiaPage   = lazy(() => import('./pages/ProjecaoEconomiaPage'))
+const ApresentacaoMascotes   = lazy(() => import('./pages/ApresentacaoMascotes'))
+const PerfilPage             = lazy(() => import('./pages/PerfilPage'))
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
@@ -27,6 +32,15 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
     </div>
   )
   return session ? <>{children}</> : <Navigate to="/login" replace/>
+}
+
+// Fallback usado pelo Suspense enquanto o chunk da página é baixado.
+function FallbackPagina() {
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center">
+      <LoadingMascoteEstatico texto="Carregando…" size={130} />
+    </div>
+  )
 }
 
 export default function App() {
@@ -39,6 +53,7 @@ export default function App() {
     <BrowserRouter>
       <PageStateProvider key={userId ?? 'anon'}>
         <ContextoIAProvider>
+        <Suspense fallback={<FallbackPagina/>}>
         <Routes>
           <Route path="/login"    element={<LoginPage/>}/>
           <Route path="/cadastro"        element={<CadastroPage/>}/>
@@ -66,6 +81,7 @@ export default function App() {
           </Route>
           <Route path="*" element={<Navigate to="/" replace/>}/>
         </Routes>
+        </Suspense>
         </ContextoIAProvider>
       </PageStateProvider>
     </BrowserRouter>

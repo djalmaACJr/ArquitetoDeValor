@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 
@@ -14,6 +14,11 @@ export function useOcultarValores() {
     () => localStorage.getItem(LS_KEY) === 'true',
   )
 
+  // Se o usuário já mexeu no toggle, o fetch tardio do banco NÃO pode
+  // sobrescrever o estado local — caso contrário cliques rápidos viram
+  // "borracha" (testes E2E-CT07/REL07 dependiam disso).
+  const tocadoLocal = useRef(false)
+
   useEffect(() => {
     if (!userId) return
     supabase
@@ -24,6 +29,7 @@ export function useOcultarValores() {
       .single()
       .then(({ data }) => {
         if (!data) return
+        if (tocadoLocal.current) return
         const valor = data.ocultar_valores ?? false
         localStorage.setItem(LS_KEY, String(valor))
         setOculto(valor)
@@ -31,6 +37,7 @@ export function useOcultarValores() {
   }, [userId])
 
   const toggle = async () => {
+    tocadoLocal.current = true
     const novo = !oculto
     setOculto(novo)
     localStorage.setItem(LS_KEY, String(novo))

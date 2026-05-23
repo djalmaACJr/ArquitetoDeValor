@@ -7,7 +7,7 @@ import { Repeat2, Trash2, Zap, Sparkles } from 'lucide-react'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
 import { apiFetch, apiMutate } from '../../lib/api'
-import { formatBRL } from '../../lib/utils'
+import { formatBRL, parsearValorBR } from '../../lib/utils'
 import { buscarSugestoes, buscarTodasSugestoes, salvarSugestao, type SugestaoLancamento } from '../../hooks/useAssistente'
 // Logger desativado — reativar removendo o comentário desta linha e dos log() abaixo
 // import { log } from '../../lib/logger'
@@ -90,9 +90,6 @@ interface FormState {
 }
 
 // ── Máscara BR ─────────────────────────────────────────────────
-function parsearValorBR(v: string): number {
-  return parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0
-}
 function valorParaMascara(v: number): string {
   return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -836,7 +833,16 @@ export default function DrawerLancamento({
                   }
                   return
                 }
-                if (e.key === 'Escape') { setSugestoesAbertas(false); return }
+                if (e.key === 'Escape') {
+                  if (sugestoesAbertas) {
+                    // Drawer também escuta Escape no document e fecharia.
+                    // Bloqueia o native event para que Escape feche apenas
+                    // o dropdown enquanto ele estiver aberto.
+                    e.nativeEvent.stopImmediatePropagation()
+                    setSugestoesAbertas(false)
+                  }
+                  return
+                }
                 if (!sugestoesAbertas || sugestoes.length === 0) return
                 if (e.key === 'ArrowDown') {
                   e.preventDefault()

@@ -8,7 +8,7 @@ import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { ChevronDown, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus, Search } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { log } from '../lib/logger'
-import { mesLabel, formatBRL, formatData, CORES_CATEGORIA } from '../lib/utils'
+import { mesLabel, formatBRL, formatData, proximoMes, MESES_ABREV, CORES_CATEGORIA } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import TutorialTour from '../components/ui/TutorialTour'
@@ -16,10 +16,24 @@ import { TUTORIAL_DASHBOARD } from '../lib/tutoriaisPaginas'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import { Doughnut, Chart } from 'react-chartjs-2'
-import 'chart.js/auto'
+import {
+  Chart as ChartJS,
+  ArcElement, CategoryScale, LinearScale,
+  BarElement, LineElement, PointElement,
+  Tooltip, Legend, Filler,
+} from 'chart.js'
 import type { TooltipItem } from 'chart.js'
+
+// Registro seletivo (antes era `import 'chart.js/auto'` que carregava todos
+// os tipos e plugins do Chart.js). Aqui só o necessário para Doughnut + Bar/Line.
+ChartJS.register(
+  ArcElement, CategoryScale, LinearScale,
+  BarElement, LineElement, PointElement,
+  Tooltip, Legend, Filler,
+)
 import type { Conta, Transacao, DespesaCategoria } from '../types'
 import type { Lancamento } from '../hooks/useLancamentos'
+import { useSaldoBaseMes } from '../hooks/useSaldoBaseMes'
 import { supabase } from '../lib/supabase'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
@@ -50,14 +64,8 @@ function IconeConta({ icone, cor, size = 'md' }: {
 
 const OCULTO = '??????'
 
-function navMesStr(ym: string, delta: number): string {
-  const [y, m] = ym.split('-').map(Number)
-  const d = new Date(y, m - 1 + delta, 1)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
 // -- Card de resultado do mes -----------------------------
-function CardResultados({
+const CardResultados = memo(function CardResultados({
   resumo,
 }: {
   resumo: { total_entradas: number; total_saidas: number } | null
@@ -85,10 +93,10 @@ function CardResultados({
       </div>
     </div>
   )
-}
+})
 
 // -- Card de saldo acumulado ------------------------------
-function CardSaldo({ contas, oculto, mes, historico, modo, setModo }: {
+const CardSaldo = memo(function CardSaldo({ contas, oculto, mes, historico, modo, setModo }: {
   contas: Conta[]
   oculto: boolean
   mes: string
@@ -170,7 +178,7 @@ function CardSaldo({ contas, oculto, mes, historico, modo, setModo }: {
       </div>
     </div>
   )
-}
+})
 
 // -- Grupo de conta dentro do card de alertas -------------
 function GrupoConta({
@@ -241,7 +249,7 @@ function GrupoConta({
 }
 
 // -- Card de alertas agrupado por conta -------------------
-function CardAlertas({
+const CardAlertas = memo(function CardAlertas({
   titulo, cor, total, itens, contas, onVerTodos, onEditar, filtravel, mes,
 }: {
   titulo: string; cor: string; total: number
@@ -351,7 +359,7 @@ function CardAlertas({
       )}
     </div>
   )
-}
+})
 
 // -- Grafico barras + linha de saldo ----------------------
 const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pendentes, projecoes, loading = false, onMesClick }: {
@@ -912,7 +920,7 @@ function formatRelativo(iso: string): string {
   return formatData(iso.split('T')[0])
 }
 
-function CardUltimasAlteracoes({ contas, onEditar }: { contas: Conta[]; onEditar: (id: string) => void }) {
+const CardUltimasAlteracoes = memo(function CardUltimasAlteracoes({ contas, onEditar }: { contas: Conta[]; onEditar: (id: string) => void }) {
   const [aberto,  setAberto]  = useState(false)
   const [items,   setItems]   = useState<AlteracaoItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -987,10 +995,10 @@ function CardUltimasAlteracoes({ contas, onEditar }: { contas: Conta[]; onEditar
       )}
     </div>
   )
-}
+})
 
 // -- Card de contas com saldo dinâmico ------------------------------
-function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw, ultimaTxPorConta }: {
+const CardContas = memo(function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw, ultimaTxPorConta }: {
   contas: Conta[];
   oculto: boolean;
   mes: string;
@@ -1148,14 +1156,12 @@ function CardContas({ contas, oculto, mes, modo, setModo, saldoBaseMes, doMesRaw
       })}
     </div>
   )
-}
+})
 
 // -- Painel todos os lembretes ----------------------------
-const MESES_ABR = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
-
 function labelMesAbr(ym: string) {
   const [y, m] = ym.split('-').map(Number)
-  return `${MESES_ABR[m - 1]} ${y}`
+  return `${MESES_ABREV[m - 1]} ${y}`
 }
 
 function PainelTodosLembretes({
@@ -1396,11 +1402,11 @@ export default function DashboardPage() {
       if (e.key === 'ArrowLeft') {
         e.preventDefault()
         prefetchMesAnterior()
-        setMes(navMesStr(mes, -1))
+        setMes(proximoMes(mes, -1))
       } else if (e.key === 'ArrowRight') {
         e.preventDefault()
         prefetchMesSeguinte()
-        setMes(navMesStr(mes, 1))
+        setMes(proximoMes(mes, 1))
       }
     }
     document.addEventListener('keydown', onKey)
@@ -1478,26 +1484,7 @@ export default function DashboardPage() {
   // base para projeção dia-a-dia da detecção de saldo negativo.
   // RPC `fn_saldos_contas_ate_data(p_user_id, p_data)` retorna saldo PAGO por
   // conta na data informada (defesa em profundidade: ainda valida por user_id).
-  const [saldoBaseMes, setSaldoBaseMes] = useState<Record<string, number>>({})
-  useEffect(() => {
-    const [y, m] = mes.split('-').map(Number)
-    if (Number.isNaN(y) || Number.isNaN(m)) return
-    const ultimoDiaAnterior = new Date(y, m - 1, 0).toISOString().split('T')[0]
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session?.user?.id) return
-      supabase.schema('arqvalor').rpc('fn_saldos_contas_ate_data', {
-        p_user_id: session.user.id,
-        p_data:    ultimoDiaAnterior,
-      }).then(({ data, error }) => {
-        if (error) { log('[saldoBaseMes] erro:', error); return }
-        const mapa: Record<string, number> = {}
-        ;(data as { conta_id: string; saldo: number }[] ?? []).forEach(r => {
-          mapa[r.conta_id] = r.saldo
-        })
-        setSaldoBaseMes(mapa)
-      })
-    })
-  }, [mes])
+  const saldoBaseMes = useSaldoBaseMes(mes)
 
   // Alerta de saldo negativo — para TODOS os dias do mês exibido.
   // Considera contas correntes (CORRENTE + REMUNERACAO) ativas; aplica todas

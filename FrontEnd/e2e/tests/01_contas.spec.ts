@@ -46,40 +46,40 @@ test.describe('Contas', () => {
     // Selecionar tipo Cartão
     await drawer.getByRole('combobox').selectOption('CARTAO')
 
-    // Campos de dia fechamento/pagamento devem aparecer
+    // Campos específicos de cartão devem aparecer
     await expect(drawer.getByText(/dia de fechamento/i)).toBeVisible()
     await expect(drawer.getByText(/dia de pagamento/i)).toBeVisible()
+    await expect(drawer.getByText(/limite de crédito/i)).toBeVisible()
+    // Cartão NÃO deve mostrar Saldo inicial
+    await expect(drawer.getByText(/saldo inicial/i)).toHaveCount(0)
 
     await page.keyboard.press('Escape')
   })
 
-  test('E2E-CT04 — criar cartão com dia fechamento e pagamento', async ({ page }) => {
+  test('E2E-CT04 — criar cartão com dia fechamento, pagamento e limite de crédito', async ({ page }) => {
     await page.getByRole('button', { name: /nova conta/i }).click()
     const drawer = page.getByRole('dialog').first()
 
-    // Selecionar tipo Cartão
+    // Selecionar tipo Cartão e aguardar campos extras renderizarem
     await drawer.getByRole('combobox').selectOption('CARTAO')
+    await expect(drawer.getByText(/limite de crédito/i)).toBeVisible()
 
-    // Esperar campos aparecerem e usar seletores mais específicos
-    await page.waitForTimeout(1000)
-    
-    // Tentar diferentes seletores para os campos de dia
-    const campoFechamento = drawer.locator('input[name*="fechamento"], input[placeholder*="fechamento"], label:has-text("fechamento") input').first()
-    const campoPagamento = drawer.locator('input[name*="pagamento"], input[placeholder*="pagamento"], label:has-text("pagamento") input').first()
-    
-    if (await campoFechamento.isVisible()) {
-      await expect(campoFechamento).toBeVisible()
-      await campoFechamento.fill('10')
-    } else {
-      console.log('⚠️ Campo fechamento não encontrado')
-    }
-    
-    if (await campoPagamento.isVisible()) {
-      await expect(campoPagamento).toBeVisible()
-      await campoPagamento.fill('15')
-    } else {
-      console.log('⚠️ Campo pagamento não encontrado')
-    }
+    // Field renderiza <div><p>label</p><input/></div>. Localizamos o <p>
+    // do label e descemos para o input do mesmo Field.
+    const fieldFechamento = drawer.locator('div').filter({ has: page.locator('p', { hasText: /dia de fechamento/i }) }).last()
+    const fieldPagamento  = drawer.locator('div').filter({ has: page.locator('p', { hasText: /dia de pagamento/i }) }).last()
+    const fieldLimite     = drawer.locator('div').filter({ has: page.locator('p', { hasText: /limite de crédito/i }) }).last()
+    const campoFechamento = fieldFechamento.locator('input').first()
+    const campoPagamento  = fieldPagamento.locator('input').first()
+    const campoLimite     = fieldLimite.locator('input').first()
+
+    await expect(campoFechamento).toBeVisible()
+    await expect(campoPagamento).toBeVisible()
+    await expect(campoLimite).toBeVisible()
+
+    await campoFechamento.fill('10')
+    await campoPagamento.fill('15')
+    await campoLimite.fill('5000')
 
     await drawer.getByPlaceholder(/nubank|nome/i).fill('E2E Cartão Teste')
     await drawer.getByRole('button', { name: /salvar|criar/i }).click()
