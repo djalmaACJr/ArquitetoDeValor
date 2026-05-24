@@ -313,11 +313,16 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         className={
           isDesktop
             // Desktop: parte do layout, largura controlada por `colapsado`.
-            ? `flex flex-col px-3 py-5 bg-av-dark sticky top-0 h-screen rounded-r-2xl flex-shrink-0 transition-all duration-300 ${
+            // `overflow-y-auto` evita que o conteúdo da nav (quando submenu
+            // expandido empurra o rodapé além de h-screen) vaze para fora
+            // da viewport e gere um retângulo `bg-av-dark` visível em
+            // cima da página principal — bug "quadro preto" reportado ao
+            // navegar com Relatórios expandido + clicar em Perfil.
+            ? `flex flex-col px-3 py-5 bg-av-dark sticky top-0 h-screen overflow-y-auto rounded-r-2xl flex-shrink-0 transition-all duration-300 ${
                 colapsado ? 'w-[60px]' : 'w-[216px]'
               }`
             // Mobile: overlay deslizante.
-            : `flex flex-col px-3 py-5 bg-av-dark fixed top-0 left-0 h-screen z-50 w-[260px] transition-transform duration-300 ${
+            : `flex flex-col px-3 py-5 bg-av-dark fixed top-0 left-0 h-screen overflow-y-auto z-50 w-[260px] transition-transform duration-300 ${
                 mobileOpen ? 'translate-x-0' : '-translate-x-full'
               }`
         }

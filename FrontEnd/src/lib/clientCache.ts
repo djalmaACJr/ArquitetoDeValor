@@ -45,10 +45,12 @@ const LS_KEYS_USER_SCOPED = [
   'arqvalor:ocultar_valores',      // flag ocultar (sync de arqvalor.usuarios.ocultar_valores)
 ] as const
 
-// Tutoriais vistos são chave-com-mascote: prefixos LS para varrer.
+// Chaves legadas que ainda podem existir no LS de versões anteriores.
+// `tutoriais_vistos` agora vive em `arqvalor.usuarios` (JSONB), mas
+// limpamos os resquícios antigos pra não ocupar quota.
 const LS_PREFIXES_USER_SCOPED = [
-  'av-tut-',   // av-tut-<pagina>-<mascote>=1  (tutorial visto)
-  'av-tour-',  // av-tour-<pagina>-v1=1        (tour guiado visto)
+  'av-tut-',   // av-tut-<pagina>-<mascote>=1  (legado)
+  'av-tour-',  // av-tour-<pagina>-v1=1        (legado)
 ] as const
 
 /**

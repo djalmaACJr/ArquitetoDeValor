@@ -7,7 +7,7 @@ import { Repeat2, Trash2, Zap, Sparkles } from 'lucide-react'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
 import { apiFetch, apiMutate } from '../../lib/api'
-import { formatBRL, parsearValorBR } from '../../lib/utils'
+import { formatBRL, parsearValorBR, hojeLocal, dataParaYMD } from '../../lib/utils'
 import { buscarSugestoes, buscarTodasSugestoes, salvarSugestao, type SugestaoLancamento } from '../../hooks/useAssistente'
 // Logger desativado — reativar removendo o comentário desta linha e dos log() abaixo
 // import { log } from '../../lib/logger'
@@ -96,7 +96,7 @@ function valorParaMascara(v: number): string {
 
 // ── Form ───────────────────────────────────────────────────────
 const FORM_VAZIO: FormState = {
-  tipo: 'DESPESA', data: new Date().toISOString().slice(0, 10), descricao: '', valor: '',
+  tipo: 'DESPESA', data: hojeLocal(), descricao: '', valor: '',
   conta_id: '', conta_destino_id: '', categoria_id: '', status: 'PAGO', observacao: '',
   recorrente: false, total_parcelas: '2', tipo_recorrencia: 'MENSAL', intervalo_recorrencia: '1',
   criarLembrete: false,
@@ -174,7 +174,7 @@ interface DrawerLancamentoProps {
 // senão dia de hoje (clampado ao último dia do mês alvo) no mês/ano alvo.
 function dataPadrao(mes?: string | null): string {
   const hoje = new Date()
-  const hojeStr = hoje.toISOString().slice(0, 10)
+  const hojeStr = dataParaYMD(hoje)
   if (!mes) return hojeStr
   const [y, m] = mes.split('-').map(Number)
   if (Number.isNaN(y) || Number.isNaN(m) || m < 1 || m > 12) return hojeStr
@@ -218,7 +218,7 @@ export default function DrawerLancamento({
   const sugestoesListRef = useRef<HTMLDivElement>(null)
 
   const set = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
-  const hojeStr = new Date().toISOString().slice(0, 10)
+  const hojeStr = hojeLocal()
 
   // Persiste o lançamento atual como sugestão (somente em criação e com
   // o checkbox marcado). Não bloqueia o fluxo se falhar.

@@ -1,6 +1,6 @@
 // src/pages/RelatoriosPage.tsx
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react'
-import { ChevronDown, ChevronRight, Download, RefreshCw, Filter, Pencil } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, Download, RefreshCw, Filter, Pencil } from 'lucide-react'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
@@ -302,6 +302,89 @@ export default function RelatoriosPage() {
   const expPareto = useExpansaoCategoria()
   const expandidosPareto = expPareto.expandidos
   const drillRef    = useRef<HTMLDivElement>(null)
+
+  // ── Auto-colapsar a barra de filtros (DEBUG instrumentado) ──
+  const [filtrosColapsados, setFiltrosColapsados] = useState(false)
+  const overrideManualRef = useRef(false)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const stickyBarRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const renderCountRef = useRef(0)
+  renderCountRef.current++
+  // eslint-disable-next-line no-console
+  console.log('[REL][render]', { n: renderCountRef.current, col: filtrosColapsados })
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    if (!sentinel) return
+    let scrollRoot: Element | null = sentinel.parentElement
+    while (scrollRoot && scrollRoot !== document.body) {
+      const o = getComputedStyle(scrollRoot).overflowY
+      if (o === 'auto' || o === 'scroll') break
+      scrollRoot = scrollRoot.parentElement
+    }
+    const root = scrollRoot as HTMLElement
+    // eslint-disable-next-line no-console
+    console.log('[REL][init]', {
+      scrollRoot: root?.tagName,
+      scrollHeight: root?.scrollHeight,
+      clientHeight: root?.clientHeight,
+      scrollTop: root?.scrollTop,
+    })
+    let iter = 0
+    const obs = new IntersectionObserver(([entry]) => {
+      iter++
+      const stickyH = stickyBarRef.current?.offsetHeight ?? 0
+      const containerPad = containerRef.current?.style.paddingBottom ?? ''
+      // eslint-disable-next-line no-console
+      console.log('[REL][IO]', {
+        iter,
+        intersecting: entry.isIntersecting,
+        scrollTop: root?.scrollTop,
+        scrollHeight: root?.scrollHeight,
+        clientHeight: root?.clientHeight,
+        maxScroll: root ? root.scrollHeight - root.clientHeight : 0,
+        sentinelTop: entry.boundingClientRect.top.toFixed(0),
+        rootBoundsTop: entry.rootBounds?.top.toFixed(0) ?? 'null',
+        stickyH,
+        containerPad,
+        override: overrideManualRef.current,
+      })
+      if (entry.isIntersecting) {
+        overrideManualRef.current = false
+        setFiltrosColapsados(prev => {
+          if (!prev) return prev
+          // eslint-disable-next-line no-console
+          console.log('[REL][→false] removendo padding')
+          if (containerRef.current) containerRef.current.style.paddingBottom = ''
+          return false
+        })
+      } else if (!overrideManualRef.current) {
+        setFiltrosColapsados(prev => {
+          if (prev) return prev
+          const sticky = stickyBarRef.current
+          const container = containerRef.current
+          if (sticky && container) {
+            const reducao = Math.max(0, sticky.offsetHeight - 50)
+            container.style.paddingBottom = `${reducao}px`
+            // eslint-disable-next-line no-console
+            console.log('[REL][→true] aplicando padding', { reducao })
+          }
+          return true
+        })
+      }
+    }, { root: scrollRoot, threshold: 0 })
+    obs.observe(sentinel)
+    return () => obs.disconnect()
+  }, [])
+  const expandirFiltros = useCallback(() => {
+    overrideManualRef.current = true
+    setFiltrosColapsados(false)
+  }, [])
+  const colapsarFiltros = useCallback(() => {
+    overrideManualRef.current = true
+    setFiltrosColapsados(true)
+  }, [])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [lancamentoEditando, setLancamentoEditando] = useState<any | null>(null)
   const [expandidosDrill,   setExpandidosDrill]    = useState<Set<string>>(new Set())
@@ -896,11 +979,81 @@ export default function RelatoriosPage() {
   }, [nivel, grupos])
 
   return (
-    <div className="p-5 min-h-screen" style={{ background: '#0e1320' }}>
+    <div
+      ref={containerRef}
+      className="p-5 min-h-screen relative"
+      style={{ background: '#0e1320', overflowAnchor: 'none' }}
+    >
+      {/* Sentinel pro IntersectionObserver — absolute pra que sua posição
+          NÃO seja afetada quando o sticky bar abaixo encolhe. */}
+      <div
+        ref={sentinelRef}
+        aria-hidden="true"
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 200, pointerEvents: 'none' }}
+      />
+      {/* Sticky: topbar + filtros — encolhe automaticamente ao rolar.
+          Quando colapsado, mostra só uma barra fina com botão pra reexibir
+          os filtros + título + botão Gerar/atualizar. */}
+      <div ref={stickyBarRef} className="sticky top-0 z-20 -mx-5 px-5 pt-4 pb-2"
+        style={{ background: 'var(--bg-page, #0d1220)', borderBottom: filtrosColapsados ? '1px solid rgba(255,255,255,0.08)' : 'none' }}>
+        {filtrosColapsados ? (
+          // ── Versão compacta (auto ao rolar) ──
+          <div className="flex items-center gap-2 mb-2">
+            <button
+              onClick={expandirFiltros}
+              title="Mostrar filtros"
+              aria-label="Mostrar filtros"
+              className="relative flex items-center justify-center rounded-lg border transition-all flex-shrink-0"
+              style={{
+                width: 34, height: 34,
+                borderColor: 'rgba(255,255,255,0.12)',
+                color: '#8b92a8',
+                background: 'rgba(255,255,255,0.03)',
+              }}
+            >
+              <Filter size={14} />
+            </button>
+            <h1 className="text-[16px] font-semibold flex-1 truncate" style={{ color: '#e8eaf0' }}>
+              Relatório por categoria
+              {meses.length > 0 && (
+                <span className="ml-2 text-[14px] font-normal" style={{ color: '#8b92a8' }}>
+                  · {mesLabel(meses[0])} → {mesLabel(meses[meses.length - 1])}
+                </span>
+              )}
+            </h1>
+            {buscado && (
+              <button
+                onClick={() => buscar()}
+                disabled={loading}
+                title="Atualizar relatório"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[14px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
+                style={{ background: '#00c896', color: '#0a0f1a' }}
+              >
+                {loading
+                  ? <RefreshCw size={12} className="animate-spin" />
+                  : <RefreshCw size={12} />
+                }
+                <span className="hidden sm:inline">Atualizar</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
       {/* Topbar */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-[22px] font-bold" style={{ color: '#e8eaf0' }}>Relatório por categoria</h1>
+          <h1 className="text-[22px] font-bold flex items-center gap-2" style={{ color: '#e8eaf0' }}>
+            Relatório por categoria
+            <button
+              onClick={colapsarFiltros}
+              title="Recolher filtros"
+              aria-label="Recolher filtros"
+              className="p-1 rounded-md border transition-colors"
+              style={{ borderColor: 'rgba(255,255,255,0.12)', color: '#8b92a8' }}
+            >
+              <ChevronUp size={14} />
+            </button>
+          </h1>
           <p className="text-[15px] mt-0.5" style={{ color: '#8b92a8' }}>Receitas e despesas agrupadas por categoria</p>
         </div>
         <div data-tutorial="relatorios-ocultar">
@@ -1013,6 +1166,9 @@ export default function RelatoriosPage() {
           <p className="text-[14px] mt-3" style={{ color: '#4a5168' }}>
             {meses.length} {meses.length === 1 ? 'mês' : 'meses'}: {mesLabel(meses[0])} {">"} {mesLabel(meses[meses.length - 1])}
           </p>
+        )}
+      </div>
+          </>
         )}
       </div>
 
@@ -1137,12 +1293,15 @@ export default function RelatoriosPage() {
             />
           )}
 
-          {/* Tabela principal */}
-          {!vistaPareto && <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl overflow-hidden" data-tutorial="relatorios-tabela">
-            <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+          {/* Tabela principal. SEM wrapper com overflow:
+              qualquer overflow no caminho entre <thead sticky> e <main>
+              quebra o sticky vertical. Em viewports estreitas, a página
+              inteira (<main>) rola horizontalmente — não a tabela. */}
+          {!vistaPareto && <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl" data-tutorial="relatorios-tabela">
               <table className="w-full border-collapse" style={{ minWidth: 600 }}>
-                {/* Cabecalho */}
-                <thead className="sticky top-0 z-30">
+                {/* Cabecalho — sticky abaixo da topbar (altura da topbar
+                    colapsada ~50px). */}
+                <thead className="sticky z-30" style={{ top: filtrosColapsados ? 50 : 0 }}>
                   <tr style={{ background: '#1a1f2e' }}>
                     <th className="px-4 py-3 text-left sticky left-0 z-40 border-b border-white/10"
                       style={{ background: '#1a1f2e', minWidth: 220 }}>
@@ -1313,7 +1472,6 @@ export default function RelatoriosPage() {
                   </tr>
                 </tbody>
               </table>
-            </div>
           </div>}
         </>
       )}
@@ -1506,7 +1664,20 @@ export default function RelatoriosPage() {
         </div>
       )}
 
-      <TutorialTour pageKey="relatorios-v1" passos={TUTORIAL_RELATORIOS} />
+      <TutorialTour
+        pageKey="relatorios-v1"
+        passos={TUTORIAL_RELATORIOS}
+        onStep={(idx) => {
+          // Ao sair do passo "Gerar relatório" (grupo: 'acao-gerar'),
+          // dispara a busca para que os elementos seguintes da tela
+          // (cards, tabela, gráficos) fiquem visíveis quando o tutorial
+          // for destacá-los.
+          const anterior = TUTORIAL_RELATORIOS[idx - 1]
+          if (anterior?.grupo === 'acao-gerar' && !buscado && !loading) {
+            buscar()
+          }
+        }}
+      />
     </div>
   )
 }

@@ -14,7 +14,7 @@ import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_EXTRATO } from '../lib/tutoriaisPaginas'
 import { useLancamentos, fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
-import { formatBRL, mesLabel, proximoMes, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
+import { formatBRL, mesLabel, proximoMes, hojeLocal, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { apiMutate } from '../lib/api'
 import { usePageState } from '../context/PageStateContext'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
@@ -421,7 +421,7 @@ export default function LancamentosPage() {
     })
   }, [])
 
-  const hoje = useMemo(() => new Date().toISOString().split('T')[0], [])
+  const hoje = useMemo(() => hojeLocal(), [])
 
   // ── Pesquisa ──────────────────────────────────────────────────
   const [refreshing,        setRefreshing]        = useState(false)

@@ -16,13 +16,12 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Shuffle } from 'lucide-react'
 import MascoteDica from './MascoteDica'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
+import { useTutoriaisVistos } from '../../hooks/useTutoriaisVistos'
 import {
   falaTutorial,
   DICAS,
   type PaginaTutorial,
 } from '../../lib/conteudoMascotes'
-
-const STORAGE_PREFIX = 'av-tut-visto-'
 
 export default function MascoteTutorial({
   pagina,
@@ -31,8 +30,9 @@ export default function MascoteTutorial({
   pagina:     PaginaTutorial
   className?: string
 }) {
-  const { mascote } = useMascotePreferido()
-  const storageKey = `${STORAGE_PREFIX}${pagina}-${mascote}`
+  const { mascote, semMascote } = useMascotePreferido()
+  const { loading: tutoriaisLoading, foiVisto, marcarVisto } = useTutoriaisVistos()
+  const chaveVisto = `tutorial-${pagina}-${mascote}`
 
   // `null` enquanto não decidimos (1º render); depois "tutorial" ou um
   // índice numérico (0..N-1) apontando pra DICAS[mascote][idx].
@@ -42,37 +42,33 @@ export default function MascoteTutorial({
     const p = DICAS[mascote]
     if (p.length <= 1) return 0
     let proximo = Math.floor(Math.random() * p.length)
-    // Evita repetir a mesma dica em sequência (se possível)
     if (proximo === atual) proximo = (proximo + 1) % p.length
     return proximo
   }, [mascote])
 
-  // Lê o "já viu tutorial" do localStorage ao montar / trocar mascote.
+  // Decide tutorial vs dica com base no banco (não mais localStorage).
+  // Aguarda o estado dos tutoriais carregar antes de decidir — assim
+  // mesmo num browser/dispositivo novo, se o tutorial já foi visto antes,
+  // não vai aparecer de novo.
   useEffect(() => {
-    // Limpeza one-shot: chaves do schema antigo (com X dispensável)
-    // ficavam em `av-tutorial-...`. Removemos pra esquecer "fechado".
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const k = localStorage.key(i)
-      if (k && k.startsWith('av-tutorial-')) localStorage.removeItem(k)
-    }
-
-    const jaViu = localStorage.getItem(storageKey) === '1'
-    if (jaViu) {
-      // Vai direto pra dica aleatória.
+    if (tutoriaisLoading) return
+    if (foiVisto(chaveVisto)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setEstado(idxRandomDica())
     } else {
-      // Mostra o tutorial e marca como visto.
-      localStorage.setItem(storageKey, '1')
+      // Mostra o tutorial e marca como visto no banco.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setEstado('tutorial')
+      void marcarVisto(chaveVisto)
     }
-  }, [storageKey, idxRandomDica])
+  }, [chaveVisto, tutoriaisLoading, foiVisto, marcarVisto, idxRandomDica])
 
   const tutorial = useMemo(() => falaTutorial(pagina, mascote), [pagina, mascote])
   const pool = DICAS[mascote]
 
-  if (estado === null) return null  // 1º paint — evita flash
+  // Modo "Nenhum mentor" — esconde balão/banner completamente.
+  if (semMascote) return null
+  if (estado === null) return null  // 1º paint / carregando — evita flash
 
   const exibindoTutorial = estado === 'tutorial'
   const dica = exibindoTutorial ? null : pool[estado]

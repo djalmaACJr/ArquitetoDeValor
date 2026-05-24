@@ -25,6 +25,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import Mascote, { type MascoteNome } from './Mascote'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
+import { useTutoriaisVistos } from '../../hooks/useTutoriaisVistos'
 
 export interface PassoTutorial {
   /** Seletor CSS do elemento a destacar (ex.: `[data-tutorial="filtros"]`). */
@@ -58,27 +59,28 @@ interface Props {
   onStep?: (idx: number, passo: PassoTutorial) => void
 }
 
-const STORAGE_PREFIX = 'av-tut-tour-'
-
 interface BoxRect { x: number; y: number; w: number; h: number }
 
 export default function TutorialTour({ pageKey, passos, onStep }: Props) {
   const { mascote } = useMascotePreferido()
+  const { loading: tutoriaisLoading, foiVisto, marcarVisto } = useTutoriaisVistos()
   const [aberto,  setAberto]  = useState(false)
   const [idx,     setIdx]     = useState(0)
   const [rect,    setRect]    = useState<BoxRect | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const storageKey = `${STORAGE_PREFIX}${pageKey}`
+  const chaveVisto = `tour-${pageKey}`
 
-  // Auto-trigger na 1ª visita (somente se houver passos)
+  // Auto-trigger na 1ª visita (somente se houver passos).
+  // Espera o estado dos tutoriais carregar do banco — evita abrir o tour
+  // por engano enquanto a flag de "já visto" ainda não chegou.
   useEffect(() => {
     if (!passos.length) return
-    if (localStorage.getItem(storageKey) === '1') return
-    // Pequeno delay pra esperar a página renderizar
+    if (tutoriaisLoading) return
+    if (foiVisto(chaveVisto)) return
     const t = setTimeout(() => { setAberto(true); setIdx(0) }, 600)
     return () => clearTimeout(t)
-  }, [storageKey, passos.length])
+  }, [chaveVisto, passos.length, tutoriaisLoading, foiVisto])
 
   // Trigger global — qualquer lugar do app pode disparar `av-abrir-tutorial`
   // e o tour da página atual abre. F1 também aciona (handler em AppLayout).
@@ -204,7 +206,7 @@ export default function TutorialTour({ pageKey, passos, onStep }: Props) {
 
   function fechar() {
     setAberto(false)
-    localStorage.setItem(storageKey, '1')
+    void marcarVisto(chaveVisto)
   }
   function proximo() {
     if (idx + 1 < passos.length) setIdx(i => i + 1)

@@ -6,6 +6,7 @@ import Sidebar from './Sidebar'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useAutoLogout } from '../../hooks/useAutoLogout'
+import { mesAtual } from '../../lib/utils'
 
 export default function AppLayout() {
   const qc = useQueryClient()
@@ -26,7 +27,7 @@ export default function AppLayout() {
   // Pré-aquece o cache dos meses vizinhos ao mês atual logo após o login,
   // antes mesmo do usuário navegar para a tela de Lançamentos.
   useEffect(() => {
-    const mes = new Date().toISOString().slice(0, 7)
+    const mes = mesAtual()
     prefetchLancamentosVizinhos(qc, mes)
   }, [qc])
 

@@ -252,8 +252,9 @@ export const TUTORIAL_RELATORIOS: PassoTutorial[] = [
   },
   {
     titulo: 'Gerar relatório',
-    texto: 'Clique para carregar e consolidar os lançamentos de todos os meses do período. Quanto maior o intervalo, mais alguns segundos pode levar — o sistema busca mês a mês em paralelo.',
+    texto: 'Clique para carregar e consolidar os lançamentos de todos os meses do período. Quanto maior o intervalo, mais alguns segundos pode levar — o sistema busca mês a mês em paralelo.\n\nAo avançar pro próximo passo, o tutorial vai disparar essa busca por você — assim os elementos seguintes ficam visíveis pra explicar.',
     seletor: '[data-tutorial="relatorios-gerar"]',
+    grupo: 'acao-gerar',
   },
   {
     titulo: 'Ocultar valores',
@@ -423,8 +424,9 @@ export const TUTORIAL_COMPARATIVO: PassoTutorial[] = [
   },
   {
     titulo: 'Comparar',
-    texto: 'Após definir os períodos, clique em Comparar para carregar os dados. O botão só fica ativo quando os dois períodos têm a mesma duração.',
+    texto: 'Após definir os períodos, clique em Comparar para carregar os dados. O botão só fica ativo quando os dois períodos têm a mesma duração.\n\nAo avançar pro próximo passo, o tutorial vai disparar a comparação por você — assim os elementos seguintes (cards, gráficos, análise) ficam visíveis pra explicar.',
     seletor: '[data-tutorial="comparativo-comparar"]',
+    grupo: 'acao-comparar',
   },
   {
     titulo: 'Ocultar valores',
@@ -435,26 +437,24 @@ export const TUTORIAL_COMPARATIVO: PassoTutorial[] = [
     titulo: 'Cards de resumo',
     texto: 'Receita total, despesa total, resultado líquido e variações percentuais entre os dois períodos. Os cards "Maior Aumento" e "Maior Redução" destacam as categorias com mais impacto.',
     seletor: '[data-tutorial="comparativo-kpis"]',
-    flutuante: true,
   },
   {
     titulo: 'Gráficos comparativos',
     texto: '"Receitas vs Despesas" mostra os totais dos dois períodos lado a lado. "Top Categorias" exibe as 10 com maior variação absoluta entre os períodos.',
     seletor: '[data-tutorial="comparativo-graficos"]',
-    flutuante: true,
+    posicao: 'acima',
   },
   {
     titulo: 'Tendência Financeira',
     texto: 'Evolução mês a mês dos últimos 12 meses — receitas, despesas e saldo. A tabela abaixo do gráfico mostra os valores exatos alinhados com o eixo X.',
     seletor: '[data-tutorial="comparativo-tendencia"]',
-    flutuante: true,
     posicao: 'acima',
   },
   {
     titulo: 'Análise por Categoria',
     texto: 'Tabela com todas as categorias e suas variações. Clique em qualquer valor para ver os lançamentos daquela categoria no período. Use os toggles "Tabela/Pareto" e "Categoria/Resumo" para mudar a visualização.',
     seletor: '[data-tutorial="comparativo-analise"]',
-    flutuante: true,
+    posicao: 'acima',
   },
   {
     titulo: 'Insights automáticos',
@@ -466,7 +466,6 @@ export const TUTORIAL_COMPARATIVO: PassoTutorial[] = [
     titulo: 'Exportar',
     texto: 'Exporta o comparativo para Excel refletindo o agrupamento, filtro e insights ativos no momento.',
     seletor: '[data-tutorial="comparativo-exportar"]',
-    flutuante: true,
   },
   {
     titulo: 'Tudo pronto!',

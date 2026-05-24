@@ -7,14 +7,13 @@ export function useAuth() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data, error }) => {
-      // Se houver erro ou sessão expirada/inválida, limpa e redireciona para login
-      if (error || !data.session) {
-        supabase.auth.signOut()
-        setSession(null)
-      } else {
-        setSession(data.session)
-      }
+    // IMPORTANTE: não chame `signOut()` aqui quando `data.session` for
+    // null. Cada componente que usa `useAuth` monta esse efeito e roda
+    // `getSession()` em paralelo. Em race com `signIn()` em andamento
+    // (clique no botão Entrar), o signOut "limpa" a sessão recém-criada
+    // e o login parece falhar. Apenas reflete o estado atual.
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session ?? null)
       setLoading(false)
     })
 

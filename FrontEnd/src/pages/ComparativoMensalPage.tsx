@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { apiFetch } from '../lib/api'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
-import { formatBRL, mesLabel, mesAtual } from '../lib/utils'
+import { formatBRL, mesLabel, mesAtual, dataParaYMD } from '../lib/utils'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
 import { useOcultarValores } from '../hooks/useOcultarValores'
 import ParetoChart from '../components/relatorios/ParetoChart'
@@ -79,7 +79,7 @@ function diffDays(inicio: string, fim: string): number {
 function shiftDate(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00`)
   d.setDate(d.getDate() + days)
-  return d.toISOString().split('T')[0]
+  return dataParaYMD(d)
 }
 
 function ultimoDiaMes(mes: string): string {
@@ -766,8 +766,11 @@ export default function ComparativoMensalPage() {
       {
         label: 'Período final',
         data: [resumoB.totalReceitas, resumoB.totalDespesas, resumoB.resultado],
-        backgroundColor: ['rgba(0,200,150,0.15)', 'rgba(248,113,113,0.15)', 'rgba(77,166,255,0.15)'],
-        borderColor:     ['rgba(0,200,150,0.4)', 'rgba(248,113,113,0.4)', 'rgba(77,166,255,0.4)'],
+        // Mantém a mesma família de cor do Período inicial mas com alpha
+        // menor + borda opaca — fica visível em tema dia E tema noite
+        // (antes era 0.15, que sumia no fundo claro).
+        backgroundColor: ['rgba(0,200,150,0.25)', 'rgba(248,113,113,0.25)', 'rgba(77,166,255,0.25)'],
+        borderColor:     ['#00c896', '#f87171', '#4da6ff'],
         borderWidth: 1.5, borderRadius: 6,
       },
     ],
@@ -791,8 +794,10 @@ export default function ComparativoMensalPage() {
         {
           label: 'Período final',
           data: top.map(c => c.atual),
-          backgroundColor: 'rgba(255,255,255,0.08)',
-          borderColor:     'rgba(255,255,255,0.2)',
+          // Cinza-azulado neutro com contraste em ambos os temas
+          // (antes era rgba(255,255,255,0.08) que sumia no tema claro).
+          backgroundColor: 'rgba(100,116,139,0.45)',
+          borderColor:     'rgba(71,85,105,0.85)',
           borderWidth: 1, borderRadius: 3,
         },
       ],
@@ -1575,10 +1580,13 @@ export default function ComparativoMensalPage() {
                   </div>
                 )}
                 {insights.map((ins, i) => {
+                  // Alpha mais alto no fundo + borda em alpha 60 (`99`) pra ficar visível
+                  // no tema dia (fundo branco). Antes era 0.07 no bg + alpha 25 (~15%) na
+                  // borda — sumiu no claro.
                   const cfg =
-                    ins.tipo === 'alerta'   ? { bg: 'rgba(248,113,113,0.07)', cor: '#f87171', Icon: AlertTriangle }
-                    : ins.tipo === 'positivo' ? { bg: 'rgba(0,200,150,0.07)',   cor: '#00c896', Icon: CheckCircle }
-                    :                          { bg: 'rgba(77,166,255,0.07)',   cor: '#4da6ff', Icon: Info }
+                    ins.tipo === 'alerta'   ? { bg: 'rgba(248,113,113,0.14)', cor: '#f87171', Icon: AlertTriangle }
+                    : ins.tipo === 'positivo' ? { bg: 'rgba(0,200,150,0.14)',   cor: '#00c896', Icon: CheckCircle }
+                    :                          { bg: 'rgba(77,166,255,0.14)',   cor: '#4da6ff', Icon: Info }
                   const ativo = insightAtivo === i
                   const clicavel = ins.catKeys.length > 0
                   return (
@@ -1601,14 +1609,14 @@ export default function ComparativoMensalPage() {
                       className="w-full text-left flex gap-2.5 p-3 rounded-xl transition-all"
                       title={clicavel ? 'Clique para destacar as categorias relacionadas' : undefined}
                       style={{
-                        background: ativo ? `${cfg.cor}1A` : cfg.bg,
-                        border: `1px solid ${ativo ? cfg.cor : cfg.cor + '25'}`,
+                        background: ativo ? `${cfg.cor}2E` : cfg.bg,
+                        border: `1px solid ${ativo ? cfg.cor : cfg.cor + '70'}`,
                         cursor: clicavel ? 'pointer' : 'default',
                         opacity: clicavel ? 1 : 0.85,
                       }}
                     >
                       <cfg.Icon size={14} style={{ color: cfg.cor, flexShrink: 0, marginTop: 1 }} />
-                      <p className="text-[15px] leading-relaxed flex-1" style={{ color: '#c5cad8' }}>
+                      <p className="text-[15px] leading-relaxed flex-1" style={{ color: 'var(--text-secondary)' }}>
                         {ins.texto}
                         {clicavel && (
                           <span className="ml-2 text-[13px] font-semibold" style={{ color: cfg.cor }}>
@@ -1743,7 +1751,19 @@ export default function ComparativoMensalPage() {
         />
       )}
 
-      <TutorialTour pageKey="comparativo-v1" passos={TUTORIAL_COMPARATIVO} />
+      <TutorialTour
+        pageKey="comparativo-v1"
+        passos={TUTORIAL_COMPARATIVO}
+        onStep={(idx) => {
+          // Ao sair do passo "Comparar" (grupo: 'acao-comparar'), dispara
+          // a busca para que os elementos seguintes (cards, gráficos,
+          // tabela) fiquem visíveis quando o tutorial for destacá-los.
+          const anterior = TUTORIAL_COMPARATIVO[idx - 1]
+          if (anterior?.grupo === 'acao-comparar' && !buscado && !loading && diasOk && !periodoInvalido) {
+            buscar()
+          }
+        }}
+      />
     </div>
   )
 }

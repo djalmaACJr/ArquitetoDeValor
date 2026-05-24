@@ -10,7 +10,7 @@ import DrawerLancamento from '../components/ui/DrawerLancamento'
 import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useCategorias } from '../hooks/useCategorias'
 import { apiMutate } from '../lib/api'
-import { formatBRL, mesLabel } from '../lib/utils'
+import { formatBRL, mesLabel, hojeLocal } from '../lib/utils'
 import BotaoExpandirTodas from '../components/relatorios/BotaoExpandirTodas'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteDica from '../components/ui/MascoteDica'
@@ -322,7 +322,7 @@ const tipFmt      = (v: unknown) => formatBRL(Number(v))
 
 // ── Page ─────────────────────────────────────────────────────────
 export default function AssinaturasPage() {
-  const hoje = useMemo(() => new Date().toISOString().split('T')[0], [])
+  const hoje = useMemo(() => hojeLocal(), [])
   const [lancamentos, setLancamentos] = useState<Lancamento[]>(() => _saved?.lancamentos ?? [])
   const [loading, setLoading]         = useState(!_saved)
   const [busca, setBusca]             = useState('')
@@ -789,9 +789,14 @@ export default function AssinaturasPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {insights.map((ins, i) => (
                   <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg"
-                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    style={{
+                      // Antes era rgba(255,255,255,0.03/0.06) — invisível em fundo claro.
+                      // Tokens do tema garantem contraste em ambos os modos.
+                      background:  'var(--bg-elevated)',
+                      border:      '1px solid var(--border-subtle)',
+                    }}>
                     <span className="text-[19px] leading-none mt-0.5 flex-shrink-0">{ins.icon}</span>
-                    <p className="text-[15px] leading-relaxed" style={{ color: '#c8cad8' }}>{ins.text}</p>
+                    <p className="text-[15px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{ins.text}</p>
                   </div>
                 ))}
               </div>

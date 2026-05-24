@@ -87,7 +87,7 @@ function Alerta({ fb }: { fb: Feedback | null }) {
  *  "triste" por um instante antes de voltar para sentado — feedback de
  *  transição. A escolha persiste em `arqvalor.usuarios.mascote_preferido`. */
 function SecaoMascote() {
-  const { mascote, setMascote, apelidos, apelidoDe, definirApelido } = useMascotePreferido()
+  const { mascote, preferencia, setMascote, apelidos, apelidoDe, definirApelido } = useMascotePreferido()
   // Mascote "deposto": fica triste por uns segundos após perder o ativo.
   const [tristePassageiro, setTristePassageiro] = useState<MascoteNome | null>(null)
   // Modal de apelido: aberto ao selecionar mascote SEM apelido ainda,
@@ -110,7 +110,7 @@ function SecaoMascote() {
   }
 
   const aoTrocar = (id: MascoteNome) => {
-    if (id === mascote) return  // re-clique no ativo: não faz nada (use botão renomear)
+    if (id === preferencia) return  // re-clique no ativo: não faz nada (use botão renomear)
     const anterior = mascote
     setMascote(id)
     setTristePassageiro(anterior)
@@ -120,6 +120,12 @@ function SecaoMascote() {
       setApelidoInput('')
       setModalApelido(id)
     }
+  }
+
+  // Troca pra modo especial ("aleatorio" ou "nenhum") — sem modal de apelido.
+  const aoTrocarPreferencia = (p: 'aleatorio' | 'nenhum') => {
+    if (p === preferencia) return
+    setMascote(p)
   }
 
   const salvarApelido = async () => {
@@ -135,7 +141,7 @@ function SecaoMascote() {
       </p>
       <div className="grid grid-cols-2 gap-2.5">
         {catalogo.map(m => {
-          const ativo = m.id === mascote
+          const ativo = m.id === preferencia  // só mascote individual conta como "ativo" aqui
           const triste = m.id === tristePassageiro
           // Pose por estado: ativo→feliz, triste passageiro→triste, default→sentado
           const pose: MascotePose = ativo ? 'feliz' : triste ? 'triste' : 'sentado'
@@ -202,6 +208,50 @@ function SecaoMascote() {
       <p className="text-[13px] text-white/30 mt-3 leading-relaxed">
         Toque novamente no mentor ativo para renomeá-lo.
       </p>
+
+      {/* Opções especiais — não são mascotes individuais */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-3">
+        {([
+          { id: 'aleatorio' as const, icone: '🎲', label: 'Aleatório', descricao: 'Um mentor diferente a cada dia.' },
+          { id: 'nenhum'    as const, icone: '🤐', label: 'Nenhum',    descricao: 'Sem balões nem dicas. Só o parecer do mês.' },
+        ]).map(opt => {
+          const ativo = opt.id === preferencia
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => aoTrocarPreferencia(opt.id)}
+              className="text-left rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-av-green/40 p-2.5"
+              style={{
+                borderColor: ativo ? '#00c896' : 'rgba(255,255,255,0.10)',
+                background:  ativo ? 'rgba(0,200,150,0.08)' : 'rgba(255,255,255,0.03)',
+              }}
+              aria-pressed={ativo}
+              title={opt.descricao}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex-shrink-0 rounded-xl flex items-center justify-center text-[34px]"
+                  style={{ width: 84, height: 84, background: 'rgba(255,255,255,0.04)' }}
+                >
+                  {opt.icone}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[16px] font-semibold text-white truncate">{opt.label}</p>
+                  {ativo && (
+                    <span className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: '#00c896' }}>
+                      ✓ Em uso
+                    </span>
+                  )}
+                  <p className="text-[13px] mt-1 leading-snug" style={{ color: '#8b92a8' }}>
+                    {opt.descricao}
+                  </p>
+                </div>
+              </div>
+            </button>
+          )
+        })}
+      </div>
 
       {/* Modal: pedir apelido para o mascote escolhido */}
       {modalApelido && (
@@ -462,11 +512,22 @@ function SecaoIA() {
   const editandoFormulario = adicionando || editando !== null
 
   return (
-    <Secao titulo="Integração com IA" icone={<Sparkles size={15}/>}>
-      <p className="text-[15px] mb-4 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-        Configure um ou mais provedores de IA. Só a configuração marcada como{' '}
-        <strong style={{ color: 'var(--text-primary)' }}>ativa</strong> é usada pelo chat com o mentor —
-        as outras ficam guardadas para troca rápida.
+    <Secao titulo="Conversa com IA" icone={<Sparkles size={15}/>}>
+      <p className="text-[15px] mb-2 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+        Quer poder <strong style={{ color: 'var(--text-primary)' }}>conversar com o seu mentor</strong> e
+        receber conselhos sobre as suas finanças? Para isso você precisa conectar
+        uma <em>inteligência artificial</em> (como o ChatGPT, Gemini ou Claude).
+      </p>
+      <p className="text-[14px] mb-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+        Como funciona: você cria uma <strong>conta gratuita</strong> em um desses serviços, pega uma
+        chave de acesso (parece uma senha longa) e cola aqui. A conversa fica entre você e a IA — a
+        gente só repassa a mensagem. <strong>Há opções 100% grátis</strong> (Gemini, OpenRouter,
+        Mistral, Cohere) que não pedem cartão.
+      </p>
+      <p className="text-[14px] mb-4 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+        Você pode salvar várias chaves. A que estiver marcada como{' '}
+        <strong style={{ color: 'var(--text-primary)' }}>ativa</strong> é a que o mentor vai usar
+        agora; as outras ficam guardadas para você trocar quando quiser.
       </p>
 
       {carregando ? (
@@ -609,7 +670,7 @@ function SecaoIA() {
                 border:      configs.length === 0 ? 'none' : '1px dashed var(--border-subtle)',
               }}
             >
-              + {configs.length === 0 ? 'Configurar primeira integração' : 'Adicionar outra configuração'}
+              + {configs.length === 0 ? 'Conectar uma IA' : 'Conectar outra IA'}
             </button>
           )}
 
@@ -621,11 +682,13 @@ function SecaoIA() {
               style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
             >
               <p className="text-[15px] font-semibold" style={{ color: 'var(--text-primary)' }}>
-                {editando ? 'Editar configuração' : 'Nova configuração'}
+                {editando ? 'Editar configuração' : 'Conectar uma IA'}
               </p>
 
               <div>
-                <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>Provedor</label>
+                <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Qual IA você quer usar?
+                </label>
                 <select
                   value={provedorId}
                   onChange={e => { setProvedorId(e.target.value); setFb(null) }}
@@ -640,7 +703,7 @@ function SecaoIA() {
                 >
                   {PROVEDORES.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.label} {p.gratuito ? '— Grátis' : '— Pago'}
+                      {p.label} {p.gratuito ? '— Grátis (sem cartão)' : '— Pago (precisa cartão)'}
                     </option>
                   ))}
                 </select>
@@ -651,14 +714,14 @@ function SecaoIA() {
                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-semibold uppercase tracking-wider"
                       style={{ background: 'rgba(0,200,150,0.15)', color: '#00c896', border: '1px solid rgba(0,200,150,0.4)' }}
                     >
-                      ✓ Tier gratuito (sem cartão)
+                      ✓ Grátis · sem cartão
                     </span>
                   ) : (
                     <span
                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-semibold uppercase tracking-wider"
                       style={{ background: 'rgba(240,180,41,0.12)', color: '#f0b429', border: '1px solid rgba(240,180,41,0.35)' }}
                     >
-                      $ Pago — exige cartão
+                      $ Pago · precisa de cartão
                     </span>
                   )}
                   <span
@@ -673,7 +736,8 @@ function SecaoIA() {
 
               <div>
                 <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>
-                  Apelido (opcional) <span className="text-[12px] ml-1" style={{ color: 'var(--text-faint)' }}>ex.: Pessoal, Trabalho</span>
+                  Apelido pra essa conexão (opcional)
+                  <span className="text-[12px] ml-1" style={{ color: 'var(--text-faint)' }}>ex.: "Pessoal", "Trabalho"</span>
                 </label>
                 <input
                   type="text"
@@ -700,7 +764,7 @@ function SecaoIA() {
                 >
                   <span className="text-[14px] font-medium flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
                     <Sparkles size={13} style={{ color: '#f0b429' }}/>
-                    Como obter a chave do {provedorAtual.label}
+                    Onde criar essa chave — passo a passo
                   </span>
                   <ChevronDown size={14} className="transition-transform"
                     style={{ color: 'var(--text-muted)', transform: expandido === provedorAtual.id ? 'rotate(180deg)' : 'rotate(0deg)' }}/>
@@ -720,7 +784,7 @@ function SecaoIA() {
                       className="inline-flex items-center gap-1.5 text-[13px] hover:opacity-80"
                       style={{ color: 'var(--av-blue)' }}
                     >
-                      <ArrowRight size={12}/> Abrir página do {provedorAtual.label}
+                      <ArrowRight size={12}/> Ir para o site do {provedorAtual.label}
                     </a>
                   </div>
                 )}
@@ -728,8 +792,9 @@ function SecaoIA() {
 
               <div>
                 <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>
-                  Chave da API{editando && (
-                    <span className="text-[12px] ml-2" style={{ color: 'var(--text-faint)' }}>(em branco mantém a atual)</span>
+                  Cole aqui a chave que você criou
+                  {editando && (
+                    <span className="text-[12px] ml-2" style={{ color: 'var(--text-faint)' }}>(deixe em branco se não quiser mudar)</span>
                   )}
                 </label>
                 <input
@@ -755,7 +820,7 @@ function SecaoIA() {
                   className="px-4 py-2 rounded-lg text-[15px] font-semibold transition-colors disabled:opacity-50"
                   style={{ background: '#00c896', color: '#0a0f1a' }}
                 >
-                  {salvando ? 'Salvando…' : (editando ? 'Salvar alterações' : 'Adicionar')}
+                  {salvando ? 'Salvando…' : (editando ? 'Salvar alterações' : 'Conectar')}
                 </button>
                 <button
                   type="button"
@@ -774,9 +839,9 @@ function SecaoIA() {
       )}
 
       <p className="text-[13px] mt-4 leading-relaxed" style={{ color: 'var(--text-faint)' }}>
-        🔒 Suas chaves ficam <strong style={{ color: 'var(--text-muted)' }}>guardadas em segredo</strong> — depois
-        de salvar, ninguém vê o valor de novo (nem você, nem nós). Para trocar a chave, é só digitar uma nova
-        aqui; deixar em branco mantém a anterior.
+        🔒 <strong style={{ color: 'var(--text-muted)' }}>Sua chave é guardada criptografada</strong> —
+        depois de salvar, ela não aparece em texto puro nem para você nem pra gente. Se quiser trocar,
+        é só colar uma nova aqui. Deixar em branco mantém a que já está salva.
       </p>
 
       {/* Chat com o mascote — abre ao clicar em "Conversar" num card */}

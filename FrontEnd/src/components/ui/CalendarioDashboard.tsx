@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Bell, CreditCard, Check, Trash2, Pencil, X, Plus, AlertTriangle, Flag, List } from 'lucide-react'
 import type { Lembrete, Conta } from '../../types'
-import { MESES_ABREV } from '../../lib/utils'
+import { MESES_ABREV, hojeLocal } from '../../lib/utils'
 
 const DOW_ABR = ['D','S','T','Q','Q','S','S']
 
@@ -32,10 +32,15 @@ export default function CalendarioDashboard({
 }: Props) {
   const [diaAberto, setDiaAberto] = useState<string | null>(null)
 
+  // Ao trocar de mês, fecha o painel de detalhes do dia (a data aberta
+  // pertencia ao mês anterior e o painel ficaria mostrando lembretes de
+  // um dia que não está mais visível na grade).
+  useEffect(() => { setDiaAberto(null) }, [mes])
+
   const [ano, m] = mes.split('-').map(Number)
   const totalDias   = new Date(ano, m, 0).getDate()
   const primeiroDow = new Date(ano, m - 1, 1).getDay()
-  const hoje        = new Date().toISOString().split('T')[0]
+  const hoje        = hojeLocal()
 
   const lembretesPorDia = new Map<string, Lembrete[]>()
   for (const l of lembretes) {

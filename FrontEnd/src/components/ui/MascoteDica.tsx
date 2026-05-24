@@ -36,10 +36,28 @@ export default function MascoteDica({
 }) {
   const [imgFalhou, setImgFalhou] = useState(false)
   const [chatAberto, setChatAberto] = useState(false)
-  const { apelidoDe } = useMascotePreferido()
+  const { apelidoDe, semMascote } = useMascotePreferido()
   if (imgFalhou) return null
 
   const apelido = apelidoDe(nome)
+
+  // Modo "Nenhum mentor" — renderiza apenas o texto (parecer/resumo)
+  // sem avatar e sem balão. Mantém a informação relevante mas remove
+  // a presença do personagem.
+  if (semMascote) {
+    return (
+      <div
+        className={`rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed border ${className}`}
+        style={{
+          background:  'var(--bg-elevated)',
+          borderColor: 'var(--border-subtle)',
+          color:       'var(--text-secondary)',
+        }}
+      >
+        {texto}
+      </div>
+    )
+  }
 
   return (
     <div className={`flex items-center gap-3 ${className}`}>

@@ -8,7 +8,7 @@ import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { ChevronDown, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus, Search } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { log } from '../lib/logger'
-import { mesLabel, formatBRL, formatData, proximoMes, MESES_ABREV, CORES_CATEGORIA } from '../lib/utils'
+import { mesLabel, formatBRL, formatData, proximoMes, hojeLocal, mesAtual, dataParaYMD, MESES_ABREV, CORES_CATEGORIA } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import TutorialTour from '../components/ui/TutorialTour'
@@ -104,7 +104,7 @@ const CardSaldo = memo(function CardSaldo({ contas, oculto, mes, historico, modo
   modo: 'hoje' | 'fim'
   setModo: (m: 'hoje' | 'fim') => void
 }) {
-  const mesAtualStr = new Date().toISOString().slice(0, 7)
+  const mesAtualStr = mesAtual()
   const isMesAtual  = mes === mesAtualStr
   // Saldo ate hoje (soma dos saldos_atual das contas - posicao real agora)
   const saldoHoje = contas.reduce((s, c) => s + c.saldo_atual, 0)
@@ -137,7 +137,7 @@ const CardSaldo = memo(function CardSaldo({ contas, oculto, mes, historico, modo
       return `Saldo em ${ultimoDia}/${m}/${ano}`
     }
     return modo === 'hoje'
-      ? `Posição em ${formatData(new Date().toISOString().split('T')[0])}`
+      ? `Posição em ${formatData(hojeLocal())}`
       : 'Projetado até fim do mês'
   })()
 
@@ -264,15 +264,15 @@ const CardAlertas = memo(function CardAlertas({
     if (!filtravel) return itens
     if (periodo === 'mes') {
       // Somente do mes selecionado no dashboard
-      const anoMes = mes ?? new Date().toISOString().slice(0, 7)
+      const anoMes = mes ?? mesAtual()
       return itens.filter(t => t.data.startsWith(anoMes))
     }
     // 30 dias: a partir de HOJE ate hoje+30 - independente do mes selecionado
     const hoje = new Date()
     const limite = new Date(hoje)
     limite.setDate(hoje.getDate() + 30)
-    const limiteStr = limite.toISOString().slice(0, 10)
-    const hojeStr   = hoje.toISOString().slice(0, 10)
+    const limiteStr = dataParaYMD(limite)
+    const hojeStr   = dataParaYMD(hoje)
     return itens.filter(t => t.data > hojeStr && t.data <= limiteStr)
   })()
 
@@ -301,7 +301,7 @@ const CardAlertas = memo(function CardAlertas({
           {aberto ? <ChevronDown size={13} className="text-gray-400"/> : <ChevronRight size={13} className="text-gray-400"/>}
         </button>
         {filtravel && aberto && (() => {
-          const mesAtualStr = new Date().toISOString().slice(0, 7)
+          const mesAtualStr = mesAtual()
           const isMesAtual  = !mes || mes === mesAtualStr
           if (!isMesAtual) return null
           return (
@@ -1013,7 +1013,7 @@ const CardContas = memo(function CardContas({ contas, oculto, mes, modo, setModo
   ultimaTxPorConta: Record<string, string>;
 }) {
   const navigate = useNavigate()
-  const mesAtualStr = new Date().toISOString().slice(0, 7)
+  const mesAtualStr = mesAtual()
   const isMesAtual = mes === mesAtualStr
 
   // Saldo na data-alvo calculado client-side: parte do saldo PAGO no fim do
@@ -1024,9 +1024,9 @@ const CardContas = memo(function CardContas({ contas, oculto, mes, modo, setModo
   //   • "Até fim do mês" (atual) ou meses futuros → inclui PENDENTE+PROJECAO
   //     (projeção de saldo final). Com isso a opção do dropdown muda valor.
   const dataAlvo = (() => {
-    const hoje = new Date().toISOString().split('T')[0]
+    const hoje = hojeLocal()
     const [y, m] = mes.split('-').map(Number)
-    const ultimoDia = new Date(y, m, 0).toISOString().split('T')[0]
+    const ultimoDia = dataParaYMD(new Date(y, m, 0))
     if (isMesAtual) return modo === 'hoje' ? hoje : ultimoDia
     return ultimoDia
   })()
@@ -1175,7 +1175,7 @@ function PainelTodosLembretes({
   onToggle: (id: string, status: 'PENDENTE' | 'CONCLUIDO') => void
   onNovo: () => void
 }) {
-  const hoje = new Date().toISOString().split('T')[0]
+  const hoje = hojeLocal()
   const [verTodos, setVerTodos] = useState(false)
 
   const sorted = [...lembretes].sort((a, b) => a.data.localeCompare(b.data))

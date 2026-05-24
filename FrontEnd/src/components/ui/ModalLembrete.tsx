@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, Bell, Check } from 'lucide-react'
 import { useLembretes } from '../../hooks/useLembretes'
+import { hojeLocal } from '../../lib/utils'
 import type { Lembrete } from '../../types'
 
 interface Props {
@@ -13,7 +14,7 @@ interface Props {
 }
 
 export default function ModalLembrete({ aberto, onFechar, lembrete, dataInicial, descricaoInicial, onSalvo }: Props) {
-  const hoje = new Date().toISOString().split('T')[0]
+  const hoje = hojeLocal()
   const { criar, editar } = useLembretes()
 
   const [data,      setData]      = useState(dataInicial ?? hoje)

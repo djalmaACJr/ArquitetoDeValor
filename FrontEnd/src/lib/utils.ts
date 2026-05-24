@@ -61,16 +61,27 @@ export function mesLabel(
 }
 
 export function mesAtual(): string {
-  const d = new Date()
+  return dataParaYM(new Date())
+}
+
+// Converte um Date em string "YYYY-MM-DD" no fuso LOCAL (não UTC).
+//
+// REGRA DE OURO: NUNCA usar `<date>.toISOString().slice(0, 10)` para
+// representar uma data civil — toISOString devolve UTC e em UTC-3 (BR)
+// vira o dia seguinte a partir das 21h local. Use SEMPRE esta função
+// (ou `hojeLocal()` quando o Date é `new Date()`).
+export function dataParaYMD(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Mesmo formato, mas para o ano-mês "YYYY-MM".
+export function dataParaYM(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
 // Data de hoje no fuso LOCAL no formato YYYY-MM-DD.
-// Não usar `new Date().toISOString().split('T')[0]` — toISOString devolve UTC
-// e em UTC-3 vira o dia seguinte a partir das 21h local.
 export function hojeLocal(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return dataParaYMD(new Date())
 }
 
 // Avança/retrocede `delta` meses sobre "YYYY-MM". Retorna nova string "YYYY-MM".
@@ -83,16 +94,14 @@ export function proximoMes(ym: string, delta: number): string {
 // Última data (YYYY-MM-DD) do mês "YYYY-MM".
 export function ultimoDiaMes(ym: string): string {
   const [y, m] = ym.split('-').map(Number)
-  const d = new Date(y, m, 0) // dia 0 do mês seguinte = último dia do mês atual
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return dataParaYMD(new Date(y, m, 0)) // dia 0 do mês seguinte = último dia do mês atual
 }
 
 // Última data (YYYY-MM-DD) do mês anterior a "YYYY-MM". Útil para
 // calcular saldo-base usado por Dashboard / Extrato.
 export function ultimoDiaMesAnterior(ym: string): string {
   const [y, m] = ym.split('-').map(Number)
-  const d = new Date(y, m - 1, 0)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return dataParaYMD(new Date(y, m - 1, 0))
 }
 
 export function mesesDisponiveis(qtd = 12): string[] {

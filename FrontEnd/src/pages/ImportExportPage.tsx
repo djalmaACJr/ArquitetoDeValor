@@ -8,6 +8,7 @@ import {
 import { apiFetch, apiMutate, extrairLista } from '../lib/api'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { log as logDev } from '../lib/logger'
+import { mesAtual as mesAtualLocal, hojeLocal, dataParaYMD } from '../lib/utils'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { MonthPicker } from '../components/ui/MonthPicker'
@@ -117,7 +118,7 @@ async function apiComRetry(
   return apiMutate(path, method, body)
 }
 
-function mesAtual() { return new Date().toISOString().slice(0, 7) }
+const mesAtual = mesAtualLocal
 
 function mesMenos(m: string, n: number) {
   const [a, mo] = m.split('-').map(Number)
@@ -771,7 +772,7 @@ function SecaoImport() {
             const dataRaw = r['data'] ?? r['date'] ?? ''
             let dataFmt = ''
             if (dataRaw instanceof Date) {
-              dataFmt = dataRaw.toISOString().slice(0, 10)
+              dataFmt = dataParaYMD(dataRaw)
             } else {
               const s = String(dataRaw).trim()
               if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
@@ -790,7 +791,7 @@ function SecaoImport() {
               : tipoRaw === 'DESPESA' ? 'DESPESA'
               : valorNum < 0 ? 'DESPESA' : 'RECEITA'
             const statusRaw = String(r['status'] ?? '').toUpperCase()
-            const hoje = new Date().toISOString().slice(0, 10)
+            const hoje = hojeLocal()
             const statusAuto = dataFmt && dataFmt < hoje ? 'PAGO' : 'PENDENTE'
             const status = ['PAGO', 'PENDENTE', 'PROJECAO'].includes(statusRaw) ? statusRaw : statusAuto
 
@@ -2040,7 +2041,7 @@ function SecaoBackup() {
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
       a.href     = url
-      a.download = `arqvalor_backup_${new Date().toISOString().slice(0, 10)}.json`
+      a.download = `arqvalor_backup_${hojeLocal()}.json`
       a.click()
       URL.revokeObjectURL(url)
 

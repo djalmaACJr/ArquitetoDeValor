@@ -27,6 +27,8 @@ interface MascoteInfo {
   profissao: string
   cor:       string
   apresentacao: string
+  /** Pequena frase de convite — voz do personagem pedindo pra ser escolhido. */
+  convite:   string
 }
 
 const MASCOTES: MascoteInfo[] = [
@@ -35,24 +37,28 @@ const MASCOTES: MascoteInfo[] = [
     profissao: 'Conselheiro',
     cor: '#d4a86e',
     apresentacao: 'Sou o Conselheiro — paciência, disciplina e longo prazo.',
+    convite: 'Caminhe comigo — devagar e firme.',
   },
   {
     id: 'arquiteta',
     profissao: 'Arquiteta',
     cor: '#e878a8',
     apresentacao: 'Sou a Arquiteta — estrutura, cálculo e controle.',
+    convite: 'Vamos colocar tudo no lugar?',
   },
   {
     id: 'gato',
     profissao: 'Mago',
     cor: '#b48cff',
     apresentacao: 'Sou o Mago — magia dos juros compostos e multiplicação.',
+    convite: 'Pchsst — me escolha e a mágica começa!',
   },
   {
     id: 'raposa',
     profissao: 'Estrategista',
     cor: '#50c86e',
     apresentacao: 'Sou a Estrategista — leitura de mercado e custo de oportunidade.',
+    convite: 'Estratégia precisa de aliados — vem comigo.',
   },
 ]
 
@@ -60,14 +66,31 @@ const MASCOTES: MascoteInfo[] = [
 // trocas instantâneas (sem flash de imagem ausente)
 const POSES_PRELOAD: MascotePose[] = ['curioso', 'feliz', 'triste', 'sentado', 'comprimento-inicio']
 
-type Fase = 'apresentando' | 'aguardando' | 'escolhido' | 'sentar' | 'nomeando' | 'tema' | 'aviso-dados'
+// Fases do fluxo:
+//   apresentando  → cards mostram apresentação (~4s)
+//   aguardando    → usuário pode clicar em UM mascote, em "Aleatório" ou em "Nenhum"
+//   escolhido     → um mascote ficou feliz, outros tristes (fluxo individual)
+//   sentar        → outros 3 sentaram, escolhido em destaque
+//   nomeando      → usuário dá apelido ao mascote escolhido (fluxo individual)
+//   todos-alegres → usuário escolheu "Aleatório" — todos vão pra pose feliz
+//   nomeando-todos→ formulário pra dar apelido aos 4 (fluxo Aleatório)
+//   tema          → escolha de família + modo dia/noite
+//   aviso-dados   → último passo do 1º acesso (avisa sobre seed)
+type Fase =
+  | 'apresentando' | 'aguardando' | 'escolhido' | 'sentar' | 'nomeando'
+  | 'todos-alegres' | 'nomeando-todos'
+  | 'tema' | 'aviso-dados'
 
 export default function ApresentacaoMascotes() {
   const navigate = useNavigate()
-  const { setMascote, definirApelido, primeiroAcesso } = useMascotePreferido()
+  const { setMascote, definirApelido, definirVariosApelidos, primeiroAcesso } = useMascotePreferido()
   const [fase, setFase] = useState<Fase>('apresentando')
   const [escolhido, setEscolhido] = useState<MascoteNome | null>(null)
   const [apelido, setApelido] = useState('')
+  // Apelidos dos 4 mascotes no fluxo "Aleatório".
+  const [apelidosTodos, setApelidosTodos] = useState<Record<MascoteNome, string>>({
+    sabio: '', arquiteta: '', gato: '', raposa: '',
+  })
   const [salvando, setSalvando] = useState(false)
 
   // Pré-carrega todas as poses de todos os mascotes — garante que ao
@@ -118,6 +141,42 @@ export default function ApresentacaoMascotes() {
     setFase('tema')
   }
 
+  // ── Fluxo "Aleatório" ──────────────────────────────────────────────
+  function aoEscolherAleatorio() {
+    if (fase !== 'aguardando') return
+    // Sinaliza com null pra logica de pose: todos vão pra 'feliz'
+    setEscolhido(null)
+    setFase('todos-alegres')
+    setTimeout(() => setFase('nomeando-todos'), 1000)
+  }
+
+  async function aoSalvarTodos() {
+    setSalvando(true)
+    setMascote('aleatorio')
+    // Filtra só os apelidos preenchidos (apelidos vazios são limpos pelo hook)
+    const limpos: Partial<Record<MascoteNome, string>> = {}
+    for (const [nome, ap] of Object.entries(apelidosTodos)) {
+      if (ap.trim()) limpos[nome as MascoteNome] = ap.trim()
+    }
+    if (Object.keys(limpos).length > 0) {
+      await definirVariosApelidos(limpos)
+    }
+    setSalvando(false)
+    setFase('tema')
+  }
+
+  function aoPularNomesTodos() {
+    setMascote('aleatorio')
+    setFase('tema')
+  }
+
+  // ── Fluxo "Nenhum" ─────────────────────────────────────────────────
+  function aoEscolherNenhum() {
+    if (fase !== 'aguardando') return
+    setMascote('nenhum')
+    setFase('tema')
+  }
+
   function aoConcluirTema() {
     // Em primeiro acesso, mostra o aviso sobre os dados de exemplo
     // criados pelo seed (Carteira, cartões, categorias). Em retomada
@@ -156,6 +215,18 @@ export default function ApresentacaoMascotes() {
       onSalvar={aoSalvar}
       onPular={aoPularNome}
       onEscolherOutro={aoEscolherOutro}
+      salvando={salvando}
+    />
+  }
+
+  // Layout especial do fluxo "Aleatório": nomeia os 4 mascotes
+  if (fase === 'nomeando-todos') {
+    return <LayoutNomeandoTodos
+      apelidos={apelidosTodos}
+      onApelidoChange={(nome, valor) => setApelidosTodos(prev => ({ ...prev, [nome]: valor }))}
+      onSalvar={aoSalvarTodos}
+      onPular={aoPularNomesTodos}
+      onEscolherOutro={() => { setFase('aguardando') }}
       salvando={salvando}
     />
   }
@@ -215,6 +286,64 @@ export default function ApresentacaoMascotes() {
             />
           ))}
         </div>
+
+        {/* Opções extras: Aleatório (rotação diária) e Nenhum (sem mentores).
+            Só aparecem quando o usuário ainda pode escolher (fase 'aguardando'). */}
+        {fase === 'aguardando' && (
+          <div className="mt-5">
+            <p
+              className="text-[13px] text-center mb-2 uppercase tracking-widest"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              ou
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl mx-auto">
+              <button
+                type="button"
+                onClick={aoEscolherAleatorio}
+                className="rounded-2xl p-3 text-left transition-all hover:scale-[1.02]"
+                style={{
+                  background: '#ffffff',
+                  border: '2px dashed rgba(0,0,0,0.15)',
+                }}
+              >
+                <div className="flex items-start gap-2.5">
+                  <span className="text-[26px] leading-none">🎲</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-bold mb-0.5" style={{ color: '#0f172a' }}>
+                      Aleatório
+                    </p>
+                    <p className="text-[12px] leading-snug" style={{ color: '#475569' }}>
+                      Um mentor diferente a cada dia — variedade nos conselhos.
+                    </p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={aoEscolherNenhum}
+                className="rounded-2xl p-3 text-left transition-all hover:scale-[1.02]"
+                style={{
+                  background: '#ffffff',
+                  border: '2px dashed rgba(0,0,0,0.15)',
+                }}
+              >
+                <div className="flex items-start gap-2.5">
+                  <span className="text-[26px] leading-none">🤐</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-bold mb-0.5" style={{ color: '#0f172a' }}>
+                      Nenhum
+                    </p>
+                    <p className="text-[12px] leading-snug" style={{ color: '#475569' }}>
+                      Sem balões nem dicas. Só o parecer do resultado do mês na tela principal.
+                    </p>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -237,6 +366,8 @@ function CardMascote({ info, fase, ehEscolhido, ehNaoEscolhido, onEscolher }: Ca
   const videoRef = useRef<HTMLVideoElement>(null)
 
   const pose: MascotePose | null = useMemo(() => {
+    // Fluxo "Aleatório" — todos os mascotes ficam alegres.
+    if (fase === 'todos-alegres' || fase === 'nomeando-todos') return 'feliz'
     if (fase === 'sentar' && ehNaoEscolhido)    return 'sentado'
     if (fase === 'escolhido' && ehNaoEscolhido) return 'triste'
     if (fase === 'nomeando' && ehNaoEscolhido)  return 'sentado'
@@ -310,10 +441,10 @@ function CardMascote({ info, fase, ehEscolhido, ehNaoEscolhido, onEscolher }: Ca
 
       {clicavel && (
         <div
-          className="mt-1.5 mx-auto inline-block text-[12px] font-semibold py-0.5 px-2.5 rounded-full"
+          className="mt-1.5 mx-auto inline-block text-[12px] font-medium italic py-0.5 px-2.5 rounded-full text-center"
           style={{ background: `${info.cor}22`, color: info.cor }}
         >
-          Sou eu! ✓
+          {info.convite}
         </div>
       )}
     </button>
@@ -425,6 +556,107 @@ function LayoutNomeando({ escolhido, apelido, onApelidoChange, onSalvar, onPular
               className="select-none pointer-events-none"
             />
           ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Layout do fluxo "Aleatório" — nomeia os 4 ─────────────────────────
+// Mostra os 4 mascotes alegres em destaque + um campo de apelido pra
+// cada um. Salvar grava todos os apelidos preenchidos e seta a
+// preferência = 'aleatorio' (rotação diária).
+interface LayoutNomeandoTodosProps {
+  apelidos:          Record<MascoteNome, string>
+  onApelidoChange:   (nome: MascoteNome, valor: string) => void
+  onSalvar:          () => void
+  onPular:           () => void
+  onEscolherOutro:   () => void
+  salvando:          boolean
+}
+
+function LayoutNomeandoTodos({
+  apelidos, onApelidoChange, onSalvar, onPular, onEscolherOutro, salvando,
+}: LayoutNomeandoTodosProps) {
+  return (
+    <div
+      className="min-h-screen w-full flex flex-col items-center justify-start py-6 px-3"
+      style={{ background: 'var(--bg-page)' }}
+    >
+      <div className="max-w-3xl w-full">
+        <h2 className="text-[22px] font-bold text-center mb-1" style={{ color: 'var(--text-primary)' }}>
+          Vamos batizar todos os mentores
+        </h2>
+        <p className="text-[14px] text-center mb-5 max-w-xl mx-auto" style={{ color: 'var(--text-muted)' }}>
+          A cada dia um mentor diferente vai te acompanhar. Dê um apelido pra cada um — ou deixe em branco pra usar o nome padrão.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+          {MASCOTES.map(m => (
+            <div
+              key={m.id}
+              className="rounded-2xl p-3 flex items-center gap-3"
+              style={{ background: '#ffffff', border: `2px solid ${m.cor}66` }}
+            >
+              <img
+                src={srcMascote(m.id, 'feliz')}
+                alt=""
+                style={{ height: 70, width: 'auto', objectFit: 'contain' }}
+                className="select-none pointer-events-none flex-shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-bold mb-1" style={{ color: m.cor }}>
+                  {m.profissao}
+                </p>
+                <input
+                  type="text"
+                  value={apelidos[m.id]}
+                  onChange={e => onApelidoChange(m.id, e.target.value)}
+                  maxLength={40}
+                  placeholder={m.profissao}
+                  className="w-full rounded-lg px-2.5 py-1.5 text-[14px] focus:outline-none transition-colors"
+                  style={{
+                    background: 'rgba(0,0,0,0.04)',
+                    color: '#0f172a',
+                    border: '1px solid rgba(0,0,0,0.1)',
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="text-center mb-3">
+          <button
+            type="button"
+            onClick={onEscolherOutro}
+            disabled={salvando}
+            className="text-[13px] underline transition-opacity hover:opacity-70 disabled:opacity-50"
+            style={{ color: 'var(--av-blue)' }}
+          >
+            ← Voltar e escolher outra opção
+          </button>
+        </div>
+
+        <div className="flex gap-2 max-w-md mx-auto">
+          <button
+            type="button"
+            onClick={onPular}
+            disabled={salvando}
+            className="flex-1 py-2.5 rounded-lg text-[15px] font-medium transition-colors hover:opacity-80 disabled:opacity-50"
+            style={{ border: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}
+          >
+            Usar nomes padrão
+          </button>
+          <button
+            type="button"
+            onClick={onSalvar}
+            disabled={salvando}
+            className="flex-1 py-2.5 rounded-lg text-[15px] font-semibold transition-colors hover:opacity-90 disabled:opacity-50"
+            style={{ background: '#00c896', color: '#0a0f1a' }}
+          >
+            {salvando ? 'Salvando…' : 'Confirmar'}
+          </button>
         </div>
       </div>
     </div>
