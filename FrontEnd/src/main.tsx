@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 import { supabase } from './lib/supabase'
+import { limparEstadoCliente } from './lib/clientCache'
 import './styles/globals.css'
 
 const queryClient = new QueryClient({
@@ -20,33 +21,60 @@ const queryClient = new QueryClient({
 })
 
 // ── Cache persistido em localStorage ─────────────────────────────────────────
-// Navegação entre meses é instantânea a partir da 2ª visita (mesmo após
-// refresh/login): os dados do localStorage aparecem imediatamente e o
-// React Query refaz o fetch em background para atualizar.
+// Navegação entre meses é instantânea a partir da 2ª visita: ao confirmar
+// que a sessão atual é do mesmo usuário que populou o cache, os dados do
+// localStorage aparecem imediatamente e o React Query refaz o fetch em
+// background pra atualizar.
+//
+// IMPORTANTE — vazamento entre usuários:
+// O cache NÃO é hidratado de forma síncrona no boot. Antes, fazíamos
+// `hydratarCache()` no carregamento do módulo, e o `onAuthStateChange`
+// limpava depois, mas com uma janela de ~50-500ms em que o user que
+// acabou de logar via dados do user anterior. Agora hidratamos APENAS
+// dentro do listener de auth, e só se o userId do cache bater com o da
+// sessão atual.
 const LS_KEY     = 'arqv-lc'
 const LS_MAX_AGE = 8 * 60 * 60 * 1000 // 8 horas
 
-// userId é carimbado no payload e usado para invalidar o cache quando
-// o usuário trocar (login em outra conta na mesma aba/navegador).
 let currentUserId: string | null | undefined = undefined
-let cachedUserId:  string | null = null
+let cacheHidratado = false
 
-function hydratarCache() {
+function tentarHidratar(userIdAtual: string | null) {
+  if (cacheHidratado) return
+  cacheHidratado = true
   try {
     const raw = localStorage.getItem(LS_KEY)
-    if (!raw) return
+    if (!raw) {
+      // Mesmo sem cache do React Query, pode haver preferências (tema,
+      // mascote, ocultar) deixadas por outro usuário — limpa pra garantir.
+      if (userIdAtual) limparEstadoCliente()
+      return
+    }
     const parsed = JSON.parse(raw) as {
       data: Record<string, unknown>
       savedAt: number
       userId?: string | null
     }
-    if (Date.now() - parsed.savedAt > LS_MAX_AGE) { localStorage.removeItem(LS_KEY); return }
-    cachedUserId = parsed.userId ?? null
+    // Cache expirado, anônimo ou de OUTRO usuário → descarta sem hidratar
+    if (Date.now() - parsed.savedAt > LS_MAX_AGE) {
+      localStorage.removeItem(LS_KEY)
+      if (userIdAtual) limparEstadoCliente()
+      return
+    }
+    if (!userIdAtual || (parsed.userId ?? null) !== userIdAtual) {
+      // Aba foi reaberta com sessão de OUTRO usuário (ou anônimo).
+      // Limpa TUDO — não só o cache do React Query, mas também
+      // preferências (tema, mascote, ocultar) e estado in-memory das
+      // páginas que se registraram.
+      localStorage.removeItem(LS_KEY)
+      limparEstadoCliente()
+      return
+    }
     for (const [keyStr, value] of Object.entries(parsed.data)) {
       queryClient.setQueryData(JSON.parse(keyStr), value)
     }
-    // Marca como stale — React Query vai refrescar em background quando o
-    // componente se inscrever, sem bloquear a exibição imediata do cache.
+    // Marca como stale — React Query refresca em background quando os
+    // componentes se inscreverem, sem bloquear a exibição imediata.
     queryClient.invalidateQueries({ queryKey: ['lancamentos'] })
   } catch {
     localStorage.removeItem(LS_KEY)
@@ -55,7 +83,7 @@ function hydratarCache() {
 
 function persistirCache() {
   // Não persiste antes do INITIAL_SESSION resolver — evita gravar com userId errado
-  if (currentUserId === undefined) return
+  if (currentUserId === undefined || currentUserId === null) return
   try {
     const data: Record<string, unknown> = {}
     queryClient.getQueryCache().getAll()
@@ -69,8 +97,6 @@ function persistirCache() {
   } catch { /* quota exceeded — ignora silenciosamente */ }
 }
 
-hydratarCache()
-
 queryClient.getQueryCache().subscribe(event => {
   if (
     event.type === 'updated' &&
@@ -81,18 +107,23 @@ queryClient.getQueryCache().subscribe(event => {
   }
 })
 
-// ── Limpeza de cache em troca de usuário ─────────────────────────────────────
-// Sem isso, dados do usuário anterior (contas, categorias, lançamentos) ficam
-// no cache do React Query e podem vazar para a próxima sessão (ex.: novo
-// lançamento usando UUID de conta do outro usuário → RV-004 no backend).
+// ── Hidratação + limpeza em troca de usuário ────────────────────────────────
+// O listener resolve a sessão real ANTES de hidratar — eliminando o vazamento.
 supabase.auth.onAuthStateChange((_event, session) => {
   const newUserId = session?.user?.id ?? null
-  const trocou = currentUserId === undefined
-    ? cachedUserId !== null && cachedUserId !== newUserId
-    : newUserId !== currentUserId
-  if (trocou) {
+
+  // 1º callback: tenta hidratar (só funciona se o userId bate)
+  if (!cacheHidratado) {
+    tentarHidratar(newUserId)
+  }
+
+  // Troca de usuário durante a sessão (login em outra conta, logout): limpa
+  // TODOS os caches client-side do usuário anterior. Sem isso já tivemos
+  // vazamento de lançamentos entre sessões (usuário B via dados do A).
+  if (currentUserId !== undefined && newUserId !== currentUserId) {
     queryClient.clear()
     localStorage.removeItem(LS_KEY)
+    limparEstadoCliente()
   }
   currentUserId = newUserId
 })

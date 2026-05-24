@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "3.00"
+export const APP_VERSION = "3.1.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -15,8 +15,8 @@ export const getVersionInfo = () => ({
     patch: "Tentativas"
   },
   current: {
-    level: "major",
-    description: "Busca no extrato com escopo multi-mês, foco no calendário com destaque de dia"
+    level: "minor",
+    description: "Hardening de sessão (sessionStorage + auto-logout 15min), reset de caches client-side entre usuários, limite de crédito em cartões, fixes de RLS em RPCs"
   }
 })
 

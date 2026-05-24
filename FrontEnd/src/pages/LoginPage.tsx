@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
 
@@ -41,6 +41,8 @@ const inputCls = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.
 export default function LoginPage() {
   const { signIn } = useAuth()
   const navigate   = useNavigate()
+  const [searchParams] = useSearchParams()
+  const sessaoExpirada = searchParams.get('expirado') === '1'
 
   useEffect(() => {
     const html = document.documentElement
@@ -128,6 +130,16 @@ export default function LoginPage() {
           {modo === 'login' && (
             <>
               <h2 className="text-base font-semibold text-white mb-5">Entrar na sua conta</h2>
+              {sessaoExpirada && (
+                <div className="mb-4 rounded-lg px-3 py-2.5 text-[15px]"
+                  style={{
+                    background: 'rgba(240,180,41,0.10)',
+                    border:     '1px solid rgba(240,180,41,0.30)',
+                    color:      '#f0b429',
+                  }}>
+                  Sua sessão foi encerrada por inatividade. Entre novamente para continuar.
+                </div>
+              )}
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                   <label className="block text-[16px] text-white/50 mb-1.5">Email</label>

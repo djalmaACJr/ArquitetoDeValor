@@ -26,12 +26,17 @@ export default defineConfig({
     locale: 'pt-BR',
   },
 
-  // Em CI, o Playwright sobe o servidor Vite automaticamente
+  // Em CI, o Playwright sobe o servidor Vite automaticamente.
+  // Localmente, o usuário deve rodar `npm run dev:e2e` (que injeta
+  // VITE_E2E=true) antes de `npm run test:e2e`. Sem esse env, o supabase
+  // usa sessionStorage e o `storageState` do Playwright não consegue
+  // persistir a sessão entre specs.
   webServer: process.env.CI ? {
     command: 'npm run dev',
     url: 'http://localhost:5173',
     timeout: 60_000,
     reuseExistingServer: false,
+    env: { VITE_E2E: 'true' },
   } : undefined,
 
   projects: [

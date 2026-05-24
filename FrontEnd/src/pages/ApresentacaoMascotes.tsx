@@ -252,7 +252,7 @@ function CardMascote({ info, fase, ehEscolhido, ehNaoEscolhido, onEscolher }: Ca
   const borda = ehEscolhido
     ? `2px solid ${info.cor}`
     : ehNaoEscolhido
-    ? '2px solid var(--border-subtle)'
+    ? '2px solid rgba(0,0,0,0.08)'
     : `2px solid ${info.cor}66`
 
   return (
@@ -264,7 +264,10 @@ function CardMascote({ info, fase, ehEscolhido, ehNaoEscolhido, onEscolher }: Ca
         clicavel ? 'cursor-pointer hover:scale-[1.03]' : 'cursor-default'
       } ${ehEscolhido ? 'scale-105' : ehNaoEscolhido ? 'opacity-60 scale-95' : ''}`}
       style={{
-        background: 'var(--bg-card)',
+        // Fundo BRANCO fixo independente do tema — os mascotes foram pintados
+        // assumindo fundo claro; em temas escuros (verde-floresta, marrom etc.)
+        // a borda do pelo/roupa some.
+        background: '#ffffff',
         border:     borda,
         transition: 'transform 250ms ease, opacity 250ms ease, border-color 250ms ease',
       }}
@@ -300,7 +303,7 @@ function CardMascote({ info, fase, ehEscolhido, ehNaoEscolhido, onEscolher }: Ca
       </p>
 
       {fase === 'aguardando' && (
-        <p className="text-center text-[12px] mt-1 leading-snug line-clamp-2" style={{ color: 'var(--text-muted)' }}>
+        <p className="text-center text-[12px] mt-1 leading-snug line-clamp-2" style={{ color: '#4b5563' }}>
           {info.apresentacao}
         </p>
       )}

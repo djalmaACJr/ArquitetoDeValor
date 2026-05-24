@@ -5,6 +5,7 @@ import { Menu } from 'lucide-react'
 import Sidebar from './Sidebar'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
+import { useAutoLogout } from '../../hooks/useAutoLogout'
 
 export default function AppLayout() {
   const qc = useQueryClient()
@@ -12,6 +13,11 @@ export default function AppLayout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const { pathname } = useLocation()
   const { primeiroAcesso } = useMascotePreferido()
+
+  // Auto-logout após 15min de inatividade — defesa em PC compartilhado.
+  // Combinado com sessionStorage (fechar aba = sair) cobre os 2 cenários
+  // de "sessão esquecida" mais comuns.
+  useAutoLogout(15)
 
   // Fecha o menu mobile ao navegar (UX)
   // eslint-disable-next-line react-hooks/set-state-in-effect

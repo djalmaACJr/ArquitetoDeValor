@@ -1,0 +1,77 @@
+// src/lib/clientCache.ts
+//
+// Registry central de TODO o estado client-side que pode vazar entre
+// usuários quando há logout + novo login na mesma aba/navegador:
+//
+//   - Variáveis module-level (`let _saved = ...`) em páginas com cache em
+//     memória (AssinaturasPage, ComparativoMensalPage, ProjecaoEconomiaPage).
+//   - Chaves de localStorage com PREFERÊNCIAS do usuário (tema, mascote,
+//     ocultar valores, tutoriais vistos).
+//
+// O cache do React Query e a chave `arqv-lc` são limpos diretamente no
+// listener de `supabase.auth.onAuthStateChange` em main.tsx.
+//
+// Antecedentes:
+// Em 2026-05 descobrimos que após logout + login o usuário novo via
+// dados financeiros do usuário anterior. Causa raiz: hidratação síncrona
+// do cache do React Query + variáveis module-level guardando lançamentos
+// não eram resetadas. Este módulo centraliza o reset.
+
+type ResetFn = () => void
+
+const resetCallbacks = new Set<ResetFn>()
+
+/**
+ * Registra uma função que zera estado in-memory específico de página.
+ * Retorna uma função para desfazer o registro (útil em testes ou HMR).
+ *
+ * Convenção: a fn passa a variável module-level para `null`/array vazio.
+ */
+export function registrarResetCliente(fn: ResetFn): () => void {
+  resetCallbacks.add(fn)
+  return () => { resetCallbacks.delete(fn) }
+}
+
+/**
+ * Chaves de localStorage a serem apagadas na troca de usuário.
+ * Mantemos uma lista explícita para evitar apagar coisas alheias.
+ *
+ * `arqv-lc` (cache do React Query) é apagado direto no main.tsx; não
+ * incluímos aqui para não duplicar.
+ */
+const LS_KEYS_USER_SCOPED = [
+  'av-mascote',                    // mascote preferido (sync de arqvalor.usuarios)
+  'av-theme',                      // tema (sync de arqvalor.usuarios.layout)
+  'arqvalor:ocultar_valores',      // flag ocultar (sync de arqvalor.usuarios.ocultar_valores)
+] as const
+
+// Tutoriais vistos são chave-com-mascote: prefixos LS para varrer.
+const LS_PREFIXES_USER_SCOPED = [
+  'av-tut-',   // av-tut-<pagina>-<mascote>=1  (tutorial visto)
+  'av-tour-',  // av-tour-<pagina>-v1=1        (tour guiado visto)
+] as const
+
+/**
+ * Apaga TODO o estado client-side específico de usuário. Chamada pelo
+ * listener de auth em main.tsx quando o usuário troca ou faz logout.
+ */
+export function limparEstadoCliente(): void {
+  // 1) Variáveis module-level registradas pelas páginas
+  resetCallbacks.forEach(fn => {
+    try { fn() } catch { /* registro não pode quebrar o fluxo */ }
+  })
+
+  // 2) Chaves específicas de localStorage
+  for (const k of LS_KEYS_USER_SCOPED) {
+    localStorage.removeItem(k)
+  }
+
+  // 3) Chaves por prefixo (tutoriais)
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i)
+    if (!key) continue
+    if (LS_PREFIXES_USER_SCOPED.some(p => key.startsWith(p))) {
+      localStorage.removeItem(key)
+    }
+  }
+}

@@ -298,6 +298,8 @@ npm run test:e2e:report   # abre relatório HTML
 ./rodar_testes_e2e.bat
 ```
 
+> **Storage automático em E2E**: o app usa `sessionStorage` para a sessão Supabase em uso normal (proteção contra "sessão esquecida" — ver seção 🔐). Como o `storageState` do Playwright só persiste `localStorage`, o supabase detecta browsers controlados via `navigator.webdriver === true` (sempre `true` em Playwright/Selenium/WebDriver) e volta a usar `localStorage` automaticamente. **Não precisa de comando separado**. Em debug manual fora do Playwright, dá pra forçar com `VITE_E2E=true` no env (ou `npm run dev:e2e` se já criado).
+
 ### Deploy Edge Functions
 
 ```bash
@@ -337,6 +339,36 @@ ALLOWED_ORIGIN=https://seu-dominio.com   # CORS em produção
 # e usuários precisam re-cadastrar.
 IA_KEYS_ENCRYPTION_KEY=...
 ```
+
+### 🔐 Configuração de sessão (Supabase Auth)
+
+Defesa contra "sessão esquecida em PC compartilhado". Camadas trabalham juntas e atacam dois problemas distintos: **sessão persistida no LS** e **token vivo demais após inatividade ou roubo**.
+
+#### Camadas no client (este repo)
+
+1. **`sessionStorage`** ([lib/supabase.ts](FrontEnd/src/lib/supabase.ts)) — substitui o `localStorage` padrão do supabase-js. Fechar a aba descarta a sessão. F5 na mesma aba mantém. Cada aba é independente.
+2. **`useAutoLogout(15)`** ([hooks/useAutoLogout.ts](FrontEnd/src/hooks/useAutoLogout.ts) montado em `AppLayout`) — timer de inatividade no client. 15 min sem mouse/teclado/scroll/click → `signOut()` + redirect `/login?expirado=1` (banner amigável).
+3. **`limparEstadoCliente()`** ([lib/clientCache.ts](FrontEnd/src/lib/clientCache.ts)) — chamado pelo listener de `onAuthStateChange` em troca de user. Reseta `_saved` em memória das páginas e LS de preferências.
+
+#### Camadas no Supabase (Dashboard — configuração externa)
+
+Dois conceitos **DIFERENTES** que costumam ser confundidos:
+
+| Setting | O que é | Default | Recomendado |
+|---|---|---|---|
+| **JWT expiry limit** (Auth → Settings → JWT Settings) | Vida útil do **access token**. Quando expira, o supabase-js chama `/token?grant_type=refresh_token` automaticamente em background. **Não afeta UX do user ativo** — o refresh é transparente. Reduzir é defesa em profundidade contra token roubado (XSS, leitura de storage). | 3600s (1h) | 1800s (30min) |
+| **Inactivity timeout** (Auth → Settings → Sessions) | Tempo máximo sem usar o refresh token antes dele ser invalidado. Quando o refresh token morre, o próximo refresh do access token falha e o user é forçado a relogar. **Esta é a defesa server-side contra inatividade** (espelha o `useAutoLogout` do client). | Never | 30min – 1h |
+| **Refresh token reuse interval** (Auth → Settings → Sessions) | Janela em que o supabase aceita o mesmo refresh token ser usado mais de uma vez (cobre race conditions). | 10s | manter default |
+
+#### Por que ambos os timers (cliente + servidor)?
+
+- O `useAutoLogout` é **rápido e amigável** (mostra banner, navega) mas roda em JS — alguém com DevTools poderia desabilitar.
+- O **Inactivity timeout** é **servidor-enforçado** — mesmo que o JS seja sabotado, a próxima chamada de API falha com 401 e o app força login. Ele substitui o `useAutoLogout` em garantia, mas oferece UX pior (a falha vem do server, não como deslogou-graciosamente).
+- Por isso usamos os dois: o do client cobre 99% (UX boa) e o do server cobre o resto (defesa real).
+
+#### Resumo prático
+
+Reduzir JWT expiry SEM mexer no Inactivity timeout = nenhum efeito perceptível no user ativo (só refresh mais frequente). Para desconectar usuário parado é o **Inactivity timeout** que importa.
 
 ---
 

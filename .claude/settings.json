@@ -31,7 +31,8 @@
       "Bash(py -3 scripts/limpar_bolsoes_apontando.py FrontEnd/public/mascotes/gato-apontando-esquerda.png)",
       "mcp__supabase__execute_sql",
       "mcp__supabase__apply_migration",
-      "Bash(xargs wc -l)"
+      "Bash(xargs wc -l)",
+      "Bash(grep -v \"import\\\\|type\\\\|interface\\\\|//\")"
     ]
   }
 }

@@ -25,6 +25,7 @@ import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
 import TutorialTour from '../components/ui/TutorialTour'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import { registrarResetCliente } from '../lib/clientCache'
 import { falaComparativoPeriodos } from '../lib/conteudoMascotes'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { TUTORIAL_COMPARATIVO } from '../lib/tutoriaisPaginas'
@@ -197,6 +198,9 @@ interface PageState {
   busca: string; sortCat: { col: SortCol; dir: 1 | -1 }
 }
 let _saved: PageState | null = null
+// Limpa este cache em troca de usuário — evita vazamento de lançamentos
+// entre sessões na mesma aba.
+registrarResetCliente(() => { _saved = null })
 
 // ── KPI Card ───────────────────────────────────────────────────────────────────
 function KpiCard({

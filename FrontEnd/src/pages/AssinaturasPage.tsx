@@ -18,6 +18,7 @@ import MascoteTutorial from '../components/ui/MascoteTutorial'
 import TutorialTour from '../components/ui/TutorialTour'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCategoria'
+import { registrarResetCliente } from '../lib/clientCache'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { TUTORIAL_ASSINATURAS } from '../lib/tutoriaisPaginas'
 
@@ -310,6 +311,9 @@ function KpiCard({ label, value, sub, color = '#e8eaf0' }: {
 // ── State persistence ────────────────────────────────────────────
 interface PageCache { lancamentos: Lancamento[] }
 let _saved: PageCache | null = null
+// Limpa este cache em troca de usuário — evita vazamento de lançamentos
+// entre sessões na mesma aba. (Import no topo do arquivo.)
+registrarResetCliente(() => { _saved = null })
 
 // ── Chart defaults ───────────────────────────────────────────────
 const TICK_STYLE  = { color: '#8b92a8', font: { size: 14 as const } }

@@ -12,6 +12,7 @@ import MascoteDica from '../components/ui/MascoteDica'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
 import TutorialTour from '../components/ui/TutorialTour'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import { registrarResetCliente } from '../lib/clientCache'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { TUTORIAL_PROJECAO } from '../lib/tutoriaisPaginas'
 
@@ -95,6 +96,9 @@ function Slider({ label, value, min, max, step, fmt, onChange, color = '#4da6ff'
 // ── State persistence ─────────────────────────────────────────────
 interface PageCache { lancamentos: Lancamento[] }
 let _saved: PageCache | null = null
+// Limpa este cache em troca de usuário — evita vazamento de lançamentos
+// entre sessões na mesma aba.
+registrarResetCliente(() => { _saved = null })
 
 // ── Page ──────────────────────────────────────────────────────────
 export default function ProjecaoEconomiaPage() {
