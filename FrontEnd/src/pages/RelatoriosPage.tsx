@@ -311,7 +311,6 @@ export default function RelatoriosPage() {
   const containerRef = useRef<HTMLDivElement>(null)
   const renderCountRef = useRef(0)
   renderCountRef.current++
-  // eslint-disable-next-line no-console
   console.log('[REL][render]', { n: renderCountRef.current, col: filtrosColapsados })
 
   useEffect(() => {
@@ -324,7 +323,6 @@ export default function RelatoriosPage() {
       scrollRoot = scrollRoot.parentElement
     }
     const root = scrollRoot as HTMLElement
-    // eslint-disable-next-line no-console
     console.log('[REL][init]', {
       scrollRoot: root?.tagName,
       scrollHeight: root?.scrollHeight,
@@ -336,7 +334,6 @@ export default function RelatoriosPage() {
       iter++
       const stickyH = stickyBarRef.current?.offsetHeight ?? 0
       const containerPad = containerRef.current?.style.paddingBottom ?? ''
-      // eslint-disable-next-line no-console
       console.log('[REL][IO]', {
         iter,
         intersecting: entry.isIntersecting,
@@ -354,7 +351,6 @@ export default function RelatoriosPage() {
         overrideManualRef.current = false
         setFiltrosColapsados(prev => {
           if (!prev) return prev
-          // eslint-disable-next-line no-console
           console.log('[REL][→false] removendo padding')
           if (containerRef.current) containerRef.current.style.paddingBottom = ''
           return false
@@ -367,7 +363,6 @@ export default function RelatoriosPage() {
           if (sticky && container) {
             const reducao = Math.max(0, sticky.offsetHeight - 50)
             container.style.paddingBottom = `${reducao}px`
-            // eslint-disable-next-line no-console
             console.log('[REL][→true] aplicando padding', { reducao })
           }
           return true

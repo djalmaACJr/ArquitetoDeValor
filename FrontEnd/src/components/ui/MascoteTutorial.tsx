@@ -57,7 +57,6 @@ export default function MascoteTutorial({
       setEstado(idxRandomDica())
     } else {
       // Mostra o tutorial e marca como visto no banco.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEstado('tutorial')
       void marcarVisto(chaveVisto)
     }

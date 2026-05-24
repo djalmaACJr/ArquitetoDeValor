@@ -35,13 +35,16 @@ const INTERVALO_CHECK_MS = 60_000 // confere a cada 1 min
 
 export function useAutoLogout(timeoutMinutos: number = 15): void {
   const navigate = useNavigate()
-  const lastActivityRef = useRef<number>(Date.now())
+  // Date.now() é impura — não pode rodar durante o render. Inicializa
+  // como 0 e o useEffect abaixo seta o timestamp real ao montar.
+  const lastActivityRef = useRef<number>(0)
   const expiradoRef = useRef<boolean>(false)
 
   useEffect(() => {
     if (timeoutMinutos <= 0) return // 0 desliga o auto-logout
 
     const limiteMs = timeoutMinutos * 60_000
+    lastActivityRef.current = Date.now()
 
     function marcarAtividade() {
       lastActivityRef.current = Date.now()

@@ -35,6 +35,7 @@ export default function CalendarioDashboard({
   // Ao trocar de mês, fecha o painel de detalhes do dia (a data aberta
   // pertencia ao mês anterior e o painel ficaria mostrando lembretes de
   // um dia que não está mais visível na grade).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setDiaAberto(null) }, [mes])
 
   const [ano, m] = mes.split('-').map(Number)

@@ -23,7 +23,11 @@ export function useTutoriaisVistos() {
   const [vistos, setVistos] = useState<Mapa | null>(null)
 
   useEffect(() => {
-    if (!userId) { setVistos(null); return }
+    if (!userId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setVistos(null)
+      return
+    }
     let cancelado = false
     supabase
       .schema('arqvalor')

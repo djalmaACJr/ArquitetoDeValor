@@ -46,7 +46,6 @@ export function useIAPreferencia() {
     if (!userId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setCol({ ativa: null, configs: [] })
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCarregando(false)
       return
     }
