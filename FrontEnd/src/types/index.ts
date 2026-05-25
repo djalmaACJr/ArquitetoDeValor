@@ -5,6 +5,12 @@
 import type { TipoConta, TipoTransacao, StatusTransacao } from '../lib/constants'
 export type { TipoConta, TipoTransacao, StatusTransacao }
 
+export interface CartaoVirtual {
+  id:      string   // uuid local, gerado no front via crypto.randomUUID()
+  sufixo:  string   // últimos dígitos do cartão (2 a 8 dígitos)
+  apelido: string   // até 40 chars, ex.: "Principal", "Compras online"
+}
+
 export interface Conta {
   conta_id:      string
   user_id:       string
@@ -19,6 +25,7 @@ export interface Conta {
   dia_fechamento?: number | null
   dia_pagamento?:  number | null
   limite_credito?: number | null
+  cartoes_virtuais?: CartaoVirtual[]
 }
 
 // ── Categorias ────────────────────────────────────────────
@@ -133,4 +140,45 @@ export interface Usuario {
   email:     string
   nome:      string
   criado_em: string
+}
+
+// ── Importação de Fatura de Cartão ───────────────────────
+export type StatusFaturaImport = 'EM_ANALISE' | 'CONFIRMADA' | 'CANCELADA'
+export type DecisaoFaturaImport = 'PENDENTE' | 'CRIAR' | 'ATUALIZAR' | 'IGNORAR'
+
+export interface FaturaImportSessao {
+  id:                  string
+  user_id:             string
+  conta_id:            string
+  arquivo_nome:        string
+  vencimento_fatura:   string | null
+  valor_total:         number | null
+  status:              StatusFaturaImport
+  observacao:          string | null
+  criado_em:           string
+  atualizado_em:       string
+  // Vindo do JOIN no GET
+  conta?: { id?: string; nome: string; tipo?: TipoConta; icone: string | null; cor: string | null }
+  itens?: FaturaImportItem[]
+}
+
+export interface FaturaImportItem {
+  id:                     string
+  sessao_id:              string
+  user_id:                string
+  data_compra:            string
+  descricao:              string
+  estabelecimento:        string | null
+  valor:                  number
+  parcela_atual:          number | null
+  parcela_total:          number | null
+  decisao:                DecisaoFaturaImport
+  categoria_sugerida_id:  string | null
+  categoria_escolhida_id: string | null
+  transacao_existente_id: string | null
+  transacao_criada_id:    string | null
+  hash_match:             string | null
+  observacao:             string | null
+  criado_em:              string
+  atualizado_em:          string
 }

@@ -3,6 +3,7 @@ import { useMemo, useEffect, useState } from 'react'
 import { useQuery, useQueries, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiFetch, extrairLista } from '../lib/api'
 import { qk } from '../lib/queryKeys'
+import { useAuth } from './useAuth'
 import { hojeLocal } from '../lib/utils'
 import type { Conta, Transacao, ResumoMensal, DespesaCategoria } from '../types'
 
@@ -145,6 +146,8 @@ export function useDashboard(
   filtStatus:   string[] = [],
 ) {
   const qc = useQueryClient()
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
   const parsed = useMemo(() => parseMes(mes), [mes])
   
   // Lazy-load: ativa fase 2 somente após UI renderizar (500ms)
@@ -158,7 +161,7 @@ export function useDashboard(
   // Prefetcha tanto fase 1 (alertas/saldo) quanto cada mês individual do
   // histórico para que ambos os gráficos fiquem prontos ao navegar.
   useEffect(() => {
-    if (!parsed) return
+    if (!parsed || !uid) return
 
     // Prefetcha a janela do histórico completo + alguns meses adjacentes,
     // para que a troca de mês por setas e teclado já tenha os dados em cache.
@@ -166,7 +169,7 @@ export function useDashboard(
       const mesPrefetch = mesAdjacente(mes, delta)
       if (delta !== 0) {
         qc.prefetchQuery({
-          queryKey: ['dashboard-fase1', mesPrefetch],
+          queryKey: qk.dashboardFase1(uid, mesPrefetch),
           queryFn: ({ signal }) => fetchFase1(mesPrefetch, signal),
           staleTime: 60_000,
         })
@@ -175,26 +178,27 @@ export function useDashboard(
       // Mes individual — alimenta o histórico de QUALQUER mês adjacente
       // (cache key compartilhado entre todas as visões do dashboard)
       qc.prefetchQuery({
-        queryKey: ['transacoes-mes', mesPrefetch],
+        queryKey: qk.transacoesMes(uid, mesPrefetch),
         queryFn: ({ signal }) => fetchTransacoesMes(mesPrefetch, signal),
         staleTime: 60_000,
       })
     }
-  }, [mes, parsed, qc])
+  }, [mes, parsed, qc, uid])
 
   // Contas (cache compartilhado com useContas via mesma query key)
   const { data: contas = [] } = useQuery({
-    queryKey: qk.contas(),
+    queryKey: qk.contas(uid),
     queryFn:  ({ signal }) => fetchContas(signal),
     staleTime: 5 * 60_000, // 5 minutos
+    enabled:   !!uid,
   })
 
   // FASE 1 — mês atual + próximos pendentes (libera UI imediato)
   // keepPreviousData: mantém dados do mês anterior enquanto carrega novos
   const fase1Q = useQuery({
-    queryKey: ['dashboard-fase1', mes],
+    queryKey: qk.dashboardFase1(uid, mes),
     queryFn:  ({ signal }) => fetchFase1(mes, signal),
-    enabled:  !!parsed,
+    enabled:  !!parsed && !!uid,
     staleTime: 60_000, // 1 minuto
     placeholderData: keepPreviousData,
   })
@@ -211,9 +215,9 @@ export function useDashboard(
 
   const historicoQs = useQueries({
     queries: mesesAnteriores.map(mh => ({
-      queryKey:        ['transacoes-mes', mh] as const,
+      queryKey:        qk.transacoesMes(uid, mh),
       queryFn:         ({ signal }: { signal?: AbortSignal }) => fetchTransacoesMes(mh, signal),
-      enabled:         fase2Enabled,
+      enabled:         fase2Enabled && !!uid,
       staleTime:       60_000,
       placeholderData: keepPreviousData,
     })),
@@ -347,25 +351,25 @@ export function useDashboard(
 
   const refetch = async () => {
     await Promise.all([
-      qc.invalidateQueries({ queryKey: ['dashboard-fase1', mes] }),
-      qc.invalidateQueries({ queryKey: ['transacoes-mes'] }),
-      qc.invalidateQueries({ queryKey: qk.contas() }),
+      qc.invalidateQueries({ queryKey: qk.dashboardFase1(uid, mes) }),
+      qc.invalidateQueries({ queryKey: ['transacoes-mes', uid] }),
+      qc.invalidateQueries({ queryKey: qk.contas(uid) }),
     ])
   }
 
   const prefetchMes = (delta: number) => {
-    if (!parsed) return
+    if (!parsed || !uid) return
     const [y, m] = mes.split('-').map(Number)
     const d = new Date(y, m - 1 + delta, 1)
     const novoMes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 
     qc.prefetchQuery({
-      queryKey: ['dashboard-fase1', novoMes],
+      queryKey: qk.dashboardFase1(uid, novoMes),
       queryFn: ({ signal }) => fetchFase1(novoMes, signal),
       staleTime: 60_000,
     })
     qc.prefetchQuery({
-      queryKey: ['transacoes-mes', novoMes],
+      queryKey: qk.transacoesMes(uid, novoMes),
       queryFn: ({ signal }) => fetchTransacoesMes(novoMes, signal),
       staleTime: 60_000,
     })

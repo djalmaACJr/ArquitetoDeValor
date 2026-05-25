@@ -2,6 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
+import { useAuth } from './useAuth'
 import type { Categoria } from '../types'
 
 interface OpResult { ok: boolean; erro: string | null }
@@ -14,19 +15,22 @@ async function fetchCategorias(): Promise<Categoria[]> {
 
 export function useCategorias() {
   const qc = useQueryClient()
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
 
   const { data: categorias = [], isLoading: loading, error } = useQuery({
-    queryKey: qk.categorias(),
+    queryKey: qk.categorias(uid),
     queryFn:  fetchCategorias,
+    enabled:  !!uid,
   })
 
-  const carregar = async () => { await qc.invalidateQueries({ queryKey: qk.categorias() }) }
+  const carregar = async () => { await qc.invalidateQueries({ queryKey: qk.categorias(uid) }) }
 
   const criar = async (payload: {
     descricao: string; id_pai?: string | null; icone?: string; cor?: string
   }): Promise<OpResult> => {
     const res = await apiMutate('/categorias', 'POST', payload)
-    if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias() })
+    if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias(uid) })
     return { ok: res.ok, erro: res.erro }
   }
 
@@ -34,13 +38,13 @@ export function useCategorias() {
     descricao: string; id_pai: string | null; icone: string; cor: string; ativa: boolean
   }>): Promise<OpResult> => {
     const res = await apiMutate(`/categorias/${id}`, 'PUT', payload)
-    if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias() })
+    if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias(uid) })
     return { ok: res.ok, erro: res.erro }
   }
 
   const excluir = async (id: string): Promise<OpResult> => {
     const res = await apiMutate(`/categorias/${id}`, 'DELETE')
-    if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias() })
+    if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias(uid) })
     return { ok: res.ok, erro: res.erro }
   }
 

@@ -8,6 +8,29 @@ import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWa
 
 const TIPOS_CONTA = ["CORRENTE","REMUNERACAO","CARTAO","INVESTIMENTO","CARTEIRA"];
 
+interface CartaoVirtual { id: string; sufixo: string; apelido: string }
+
+/** Valida e normaliza o array `cartoes_virtuais`. Retorna Response em
+ *  caso de erro, ou o array sanitizado. Tipo = CARTAO obrigatório. */
+function validarCartoesVirtuais(input: unknown): Response | CartaoVirtual[] {
+  if (!Array.isArray(input)) return erro("cartoes_virtuais deve ser um array");
+  const out: CartaoVirtual[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") return erro("cartao virtual inválido");
+    const c = item as Record<string, unknown>;
+    const id      = String(c.id ?? "").trim();
+    const sufixo  = String(c.sufixo ?? "").trim();
+    const apelido = String(c.apelido ?? "").trim();
+    if (!id)      return erro("cartao_virtual.id obrigatório");
+    if (!/^\d{2,8}$/.test(sufixo))
+      return erro("cartao_virtual.sufixo deve ter de 2 a 8 dígitos numéricos");
+    if (apelido.length > 40)
+      return erro("cartao_virtual.apelido deve ter até 40 caracteres");
+    out.push({ id, sufixo, apelido });
+  }
+  return out;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = autenticar(req);
@@ -104,6 +127,15 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   }
 
   const ehCartao = body.tipo === "CARTAO";
+
+  // Validar cartoes_virtuais (apenas CARTAO; demais tipos ignoram silenciosamente)
+  let cartoesVirtuais: CartaoVirtual[] = [];
+  if (ehCartao && body.cartoes_virtuais !== undefined && body.cartoes_virtuais !== null) {
+    const r = validarCartoesVirtuais(body.cartoes_virtuais);
+    if (r instanceof Response) return r;
+    cartoesVirtuais = r;
+  }
+
   const { data, error } = await c.from("contas").insert({
     user_id: userId, nome: body.nome, tipo: body.tipo,
     // Cartão não tem saldo inicial (sempre 0); demais tipos usam o valor informado
@@ -112,6 +144,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
     dia_fechamento: ehCartao ? (body.dia_fechamento ?? null) : null,
     dia_pagamento:  ehCartao ? (body.dia_pagamento  ?? null) : null,
     limite_credito: ehCartao ? (body.limite_credito ?? null) : null,
+    cartoes_virtuais: ehCartao ? cartoesVirtuais : [],
   }).select().single();
 
   if (error) {
@@ -164,7 +197,14 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
       return erro("limite_credito deve ser >= 0")
   }
 
-  const campos = camposParaAtualizar(body, ["nome","tipo","saldo_inicial","icone","cor","ativa","dia_fechamento","dia_pagamento","limite_credito"]);
+  // Valida cartoes_virtuais se enviado e substitui no body pelo array sanitizado
+  if (body.cartoes_virtuais !== undefined && body.cartoes_virtuais !== null) {
+    const r = validarCartoesVirtuais(body.cartoes_virtuais);
+    if (r instanceof Response) return r;
+    body.cartoes_virtuais = r;
+  }
+
+  const campos = camposParaAtualizar(body, ["nome","tipo","saldo_inicial","icone","cor","ativa","dia_fechamento","dia_pagamento","limite_credito","cartoes_virtuais"]);
   const { data, error } = await c.from("contas").update(campos).eq("id", id).select().single();
   
   if (error) {

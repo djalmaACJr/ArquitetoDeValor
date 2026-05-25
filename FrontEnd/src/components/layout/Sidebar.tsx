@@ -4,9 +4,11 @@ import {
   LayoutDashboard, List, CreditCard, Tag,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
   ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2, TrendingUp, X,
+  Receipt,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
+import { useUsuarioPerfil } from '../../hooks/useUsuarioPerfil'
 import AppVersion from '../ui/AppVersion'
 
 const Logo = () => (
@@ -112,7 +114,15 @@ const navRelatorios: NavItem[] = [
   },
 ]
 const navFerramentas: NavItem[] = [
-  { to: '/importexport', icon: <ArrowLeftRight size={15}/>, label: 'Ferramentas' },
+  {
+    to: '/importexport',
+    icon: <ArrowLeftRight size={15}/>,
+    label: 'Ferramentas',
+    children: [
+      { to: '/importexport',     icon: <ArrowLeftRight size={13}/>, label: 'Importar/Exportar' },
+      { to: '/importar-fatura',  icon: <Receipt size={13}/>,        label: 'Importação de Fatura' },
+    ],
+  },
 ]
 
 function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChild[] }; collapsed: boolean }) {
@@ -276,14 +286,13 @@ interface SidebarProps {
 
 export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}) {
   const { dark, toggle } = useTheme()
-  const { signOut, session } = useAuth()
+  const { signOut } = useAuth()
+  const { nome: nomePerfil, email } = useUsuarioPerfil()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
 
-  const nome  = session?.user?.user_metadata?.nome
-    ?? session?.user?.email?.split('@')[0]
-    ?? 'Usuário'
-  const email = session?.user?.email ?? ''
+  // Fallback final pra UI nunca exibir vazio enquanto o fetch resolve
+  const nome = nomePerfil || 'Usuário'
 
   // `collapsed` só deve afetar a renderizaçao em desktop (md+). Em mobile
   // o overlay é sempre expandido — usamos `colapsado` (efetivo) abaixo.

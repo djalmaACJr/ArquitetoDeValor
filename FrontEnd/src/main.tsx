@@ -120,7 +120,14 @@ supabase.auth.onAuthStateChange((_event, session) => {
   // Troca de usuário durante a sessão (login em outra conta, logout): limpa
   // TODOS os caches client-side do usuário anterior. Sem isso já tivemos
   // vazamento de lançamentos entre sessões (usuário B via dados do A).
+  //
+  // cancelQueries() ANTES de clear() — sem isso, fetches já disparados com
+  // o JWT antigo podem terminar DEPOIS do clear() e repopular o cache com
+  // dados do usuário anterior (race janela de ~100-500ms entre signOut e o
+  // signIn novo). cancelQueries marca os fetches como abortados; o cleanup
+  // do React Query descarta o resultado quando ele chegar.
   if (currentUserId !== undefined && newUserId !== currentUserId) {
+    queryClient.cancelQueries()
     queryClient.clear()
     localStorage.removeItem(LS_KEY)
     limparEstadoCliente()

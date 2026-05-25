@@ -1040,6 +1040,11 @@ const CardContas = memo(function CardContas({ contas, oculto, mes, modo, setModo
       if (tx.conta_id !== c.conta_id) continue
       if (tx.data > dataAlvo) continue
       if (!incluirPlanejado && tx.status !== 'PAGO') continue
+      // Regra de negócio: saldo de CARTAO ignora PROJECAO mesmo quando
+      // incluirPlanejado=true (alinha com a view vw_saldo_contas e os
+      // RPCs fn_saldos_contas_ate_data/fn_saldo_conta_ate_data —
+      // ver 20260526000001_saldo_cartao_ignora_projecao.sql).
+      if (c.tipo === 'CARTAO' && tx.status === 'PROJECAO') continue
       s += tx.tipo === 'RECEITA' ? tx.valor : -tx.valor
     }
     return s

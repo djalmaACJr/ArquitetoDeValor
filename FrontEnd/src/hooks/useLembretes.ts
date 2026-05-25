@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
+import { useAuth } from './useAuth'
 import type { Lembrete } from '../types'
 
 export type { Lembrete }
@@ -19,17 +20,19 @@ async function fetchLembretes(filtros: { mes?: string }): Promise<Lembrete[]> {
 
 export function useLembretes(filtros: { mes?: string; enabled?: boolean } = {}) {
   const qc = useQueryClient()
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
   const { enabled = true, ...filtroQuery } = filtros
 
   const { data: lembretes = [], isLoading: loading, error } = useQuery({
-    queryKey: qk.lembretes(filtroQuery),
+    queryKey: qk.lembretes(uid, filtroQuery),
     queryFn:  () => fetchLembretes(filtroQuery),
     staleTime: 30_000,
     retry: false,
-    enabled,
+    enabled: enabled && !!uid,
   })
 
-  const invalidar = () => qc.invalidateQueries({ queryKey: ['lembretes'] })
+  const invalidar = () => qc.invalidateQueries({ queryKey: ['lembretes', uid] })
 
   const criar = async (payload: {
     data: string

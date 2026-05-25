@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { useUsuarioPerfil } from '../hooks/useUsuarioPerfil'
 import { apiMutate } from '../lib/api'
 import { useFiltrosSalvos } from '../hooks/useFiltrosSalvos'
 import { useSugestoes, salvarSugestao } from '../hooks/useAssistente'
@@ -853,16 +854,23 @@ function SecaoIA() {
 export default function PerfilPage() {
   const { session } = useAuth()
   const navigate    = useNavigate()
+  // qc precisa estar em escopo antes de salvarNome — declarado aqui no topo
+  // (havia uma 2ª declaração em ~L958 dentro de outra seção; removida).
+  const qc = useQueryClient()
   const user = session?.user
 
-  const nomeAtual  = user?.user_metadata?.nome ?? user?.email?.split('@')[0] ?? ''
-  const emailAtual = user?.email ?? ''
+  // Lê de arqvalor.usuarios (fonte da verdade) em vez do JWT.
+  // Se os dois espelhos divergirem (auth.users.raw_user_meta_data vs
+  // arqvalor.usuarios), confiamos no espelho da tabela arqvalor.
+  const { nome: nomePerfil, email: emailPerfil } = useUsuarioPerfil()
+  const nomeAtual  = nomePerfil
+  const emailAtual = emailPerfil
 
   // ── Nome ────────────────────────────────────────────────────
   const [nome, setNome]         = useState(nomeAtual)
-  useEffect(() => {
-    if (user) setNome(user.user_metadata?.nome ?? user.email?.split('@')[0] ?? '')
-  }, [user])
+  // Quando o fetch da tabela resolve, ressincroniza o input controlado.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setNome(nomeAtual) }, [nomeAtual])
   const [fbNome, setFbNome]     = useState<Feedback | null>(null)
   const [loadNome, setLoadNome] = useState(false)
 
@@ -871,13 +879,22 @@ export default function PerfilPage() {
     if (!nome.trim()) return
     setFbNome(null)
     setLoadNome(true)
-    const { error } = await supabase.auth.updateUser({ data: { nome: nome.trim() } })
-    if (!error) {
-      await supabase.schema('arqvalor').from('usuarios')
-        .update({ nome: nome.trim() }).eq('id', user!.id)
-    }
+
+    // Atualiza arqvalor.usuarios PRIMEIRO (fonte da verdade da UI).
+    // Depois atualiza auth.users.raw_user_meta_data como espelho.
+    // Se um falhar, mostramos erro visível e não confirmamos sucesso.
+    const { error: errArqv } = await supabase.schema('arqvalor').from('usuarios')
+      .update({ nome: nome.trim() }).eq('id', user!.id)
+
+    const { error: errAuth } = errArqv
+      ? { error: null }   // já vai falhar — não atualiza o espelho do auth
+      : await supabase.auth.updateUser({ data: { nome: nome.trim() } })
+
+    // Invalida cache do useUsuarioPerfil pra refetch imediato
+    if (!errArqv) await qc.invalidateQueries({ queryKey: qk.usuarioPerfil(user!.id) })
+
     setLoadNome(false)
-    setFbNome(error
+    setFbNome(errArqv || errAuth
       ? { tipo: 'erro', msg: 'Não foi possível atualizar o nome.' }
       : { tipo: 'ok',   msg: 'Nome atualizado com sucesso.' }
     )
@@ -942,7 +959,7 @@ export default function PerfilPage() {
   const { categorias } = useCategorias()
 
   // ── Assistente de Lançamentos ────────────────────────────────
-  const qc = useQueryClient()
+  // qc já declarado no topo da função
   const { sugestoes, carregando: carregandoAss, editar: editarAss, excluir: excluirAss, excluirTodas: excluirTodasAss } =
     useSugestoes()
   const [editandoAss,     setEditandoAss]     = useState<string | null>(null)
@@ -1058,7 +1075,7 @@ export default function PerfilPage() {
       })
       if (r.ok) ok++; else fail++
     }
-    await qc.invalidateQueries({ queryKey: qk.assistente() })
+    await qc.invalidateQueries({ queryKey: qk.assistente(session?.user?.id ?? null) })
     setSalvandoSug(false)
     setResultadoSug({ ok, fail })
     setSugeridas(prev => prev?.filter(s => !selecionadas.has(s.key)) ?? [])

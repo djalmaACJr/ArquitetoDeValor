@@ -6,10 +6,13 @@ import Sidebar from './Sidebar'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useAutoLogout } from '../../hooks/useAutoLogout'
+import { useAuth } from '../../hooks/useAuth'
 import { mesAtual } from '../../lib/utils'
 
 export default function AppLayout() {
   const qc = useQueryClient()
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
   const mainRef = useRef<HTMLElement>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const { pathname } = useLocation()
@@ -27,9 +30,10 @@ export default function AppLayout() {
   // Pré-aquece o cache dos meses vizinhos ao mês atual logo após o login,
   // antes mesmo do usuário navegar para a tela de Lançamentos.
   useEffect(() => {
+    if (!uid) return
     const mes = mesAtual()
-    prefetchLancamentosVizinhos(qc, mes)
-  }, [qc])
+    prefetchLancamentosVizinhos(qc, uid, mes)
+  }, [qc, uid])
 
   // ── Delegação de scroll para ↑ / ↓ / PageUp / PageDown / Home / End ───
   //

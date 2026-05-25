@@ -32,7 +32,20 @@
       "mcp__supabase__execute_sql",
       "mcp__supabase__apply_migration",
       "Bash(xargs wc -l)",
-      "Bash(grep -v \"import\\\\|type\\\\|interface\\\\|//\")"
+      "Bash(grep -v \"import\\\\|type\\\\|interface\\\\|//\")",
+      "PowerShell($pwd.Path)",
+      "PowerShell(npx tsc --noEmit 2>&1)",
+      "PowerShell(npx tsc --noEmit -p e2e/tsconfig.json 2>&1)",
+      "mcp__supabase__get_advisors",
+      "PowerShell(npx tsc --noEmit -p tsconfig.app.json 2>&1)",
+      "PowerShell(npx tsc --noEmit -p FrontEnd/tsconfig.app.json 2>&1)",
+      "mcp__supabase__list_migrations",
+      "Bash(xargs grep -l \"centro_custo\\\\|centro de custo\")",
+      "Bash(xargs grep -l \"valor_projetado\\\\|fn_preservar_valor_projetado\")",
+      "Bash(xargs grep -l \"pdf\\\\|ImportExport\\\\|papaparse\\\\|xlsx\")",
+      "mcp__supabase__list_edge_functions",
+      "mcp__supabase__get_logs",
+      "mcp__supabase__deploy_edge_function"
     ]
   }
 }

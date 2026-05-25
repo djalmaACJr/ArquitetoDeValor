@@ -3,6 +3,7 @@ import { useQuery, useQueryClient, keepPreviousData, type QueryClient } from '@t
 import { useEffect, useCallback } from 'react'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
+import { useAuth } from './useAuth'
 
 export interface Lancamento {
   id: string
@@ -95,7 +96,8 @@ export function mesAdjacente(mes: string, delta: number): string {
  * usando filtros padrão (sem conta/categoria/status). Ideal para chamar logo
  * após o login (ex.: AppLayout) para que LancamentosPage encontre o cache pronto.
  */
-export function prefetchLancamentosVizinhos(qc: QueryClient, mes: string) {
+export function prefetchLancamentosVizinhos(qc: QueryClient, uid: string | null, mes: string) {
+  if (!uid) return
   for (let delta = -3; delta <= 3; delta++) {
     const filtroAdj: FiltrosLancamento = {
       mes:          mesAdjacente(mes, delta),
@@ -105,7 +107,7 @@ export function prefetchLancamentosVizinhos(qc: QueryClient, mes: string) {
       com_saldo:    true,
     }
     qc.prefetchQuery({
-      queryKey: qk.lancamentos(filtroAdj),
+      queryKey: qk.lancamentos(uid, filtroAdj),
       queryFn:  ({ signal }) => fetchLancamentos(filtroAdj, signal),
       staleTime: 30_000,
     })
@@ -114,35 +116,40 @@ export function prefetchLancamentosVizinhos(qc: QueryClient, mes: string) {
 
 export function useLancamentos(filtros: FiltrosLancamento) {
   const qc = useQueryClient()
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
 
   const { data: lancamentos = [], isLoading: loading, isFetching: fetching, error } = useQuery({
-    queryKey:        qk.lancamentos(filtros),
+    queryKey:        qk.lancamentos(uid, filtros),
     queryFn:         ({ signal }) => fetchLancamentos(filtros, signal),
     staleTime:       30_000,
     placeholderData: keepPreviousData,
+    enabled:         !!uid,
   })
 
   // Prefetch pontual — chamado no onMouseEnter dos botões de navegação
   const prefetchAdj = useCallback((delta: number) => {
+    if (!uid) return
     const filtroAdj = { ...filtros, mes: mesAdjacente(filtros.mes, delta) }
     qc.prefetchQuery({
-      queryKey: qk.lancamentos(filtroAdj),
+      queryKey: qk.lancamentos(uid, filtroAdj),
       queryFn:  ({ signal }) => fetchLancamentos(filtroAdj, signal),
       staleTime: 30_000,
     })
-  }, [filtros, qc])
+  }, [filtros, qc, uid])
 
   // Prefetch de background — cobre navegação por teclado e saltos maiores
   useEffect(() => {
+    if (!uid) return
     for (const delta of [-3, -2, -1, 1, 2, 3]) {
       const filtroAdj = { ...filtros, mes: mesAdjacente(filtros.mes, delta) }
       qc.prefetchQuery({
-        queryKey: qk.lancamentos(filtroAdj),
+        queryKey: qk.lancamentos(uid, filtroAdj),
         queryFn:  ({ signal }) => fetchLancamentos(filtroAdj, signal),
         staleTime: 30_000,
       })
     }
-  }, [filtros.mes]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filtros.mes, uid]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const carregar = async () => {
     // Invalida o extrato (filtro atual) e também o dashboard/histórico —
@@ -150,22 +157,22 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     // refetch após uma mudança precisa propagar para todas as visões que
     // consomem transações (dashboard-fase1, transacoes-mes).
     await Promise.all([
-      qc.invalidateQueries({ queryKey: qk.lancamentos(filtros) }),
-      qc.invalidateQueries({ queryKey: ['dashboard-fase1'] }),
-      qc.invalidateQueries({ queryKey: ['transacoes-mes'] }),
+      qc.invalidateQueries({ queryKey: qk.lancamentos(uid, filtros) }),
+      qc.invalidateQueries({ queryKey: ['dashboard-fase1', uid] }),
+      qc.invalidateQueries({ queryKey: ['transacoes-mes', uid] }),
     ])
   }
 
   // Atualização local — atualiza o cache do TanStack diretamente sem refetch
   const atualizarLocal = (id: string, campos: Partial<Lancamento>) => {
-    qc.setQueryData<Lancamento[]>(qk.lancamentos(filtros), prev =>
+    qc.setQueryData<Lancamento[]>(qk.lancamentos(uid, filtros), prev =>
       prev?.map(l => l.id === id ? { ...l, ...campos } : l) ?? []
     )
   }
 
   // Remove imediatamente da lista local — usado após exclusão via Drawer
   const removerLocal = (id: string, idPar?: string | null) => {
-    qc.setQueryData<Lancamento[]>(qk.lancamentos(filtros), prev =>
+    qc.setQueryData<Lancamento[]>(qk.lancamentos(uid, filtros), prev =>
       idPar
         ? prev?.filter(l => l.id_par_transferencia !== idPar) ?? []
         : prev?.filter(l => l.id !== id) ?? []
@@ -176,9 +183,9 @@ export function useLancamentos(filtros: FiltrosLancamento) {
   // Sem invalidar dashboard-fase1/transacoes-mes, o dashboard fica em cache
   // (staleTime 60s) e cálculos como diasNegativos não enxergam a mudança.
   const invalidarTudo = () => Promise.all([
-    qc.invalidateQueries({ queryKey: ['lancamentos'] }),
-    qc.invalidateQueries({ queryKey: ['dashboard-fase1'] }),
-    qc.invalidateQueries({ queryKey: ['transacoes-mes'] }),
+    qc.invalidateQueries({ queryKey: ['lancamentos', uid] }),
+    qc.invalidateQueries({ queryKey: ['dashboard-fase1', uid] }),
+    qc.invalidateQueries({ queryKey: ['transacoes-mes', uid] }),
   ])
 
   const criar = async (payload: Partial<Lancamento>): Promise<OpResult> => {

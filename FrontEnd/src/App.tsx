@@ -18,6 +18,7 @@ const ContasPage             = lazy(() => import('./pages/ContasPage'))
 const CategoriasPage         = lazy(() => import('./pages/CategoriasPage'))
 const LancamentosPage        = lazy(() => import('./pages/LancamentosPage'))
 const ImportExportPage       = lazy(() => import('./pages/ImportExportPage'))
+const ImportarFaturaPage     = lazy(() => import('./pages/ImportarFaturaPage'))
 const ComparativoMensalPage  = lazy(() => import('./pages/ComparativoMensalPage'))
 const AssinaturasPage        = lazy(() => import('./pages/AssinaturasPage'))
 const ProjecaoEconomiaPage   = lazy(() => import('./pages/ProjecaoEconomiaPage'))
@@ -77,6 +78,8 @@ export default function App() {
             <Route path="assinaturas" element={<AssinaturasPage/>}/>
             <Route path="projecao"    element={<ProjecaoEconomiaPage/>}/>
             <Route path="importexport" element={<ImportExportPage/>}/>
+            <Route path="importar-fatura"      element={<ImportarFaturaPage/>}/>
+            <Route path="importar-fatura/:id"  element={<ImportarFaturaPage/>}/>
             <Route path="perfil"       element={<PerfilPage/>}/>
           </Route>
           <Route path="*" element={<Navigate to="/" replace/>}/>

@@ -4,6 +4,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
+import { useAuth } from './useAuth'
 import { log } from '../lib/logger'
 
 export interface SugestaoLancamento {
@@ -89,18 +90,21 @@ export async function editarSugestao(
  */
 export function useSugestoes() {
   const qc = useQueryClient()
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
 
   const { data: sugestoes = [], isLoading: carregando } = useQuery({
-    queryKey: qk.assistente(),
+    queryKey: qk.assistente(uid),
     queryFn:  async () => {
       const res = await apiFetch<SugestaoLancamento[]>('/assistente')
       if (!res.ok) return []
       return Array.isArray(res.dados) ? res.dados : []
     },
     staleTime: 30_000,
+    enabled:   !!uid,
   })
 
-  const invalidar = () => qc.invalidateQueries({ queryKey: qk.assistente() })
+  const invalidar = () => qc.invalidateQueries({ queryKey: qk.assistente(uid) })
 
   const editar = async (id: string, descricao: string) => {
     const r = await editarSugestao(id, { descricao })

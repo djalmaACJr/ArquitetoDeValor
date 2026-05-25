@@ -1,6 +1,6 @@
 // src/pages/ContasPage.tsx
 import { useState } from 'react'
-import { Plus, Pencil, X as XIcon } from 'lucide-react'
+import { Plus, Pencil, X as XIcon, CreditCard, Trash2 } from 'lucide-react'
 import { useContas } from '../hooks/useContas'
 import { useOcultarValores } from '../hooks/useOcultarValores'
 import { formatBRL } from '../lib/utils'
@@ -10,7 +10,7 @@ import {
   Drawer, ColorPicker, Field, Input, SelectDark,
   Toggle, BtnSalvar, BtnCancelar, Toast, ModalExcluir,
 } from '../components/ui/shared'
-import type { Conta, TipoConta } from '../types'
+import type { Conta, TipoConta, CartaoVirtual } from '../types'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
 import TutorialTour from '../components/ui/TutorialTour'
@@ -21,12 +21,14 @@ interface PayloadEditarConta {
   icone?: string; cor?: string; ativa: boolean
   dia_fechamento?: number | null; dia_pagamento?: number | null
   limite_credito?: number | null
+  cartoes_virtuais?: CartaoVirtual[]
 }
 interface PayloadNovaConta {
   nome: string; tipo: TipoConta; saldo_inicial: number
   icone?: string; cor?: string
   dia_fechamento?: number | null; dia_pagamento?: number | null
   limite_credito?: number | null
+  cartoes_virtuais?: CartaoVirtual[]
 }
 
 const TIPOS: { value: TipoConta; label: string }[] = [
@@ -51,10 +53,12 @@ interface FormState {
   icone: string; cor: string; ativa: boolean
   dia_fechamento: string; dia_pagamento: string
   limite_credito: string
+  cartoes_virtuais: CartaoVirtual[]
 }
 const FORM_VAZIO: FormState = {
   nome: '', tipo: 'CORRENTE', saldo_inicial: '0', icone: '', cor: '#00c896', ativa: true,
   dia_fechamento: '', dia_pagamento: '', limite_credito: '',
+  cartoes_virtuais: [],
 }
 const formDeConta = (c: Conta): FormState => ({
   nome: c.nome, tipo: c.tipo, saldo_inicial: String(c.saldo_inicial),
@@ -62,6 +66,7 @@ const formDeConta = (c: Conta): FormState => ({
   dia_fechamento: c.dia_fechamento != null ? String(c.dia_fechamento) : '',
   dia_pagamento:  c.dia_pagamento  != null ? String(c.dia_pagamento)  : '',
   limite_credito: c.limite_credito != null ? String(c.limite_credito) : '',
+  cartoes_virtuais: c.cartoes_virtuais ?? [],
 })
 
 function AcaoBtn({ onClick, title, danger = false, children }: {
@@ -154,6 +159,26 @@ export default function ContasPage() {
 
   const salvar = async () => {
     if (!form.nome.trim()) { setErro('Nome é obrigatório.'); return }
+
+    // Sanitiza cartões virtuais antes de enviar (só para CARTAO)
+    const cartoesValidados: CartaoVirtual[] = []
+    if (form.tipo === 'CARTAO') {
+      for (const c of form.cartoes_virtuais) {
+        const sufixo = c.sufixo.trim()
+        const apelido = c.apelido.trim()
+        if (!sufixo && !apelido) continue   // ignora linha vazia
+        if (!/^\d{2,8}$/.test(sufixo)) {
+          setErro(`Sufixo "${sufixo}" inválido — deve ter de 2 a 8 dígitos numéricos.`)
+          return
+        }
+        if (apelido.length > 40) {
+          setErro('Apelido do cartão virtual deve ter até 40 caracteres.')
+          return
+        }
+        cartoesValidados.push({ id: c.id, sufixo, apelido })
+      }
+    }
+
     setSalvando(true); setErro(null)
     if (contaEditar) {
       const payload: PayloadEditarConta = {
@@ -164,6 +189,7 @@ export default function ContasPage() {
         payload.dia_fechamento = form.dia_fechamento ? parseInt(form.dia_fechamento) : null
         payload.dia_pagamento  = form.dia_pagamento  ? parseInt(form.dia_pagamento)  : null
         payload.limite_credito = form.limite_credito ? parseFloat(form.limite_credito) : null
+        payload.cartoes_virtuais = cartoesValidados
       }
       const { ok, erro: e } = await editar(contaEditar.conta_id, payload)
       setSalvando(false)
@@ -179,12 +205,31 @@ export default function ContasPage() {
         payloadNovo.dia_fechamento = form.dia_fechamento ? parseInt(form.dia_fechamento) : null
         payloadNovo.dia_pagamento  = form.dia_pagamento  ? parseInt(form.dia_pagamento)  : null
         payloadNovo.limite_credito = form.limite_credito ? parseFloat(form.limite_credito) : null
+        payloadNovo.cartoes_virtuais = cartoesValidados
       }
       const { ok, erro: e } = await criar(payloadNovo)
       setSalvando(false)
       if (ok) { fechar(); toast('Conta criada com sucesso!') } else setErro(e ?? 'Erro ao salvar.')
     }
   }
+
+  // Helpers de manipulação dos cartões virtuais no form
+  const novoCartaoVirtual = (): CartaoVirtual => ({
+    id: typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    sufixo: '', apelido: '',
+  })
+  const adicionarCartao = () =>
+    set({ cartoes_virtuais: [...form.cartoes_virtuais, novoCartaoVirtual()] })
+  const removerCartao = (id: string) =>
+    set({ cartoes_virtuais: form.cartoes_virtuais.filter(c => c.id !== id) })
+  const atualizarCartao = (id: string, patch: Partial<Pick<CartaoVirtual, 'sufixo' | 'apelido'>>) =>
+    set({
+      cartoes_virtuais: form.cartoes_virtuais.map(c =>
+        c.id === id ? { ...c, ...patch } : c
+      ),
+    })
 
   const handleExcluir = async () => {
     if (!contaExcluir) return
@@ -401,6 +446,73 @@ export default function ContasPage() {
                 placeholder="Ex: 5000.00"
               />
               <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>Teto disponível no cartão</p>
+            </Field>
+
+            {/* Cartões virtuais — sufixo + apelido. N por conta. */}
+            <Field label="Cartões virtuais" data-tutorial="conta-cartoes-virtuais">
+              <p className="text-[14px] mb-2" style={{ color: '#8b92a8' }}>
+                Cadastre os cartões físicos ou virtuais desta conta. Informe só os
+                últimos dígitos (2 a 8) — não o número completo.
+              </p>
+
+              {form.cartoes_virtuais.length === 0 && (
+                <p className="text-[14px] italic mb-2" style={{ color: '#8b92a8' }}>
+                  Nenhum cartão cadastrado ainda.
+                </p>
+              )}
+
+              <div className="flex flex-col gap-2">
+                {form.cartoes_virtuais.map(cv => (
+                  <div key={cv.id} className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-md border border-white/10 flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(233,30,140,0.12)', color: '#e91e8c' }}>
+                      <CreditCard size={16} />
+                    </div>
+                    <input
+                      value={cv.sufixo}
+                      onChange={e => {
+                        const v = e.target.value.replace(/\D/g, '').slice(0, 8)
+                        atualizarCartao(cv.id, { sufixo: v })
+                      }}
+                      placeholder="Sufixo (ex: 1234)"
+                      inputMode="numeric"
+                      maxLength={8}
+                      className="w-28 bg-[#252d42] border border-white/10 rounded-lg px-2.5 py-1.5
+                        text-[15px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
+                      style={{ color: '#e8eaf0' }}
+                    />
+                    <input
+                      value={cv.apelido}
+                      onChange={e => atualizarCartao(cv.id, { apelido: e.target.value })}
+                      placeholder="Apelido (ex: Principal)"
+                      maxLength={40}
+                      className="flex-1 min-w-0 bg-[#252d42] border border-white/10 rounded-lg px-2.5 py-1.5
+                        text-[15px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
+                      style={{ color: '#e8eaf0' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removerCartao(cv.id)}
+                      title="Remover cartão"
+                      className="w-9 h-9 rounded-md border border-white/10 flex items-center justify-center flex-shrink-0
+                        hover:bg-red-400/10 hover:border-red-400/30 transition-colors"
+                      style={{ color: '#f87171' }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={adicionarCartao}
+                className="mt-2 flex items-center gap-1.5 text-[15px] border border-white/10 rounded-lg
+                  px-2.5 py-1.5 hover:border-av-green hover:text-av-green transition-colors"
+                style={{ color: '#4da6ff' }}
+              >
+                <Plus size={14} /> Adicionar cartão
+              </button>
             </Field>
           </>
         )}

@@ -24,22 +24,7 @@ setup('criar dados basicos', async ({ page, request }) => {
   await page.goto('/')
   await page.waitForLoadState('domcontentloaded')
 
-  // Marca todos os tutoriais como "já vistos" para que o overlay de tutorial
-  // não bloqueie cliques nos testes E2E (em CI o localStorage está limpo).
-  await page.evaluate(() => {
-    const keys = [
-      'av-tut-tour-dashboard-v1',
-      'av-tut-tour-extrato-v1',
-      'av-tut-tour-contas-v1',
-      'av-tut-tour-categorias-v1',
-      'av-tut-tour-relatorios-v1',
-      'av-tut-tour-comparativo-v1',
-      'av-tut-tour-assinaturas-v1',
-      'av-tut-tour-projecao-v1',
-    ]
-    keys.forEach(k => localStorage.setItem(k, '1'))
-  })
-  // Persiste o localStorage atualizado em auth.json para todos os testes herdarem.
+  // Persiste o storage state atualizado em auth.json para todos os testes herdarem.
   await page.context().storageState({ path: './fixtures/auth.json' })
 
   const token = await page.evaluate(() => {
@@ -65,6 +50,62 @@ setup('criar dados basicos', async ({ page, request }) => {
     'Content-Type': 'application/json',
   }
   const api = (p: string) => `${SUPABASE_URL}/functions/v1${p}`
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Marca tutoriais como "já vistos" e força mascote_preferido no banco.
+  //
+  // Por que no banco? `tutoriais_vistos` e `mascote_preferido` migraram do
+  // localStorage para `arqvalor.usuarios`. Se não setarmos:
+  //   - TutorialTour mostra overlay `bg-black/70 pointer-events-auto` que
+  //     intercepta cliques nos testes (mascara como "element not stable").
+  //   - Sem mascote_preferido, ApresentacaoMascotes força fluxo de 1º acesso
+  //     antes de o app carregar.
+  //
+  // PostgREST aceita PATCH direto na tabela do schema `arqvalor` via headers
+  // `Accept-Profile` / `Content-Profile`. O JWT do usuário é suficiente — RLS
+  // restringe ao próprio registro.
+  // ─────────────────────────────────────────────────────────────────────
+  const tutoriaisVistos: Record<string, boolean> = {}
+  const pageKeys = [
+    'dashboard-v1', 'extrato-v1', 'contas-v1', 'categorias-v1',
+    'relatorios-v1', 'comparativo-v1', 'assinaturas-v1', 'projecao-v1',
+  ]
+  for (const k of pageKeys) tutoriaisVistos[`tour-${k}`] = true
+
+  // Decodifica o `sub` do JWT (id do usuário) sem libs externas.
+  const userId = ((): string | null => {
+    try {
+      const payload = JSON.parse(
+        Buffer.from(token.split('.')[1], 'base64url').toString('utf-8')
+      )
+      return payload.sub ?? null
+    } catch { return null }
+  })()
+
+  if (userId) {
+    const restHeaders = {
+      ...headers,
+      'Accept-Profile':  'arqvalor',
+      'Content-Profile': 'arqvalor',
+      'Prefer': 'return=minimal',
+    }
+    const patchRes = await request.patch(
+      `${SUPABASE_URL}/rest/v1/usuarios?id=eq.${userId}`,
+      {
+        headers: restHeaders,
+        data: {
+          tutoriais_vistos: tutoriaisVistos,
+          mascote_preferido: 'sabio',
+        },
+      }
+    )
+    console.log(patchRes.ok()
+      ? '  ✅ tutoriais_vistos + mascote_preferido configurados no banco'
+      : `  ⚠️ falha ao atualizar usuario: ${patchRes.status()}`
+    )
+  } else {
+    console.log('  ⚠️ não foi possível extrair user_id do JWT')
+  }
 
   // ── Helper: lista, filtra por nome contendo "E2E", deleta cada um ─
   async function limparE2E(
