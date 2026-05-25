@@ -170,6 +170,7 @@ export interface FaturaImportItem {
   descricao:              string
   estabelecimento:        string | null
   valor:                  number
+  tipo:                   'RECEITA' | 'DESPESA'
   parcela_atual:          number | null
   parcela_total:          number | null
   decisao:                DecisaoFaturaImport

@@ -143,6 +143,15 @@ export function useFaturaImportSessao(id: string | null) {
   const setDecisao = (itemId: string, decisao: DecisaoFaturaImport) =>
     editarItem(itemId, { decisao })
 
+  const setCategoria = (itemId: string, categoriaId: string | null) =>
+    editarItem(itemId, { categoria_escolhida_id: categoriaId || null })
+
+  const sugerir = async (): Promise<OpResult<{ atualizados: number }>> => {
+    const r = await apiMutate<{ atualizados: number }>(`/faturas/${id}/sugerir`, 'POST')
+    if (r.ok) await invalidarSessao()
+    return { ok: r.ok, dados: r.dados ?? null, erro: r.erro }
+  }
+
   const confirmar = async (): Promise<OpResult> => {
     const r = await apiMutate(`/faturas/${id}/confirmar`, 'POST')
     if (r.ok) {
@@ -158,6 +167,8 @@ export function useFaturaImportSessao(id: string | null) {
     error: error ? (error as Error).message : null,
     editarItem,
     setDecisao,
+    setCategoria,
+    sugerir,
     confirmar,
   }
 }

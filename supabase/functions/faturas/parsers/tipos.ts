@@ -20,6 +20,8 @@ export interface ParsedLinha {
   parcela_total?:  number | null
   /** Observação livre do parser (ex.: "Cartão final 3690" do Nubank). */
   observacao?:     string | null
+  /** Crédito ou débito — DESPESA por padrão; RECEITA para estornos/descontos. */
+  tipo?:           'RECEITA' | 'DESPESA'
 }
 
 /** Resultado completo de parsear uma fatura. */

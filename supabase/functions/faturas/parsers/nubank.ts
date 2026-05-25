@@ -39,18 +39,30 @@ const MESES_PT: Record<string, number> = {
 // Sem `^` porque transações ficam concatenadas em uma linha gigante após o
 // unpdf. A non-greedy + boundary forte no `R\$\s*\d+,\d{2}` evita engolir
 // múltiplos lançamentos numa só match.
+//
+// `(?!\d{4})` bloqueia o caso "28 ABR 2026" do cabeçalho "EMISSÃO E ENVIO
+// 28 ABR 2026": transações reais nunca têm um ano de 4 dígitos logo após
+// o mês abreviado.
 const RE_NUBANK_TX =
-  /(\d{1,2})\s+(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\s+(?:•+\s*(\d{2,8})\s+)?(.+?)\s+([−-])?\s*R\$\s*([\d.]+,\d{2})/gi;
+  /(\d{1,2})\s+(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\s+(?!\d{4})(?:•+\s*(\d{2,8})\s+)?(.+?)\s+([−-])?\s*R\$\s*([\d.]+,\d{2})/gi;
+
+// Remove o cabeçalho de seção de transações que o unpdf repete em cada
+// página: "TRANSAÇÕES DE 29 MAR A 28 ABR ". Sem essa limpeza, o "28 ABR"
+// do intervalo de período passa no `(?!\d{4})` (pois vem depois "10 ABR"
+// não um ano) e o (.+?) não-guloso engole a 1ª transação real da página.
+const RE_HEADER_PERIODO_NUBANK =
+  /TRANSA[ÇC][ÕO]ES\s+DE\s+\d{1,2}\s+(?:JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\s+[A-Z]\s+\d{1,2}\s+(?:JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\s+/gi;
 
 const RE_VENCIMENTO =
   /vencimento[:\s]+(\d{1,2})\s+(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\s+(\d{4})/i;
 
-// Descrições que parecem cabeçalho/total e devem ser ignoradas.
+// Descrições que parecem cabeçalho/total/pagamento e devem ser ignoradas.
 // Exemplos reais que apareceram no PDF:
 //   "a 28 ABR"                 (do "29 MAR a 28 ABR" do resumo)
 //   "Djalma A C Junior"        (nome do titular antes do total)
 //   "Fechamento da próxima fatura ..."
-const DESC_PROIBIDA = /^(a\s|de\s|até\s|fechamento|saldo|total|pagamento\s+recebido|limite|próxim|emiss[ãa]o|valor\s+m[áa]ximo)/i;
+//   "Pagamento em 06 ABR"      (pagamento recebido pelo Nubank — não é compra)
+const DESC_PROIBIDA = /^(a\s|de\s|até\s|fechamento|saldo|total|pagamento\b|limite|próxim|emiss[ãa]o|valor\s+m[áa]ximo)/i;
 
 function parseDataNubank(dia: string, mesAbrev: string, ano: number): string | null {
   const mes = MESES_PT[mesAbrev.toUpperCase()];
@@ -94,9 +106,11 @@ export const parserNubank: ParserFatura = {
     const anoUsado = ano ?? new Date().getFullYear();
     const lancamentos: ParsedLinha[] = [];
 
-    // Normaliza espaços antes do matchAll. O unpdf às vezes coloca espaços
-    // múltiplos e \n no meio das transações.
-    const texto1L = texto.replace(/\s+/g, " ");
+    // Normaliza espaços e remove o cabeçalho de período que o unpdf repete
+    // em cada página ("TRANSAÇÕES DE 29 MAR A 28 ABR "). Deve ser feito
+    // ANTES do matchAll para que o "28 ABR" do cabeçalho não seja confundido
+    // com data de transação e engula a 1ª transação real da página.
+    const texto1L = texto.replace(/\s+/g, " ").replace(RE_HEADER_PERIODO_NUBANK, " ");
     const mesVenc = venc ? parseInt(venc.slice(5, 7), 10) : null;
 
     for (const m of texto1L.matchAll(RE_NUBANK_TX)) {
@@ -108,12 +122,28 @@ export const parserNubank: ParserFatura = {
       if (desc.length < 3) continue;
       if (DESC_PROIBIDA.test(desc)) continue;
 
-      // Estornos vêm com sinal "−" (U+2212) ou "-" — pular nesta versão,
-      // o schema tem CHECK (valor >= 0). Em F3 podemos modelar como crédito.
-      if (sinal === "−" || sinal === "-") continue;
+      // Créditos (estornos, descontos) vêm com sinal "−" (U+2212) ou "-".
+      // Valor permanece positivo; tipo RECEITA diferencia do débito normal.
+      const tipo = (sinal === "−" || sinal === "-") ? "RECEITA" as const : "DESPESA" as const;
 
       const data_compra = parseDataNubank(dia, mesAbrev, anoUsado);
-      const valor       = parseValorBR(valorRaw);
+      let   valor       = parseValorBR(valorRaw);
+
+      // Transações internacionais trazem a taxa de câmbio antes do valor real:
+      //   "Claude.Ai Subscription BRL 110.00 = USD 21.32 Conversão: BRL 5.34 = USD 1 = R$ 5,34 R$ 113,98"
+      // O não-guloso para em R$ 5,34 (taxa); o valor real R$ 113,98 fica logo
+      // após o fim do match. Detectamos pelo padrão "BRL X = USD" na descrição
+      // e relemos o trecho seguinte para corrigir o valor.
+      if (/BRL\s+[\d.]+\s*=\s*USD/i.test(desc)) {
+        const pos   = (m.index ?? 0) + m[0].length;
+        const apos  = texto1L.slice(pos, pos + 50);
+        const mReal = apos.match(/^\s*R\$\s*([\d.]+,\d{2})/i);
+        if (mReal) {
+          const vReal = parseValorBR(mReal[1]);
+          if (Number.isFinite(vReal) && vReal > valor) valor = vReal;
+        }
+      }
+
       if (!data_compra || !Number.isFinite(valor) || valor <= 0) continue;
 
       // Heurística de ano cruzado: fatura que vence em jan/fev costuma ter
@@ -140,6 +170,7 @@ export const parserNubank: ParserFatura = {
         parcela_atual:   parc?.atual ?? null,
         parcela_total:   parc?.total ?? null,
         observacao,
+        tipo,
       });
     }
 

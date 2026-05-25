@@ -1,18 +1,16 @@
 // ============================================================
-// Arquiteto de Valor — Edge Function: faturas (F1)
+// Arquiteto de Valor — Edge Function: faturas
 // ============================================================
-// Importação de fatura de cartão. F1 (esta versão) implementa o ciclo de
-// vida da sessão e dos itens em sandbox; o parser real de PDF entra em F2.
+// Importação de fatura de cartão.
 //
 // Rotas:
 //   GET    /faturas                   → lista sessões do usuário
 //   GET    /faturas/:id               → sessão + itens
 //   POST   /faturas                   → cria sessão a partir do upload (multipart)
-//                                       Em F1: cria 1 item placeholder.
-//                                       Em F2: parser PDF preenche os itens.
-//   PUT    /faturas/:id               → atualiza metadados da sessão (status, observação)
+//   PUT    /faturas/:id               → atualiza metadados da sessão
 //   PUT    /faturas/:id/itens/:itemId → atualiza decisão/categoria do item
 //   DELETE /faturas/:id               → exclui sessão (cascade nos itens)
+//   POST   /faturas/:id/sugerir       → sugere categoria + decisão por item (matching)
 //   POST   /faturas/:id/confirmar     → aplica decisões e marca CONFIRMADA [F3]
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
@@ -60,6 +58,9 @@ Deno.serve(async (req: Request) => {
       if (!itemId) return erro("itemId inválido", 400);
       return await editarItem(c, id, itemId, await req.json());
     }
+
+    // POST /faturas/:id/sugerir
+    if (m === "POST"   &&  id && acao === "sugerir")   return await sugerir(c, id, userId);
 
     // POST /faturas/:id/confirmar (placeholder em F1)
     if (m === "POST"   &&  id && acao === "confirmar") return await confirmar(c, id);
@@ -226,21 +227,6 @@ async function criar(c: ReturnType<typeof db>, req: Request, userId: string) {
   let observacao = resultado.avisos.length > 0
     ? `Emissor: ${resultado.emissor}. ${resultado.avisos.join(" | ")}`
     : `Emissor: ${resultado.emissor}`;
-  if (resultado.lancamentos.length === 0) {
-    const totalChars = textoCompleto.length;
-    // Conta quantas vezes cada padrão aparece — ajuda a entender o formato.
-    const matchesData = textoCompleto.match(
-      /\d{1,2}\s+(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\s+/gi
-    ) ?? [];
-    const matchesBarra = textoCompleto.match(/\b\d{1,2}\/\d{1,2}\b/g) ?? [];
-    const idxTx = textoCompleto.search(/transa[cç][õo]es/i);
-
-    // Pula o cabeçalho (primeiros ~3500 chars geralmente são opções de
-    // pagamento) e mostra um pedaço gordo do meio onde transações ficam.
-    const inicio = Math.min(3500, Math.max(0, totalChars - 6000));
-    const amostra = textoCompleto.slice(inicio, inicio + 5500).replace(/\s+/g, " ").trim();
-    observacao += ` || DEBUG total=${totalChars}c, ${totalPaginas}p, datasDDMMM=${matchesData.length}, datasDDMM=${matchesBarra.length}, idxTx=${idxTx} || AMOSTRA[${inicio}..${inicio + 5500}]: ${amostra}`;
-  }
 
   const { data: sessao, error: errSessao } = await c
     .from("fatura_import_sessao")
@@ -269,6 +255,7 @@ async function criar(c: ReturnType<typeof db>, req: Request, userId: string) {
       descricao:       l.descricao,
       estabelecimento: l.estabelecimento ?? null,
       valor:           l.valor,
+      tipo:            l.tipo ?? "DESPESA",
       parcela_atual:   l.parcela_atual ?? null,
       parcela_total:   l.parcela_total ?? null,
       observacao:      l.observacao ?? null,
@@ -346,7 +333,7 @@ async function editarItem(c: ReturnType<typeof db>, sessaoId: string, itemId: st
 
   const campos = camposParaAtualizar(body, [
     "decisao", "categoria_escolhida_id", "transacao_existente_id",
-    "descricao", "valor", "data_compra", "estabelecimento",
+    "descricao", "valor", "tipo", "data_compra", "estabelecimento",
     "parcela_atual", "parcela_total", "observacao",
   ]);
   const { data, error } = await c
@@ -385,6 +372,153 @@ async function confirmar(c: ReturnType<typeof db>, id: string) {
 
   logSuccess("Sessão confirmada (F1 placeholder — não aplica em transacoes ainda)", { id });
   return json({ mensagem: "Sessão marcada como CONFIRMADA (F1 placeholder; aplicação real em F3)" });
+}
+
+
+// ── Sugerir categorias + decisão ──────────────────────────────
+//
+// Para cada item sem categoria escolhida:
+//   1. Busca padrões do assistente → categoria_sugerida_id
+//   2. Busca transações PENDENTE/PROJECAO na mesma conta com descrição
+//      similar + valor próximo → transacao_existente_id + decisao sugerida
+//      (ATUALIZAR quando há match; CRIAR quando não há)
+//
+// Os campos são gravados nos itens mas NÃO sobrescrevem categoria_escolhida_id
+// (respeita escolha já feita pelo usuário). Idempotente: pode ser chamado
+// várias vezes sem perda de dados.
+async function sugerir(c: ReturnType<typeof db>, sessaoId: string, userId: string) {
+  logRequest("POST", `/faturas/${sessaoId}/sugerir`);
+
+  const { data: sessao, error: errSessao } = await c
+    .from("fatura_import_sessao")
+    .select("id, conta_id, status")
+    .eq("id", sessaoId)
+    .single();
+  if (errSessao || !sessao) return erro("Sessão não encontrada", 404);
+  if (sessao.status !== "EM_ANALISE") return erro("Sessão não está em análise", 422);
+
+  // Itens pendentes de sugestão (sem categoria escolhida e sem decisão final)
+  const { data: itens, error: errItens } = await c
+    .from("fatura_import_item")
+    .select("id, descricao, valor, parcela_atual, parcela_total")
+    .eq("sessao_id", sessaoId)
+    .is("categoria_escolhida_id", null)
+    .in("decisao", ["PENDENTE"]);
+  if (errItens) return erro(errItens.message);
+  if (!itens?.length) return json({ atualizados: 0 });
+
+  // Padrões do assistente com categoria definida
+  const { data: padroes } = await c
+    .from("assistente_lancamentos")
+    .select("descricao, categoria_id")
+    .eq("user_id", userId)
+    .not("categoria_id", "is", null);
+
+  // Transações pendentes/projeção na mesma conta (candidatos ao ATUALIZAR)
+  const { data: txs } = await c
+    .from("transacoes")
+    .select("id, descricao, valor, categoria_id, id_recorrencia, nr_parcela, total_parcelas")
+    .eq("user_id", userId)
+    .eq("conta_id", sessao.conta_id)
+    .in("status", ["PENDENTE", "PROJECAO"])
+    .order("data_transacao", { ascending: false })
+    .limit(300);
+
+  let atualizados = 0;
+  for (const item of itens) {
+    const catId   = melhorCategoria(item.descricao, padroes ?? []);
+    const txMatch = melhorTransacao(item, txs ?? [], catId);
+
+    const patch: Record<string, unknown> = {};
+    if (catId)    patch.categoria_sugerida_id  = catId;
+    if (txMatch)  patch.transacao_existente_id = txMatch.id;
+    // Fallback: se não achou categoria via assistente mas a tx tem uma → usa ela
+    if (!catId && txMatch?.categoria_id) patch.categoria_sugerida_id = txMatch.categoria_id;
+
+    if (Object.keys(patch).length === 0) continue;
+    const { error } = await c.from("fatura_import_item").update(patch).eq("id", item.id);
+    if (!error) atualizados++;
+  }
+
+  logSuccess("Sugestões geradas", { sessaoId, atualizados });
+  return json({ atualizados });
+}
+
+
+// ── Helpers de similaridade ────────────────────────────────────
+
+function normTxt(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ").trim();
+}
+
+const STOP = new Set([
+  "de","da","do","das","dos","a","o","e","em","com","para","por","um","uma",
+  "no","na","nos","nas","ao","aos","as","se","que","its","brl","usd",
+]);
+
+function tokens(s: string): Set<string> {
+  return new Set(normTxt(s).split(" ").filter(w => w.length > 2 && !STOP.has(w)));
+}
+
+function simTexto(a: string, b: string): number {
+  const ta = tokens(a);
+  const tb = tokens(b);
+  if (ta.size === 0 || tb.size === 0) return 0;
+  let hit = 0;
+  for (const w of ta) if (tb.has(w)) hit++;
+  return hit / Math.max(ta.size, tb.size);
+}
+
+function melhorCategoria(
+  desc: string,
+  padroes: Array<{ descricao: string; categoria_id: string | null }>,
+): string | null {
+  const dn = normTxt(desc);
+  let best: { id: string; score: number } | null = null;
+
+  for (const p of padroes) {
+    if (!p.categoria_id) continue;
+    const pn = normTxt(p.descricao);
+    let score = 0;
+    if (dn.includes(pn)) {
+      // Substring match: mais longo = mais específico
+      score = 0.5 + (pn.length / Math.max(dn.length, 1)) * 0.5;
+    } else {
+      score = simTexto(desc, p.descricao) * 0.8;
+    }
+    if (score >= 0.3 && (!best || score > best.score)) {
+      best = { id: p.categoria_id, score };
+    }
+  }
+  return best?.id ?? null;
+}
+
+function melhorTransacao(
+  item: { descricao: string; valor: number },
+  txs: Array<{ id: string; descricao: string; valor: number; categoria_id: string | null }>,
+  catSugeridaId: string | null,
+): { id: string; categoria_id: string | null } | null {
+  let best: { id: string; score: number; categoria_id: string | null } | null = null;
+
+  for (const tx of txs) {
+    const valDiff = Math.abs(tx.valor - item.valor) / Math.max(item.valor, 0.01);
+    if (valDiff > 0.15) continue;
+
+    const sim = simTexto(item.descricao, tx.descricao);
+    if (sim < 0.35) continue;
+
+    // Bônus se a categoria da tx coincide com a categoria sugerida
+    const catBonus = catSugeridaId && tx.categoria_id === catSugeridaId ? 0.15 : 0;
+    const score = sim * 0.7 + (1 - valDiff) * 0.15 + catBonus;
+    if (!best || score > best.score) {
+      best = { id: tx.id, score, categoria_id: tx.categoria_id };
+    }
+  }
+  return best;
 }
 
 
