@@ -13,9 +13,9 @@
 // O parser real de PDF entra em F2 — o edge function `faturas` (POST) hoje
 // só valida o PDF e descarta os bytes.
 
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import { FileUp, Receipt, Trash2, ArrowLeft, AlertCircle, XCircle, RotateCcw, ChevronDown } from 'lucide-react'
+import { FileUp, Receipt, Trash2, ArrowLeft, AlertCircle, XCircle, RotateCcw, ChevronDown, Pencil } from 'lucide-react'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { useFaturasImport, useFaturaImportSessao } from '../hooks/useFaturasImport'
@@ -292,7 +292,11 @@ function Sandbox({ id }: { id: string }) {
   const [emLote,           setEmLote]           = useState(false)
   const [modoImportacao,   setModoImportacao]   = useState<null | 'REGISTRO' | 'CATEGORIA'>(null)
   const [decisoesOverride, setDecisaoOverride]  = useState<Map<string, DecisaoImport>>(new Map())
-  const [gruposEncolhidos, setGruposEncolhidos] = useState<Set<string>>(new Set())
+  const [gruposEncolhidos,  setGruposEncolhidos]  = useState<Set<string>>(new Set())
+  const [descricoesOverride, setDescricaoOverride] = useState<Map<string, string>>(new Map())
+  const [editandoDesc,       setEditandoDesc]       = useState<string | null>(null)
+  const [descEditTemp,       setDescEditTemp]       = useState('')
+  const [previewExpandido,   setPreviewExpandido]   = useState<Set<string>>(new Set())
   const sugeridoRef = useRef(false)
 
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
@@ -304,8 +308,13 @@ function Sandbox({ id }: { id: string }) {
     sugerir()
   }, [sessao?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Limpa overrides de decisão ao trocar de modo
-  useEffect(() => { setDecisaoOverride(new Map()) }, [modoImportacao])
+  // Limpa overrides e expansões ao trocar de modo
+  useEffect(() => {
+    setDecisaoOverride(new Map())
+    setDescricaoOverride(new Map())
+    setEditandoDesc(null)
+    setPreviewExpandido(new Set())
+  }, [modoImportacao])
 
   // ── Dados derivados ──────────────────────────────────────────
   const catPorId = useMemo(() => new Map(categorias.map(c => [c.id, c])), [categorias])
@@ -467,6 +476,23 @@ function Sandbox({ id }: { id: string }) {
     setGruposEncolhidos(prev => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+
+  const iniciarEdicaoDesc = (chave: string, descAtual: string) => {
+    setEditandoDesc(chave)
+    setDescEditTemp(descAtual)
+  }
+  const confirmarEdicaoDesc = (chave: string) => {
+    if (descEditTemp.trim()) setDescricaoOverride(prev => new Map(prev).set(chave, descEditTemp.trim()))
+    setEditandoDesc(null)
+  }
+  const cancelarEdicaoDesc = () => setEditandoDesc(null)
+
+  const togglePreviewDetalhe = (chave: string) =>
+    setPreviewExpandido(prev => {
+      const next = new Set(prev)
+      if (next.has(chave)) next.delete(chave); else next.add(chave)
       return next
     })
 
@@ -879,57 +905,131 @@ function Sandbox({ id }: { id: string }) {
                 </thead>
                 <tbody>
                   {lancamentosPreview.map(l => {
-                    const dec    = decisoesOverride.get(l.chave) ?? l.decisaoSugerida
-                    const corCriar = '#00c896'
-                    const corAtual = '#4da6ff'
+                    const dec       = decisoesOverride.get(l.chave) ?? l.decisaoSugerida
+                    const descFinal = descricoesOverride.get(l.chave) ?? l.descricao
+                    const expandido = previewExpandido.has(l.chave)
+                    const corCriar  = '#00c896'
+                    const corAtual  = '#4da6ff'
                     return (
-                      <tr key={l.chave} className="border-t border-white/5">
-                        <td className="px-3 py-2 text-[13px]" style={{ color: '#8b92a8' }}>
-                          {l.data ? new Date(l.data + 'T00:00').toLocaleDateString('pt-BR') : '—'}
-                        </td>
-                        <td className="px-3 py-2">
-                          <p className="leading-snug">{l.descricao}</p>
-                          <p className="text-[12px]" style={{ color: '#8b92a8' }}>
-                            📂 {l.categoria_nome}
-                            {modoImportacao === 'CATEGORIA' && l.item_ids.length > 1 && (
-                              <> · {l.item_ids.length} itens agrupados</>
+                      <Fragment key={l.chave}>
+                        <tr className="border-t border-white/5">
+                          <td className="px-3 py-2 text-[13px]" style={{ color: '#8b92a8' }}>
+                            {l.data ? new Date(l.data + 'T00:00').toLocaleDateString('pt-BR') : '—'}
+                          </td>
+                          <td className="px-3 py-2">
+                            {/* Descrição editável inline */}
+                            {editandoDesc === l.chave ? (
+                              <input
+                                autoFocus
+                                value={descEditTemp}
+                                onChange={e => setDescEditTemp(e.target.value)}
+                                onBlur={() => confirmarEdicaoDesc(l.chave)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter')  confirmarEdicaoDesc(l.chave)
+                                  if (e.key === 'Escape') cancelarEdicaoDesc()
+                                }}
+                                className="w-full rounded px-2 py-0.5 text-[14px] border border-av-green/50 outline-none"
+                                style={{ background: '#131920', color: '#e8eaf0' }}
+                              />
+                            ) : (
+                              <div className="flex items-center gap-1.5 group/desc">
+                                <p className="leading-snug flex-1">{descFinal}</p>
+                                {emAnalise && (
+                                  <button
+                                    onClick={() => iniciarEdicaoDesc(l.chave, descFinal)}
+                                    className="opacity-0 group-hover/desc:opacity-100 transition-opacity p-0.5 rounded hover:bg-white/10 flex-none"
+                                    style={{ color: '#8b92a8' }}
+                                    title="Editar descrição">
+                                    <Pencil size={11}/>
+                                  </button>
+                                )}
+                              </div>
                             )}
-                          </p>
-                          {l.transacao_existente_id && dec === 'ATUALIZAR' && (
-                            <p className="text-[11px] mt-0.5" style={{ color: '#4da6ff' }}>
-                              🔗 Atualiza lançamento existente
+                            <p className="text-[12px] mt-0.5" style={{ color: '#8b92a8' }}>
+                              📂 {l.categoria_nome}
                             </p>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right font-medium"
-                          style={{ color: l.tipo === 'RECEITA' ? '#4ade80' : '#e8eaf0' }}>
-                          {l.tipo === 'RECEITA' ? `−${formatBRL(l.valor)}` : formatBRL(l.valor)}
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex gap-1">
-                            {(['CRIAR', 'ATUALIZAR'] as DecisaoImport[]).map(d => {
-                              const ativo = dec === d
-                              const cor   = d === 'CRIAR' ? corCriar : corAtual
-                              const desab = d === 'ATUALIZAR' && !l.transacao_existente_id
-                              return (
-                                <button key={d}
-                                  onClick={() => setDecisaoLancamento(l.chave, d)}
-                                  disabled={!emAnalise || desab}
-                                  title={desab ? 'Nenhum lançamento similar encontrado' : undefined}
-                                  className="text-[11px] px-2 py-0.5 rounded-md border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                  style={{
-                                    background:  ativo ? `${cor}22` : 'transparent',
-                                    color:       ativo ? cor : '#8b92a8',
-                                    borderColor: ativo ? cor : 'rgba(255,255,255,0.1)',
-                                    fontWeight:  ativo ? 600 : 400,
-                                  }}>
-                                  {d === 'CRIAR' ? 'Criar novo' : 'Atualizar'}
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </td>
-                      </tr>
+                            {/* Toggle de detalhes — apenas no modo CATEGORIA */}
+                            {modoImportacao === 'CATEGORIA' && (
+                              <button
+                                onClick={() => togglePreviewDetalhe(l.chave)}
+                                className="flex items-center gap-1 text-[11px] mt-0.5 hover:opacity-80 transition-opacity"
+                                style={{ color: '#8b92a8' }}>
+                                <ChevronDown size={11} style={{
+                                  transform: expandido ? 'rotate(0deg)' : 'rotate(-90deg)',
+                                  transition: 'transform 0.15s',
+                                }}/>
+                                {l.item_ids.length} {l.item_ids.length === 1 ? 'item' : 'itens'}
+                              </button>
+                            )}
+                            {l.transacao_existente_id && dec === 'ATUALIZAR' && (
+                              <p className="text-[11px] mt-0.5" style={{ color: '#4da6ff' }}>
+                                🔗 Atualiza lançamento existente
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right font-medium"
+                            style={{ color: l.tipo === 'RECEITA' ? '#4ade80' : '#e8eaf0' }}>
+                            {l.tipo === 'RECEITA' ? `−${formatBRL(l.valor)}` : formatBRL(l.valor)}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex gap-1">
+                              {(['CRIAR', 'ATUALIZAR'] as DecisaoImport[]).map(d => {
+                                const ativo = dec === d
+                                const cor   = d === 'CRIAR' ? corCriar : corAtual
+                                const desab = d === 'ATUALIZAR' && !l.transacao_existente_id
+                                return (
+                                  <button key={d}
+                                    onClick={() => setDecisaoLancamento(l.chave, d)}
+                                    disabled={!emAnalise || desab}
+                                    title={desab ? 'Nenhum lançamento similar encontrado' : undefined}
+                                    className="text-[11px] px-2 py-0.5 rounded-md border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                    style={{
+                                      background:  ativo ? `${cor}22` : 'transparent',
+                                      color:       ativo ? cor : '#8b92a8',
+                                      borderColor: ativo ? cor : 'rgba(255,255,255,0.1)',
+                                      fontWeight:  ativo ? 600 : 400,
+                                    }}>
+                                    {d === 'CRIAR' ? 'Criar novo' : 'Atualizar'}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* Detalhes dos itens agrupados */}
+                        {modoImportacao === 'CATEGORIA' && expandido && (
+                          <tr>
+                            <td colSpan={4} className="px-4 pb-3 pt-0">
+                              <div className="rounded-lg overflow-hidden border border-white/5 mt-1">
+                                {(sessao?.itens ?? [])
+                                  .filter(i => l.item_ids.includes(i.id))
+                                  .map((it, idx) => (
+                                    <div key={it.id}
+                                      className={`flex items-center gap-2 px-3 py-1.5 text-[12px]${idx > 0 ? ' border-t border-white/5' : ''}`}
+                                      style={{ background: '#0d1117', color: '#8b92a8' }}>
+                                      <span className="w-20 flex-none">
+                                        {new Date(it.data_compra + 'T00:00').toLocaleDateString('pt-BR')}
+                                      </span>
+                                      <span className="flex-1 truncate" style={{ color: '#e8eaf0' }}>
+                                        {it.descricao}
+                                      </span>
+                                      {it.parcela_atual && it.parcela_total && (
+                                        <span>parc. {it.parcela_atual}/{it.parcela_total}</span>
+                                      )}
+                                      <span className="font-mono flex-none"
+                                        style={{ color: it.tipo === 'RECEITA' ? '#4ade80' : '#c8d0e0' }}>
+                                        {it.tipo === 'RECEITA'
+                                          ? `−${formatBRL(Number(it.valor))}`
+                                          : formatBRL(Number(it.valor))}
+                                      </span>
+                                    </div>
+                                  ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     )
                   })}
                 </tbody>
