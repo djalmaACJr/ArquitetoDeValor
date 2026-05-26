@@ -12,6 +12,7 @@
 // variante `LoadingMascoteEstatico` que aceita `nome` explícito —
 // não tenta consumir o hook.
 
+import { useState } from 'react'
 import Mascote, { type MascoteNome } from './Mascote'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 
@@ -24,7 +25,9 @@ interface PropsBase {
 // Mascotes que já têm WebM de loading gerado em /public/mascotes/.
 const COM_WEBM: readonly MascoteNome[] = ['sabio', 'arquiteta', 'gato', 'raposa']
 
-/** Cena WebM de loading — vídeo de ~4s em loop com alpha. */
+/** Cena WebM de loading — vídeo de ~4s em loop com alpha. Se o WebM
+ *  falhar (autoplay bloqueado, codec não suportado, 404) cai pra pose
+ *  estática `andando` com a mesma animação CSS dos mascotes sem WebM. */
 function CenaWebM({ nome, size }: { nome: MascoteNome; size: number }) {
   // O vídeo agora é portrait 360×640 (9:16). Dimensionamos pela ALTURA
   // (não largura) pra não ocupar muito espaço horizontal nas telas.
@@ -32,8 +35,19 @@ function CenaWebM({ nome, size }: { nome: MascoteNome; size: number }) {
   // maior por causa das margens superior/inferior dele.
   const FATOR_ALTURA = 1.5
   const videoH = Math.round(size * FATOR_ALTURA)
+  const [erro, setErro] = useState(false)
+
+  if (erro) {
+    return (
+      <div className="loading-mascote-walk" style={{ width: size, height: 'auto' }}>
+        <Mascote nome={nome} pose="andando" size={size} />
+      </div>
+    )
+  }
+
   return (
     <video
+      key={nome}
       src={`/mascotes/${nome}-andando.webm`}
       autoPlay
       loop
@@ -41,6 +55,8 @@ function CenaWebM({ nome, size }: { nome: MascoteNome; size: number }) {
       playsInline
       aria-hidden="true"
       style={{ height: videoH, width: 'auto', display: 'block' }}
+      onError={() => setErro(true)}
+      onStalled={() => setErro(true)}
     />
   )
 }

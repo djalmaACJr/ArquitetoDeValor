@@ -194,7 +194,13 @@ ESTILO DA RESPOSTA:
 - Português do Brasil.`,
 };
 
-const MAX_TOKENS = 600;
+// Teto de tokens da RESPOSTA. 600 estava cortando explicações no meio
+// (especialmente Arquiteta com cálculos e Raposa com cenários). 2000 dá
+// margem para ~1500 palavras em pt-BR — suficiente sem inflar custo
+// significativamente (~US$ 0,002 por resposta no Claude Haiku 4.5).
+// As personas já pedem "2 a 5 frases" no system, então o modelo geralmente
+// fica abaixo do teto — só usa o espaço extra quando a pergunta exige.
+const MAX_TOKENS = 2000;
 
 interface HistoricoItem {
   role: "user" | "assistant";

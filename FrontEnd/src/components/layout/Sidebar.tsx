@@ -181,7 +181,14 @@ function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChi
   }
 
   return (
-    <div>
+    // Mouse sobre o item PAI ou seus filhos expande o submenu (UX consistente
+    // com o flyout do estado colapsado). Ao sair, recolhe — exceto quando a
+    // página atual está em uma rota filha (anyActive=true), pra não esconder
+    // o destino corrente.
+    <div
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(anyActive)}
+    >
       {/* Linha do pai: NavLink (vai para o destino default — Resumo geral) com
           um chevron-button separado à direita pra abrir/fechar o submenu.
           Manter como link garante que ferramentas que buscam por `role="link"`

@@ -497,11 +497,29 @@ function Sandbox({ id }: { id: string }) {
     })
 
   const handleConfirmar = async () => {
+    if (!modoImportacao) { toast('Escolha o modo de importação.'); return }
     setConfirmando(true)
-    const r = await confirmar()
+    // Reaproveita as decisões/descrições do preview. As chaves seguem a
+    // semântica do backend: item.id no modo REGISTRO, categoria_id no modo
+    // CATEGORIA. lancamentosPreview.chave já segue essa regra.
+    const decisoes:   Record<string, 'CRIAR' | 'ATUALIZAR'> = {}
+    const descricoes: Record<string, string>                = {}
+    for (const l of lancamentosPreview) {
+      const decFinal = decisoesOverride.get(l.chave) ?? l.decisaoSugerida
+      decisoes[l.chave] = decFinal
+      const descOv = descricoesOverride.get(l.chave)
+      if (descOv && descOv !== l.descricao) descricoes[l.chave] = descOv
+    }
+    const r = await confirmar({ modo: modoImportacao, decisoes, descricoes })
     setConfirmando(false)
-    if (r.ok) { toast('Importação confirmada.'); setTimeout(() => navigate('/importar-fatura'), 800) }
-    else toast(r.erro ?? 'Falha ao confirmar.')
+    if (r.ok) {
+      const c = r.dados?.criadas     ?? 0
+      const u = r.dados?.atualizadas ?? 0
+      toast(`Importação confirmada. ${c} criado${c !== 1 ? 's' : ''}, ${u} atualizado${u !== 1 ? 's' : ''}.`)
+      setTimeout(() => navigate('/importar-fatura'), 1200)
+    } else {
+      toast(r.erro ?? 'Falha ao confirmar.')
+    }
   }
 
   // Select de categoria reutilizado em item e bulk

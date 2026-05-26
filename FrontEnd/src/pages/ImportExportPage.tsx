@@ -12,7 +12,7 @@ import { mesAtual as mesAtualLocal, hojeLocal, dataParaYMD } from '../lib/utils'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { MonthPicker } from '../components/ui/MonthPicker'
-import type { Conta } from '../types'
+import type { Conta, CartaoVirtual } from '../types'
 
 // ── Tipos internos ──────────────────────────────────────────────
 
@@ -139,6 +139,32 @@ function parseValor(s: string): number {
   return parseFloat(limpo.replace(',', '.'))
 }
 
+/** Lê um valor de dia (1..31). Aceita number, string com decimais ou nada. */
+function parseDiaCartao(raw: unknown): number | null {
+  if (raw === '' || raw == null) return null
+  const n = parseInt(String(raw).replace(/[^\d]/g, ''), 10)
+  if (!Number.isInteger(n) || n < 1 || n > 31) return null
+  return n
+}
+
+/** Parser do formato exportado de cartões virtuais:
+ *    "1234 Principal, 5678 Compras online"
+ *  Cada item: primeiro pedaço = sufixo (2-8 dígitos); resto = apelido.
+ *  Aceita também separador ";" pra robustez. */
+function parseCartoesVirtuais(raw: unknown): CartaoVirtual[] {
+  if (!raw) return []
+  const s = String(raw).trim()
+  if (!s) return []
+  return s.split(/[,;]\s*/).flatMap(item => {
+    const m = item.trim().match(/^(\d{2,8})\s*(.*)$/)
+    if (!m) return []
+    const id = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    return [{ id, sufixo: m[1], apelido: m[2].trim().slice(0, 40) }]
+  })
+}
+
 // ── Componentes auxiliares ──────────────────────────────────────
 function Section({ titulo, subtitulo, icon: Icon, cor, children, defaultOpen = true }: {
   titulo: string; subtitulo: string; icon: React.ElementType; cor: string
@@ -229,7 +255,9 @@ function ModalConfirmacao({ titulo, mensagem, onConfirmar, onCancelar, corBtn = 
 // ══════════════════════════════════════════════════════════════════
 function SecaoLimpeza() {
   const [confirmando, setConfirmando] = useState(false)
-  const [modo, setModo] = useState<'transacoes' | 'tudo'>('tudo')
+  // 'transacoes' por padrão — é a opção menos destrutiva. "Limpar tudo"
+  // apaga também contas e categorias, então exige opt-in explícito.
+  const [modo, setModo] = useState<'transacoes' | 'tudo'>('transacoes')
   const [loading, setLoading] = useState(false)
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro'; msg: string }[]>([])
 
@@ -280,7 +308,7 @@ function SecaoLimpeza() {
   ]
 
   return (
-    <Section titulo="Limpar dados" subtitulo="Remove transações, categorias e contas do banco" icon={Trash2} cor="#ff6b4a">
+    <Section titulo="Limpar dados" subtitulo="Remove transações, categorias e contas do banco" icon={Trash2} cor="#ff6b4a" defaultOpen={false}>
       <div className="space-y-3">
 
         {/* Seleção do modo */}
@@ -370,6 +398,10 @@ function SecaoExport() {
   const [mesFim, setMesFim]       = useState(mesAtual())
   const [exportarContas, setExportarContas]         = useState(true)
   const [exportarCategorias, setExportarCategorias] = useState(true)
+  // Transferências NÃO são opção separada — quando "Transações" está
+  // marcado, elas vão automaticamente em uma aba dedicada (cada par
+  // origem→destino vira uma linha). Sem isso, o usuário leigo poderia
+  // exportar transações sem perceber que transferências estão de fora.
   const [exportarTransacoes, setExportarTransacoes] = useState(true)
   const [loading, setLoading] = useState(false)
 
@@ -381,32 +413,52 @@ function SecaoExport() {
       const sheets: Sheet[] = []
 
       // Aba: Contas
+      // Ícone/Cor são metadados visuais do app — não interessam num
+      // export pra leitura humana. Em contrapartida, contas tipo CARTAO
+      // têm campos próprios (fechamento/pagamento/limite/cartões virtuais)
+      // que faltavam aqui.
       if (exportarContas) {
         sheets.push({
           name: 'Contas',
           title: 'Contas',
           columns: [
-            { key: 'nome',  label: 'Nome',           type: 'text',     width: 25 },
-            { key: 'tipo',  label: 'Tipo',           type: 'text',     width: 15 },
-            { key: 'sIni', label: 'Saldo Inicial',  type: 'currency', width: 16 },
-            { key: 'sAtu', label: 'Saldo Atual',    type: 'currency', width: 16 },
-            { key: 'ativa', label: 'Ativa',          type: 'text',     width: 8,  align: 'center' },
-            { key: 'icone', label: 'Ícone',          type: 'text',     width: 10 },
-            { key: 'cor',   label: 'Cor',            type: 'text',     width: 10 },
+            { key: 'nome',         label: 'Nome',              type: 'text',     width: 25 },
+            { key: 'tipo',         label: 'Tipo',              type: 'text',     width: 15 },
+            { key: 'sIni',         label: 'Saldo Inicial',     type: 'currency', width: 16 },
+            { key: 'sAtu',         label: 'Saldo Atual',       type: 'currency', width: 16 },
+            { key: 'ativa',        label: 'Ativa',             type: 'text',     width: 8,  align: 'center' },
+            // Campos exclusivos de CARTAO — ficam vazios nos demais tipos
+            { key: 'diaFech',      label: 'Dia fechamento',    type: 'text',     width: 14, align: 'center' },
+            { key: 'diaPag',       label: 'Dia pagamento',     type: 'text',     width: 14, align: 'center' },
+            { key: 'limCred',      label: 'Limite de crédito', type: 'currency', width: 16 },
+            { key: 'cartoesVirt',  label: 'Cartões virtuais',  type: 'text',     width: 40 },
           ],
           rows: contas.map(c => ({
-            nome:  c.nome,
-            tipo:  c.tipo,
-            sIni:  c.saldo_inicial ?? 0,
-            sAtu:  c.saldo_atual ?? 0,
-            ativa: c.ativa ? 'Sim' : 'Não',
-            icone: c.icone ?? '',
-            cor:   c.cor ?? '',
+            nome:    c.nome,
+            tipo:    c.tipo,
+            sIni:    c.saldo_inicial ?? 0,
+            sAtu:    c.saldo_atual ?? 0,
+            ativa:   c.ativa ? 'Sim' : 'Não',
+            // CARTAO: mostra os campos; outros tipos: célula vazia
+            diaFech: c.tipo === 'CARTAO' && c.dia_fechamento != null ? String(c.dia_fechamento) : '',
+            diaPag:  c.tipo === 'CARTAO' && c.dia_pagamento  != null ? String(c.dia_pagamento)  : '',
+            // Para limite, deixar vazio (não 0) em não-cartões pra não
+            // confundir leitura — a coluna é currency, célula vazia fica em branco.
+            limCred: c.tipo === 'CARTAO' ? (c.limite_credito ?? 0) : '',
+            // Cartões virtuais: "sufixo apelido" separados por vírgula. Ex:
+            //   "1234 Principal, 5678 Compras online"
+            cartoesVirt: c.tipo === 'CARTAO' && c.cartoes_virtuais?.length
+              ? c.cartoes_virtuais
+                  .map(cv => `${cv.sufixo}${cv.apelido ? ' ' + cv.apelido : ''}`)
+                  .join(', ')
+              : '',
           })),
         })
       }
 
-      // Aba: Categorias (com hierarquia)
+      // Aba: Categorias (com hierarquia).
+      // Cor é metadado visual do app — não interessa no export.
+      // Ícone mantido por ser parte do uso prático (emoji informativo).
       if (exportarCategorias) {
         const pais = categorias.filter(c => !c.id_pai)
         type Row = import('../lib/exportUtils').ExportRow
@@ -416,7 +468,6 @@ function SecaoExport() {
             categoria: p.descricao,
             sub:       '',
             icone:     p.icone ?? '',
-            cor:       p.cor ?? '',
             _style:    'group',
           })
           categorias.filter(s => s.id_pai === p.id).forEach(s => {
@@ -424,7 +475,6 @@ function SecaoExport() {
               categoria: p.descricao,
               sub:       s.descricao,
               icone:     s.icone ?? '',
-              cor:       s.cor ?? '',
             })
           })
         })
@@ -435,52 +485,92 @@ function SecaoExport() {
             { key: 'categoria', label: 'Categoria',    type: 'text', width: 22 },
             { key: 'sub',       label: 'Subcategoria', type: 'text', width: 22 },
             { key: 'icone',     label: 'Ícone',        type: 'text', width: 10 },
-            { key: 'cor',       label: 'Cor',          type: 'text', width: 10 },
           ],
           rows,
         })
       }
 
-      // Aba: Transações
-      if (exportarTransacoes) {
-        const gerarMeses = (ini: string, fim: string) => {
-          const meses: string[] = []
-          let [a, m] = ini.split('-').map(Number)
-          const [af, mf] = fim.split('-').map(Number)
-          while (a < af || (a === af && m <= mf)) {
-            meses.push(`${a}-${String(m).padStart(2, '0')}`)
-            m++; if (m > 12) { m = 1; a++ }
-          }
-          return meses
+      // Lista de meses do período — usada pelas abas Transações e Transferências
+      const gerarMeses = (ini: string, fim: string) => {
+        const meses: string[] = []
+        let [a, m] = ini.split('-').map(Number)
+        const [af, mf] = fim.split('-').map(Number)
+        while (a < af || (a === af && m <= mf)) {
+          meses.push(`${a}-${String(m).padStart(2, '0')}`)
+          m++; if (m > 12) { m = 1; a++ }
         }
-        const meses = gerarMeses(mesInicio, mesFim)
+        return meses
+      }
+      const meses    = exportarTransacoes ? gerarMeses(mesInicio, mesFim) : []
+      const contaMap = Object.fromEntries(contas.map(c => [c.conta_id, c.nome]))
+
+      // Aba: Transações — INCLUI também as transferências como linhas
+      // unificadas no mesmo lugar (uma linha por par origem→destino, na
+      // coluna "Conta destino"). Assim o usuário tem o registro COMPLETO
+      // do período numa única aba.
+      if (exportarTransacoes) {
+        // 1) Transações normais (despesas/receitas que NÃO são transferência)
         const resArr = await Promise.all(
           meses.map(mes => apiFetch(`/transacoes?mes=${mes}&per_page=1000&saldo=true`))
         )
         const txs = resArr.flatMap(r => extrairLista<TransacaoRaw>(r.dados))
-        const contaMap = Object.fromEntries(contas.map(c => [c.conta_id, c.nome]))
-        const rows = txs.map((t: TransacaoRaw) => {
-          const descricao = (t.descricao ?? '').replace(/^\[Transf\. (saída|entrada)\] ?/, '')
+          // Mesmo filtro do Backup: descarta os dois lados das transferências
+          // (têm id_par_transferencia OU prefixo [Transf.] na descrição) —
+          // as transferências entram abaixo como UMA linha por par.
+          .filter((t: TransacaoRaw) =>
+            !t.id_par_transferencia &&
+            !(t.descricao ?? '').startsWith('[Transf.')
+          )
+        const linhasTx = txs.map((t: TransacaoRaw) => ({
+          data:        new Date(t.data + 'T12:00:00'),
+          descricao:   t.descricao ?? '',
+          valor:       t.tipo === 'DESPESA' ? -Math.abs(t.valor) : Math.abs(t.valor),
+          conta:       String(contaMap[t.conta_id ?? ''] ?? t.conta_id ?? ''),
+          contaDest:   '',
+          categoria:   String(t.categoria_nome ?? t.categoria_pai_nome ?? ''),
+          observacao:  String(t.observacao ?? ''),
+        }))
+
+        // 2) Transferências (origem→destino) — uma linha por par
+        const resTrf = await Promise.all(
+          meses.map(mes => apiFetch(`/transferencias?mes=${mes}`))
+        )
+        // Endpoint pode devolver { dados: [...] } OU [...] direto
+        const trfsAll = resTrf.flatMap(r => extrairLista<TransacaoRaw>(r.dados ?? r))
+        // Dedup por id_par (mesmo par pode aparecer em mais de um mês na borda)
+        const trfMap  = new Map(trfsAll.map(t => [t.id_par as string | undefined ?? t.id, t]))
+        const linhasTrf = [...trfMap.values()].map((t: TransacaoRaw) => {
+          const origemId  = (t.conta_origem_id  ?? t.conta_id) as string | undefined
+          const destinoId = t.conta_destino_id as string | undefined
           return {
             data:       new Date(t.data + 'T12:00:00'),
-            descricao,
-            valor:      t.tipo === 'DESPESA' ? -Math.abs(t.valor) : Math.abs(t.valor),
-            conta:      String(contaMap[t.conta_id ?? ''] ?? t.conta_id ?? ''),
-            categoria:  String(t.categoria_nome ?? t.categoria_pai_nome ?? ''),
+            descricao:  (t.descricao ?? '').replace(/^\[Transf\. (saída|entrada)\] ?/, ''),
+            valor:      Math.abs(t.valor),
+            conta:      String(contaMap[origemId  ?? ''] ?? origemId  ?? ''),
+            contaDest:  String(contaMap[destinoId ?? ''] ?? destinoId ?? ''),
+            categoria:  'Transferências',
             observacao: String(t.observacao ?? ''),
           }
         })
+
+        // 3) Junta tudo e ordena por data (asc) — usuário vê o período
+        //    em ordem cronológica, mesclando transações e transferências.
+        const rows = [...linhasTx, ...linhasTrf].sort(
+          (a, b) => a.data.getTime() - b.data.getTime(),
+        )
+
         sheets.push({
           name: 'Transações',
           title: 'Transações',
           subtitle: `${mesInicio} – ${mesFim}`,
           columns: [
-            { key: 'data',       label: 'Data',       type: 'date',     width: 12 },
-            { key: 'descricao',  label: 'Descrição',  type: 'text',     width: 35 },
-            { key: 'valor',      label: 'Valor',      type: 'currency', width: 14 },
-            { key: 'conta',      label: 'Conta',      type: 'text',     width: 20 },
-            { key: 'categoria',  label: 'Categoria',  type: 'text',     width: 22 },
-            { key: 'observacao', label: 'Observação', type: 'text',     width: 30 },
+            { key: 'data',       label: 'Data',          type: 'date',     width: 12 },
+            { key: 'descricao',  label: 'Descrição',     type: 'text',     width: 35 },
+            { key: 'valor',      label: 'Valor',         type: 'currency', width: 14 },
+            { key: 'conta',      label: 'Conta',         type: 'text',     width: 20 },
+            { key: 'contaDest',  label: 'Conta destino', type: 'text',     width: 20 },
+            { key: 'categoria',  label: 'Categoria',     type: 'text',     width: 22 },
+            { key: 'observacao', label: 'Observação',    type: 'text',     width: 30 },
           ],
           rows,
         })
@@ -529,10 +619,10 @@ function SecaoExport() {
           <p className="text-[15px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
             O que exportar
           </p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {[
-              { label: 'Contas', sub: 'Todas as contas', checked: exportarContas, set: setExportarContas, cor: '#4da6ff' },
-              { label: 'Categorias', sub: 'Com hierarquia', checked: exportarCategorias, set: setExportarCategorias, cor: '#a78bfa' },
+              { label: 'Contas',     sub: 'Todas as contas',                            checked: exportarContas,     set: setExportarContas,     cor: '#4da6ff' },
+              { label: 'Categorias', sub: 'Com hierarquia',                             checked: exportarCategorias, set: setExportarCategorias, cor: '#a78bfa' },
               { label: 'Transações', sub: `${mesInicio} → ${mesFim}`, checked: exportarTransacoes, set: setExportarTransacoes, cor: '#00c896' },
             ].map(item => (
               <label key={item.label}
@@ -552,9 +642,6 @@ function SecaoExport() {
               </label>
             ))}
           </div>
-          <p className="text-[14px] text-gray-400 mt-2">
-            * O arquivo sempre incluirá a aba "Modelo Importação" para referência
-          </p>
         </div>
 
         <Btn onClick={exportar} loading={loading} disabled={!algumSelecionado} cor="#00c896">
@@ -581,8 +668,11 @@ interface ContaImport {
   nome: string
   tipo: string
   saldo_inicial: number
-  icone: string
-  cor: string
+  // Campos exclusivos de CARTAO — null em outros tipos
+  dia_fechamento:  number | null
+  dia_pagamento:   number | null
+  limite_credito:  number | null
+  cartoes_virtuais: CartaoVirtual[]
   importar: boolean
   problema: string
 }
@@ -592,7 +682,6 @@ interface CategoriaImport {
   categoria: string     // nome do pai
   subcategoria: string  // nome do filho (vazio = é pai)
   icone: string
-  cor: string
   importar: boolean
   problema: string
 }
@@ -666,15 +755,29 @@ function SecaoImport() {
           const nome = String(r['nome'] ?? r['name'] ?? '').trim()
           const tipo = String(r['tipo'] ?? r['type'] ?? 'CORRENTE').toUpperCase().trim()
           const saldo = parseFloat(String(r['saldo inicial'] ?? r['saldo_inicial'] ?? r['saldo'] ?? '0').replace(',','.')) || 0
+          // Campos exclusivos de CARTAO — aceitamos múltiplas variações de
+          // header para casar com o exportado e com possíveis edições.
+          const ehCartao = tipo === 'CARTAO'
+          const diaFech = ehCartao ? parseDiaCartao(r['dia fechamento']  ?? r['dia_fechamento']) : null
+          const diaPag  = ehCartao ? parseDiaCartao(r['dia pagamento']   ?? r['dia_pagamento'])  : null
+          const limRaw  = ehCartao ? (r['limite de crédito'] ?? r['limite de credito'] ?? r['limite_credito'] ?? r['limite']) : ''
+          const limCred = ehCartao && String(limRaw).trim() !== ''
+            ? Math.max(0, parseValor(String(limRaw)) || 0)
+            : null
+          const cartoesVirt = ehCartao
+            ? parseCartoesVirtuais(r['cartões virtuais'] ?? r['cartoes virtuais'] ?? r['cartoes_virtuais'])
+            : []
           let problema = ''
           if (!nome) problema = 'Nome obrigatório'
           else if (!tiposValidos.includes(tipo)) problema = `Tipo inválido: ${tipo}`
           else if (contasExist.has(normalizarNome(nome))) problema = 'Já existe'
           return {
             idx, nome, tipo: tiposValidos.includes(tipo) ? tipo : 'CORRENTE',
-            saldo_inicial: saldo,
-            icone: String(r['ícone'] ?? r['icone'] ?? '').trim(),
-            cor:   String(r['cor'] ?? '').trim(),
+            saldo_inicial:   saldo,
+            dia_fechamento:  diaFech,
+            dia_pagamento:   diaPag,
+            limite_credito:  limCred,
+            cartoes_virtuais: cartoesVirt,
             importar: !problema, problema,
           }
         }).filter(l => l.nome)
@@ -703,7 +806,6 @@ function SecaoImport() {
           return {
             idx, categoria: cat, subcategoria: sub,
             icone: String(r['ícone'] ?? r['icone'] ?? '').trim(),
-            cor:   String(r['cor'] ?? '').trim(),
             importar: !problema, problema,
           }
         }).filter(l => l.categoria)
@@ -979,10 +1081,20 @@ function SecaoImport() {
       for (let i = 0; i < paraImportar.length; i++) {
         if (canceladoRef.current) { addLog('aviso', `Cancelado. ${ok} contas importadas.`); break }
         const l = paraImportar[i]
-        const r = await apiComRetry('/contas', 'POST', {
+        // Payload base: backend força saldo_inicial=0 em CARTAO; pra outros tipos
+        // o saldo informado vale. Campos de cartão só vão quando tipo=CARTAO
+        // (a edge function ignora silenciosamente em outros tipos, mas
+        // evitamos sujeira no payload).
+        const payload: Record<string, unknown> = {
           nome: l.nome, tipo: l.tipo, saldo_inicial: l.saldo_inicial,
-          icone: l.icone || undefined, cor: l.cor || undefined,
-        })
+        }
+        if (l.tipo === 'CARTAO') {
+          if (l.dia_fechamento  != null) payload.dia_fechamento  = l.dia_fechamento
+          if (l.dia_pagamento   != null) payload.dia_pagamento   = l.dia_pagamento
+          if (l.limite_credito  != null) payload.limite_credito  = l.limite_credito
+          if (l.cartoes_virtuais.length) payload.cartoes_virtuais = l.cartoes_virtuais
+        }
+        const r = await apiComRetry('/contas', 'POST', payload)
         if (r.ok) ok++
         else { addLog('erro', `"${l.nome}": ${r.erro}`); erros++ }
         setProgresso(Math.round(((i + 1) / paraImportar.length) * 100))
@@ -1009,7 +1121,7 @@ function SecaoImport() {
         if (canceladoRef.current) { addLog('aviso', `Cancelado. ${ok} categorias importadas.`); break }
         const l = pais[i]
         const r = await apiComRetry('/categorias', 'POST', {
-          descricao: l.categoria, icone: l.icone || undefined, cor: l.cor || undefined,
+          descricao: l.categoria, icone: l.icone || undefined,
         })
         if (r.ok && (r.dados as { id?: string } | null)?.id) { mapaIdPai[normalizarNome(l.categoria)] = (r.dados as { id: string }).id; ok++ }
         else { addLog('erro', `"${l.categoria}": ${r.erro}`); erros++ }
@@ -1021,7 +1133,7 @@ function SecaoImport() {
         if (!idPai) { addLog('aviso', `"${l.subcategoria}": categoria pai "${l.categoria}" não encontrada`); erros++; continue }
         const r = await apiComRetry('/categorias', 'POST', {
           descricao: l.subcategoria, id_pai: idPai,
-          icone: l.icone || undefined, cor: l.cor || undefined,
+          icone: l.icone || undefined,
         })
         if (r.ok) ok++
         else { addLog('erro', `"${l.subcategoria}": ${r.erro}`); erros++ }
@@ -1432,11 +1544,21 @@ function SecaoImport() {
                       <th className="px-2 py-2 text-left font-semibold text-gray-500">Situação</th>
                       <th className="px-2 py-2 text-left font-semibold text-gray-500">Nome</th>
                       <th className="px-2 py-2 text-left font-semibold text-gray-500">Tipo</th>
-                      <th className="px-2 py-2 text-right font-semibold text-gray-500">Saldo Inicial</th>
+                      <th className="px-2 py-2 text-right font-semibold text-gray-500">Saldo inicial</th>
+                      <th className="px-2 py-2 text-center font-semibold text-gray-500" title="Só CARTAO">Fech.</th>
+                      <th className="px-2 py-2 text-center font-semibold text-gray-500" title="Só CARTAO">Pag.</th>
+                      <th className="px-2 py-2 text-right font-semibold text-gray-500" title="Só CARTAO">Limite</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-500" title="Só CARTAO — formato: '1234 Apelido, 5678 Outro'">Cartões virtuais</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {gridContas.map(l => (
+                    {gridContas.map(l => {
+                      const ehCartao = l.tipo === 'CARTAO'
+                      const cellCartao = (vazio: boolean) =>
+                        !ehCartao || vazio
+                          ? { color: '#6b7280', opacity: 0.6 } as const
+                          : { color: '#d1d5db' } as const
+                      return (
                       <tr key={l.idx} className="border-t border-gray-700/50"
                         style={{ background: l.problema ? 'rgba(255,107,74,0.06)' : 'transparent', opacity: l.importar ? 1 : 0.45 }}>
                         <td className="px-2 py-1 text-center">
@@ -1466,11 +1588,52 @@ function SecaoImport() {
                         </td>
                         <td className="px-1 py-1 text-right">
                           <input type="number" step="0.01" value={l.saldo_inicial}
+                            disabled={ehCartao}
+                            title={ehCartao ? 'CARTAO sempre tem saldo inicial = 0' : ''}
                             onChange={e => setContaLinha(l.idx, { saldo_inicial: parseFloat(e.target.value) || 0 })}
-                            className="w-[90px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-right text-gray-300 outline-none" />
+                            className="w-[90px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-right text-gray-300 outline-none disabled:opacity-40" />
+                        </td>
+                        {/* Dia fechamento */}
+                        <td className="px-1 py-1 text-center">
+                          <input type="number" min={1} max={31}
+                            value={l.dia_fechamento ?? ''}
+                            disabled={!ehCartao}
+                            onChange={e => setContaLinha(l.idx, { dia_fechamento: parseDiaCartao(e.target.value) })}
+                            className="w-[50px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1 py-0.5 text-[15px] text-center outline-none disabled:opacity-30"
+                            style={cellCartao(l.dia_fechamento == null)} />
+                        </td>
+                        {/* Dia pagamento */}
+                        <td className="px-1 py-1 text-center">
+                          <input type="number" min={1} max={31}
+                            value={l.dia_pagamento ?? ''}
+                            disabled={!ehCartao}
+                            onChange={e => setContaLinha(l.idx, { dia_pagamento: parseDiaCartao(e.target.value) })}
+                            className="w-[50px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1 py-0.5 text-[15px] text-center outline-none disabled:opacity-30"
+                            style={cellCartao(l.dia_pagamento == null)} />
+                        </td>
+                        {/* Limite de crédito */}
+                        <td className="px-1 py-1 text-right">
+                          <input type="number" step="0.01" min={0}
+                            value={l.limite_credito ?? ''}
+                            disabled={!ehCartao}
+                            onChange={e => {
+                              const v = e.target.value
+                              setContaLinha(l.idx, { limite_credito: v === '' ? null : Math.max(0, parseFloat(v) || 0) })
+                            }}
+                            className="w-[110px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-right outline-none disabled:opacity-30"
+                            style={cellCartao(l.limite_credito == null)} />
+                        </td>
+                        {/* Cartões virtuais (read-only nesta tela — edição rica fica na ContasPage) */}
+                        <td className="px-1 py-1">
+                          <span className="text-[14px]" style={cellCartao(l.cartoes_virtuais.length === 0)}>
+                            {ehCartao && l.cartoes_virtuais.length > 0
+                              ? l.cartoes_virtuais.map(cv => `${cv.sufixo}${cv.apelido ? ` ${cv.apelido}` : ''}`).join(', ')
+                              : ehCartao ? '—' : ''}
+                          </span>
                         </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2459,10 +2622,10 @@ function SecaoRestore() {
 // ══════════════════════════════════════════════════════════════════
 export default function ImportExportPage() {
   return (
-    <div className="p-5 max-w-[860px]">
+    <div className="p-5 max-w-[1200px]">
       <div className="mb-5">
         <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Ferramentas</h1>
-        <p className="text-[16px] text-gray-400 mt-0.5">Backup, restore, exportação, importação e limpeza de dados</p>
+        <p className="text-[16px] text-gray-400 mt-0.5">Exportação, importação, backup completo e limpeza de dados</p>
       </div>
 
       <div className="mb-4">
@@ -2470,10 +2633,61 @@ export default function ImportExportPage() {
       </div>
 
       <div className="space-y-3">
-        <SecaoBackup />
-        <SecaoRestore />
-        <SecaoExport />
-        <SecaoImport />
+        {/* Linha 1 — Exportar | Importar (XLSX, uso humano) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+          <SecaoExport />
+          <SecaoImport />
+        </div>
+
+        {/* Explicação Exportar vs Backup, em linguagem leiga.
+            Posicionada entre as duas linhas para o usuário ler antes de
+            decidir qual ferramenta usar. */}
+        <div
+          className="rounded-xl border px-4 py-3 text-[14px] leading-relaxed"
+          style={{
+            background:  'rgba(77,166,255,0.06)',
+            borderColor: 'rgba(77,166,255,0.25)',
+            color:       'var(--text-secondary)',
+          }}
+        >
+          <p className="font-semibold mb-1.5" style={{ color: '#4da6ff' }}>
+            Qual a diferença entre Exportar e Backup?
+          </p>
+          <ul className="list-disc pl-5 space-y-1.5">
+            <li>
+              <strong>Exportar</strong> gera uma <strong>planilha Excel</strong>{' '}
+              que você abre, lê, imprime, analisa e até manda pro seu contador.
+              Você escolhe o período e o que quer levar (contas, categorias,
+              transações, transferências). O <strong>Importar</strong> aceita
+              essa mesma planilha de volta, ou outra parecida feita em outro
+              sistema.
+              <br/>
+              <span className="text-gray-400">
+                Pense assim: é o seu “relatório pra olhar fora do app”.
+              </span>
+            </li>
+            <li>
+              <strong>Backup</strong> gera uma <strong>cópia completa</strong>{' '}
+              dos seus dados num arquivo único — sem você precisar escolher
+              nada. Esse arquivo não foi feito pra você ler; ele serve só pra
+              guardar e usar com o <strong>Restore</strong>, que devolve tudo
+              ao app exatamente como estava.
+              <br/>
+              <span className="text-gray-400">
+                Pense assim: é a “foto da sua conta inteira” pra um eventual
+                imprevisto.
+              </span>
+            </li>
+          </ul>
+        </div>
+
+        {/* Linha 2 — Backup | Restore (JSON, salvaguarda) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+          <SecaoBackup />
+          <SecaoRestore />
+        </div>
+
+        {/* Linha 3 — Limpar (full-width, compactado por ser destrutivo) */}
         <SecaoLimpeza />
       </div>
     </div>

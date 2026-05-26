@@ -83,15 +83,32 @@ type Fase =
 
 export default function ApresentacaoMascotes() {
   const navigate = useNavigate()
-  const { setMascote, definirApelido, definirVariosApelidos, primeiroAcesso } = useMascotePreferido()
+  const { setMascote, definirApelido, definirVariosApelidos, apelidos, primeiroAcesso } = useMascotePreferido()
   const [fase, setFase] = useState<Fase>('apresentando')
   const [escolhido, setEscolhido] = useState<MascoteNome | null>(null)
   const [apelido, setApelido] = useState('')
-  // Apelidos dos 4 mascotes no fluxo "Aleatório".
+  // Apelidos dos 4 mascotes no fluxo "Aleatório". Pré-carregados pelo
+  // useEffect abaixo quando o hook resolve os apelidos persistidos.
   const [apelidosTodos, setApelidosTodos] = useState<Record<MascoteNome, string>>({
     sabio: '', arquiteta: '', gato: '', raposa: '',
   })
+
+  // Quando o hook traz apelidos persistidos (retomada — usuário já nomeou
+  // mentores em outra ocasião), pré-carrega nos campos para o usuário só
+  // editar o que quiser. `apelidos` chega vazio na 1ª renderização e
+  // populado depois do fetch.
+  useEffect(() => {
+    setApelidosTodos(prev => ({
+      sabio:     apelidos.sabio     ?? prev.sabio,
+      arquiteta: apelidos.arquiteta ?? prev.arquiteta,
+      gato:      apelidos.gato      ?? prev.gato,
+      raposa:    apelidos.raposa    ?? prev.raposa,
+    }))
+  }, [apelidos.sabio, apelidos.arquiteta, apelidos.gato, apelidos.raposa])
   const [salvando, setSalvando] = useState(false)
+  // Anima o emoji 🎲 quando o usuário clica em "Aleatório" — o dado rola,
+  // chacoalha um pouco e cai. Dura ~900ms; só depois disso a fase muda.
+  const [rolandoDado, setRolandoDado] = useState(false)
 
   // Pré-carrega todas as poses de todos os mascotes — garante que ao
   // trocar de pose (curioso → triste → sentado) a imagem aparece
@@ -118,6 +135,9 @@ export default function ApresentacaoMascotes() {
   function aoEscolher(id: MascoteNome) {
     if (fase !== 'aguardando') return
     setEscolhido(id)
+    // Se o usuário já tinha apelidado este mentor antes, traz o nome
+    // pra o input de "nomeando" — fica fácil só revisar ou editar.
+    setApelido(apelidos[id] ?? '')
     setFase('escolhido')
     // Mais ágil: 800ms triste → sentar; +500ms → nomeando
     setTimeout(() => setFase('sentar'), 800)
@@ -143,11 +163,16 @@ export default function ApresentacaoMascotes() {
 
   // ── Fluxo "Aleatório" ──────────────────────────────────────────────
   function aoEscolherAleatorio() {
-    if (fase !== 'aguardando') return
-    // Sinaliza com null pra logica de pose: todos vão pra 'feliz'
+    if (fase !== 'aguardando' || rolandoDado) return
+    // Anima o dado rolando antes de mudar de fase (~900ms).
+    // Sinaliza com null pra logica de pose: todos vão pra 'feliz'.
     setEscolhido(null)
-    setFase('todos-alegres')
-    setTimeout(() => setFase('nomeando-todos'), 1000)
+    setRolandoDado(true)
+    setTimeout(() => {
+      setRolandoDado(false)
+      setFase('todos-alegres')
+      setTimeout(() => setFase('nomeando-todos'), 1000)
+    }, 900)
   }
 
   async function aoSalvarTodos() {
@@ -301,14 +326,17 @@ export default function ApresentacaoMascotes() {
               <button
                 type="button"
                 onClick={aoEscolherAleatorio}
-                className="rounded-2xl p-3 text-left transition-all hover:scale-[1.02]"
+                disabled={rolandoDado}
+                className="rounded-2xl p-3 text-left transition-all hover:scale-[1.02] disabled:cursor-default"
                 style={{
                   background: '#ffffff',
                   border: '2px dashed rgba(0,0,0,0.15)',
                 }}
               >
                 <div className="flex items-start gap-2.5">
-                  <span className="text-[26px] leading-none">🎲</span>
+                  <span
+                    className={`text-[26px] leading-none inline-block origin-center${rolandoDado ? ' rolando-dado' : ''}`}
+                  >🎲</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-[15px] font-bold mb-0.5" style={{ color: '#0f172a' }}>
                       Aleatório
@@ -345,6 +373,9 @@ export default function ApresentacaoMascotes() {
           </div>
         )}
       </div>
+
+      {/* Animação do dado: classe `.rolando-dado` definida em globals.css
+          (compartilhada com PerfilPage.SecaoMascote). */}
     </div>
   )
 }

@@ -54,6 +54,9 @@ export interface ExportSheet {
   rows:        ExportRow[]
   /** congela cabeçalho ao rolar. default true */
   freezeHeader?: boolean
+  /** ativa o autofilter do Excel no cabeçalho (dropdowns de filtro
+   *  e ordenação em cada coluna). default true. */
+  autoFilter?:  boolean
 }
 
 export interface ExportOptions {
@@ -253,6 +256,16 @@ export async function exportToExcel(opts: ExportOptions): Promise<void> {
     // Congela linhas do topo + cabeçalho
     if (sheet.freezeHeader !== false) {
       ws.views = [{ state: 'frozen', xSplit: 0, ySplit: linhasTopo }]
+    }
+
+    // AutoFilter — habilita dropdowns de filtro/ordenação no cabeçalho.
+    // Aplica do cabeçalho (`linhasTopo`) até a última linha de dados, em
+    // todas as colunas. Só ativa se houver linhas de dados.
+    if (sheet.autoFilter !== false && sheet.rows.length > 0) {
+      ws.autoFilter = {
+        from: { row: linhasTopo, column: 1 },
+        to:   { row: linhasTopo + sheet.rows.length, column: nCols },
+      }
     }
   }
 

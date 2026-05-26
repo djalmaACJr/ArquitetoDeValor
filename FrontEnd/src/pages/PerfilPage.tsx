@@ -95,6 +95,9 @@ function SecaoMascote() {
   // ou ao clicar no botão de renomear.
   const [modalApelido, setModalApelido] = useState<MascoteNome | null>(null)
   const [apelidoInput, setApelidoInput] = useState('')
+  // Anima o emoji 🎲 quando o usuário escolhe "Aleatório" — mesmo efeito
+  // de ApresentacaoMascotes (1º acesso). Classe `.rolando-dado` em globals.css.
+  const [rolandoDado, setRolandoDado] = useState(false)
 
   // Catálogo dos 4 mascotes
   const catalogo: Array<{ id: MascoteNome; label: string; descricao: string }> = [
@@ -124,8 +127,18 @@ function SecaoMascote() {
   }
 
   // Troca pra modo especial ("aleatorio" ou "nenhum") — sem modal de apelido.
+  // Para "aleatorio", dispara animação do dado antes de persistir a troca
+  // (alinha com o 1º acesso). "nenhum" é instantâneo.
   const aoTrocarPreferencia = (p: 'aleatorio' | 'nenhum') => {
-    if (p === preferencia) return
+    if (p === preferencia || rolandoDado) return
+    if (p === 'aleatorio') {
+      setRolandoDado(true)
+      setTimeout(() => {
+        setRolandoDado(false)
+        setMascote(p)
+      }, 900)
+      return
+    }
     setMascote(p)
   }
 
@@ -217,12 +230,14 @@ function SecaoMascote() {
           { id: 'nenhum'    as const, icone: '🤐', label: 'Nenhum',    descricao: 'Sem balões nem dicas. Só o parecer do mês.' },
         ]).map(opt => {
           const ativo = opt.id === preferencia
+          const animandoEste = rolandoDado && opt.id === 'aleatorio'
           return (
             <button
               key={opt.id}
               type="button"
               onClick={() => aoTrocarPreferencia(opt.id)}
-              className="text-left rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-av-green/40 p-2.5"
+              disabled={rolandoDado}
+              className="text-left rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-av-green/40 p-2.5 disabled:cursor-default disabled:hover:scale-100"
               style={{
                 borderColor: ativo ? '#00c896' : 'rgba(255,255,255,0.10)',
                 background:  ativo ? 'rgba(0,200,150,0.08)' : 'rgba(255,255,255,0.03)',
@@ -235,7 +250,7 @@ function SecaoMascote() {
                   className="flex-shrink-0 rounded-xl flex items-center justify-center text-[34px]"
                   style={{ width: 84, height: 84, background: 'rgba(255,255,255,0.04)' }}
                 >
-                  {opt.icone}
+                  <span className={animandoEste ? 'rolando-dado' : ''}>{opt.icone}</span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[16px] font-semibold text-white truncate">{opt.label}</p>

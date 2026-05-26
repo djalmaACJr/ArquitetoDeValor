@@ -152,13 +152,33 @@ export function useFaturaImportSessao(id: string | null) {
     return { ok: r.ok, dados: r.dados ?? null, erro: r.erro }
   }
 
-  const confirmar = async (): Promise<OpResult> => {
-    const r = await apiMutate(`/faturas/${id}/confirmar`, 'POST')
+  /**
+   * Confirma a sessão aplicando as decisões dos itens em arqvalor.transacoes.
+   * Payload opcional contém o modo e overrides escolhidos pelo usuário na UI:
+   *   - modo:       REGISTRO (1 lançamento por item) ou CATEGORIA (agrupado).
+   *   - decisoes:   override CRIAR/ATUALIZAR por chave (item.id ou categoria_id
+   *                 conforme o modo).
+   *   - descricoes: override de descrição por chave.
+   */
+  const confirmar = async (payload?: {
+    modo:        'REGISTRO' | 'CATEGORIA'
+    decisoes?:   Record<string, 'CRIAR' | 'ATUALIZAR'>
+    descricoes?: Record<string, string>
+  }): Promise<OpResult<{ criadas: number; atualizadas: number; modo: string }>> => {
+    const r = await apiMutate<{ criadas: number; atualizadas: number; modo: string }>(
+      `/faturas/${id}/confirmar`, 'POST', payload,
+    )
     if (r.ok) {
       await invalidarSessao()
       await qc.invalidateQueries({ queryKey: qk.faturasImport(uid) })
+      // Confirmação cria/atualiza transações reais — invalida caches do
+      // domínio para o resto do app refletir imediatamente.
+      await qc.invalidateQueries({ queryKey: ['lancamentos', uid] })
+      await qc.invalidateQueries({ queryKey: ['dashboard-fase1', uid] })
+      await qc.invalidateQueries({ queryKey: ['transacoes-mes', uid] })
+      await qc.invalidateQueries({ queryKey: qk.contas(uid) })
     }
-    return { ok: r.ok, dados: null, erro: r.erro }
+    return { ok: r.ok, dados: r.dados ?? null, erro: r.erro }
   }
 
   return {

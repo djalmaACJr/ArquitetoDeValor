@@ -5,14 +5,21 @@
 // Anthropic Claude. Histórico em memória — não persiste entre aberturas.
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { X, Send, Trash2, Paperclip, Camera, Users } from 'lucide-react'
+import { X, Send, Trash2, Paperclip, Camera, Users, Info } from 'lucide-react'
 import Mascote, { type MascoteNome, type MascotePose } from './Mascote'
 import { useChatMascote } from '../../hooks/useChatMascote'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useContextoIA, serializarContexto } from '../../context/ContextoIAContext'
 import { useIAPreferencia } from '../../hooks/useIAPreferencia'
 import { capturarTela } from '../../lib/screenshot'
+
+// Artigo definido por personagem (gênero do mascote, NÃO do apelido).
+// Arquiteta e Raposa são femininas — usam "a"; demais usam "o".
+const ARTIGO: Record<MascoteNome, 'o' | 'a'> = {
+  sabio: 'o', gato: 'o', arquiteta: 'a', raposa: 'a',
+}
 
 // Sugestões iniciais por mascote — incentiva a primeira pergunta.
 const SUGESTOES: Record<MascoteNome, string[]> = {
@@ -56,8 +63,25 @@ export default function ChatMascote({
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   // Contexto da página atual (se registrado) — anexável à mensagem.
+  //
+  // Política de privacidade da conversa:
+  //   • OFF por padrão. O usuário precisa marcar explicitamente que quer
+  //     mandar os dados da tela junto com a pergunta.
+  //   • Envia APENAS UMA VEZ por contexto: depois do 1º envio com o toggle
+  //     ligado, ele volta a OFF automaticamente. A IA mantém o que recebeu
+  //     na memória da conversa, não precisa reenviar a cada mensagem.
+  //   • Quando o usuário muda de tela (titulo do contexto muda) ou limpa a
+  //     conversa, o "já enviei" reseta e o usuário pode marcar de novo se
+  //     quiser passar o contexto novo.
   const contextoPagina = useContextoIA()
-  const [anexarContexto, setAnexarContexto] = useState(true)  // ON por padrão quando disponível
+  const [anexarContexto, setAnexarContexto] = useState(false)
+  const [contextoJaEnviado, setContextoJaEnviado] = useState(false)
+
+  // Reset quando o conteúdo da tela muda (mudou de página/seção)
+  useEffect(() => {
+    setAnexarContexto(false)
+    setContextoJaEnviado(false)
+  }, [contextoPagina?.titulo])
 
   // Screenshot — só relevante se o provedor ativo aceitar visão.
   const { provedorAtivo } = useIAPreferencia()
@@ -83,6 +107,16 @@ export default function ChatMascote({
     finalRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [mensagens.length, carregando])
 
+  // Auto-grow do textarea conforme o usuário digita. Cresce até `MAX_ALTURA_INPUT`
+  // (~10 linhas); a partir daí passa a fazer scroll interno.
+  const MAX_ALTURA_INPUT = 220
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, MAX_ALTURA_INPUT) + 'px'
+  }, [input, aberto])
+
   // Foco no input ao abrir
   useEffect(() => {
     if (aberto) {
@@ -106,7 +140,22 @@ export default function ChatMascote({
     const screenshotBase64 = (suportaVisao && screenshot) ? screenshot : undefined
     setInput('')
     setScreenshot(null)  // limpa screenshot após enviar — usa-se uma vez
+    // Mesma regra para o contexto da tela: depois de enviado, desliga o
+    // toggle (e marca como já enviado nesta conversa). O usuário pode
+    // religar manualmente se quiser passar de novo — mas a IA já tem.
+    if (contextoTexto) {
+      setAnexarContexto(false)
+      setContextoJaEnviado(true)
+    }
     enviar(t, { contextoTexto, screenshotBase64 })
+  }
+
+  // Wrapper de limpar conversa: zera também o "já enviei" pra o usuário
+  // poder reenviar o contexto na conversa nova se quiser.
+  const limparTudo = () => {
+    setContextoJaEnviado(false)
+    setAnexarContexto(false)
+    limpar()
   }
 
   // Pose do mascote no avatar: feliz no início (vazio), curioso quando
@@ -118,7 +167,11 @@ export default function ChatMascote({
 
   if (!aberto) return null
 
-  return (
+  // Renderiza via portal direto no <body>. Sem isso, o drawer fica preso ao
+  // stacking context da página (ex.: tabela com `thead sticky z-30` na
+  // página de Relatórios passa por cima da conversa). Portal escapa
+  // qualquer ancestral com transform/overflow/z-index esquisito.
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
@@ -161,7 +214,7 @@ export default function ChatMascote({
           </button>
           {mensagens.length > 0 && (
             <button
-              onClick={limpar}
+              onClick={limparTudo}
               title="Limpar conversa"
               className="p-2 rounded-lg transition-colors hover:bg-white/10"
               style={{ color: 'var(--text-muted)' }}
@@ -187,11 +240,27 @@ export default function ChatMascote({
                 <Mascote nome={nome} pose="feliz" size={120} />
               </div>
               <p className="text-[16px] font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-                Olá! Sou o {apelido}.
+                Olá! Sou {ARTIGO[nome]} {apelido}.
               </p>
-              <p className="text-[14px] mb-4 max-w-[280px]" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-[14px] mb-3 max-w-[280px]" style={{ color: 'var(--text-muted)' }}>
                 Me pergunte qualquer coisa sobre finanças pessoais. Vou responder do meu jeito.
               </p>
+              {contextoPagina && (
+                <div
+                  className="text-[12px] mb-4 max-w-[300px] px-3 py-2 rounded-lg border text-left flex gap-2"
+                  style={{
+                    background:  'rgba(77,166,255,0.08)',
+                    borderColor: 'rgba(77,166,255,0.25)',
+                    color:       'var(--text-secondary)',
+                  }}
+                >
+                  <Info size={13} className="flex-shrink-0 mt-0.5" style={{ color: '#4da6ff' }}/>
+                  <span>
+                    Quer falar sobre o que está vendo em <strong>{contextoPagina.titulo}</strong>?
+                    Marque <strong>“Enviar dados desta tela”</strong> nos anexos da pergunta.
+                  </span>
+                </div>
+              )}
               <div className="w-full space-y-1.5">
                 {SUGESTOES[nome].map((s, i) => (
                   <button
@@ -270,17 +339,29 @@ export default function ChatMascote({
               <button
                 type="button"
                 onClick={() => setAnexarContexto(v => !v)}
-                title={anexarContexto
-                  ? `Clique para NÃO enviar os dados de "${contextoPagina.titulo}" para a IA`
-                  : `Clique para enviar os dados de "${contextoPagina.titulo}" para a IA junto com sua pergunta`}
+                title={
+                  contextoJaEnviado && !anexarContexto
+                    ? `Os dados de "${contextoPagina.titulo}" já foram enviados nesta conversa. Clique para reenviar.`
+                    : anexarContexto
+                      ? `Clique para NÃO enviar os dados de "${contextoPagina.titulo}" para a IA`
+                      : `Clique para enviar os dados de "${contextoPagina.titulo}" para a IA — só uma vez por conversa`
+                }
                 className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[12px] font-medium transition-colors"
-                style={anexarContexto
-                  ? { background: 'rgba(0,200,150,0.12)', color: '#00c896', border: '1px solid rgba(0,200,150,0.35)' }
-                  : { background: 'var(--tint-1)',        color: 'var(--text-faint)', border: '1px dashed var(--border-subtle)' }}
+                style={
+                  anexarContexto
+                    ? { background: 'rgba(0,200,150,0.12)', color: '#00c896', border: '1px solid rgba(0,200,150,0.35)' }
+                    : contextoJaEnviado
+                      ? { background: 'rgba(139,146,168,0.10)', color: 'var(--text-faint)', border: '1px solid var(--border-subtle)' }
+                      : { background: 'var(--tint-1)',        color: 'var(--text-faint)', border: '1px dashed var(--border-subtle)' }
+                }
               >
                 <Paperclip size={11}/>
                 <span className="truncate max-w-[240px]">
-                  {anexarContexto ? 'Enviando dados de ' : 'Sem dados de '}
+                  {anexarContexto
+                    ? 'Enviar dados desta tela: '
+                    : contextoJaEnviado
+                      ? 'Já enviei dados de '
+                      : 'Enviar dados desta tela: '}
                   <strong>{contextoPagina.titulo}</strong>
                 </span>
                 {anexarContexto && <X size={10}/>}
@@ -317,12 +398,13 @@ export default function ChatMascote({
             placeholder={`Pergunte ao ${apelido}...`}
             rows={1}
             maxLength={2000}
-            className="flex-1 resize-none rounded-xl border px-3 py-2 text-[15px] focus:outline-none transition-colors"
+            className="flex-1 resize-none rounded-xl border px-3 py-2 text-[15px] leading-relaxed focus:outline-none transition-colors"
             style={{
               background:  'var(--bg-input)',
               borderColor: 'var(--border-subtle)',
               color:       'var(--text-primary)',
-              maxHeight:   140,
+              maxHeight:   MAX_ALTURA_INPUT,
+              overflowY:   'auto',
             }}
           />
           {suportaVisao && !screenshot && (
@@ -359,6 +441,7 @@ export default function ChatMascote({
           letter-spacing: 0.2em;
         }
       `}</style>
-    </>
+    </>,
+    document.body,
   )
 }

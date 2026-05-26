@@ -10,6 +10,7 @@ import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLan
 import { formatBRL, mesLabel } from '../lib/utils'
 import MascoteDica from '../components/ui/MascoteDica'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
+import LoadingMascote from '../components/ui/LoadingMascote'
 import TutorialTour from '../components/ui/TutorialTour'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { registrarResetCliente } from '../lib/clientCache'
@@ -264,11 +265,8 @@ export default function ProjecaoEconomiaPage() {
 
   // ── Loading ───────────────────────────────────────────────────
   if (loading) return (
-    <div className="flex items-center justify-center py-24">
-      <div className="text-center">
-        <RefreshCw size={24} className="animate-spin mx-auto mb-3" style={{ color: '#4da6ff' }} />
-        <p className="text-[17px]" style={{ color: '#8b92a8' }}>Analisando histórico financeiro…</p>
-      </div>
+    <div className="py-12">
+      <LoadingMascote texto="Analisando histórico financeiro…" size={150} />
     </div>
   )
 

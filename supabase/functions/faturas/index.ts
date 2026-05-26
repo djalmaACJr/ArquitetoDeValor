@@ -15,7 +15,7 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId, extrairAcao, corsPreFlight,
-         verificarExistencia, camposParaAtualizar } from "../_shared/utils.ts";
+         verificarExistencia, camposParaAtualizar, calcularDataParcela } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWarn } from "../_shared/logger.ts";
 // Usamos `npm:` (suportado no Supabase Edge Runtime) em vez de esm.sh:
 // o esm.sh fazia o pdfjs-dist falhar em iniciar (worker resolver não acha
@@ -62,8 +62,8 @@ Deno.serve(async (req: Request) => {
     // POST /faturas/:id/sugerir
     if (m === "POST"   &&  id && acao === "sugerir")   return await sugerir(c, id, userId);
 
-    // POST /faturas/:id/confirmar (placeholder em F1)
-    if (m === "POST"   &&  id && acao === "confirmar") return await confirmar(c, id);
+    // POST /faturas/:id/confirmar
+    if (m === "POST"   &&  id && acao === "confirmar") return await confirmar(c, req, id, userId);
 
     // DELETE /faturas/:id
     if (m === "DELETE" &&  id && !acao) return await excluir(c, id);
@@ -349,29 +349,292 @@ async function editarItem(c: ReturnType<typeof db>, sessaoId: string, itemId: st
 }
 
 
-// ── Confirmar (placeholder em F1) ──────────────────────────────
-// Em F3 essa função vai:
-//   • Iterar os itens com decisao = CRIAR → INSERT em arqvalor.transacoes
-//   • Itens com decisao = ATUALIZAR → UPDATE da transação existente
-//     (preservando valor antigo em valor_projetado se status era PROJECAO)
-//   • Itens com decisao = IGNORAR → no-op
-//   • Marcar sessão como CONFIRMADA
-//   • Aprender padrões: upsert em assistente_lancamentos pra descrição→categoria
-async function confirmar(c: ReturnType<typeof db>, id: string) {
-  logRequest("POST", `/faturas/${id}/confirmar`);
+// ── Confirmar (persistência real em arqvalor.transacoes) ──────
+//
+// Payload (JSON):
+//   {
+//     modo: 'REGISTRO' | 'CATEGORIA',
+//     decisoes?:   Record<chave, 'CRIAR' | 'ATUALIZAR'>,
+//     descricoes?: Record<chave, string>,
+//   }
+// onde `chave` = item.id no modo REGISTRO ou categoria_id no modo CATEGORIA.
+//
+// Regras (decidido com o usuário em 2026-05-27):
+//   • REGISTRO + item parcelado com decisao=CRIAR → cria a SÉRIE completa
+//     (parcela atual como PENDENTE + restantes como PROJECAO, mesmo
+//     id_recorrencia, tipo_recorrencia=PARCELA).
+//   • REGISTRO + item parcelado com decisao=ATUALIZAR → atualiza só a tx
+//     existente (não cria as outras parcelas — assume que o usuário já
+//     tem a série lançada e está só ajustando esta parcela).
+//   • CATEGORIA → 1 lançamento por categoria, valor = soma (DESPESA −
+//     RECEITA), data = dia_pagamento do cartão no mês de vencimento,
+//     status=PENDENTE. Detalhamento dos itens vai em `observacao`.
+//   • Sessão fica CONFIRMADA + itens mantidos com transacao_criada_id
+//     populado para rastreabilidade.
+//   • Aprende padrões: upsert em assistente_lancamentos (descricao →
+//     categoria) por item (mesmo no modo CATEGORIA, cada item ensina).
+async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: string, userId: string) {
+  logRequest("POST", `/faturas/${sessaoId}/confirmar`);
 
-  const naoEncontrada = await verificarExistencia(c, "fatura_import_sessao", id, "Sessão não encontrada");
-  if (naoEncontrada) return naoEncontrada;
+  const body = await req.json().catch(() => ({}));
+  const modo: "REGISTRO" | "CATEGORIA" = body.modo === "CATEGORIA" ? "CATEGORIA" : "REGISTRO";
+  const decisoesOv:   Record<string, "CRIAR" | "ATUALIZAR"> = body.decisoes   ?? {};
+  const descricoesOv: Record<string, string>                = body.descricoes ?? {};
 
-  // F1: ainda não persiste em transacoes. Só marca como CONFIRMADA pra exercitar o fluxo.
-  const { error } = await c
+  // 1. Sessão + dados do cartão (precisamos do dia_pagamento)
+  const { data: sessao, error: errSessao } = await c
     .from("fatura_import_sessao")
-    .update({ status: "CONFIRMADA" })
-    .eq("id", id);
-  if (error) { logError("Confirmar fatura", error); return erro(error.message); }
+    .select("id, conta_id, vencimento_fatura, status, conta:contas(nome, dia_pagamento)")
+    .eq("id", sessaoId)
+    .single();
+  if (errSessao || !sessao) return erro("Sessão não encontrada", 404);
+  if (sessao.status !== "EM_ANALISE") return erro("Sessão não está em análise", 422);
+  const conta = sessao.conta as { nome?: string; dia_pagamento?: number | null } | null;
 
-  logSuccess("Sessão confirmada (F1 placeholder — não aplica em transacoes ainda)", { id });
-  return json({ mensagem: "Sessão marcada como CONFIRMADA (F1 placeholder; aplicação real em F3)" });
+  // 2. Itens da sessão (apenas classificados não-ignorados)
+  const { data: itens, error: errItens } = await c
+    .from("fatura_import_item")
+    .select("*")
+    .eq("sessao_id", sessaoId);
+  if (errItens) return erro(errItens.message);
+
+  type Item = {
+    id: string; descricao: string; valor: number;
+    data_compra: string; tipo: "RECEITA" | "DESPESA" | null;
+    categoria_escolhida_id: string | null;
+    transacao_existente_id: string | null;
+    parcela_atual: number | null;
+    parcela_total: number | null;
+    observacao: string | null;
+    decisao: string;
+  };
+  const naoIgnorados = (itens as Item[] | null)?.filter(
+    (i) => i.decisao !== "IGNORAR" && !!i.categoria_escolhida_id,
+  ) ?? [];
+
+  if (naoIgnorados.length === 0) {
+    await c.from("fatura_import_sessao").update({ status: "CONFIRMADA" }).eq("id", sessaoId);
+    return json({ mensagem: "Sessão confirmada (nenhum item importado)." });
+  }
+
+  // 3. Nomes de categoria (para descrição default no modo CATEGORIA)
+  const catIds = [...new Set(naoIgnorados.map((i) => i.categoria_escolhida_id!))];
+  const { data: cats } = await c.from("categorias").select("id, descricao").in("id", catIds);
+  const catNome = new Map((cats ?? []).map((c) => [c.id as string, c.descricao as string]));
+
+  let criadas = 0, atualizadas = 0;
+
+  if (modo === "REGISTRO") {
+    for (const item of naoIgnorados) {
+      const decisaoFinal: "CRIAR" | "ATUALIZAR" =
+        decisoesOv[item.id] ??
+        (item.transacao_existente_id ? "ATUALIZAR" : "CRIAR");
+      const descricao = (descricoesOv[item.id] ?? item.descricao).trim();
+      const tipoTx    = item.tipo ?? "DESPESA";
+
+      let txCriadaId: string | null = null;
+
+      if (decisaoFinal === "ATUALIZAR" && item.transacao_existente_id) {
+        // Atualiza tx existente. Trigger fn_preservar_valor_projetado preserva
+        // valor_projetado se status atual era PROJECAO.
+        const { data: txAtual, error } = await c
+          .from("transacoes")
+          .update({
+            descricao,
+            valor:        item.valor,
+            categoria_id: item.categoria_escolhida_id,
+            data:         item.data_compra,
+            tipo:         tipoTx,
+            status:       "PENDENTE",
+            observacao:   item.observacao,
+          })
+          .eq("id", item.transacao_existente_id)
+          .select("id")
+          .single();
+        if (error) { logWarn("update tx", error.message); continue; }
+        txCriadaId = txAtual?.id ?? null;
+        atualizadas++;
+      } else if (item.parcela_total && item.parcela_total > 1 && item.parcela_atual) {
+        // CRIAR série de parcelas (mesma id_recorrencia, MENSAL, intervalo 1).
+        // Parcela atual = PENDENTE; as restantes = PROJECAO.
+        const idRec   = crypto.randomUUID();
+        const inserts = [];
+        for (let i = item.parcela_atual; i <= item.parcela_total; i++) {
+          const offset = i - item.parcela_atual;
+          const data   = offset === 0
+            ? item.data_compra
+            : calcularDataParcela(item.data_compra, "MENSAL", offset);
+          inserts.push({
+            user_id:               userId,
+            conta_id:              sessao.conta_id,
+            categoria_id:          item.categoria_escolhida_id,
+            descricao,
+            valor:                 item.valor,
+            data,
+            tipo:                  tipoTx,
+            status:                offset === 0 ? "PENDENTE" : "PROJECAO",
+            id_recorrencia:        idRec,
+            nr_parcela:            i,
+            total_parcelas:        item.parcela_total,
+            tipo_recorrencia:      "PARCELA",
+            intervalo_recorrencia: 1,
+            observacao:            item.observacao,
+          });
+        }
+        const { data: txs, error } = await c.from("transacoes").insert(inserts)
+          .select("id, nr_parcela");
+        if (error) { logWarn("insert serie", error.message); continue; }
+        txCriadaId = (txs ?? []).find((t) => t.nr_parcela === item.parcela_atual)?.id ?? null;
+        criadas += (txs?.length ?? 0);
+      } else {
+        // CRIAR avulso
+        const { data: tx, error } = await c.from("transacoes").insert({
+          user_id:      userId,
+          conta_id:     sessao.conta_id,
+          categoria_id: item.categoria_escolhida_id,
+          descricao,
+          valor:        item.valor,
+          data:         item.data_compra,
+          tipo:         tipoTx,
+          status:       "PENDENTE",
+          observacao:   item.observacao,
+        }).select("id").single();
+        if (error) { logWarn("insert avulso", error.message); continue; }
+        txCriadaId = tx?.id ?? null;
+        criadas++;
+      }
+
+      // Rastreabilidade: item → transação gerada
+      if (txCriadaId) {
+        await c.from("fatura_import_item")
+          .update({ transacao_criada_id: txCriadaId, decisao: decisaoFinal })
+          .eq("id", item.id);
+      }
+
+      // Aprende: descricao_normalizada → categoria. Conta_origem = a conta CARTAO.
+      await aprenderPadrao(c, userId, item.descricao, item.categoria_escolhida_id!, sessao.conta_id);
+    }
+  } else {
+    // MODO CATEGORIA: 1 lançamento por categoria, data = dia_pagamento da conta
+    // no mês de vencimento; observacao = detalhamento dos itens.
+    const grupos = new Map<string, Item[]>();
+    for (const it of naoIgnorados) {
+      const k = it.categoria_escolhida_id!;
+      if (!grupos.has(k)) grupos.set(k, []);
+      grupos.get(k)!.push(it);
+    }
+
+    const venc = sessao.vencimento_fatura as string | null;
+    const diaPagto = conta?.dia_pagamento ?? 5;
+    const dataLancto = venc
+      ? `${venc.slice(0, 7)}-${String(diaPagto).padStart(2, "0")}`
+      : (venc ?? new Date().toISOString().slice(0, 10));
+
+    for (const [catId, items] of grupos) {
+      const decisaoFinal: "CRIAR" | "ATUALIZAR" =
+        decisoesOv[catId] ??
+        (items.find((i) => i.transacao_existente_id) ? "ATUALIZAR" : "CRIAR");
+
+      // Soma respeitando tipo do item (RECEITA reduz total da despesa)
+      const valorBruto = items.reduce(
+        (s, i) => s + (i.tipo === "RECEITA" ? -Number(i.valor) : Number(i.valor)), 0,
+      );
+      const tipoTx = valorBruto >= 0 ? "DESPESA" : "RECEITA";
+      const valor  = Math.abs(valorBruto);
+      if (valor <= 0) continue; // categoria que se anulou (estornos totalizam zero)
+
+      const descricaoDefault = `${conta?.nome ?? "Fatura"} - ${catNome.get(catId) ?? ""}`.trim();
+      const descricao        = (descricoesOv[catId] ?? descricaoDefault).trim();
+
+      // Detalhamento dos itens vai em observacao para auditoria
+      const detalhe = items
+        .map((i) => `${i.descricao.trim()} R$ ${Number(i.valor).toFixed(2).replace(".", ",")}`)
+        .join(" + ");
+      const observacao = `Cartão ${conta?.nome ?? ""} | ${detalhe}`.slice(0, 2000);
+
+      let txCriadaId: string | null = null;
+
+      if (decisaoFinal === "ATUALIZAR") {
+        const txAlvo = items.find((i) => i.transacao_existente_id)?.transacao_existente_id;
+        if (txAlvo) {
+          const { data: tx, error } = await c.from("transacoes").update({
+            descricao, valor, data: dataLancto,
+            categoria_id: catId, tipo: tipoTx,
+            status: "PENDENTE", observacao,
+          }).eq("id", txAlvo).select("id").single();
+          if (error) { logWarn("update cat", error.message); continue; }
+          txCriadaId = tx?.id ?? null;
+          atualizadas++;
+        }
+      } else {
+        const { data: tx, error } = await c.from("transacoes").insert({
+          user_id:      userId,
+          conta_id:     sessao.conta_id,
+          categoria_id: catId,
+          descricao, valor, data: dataLancto,
+          tipo: tipoTx, status: "PENDENTE", observacao,
+        }).select("id").single();
+        if (error) { logWarn("insert cat", error.message); continue; }
+        txCriadaId = tx?.id ?? null;
+        criadas++;
+      }
+
+      // Marca TODOS os itens do grupo com a mesma tx — assim a sandbox
+      // ainda mostra que esses itens foram absorvidos por aquele lançamento.
+      if (txCriadaId) {
+        await c.from("fatura_import_item")
+          .update({ transacao_criada_id: txCriadaId, decisao: decisaoFinal })
+          .in("id", items.map((i) => i.id));
+      }
+
+      // Aprende padrão por item (não por grupo)
+      for (const item of items) {
+        await aprenderPadrao(c, userId, item.descricao, catId, sessao.conta_id);
+      }
+    }
+  }
+
+  // 4. Marca sessão como CONFIRMADA
+  await c.from("fatura_import_sessao").update({ status: "CONFIRMADA" }).eq("id", sessaoId);
+
+  logSuccess("Sessão confirmada", { sessaoId, modo, criadas, atualizadas });
+  return json({ mensagem: "Importação confirmada.", criadas, atualizadas, modo });
+}
+
+
+/** Upsert no assistente_lancamentos: descrição (case-insensitive) → categoria.
+ *  Replica o padrão de upsert manual do edge function /assistente. */
+async function aprenderPadrao(
+  c: ReturnType<typeof db>,
+  userId: string,
+  descricao: string,
+  categoriaId: string,
+  contaId: string,
+) {
+  const desc = descricao.trim();
+  if (desc.length < 2 || desc.length > 200 || !categoriaId) return;
+
+  const { data: existente } = await c
+    .from("assistente_lancamentos")
+    .select("id")
+    .eq("user_id", userId)
+    .ilike("descricao", desc)
+    .limit(1)
+    .maybeSingle();
+
+  const payload = {
+    descricao:        desc,
+    categoria_id:     categoriaId,
+    conta_origem_id:  contaId,
+    conta_destino_id: null,
+    is_transferencia: false,
+  };
+
+  if (existente?.id) {
+    await c.from("assistente_lancamentos").update(payload).eq("id", existente.id);
+  } else {
+    await c.from("assistente_lancamentos").insert({ ...payload, user_id: userId });
+  }
 }
 
 
