@@ -892,10 +892,10 @@ function SecaoImport() {
             const tipo: 'RECEITA' | 'DESPESA' = tipoRaw === 'RECEITA' ? 'RECEITA'
               : tipoRaw === 'DESPESA' ? 'DESPESA'
               : valorNum < 0 ? 'DESPESA' : 'RECEITA'
-            const statusRaw = String(r['status'] ?? '').toUpperCase()
-            const hoje = hojeLocal()
-            const statusAuto = dataFmt && dataFmt < hoje ? 'PAGO' : 'PENDENTE'
-            const status = ['PAGO', 'PENDENTE', 'PROJECAO'].includes(statusRaw) ? statusRaw : statusAuto
+            // status: aceita apenas PENDENTE ou PROJECAO — PAGO não é importável
+            const statusNorm = String(r['status'] ?? '').toUpperCase()
+              .normalize('NFD').replace(/[̀-ͯ]/g, '') // PROJEÇÃO → PROJECAO
+            const status = ['PENDENTE', 'PROJECAO'].includes(statusNorm) ? statusNorm : 'PENDENTE'
 
             return {
               idx: globalIdx,
@@ -1409,6 +1409,7 @@ function SecaoImport() {
                     { col: 'conta', obrig: true },
                     { col: 'categoria', obrig: true },
                     { col: 'tipo', obrig: false },
+                    { col: 'status', obrig: false },
                     { col: 'observacao', obrig: false },
                   ].map(col => (
                     <div key={col.col} className="flex items-center gap-1">
@@ -1420,7 +1421,7 @@ function SecaoImport() {
                     </div>
                   ))}
                 </div>
-                <p className="text-[14px] text-gray-400">* obrigatório — valor negativo = DESPESA, positivo = RECEITA | datas no formato DD/MM/AAAA</p>
+                <p className="text-[14px] text-gray-400">* obrigatório — valor negativo = DESPESA, positivo = RECEITA | datas no formato DD/MM/AAAA | status: PENDENTE ou PROJECAO (padrão: PENDENTE)</p>
               </>}
               {modo === 'contas' && <>
                 <p className="text-[15px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
@@ -1473,10 +1474,11 @@ function SecaoImport() {
                 const wb = XLSX.utils.book_new()
                 if (modo === 'transacoes') {
                   const ws = XLSX.utils.json_to_sheet([
-                    { data: '15/01/2024', descricao: 'Conta de luz', valor: -150.00, conta: 'Conta Corrente', categoria: 'Moradia', observacao: '' },
-                    { data: '20/01/2024', descricao: 'Salário', valor: 5000.00, conta: 'Conta Corrente', categoria: 'Salário', observacao: 'Pagamento mensal' },
+                    { data: '15/01/2024', descricao: 'Conta de luz', valor: -150.00, conta: 'Conta Corrente', categoria: 'Moradia', status: 'PENDENTE', observacao: '' },
+                    { data: '20/01/2024', descricao: 'Salário', valor: 5000.00, conta: 'Conta Corrente', categoria: 'Salário', status: 'PENDENTE', observacao: 'Pagamento mensal' },
+                    { data: '01/02/2024', descricao: 'Aluguel previsto', valor: -1200.00, conta: 'Conta Corrente', categoria: 'Moradia', status: 'PROJECAO', observacao: 'Projeção futura' },
                   ])
-                  ws['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 12 }, { wch: 20 }, { wch: 22 }, { wch: 30 }]
+                  ws['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 12 }, { wch: 20 }, { wch: 22 }, { wch: 12 }, { wch: 30 }]
                   XLSX.utils.book_append_sheet(wb, ws, 'Transações')
                 } else if (modo === 'contas') {
                   const ws = XLSX.utils.json_to_sheet([
@@ -1834,6 +1836,7 @@ function SecaoImport() {
                       <th className="px-2 py-2 text-left font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">Data</th>
                       <th className="px-2 py-2 text-left font-semibold text-gray-500 dark:text-gray-400">Descrição</th>
                       <th className="px-2 py-2 text-right font-semibold text-gray-500 dark:text-gray-400">Valor</th>
+                      <th className="px-2 py-2 text-left font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">Status</th>
                       <th className="px-2 py-2 text-left font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">Conta</th>
                       <th className="px-2 py-2 text-left font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">Categoria</th>
                     </tr>
@@ -1897,6 +1900,22 @@ function SecaoImport() {
                               className="w-[90px] bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1.5 py-0.5 text-[15px] text-right outline-none"
                               style={{ color: l.tipo === 'RECEITA' ? '#00c896' : '#ff6b4a' }}
                             />
+                          </td>
+
+                          {/* Status — editável via select */}
+                          <td className="px-1 py-1">
+                            <select
+                              value={l.status}
+                              onChange={e => setLinha(l.idx, { status: e.target.value })}
+                              className="bg-transparent border border-transparent hover:border-white/10 focus:border-white/20 rounded px-1 py-0.5 text-[15px] outline-none"
+                              style={{
+                                background: '#1a1f2e',
+                                color: l.status === 'PROJECAO' ? '#a78bfa' : '#f0b429',
+                              }}
+                            >
+                              <option value="PENDENTE">Pendente</option>
+                              <option value="PROJECAO">Projeção</option>
+                            </select>
                           </td>
 
                           {/* Conta — editável via select */}

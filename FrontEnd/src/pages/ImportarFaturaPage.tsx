@@ -327,7 +327,6 @@ function Sandbox({ id }: { id: string }) {
   const [descricoesOverride, setDescricaoOverride] = useState<Map<string, string>>(new Map())
   const [editandoDesc,       setEditandoDesc]       = useState<string | null>(null)
   const [descEditTemp,       setDescEditTemp]       = useState('')
-  const [previewExpandido,   setPreviewExpandido]   = useState<Set<string>>(new Set())
 
   // ── Estado – CATEGORIA: grupos ──────────────────────────────
   const [grupos,              setGrupos]              = useState<GrupoImport[]>([])
@@ -360,7 +359,6 @@ function Sandbox({ id }: { id: string }) {
     setDecisaoOverride(new Map())
     setDescricaoOverride(new Map())
     setEditandoDesc(null)
-    setPreviewExpandido(new Set())
     setGrupos([])
     setSelGrupo(new Map())
     setEditandoDescGrupo(null)
@@ -525,12 +523,6 @@ function Sandbox({ id }: { id: string }) {
     setEditandoDesc(null)
   }
   const cancelarEdicaoDesc = () => setEditandoDesc(null)
-  const togglePreviewDetalhe = (chave: string) =>
-    setPreviewExpandido(prev => {
-      const next = new Set(prev)
-      if (next.has(chave)) next.delete(chave); else next.add(chave)
-      return next
-    })
   const toggleGrupo = (key: string) =>
     setGruposEncolhidos(prev => {
       const next = new Set(prev)
