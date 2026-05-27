@@ -183,3 +183,15 @@ export interface FaturaImportItem {
   criado_em:              string
   atualizado_em:          string
 }
+
+// Transação candidata para vincular manualmente em importação de fatura
+export interface TxCandidata {
+  id:           string
+  descricao:    string
+  valor:        number
+  data:         string
+  tipo:         'RECEITA' | 'DESPESA'
+  status:       string
+  categoria_id: string | null
+  categoria?:   { descricao: string } | null
+}

@@ -22,7 +22,7 @@ Deno.serve(async (req: Request) => {
   try {
     if (m === "GET"    && !id) return await listar(c, userId, url.searchParams);
     if (m === "POST")          return await criar(c, await req.json(), userId);
-    if (m === "PUT"    &&  id) return await renomear(c, id, await req.json(), userId);
+    if (m === "PUT"    &&  id) return await atualizar(c, id, await req.json(), userId);
     if (m === "DELETE" &&  id) return await excluir(c, id, userId);
     return erro("Rota não encontrada", 404);
   } catch (e) {
@@ -87,31 +87,43 @@ async function criar(
   return json(data, 201);
 }
 
-async function renomear(
+async function atualizar(
   c: ReturnType<typeof db>,
   id: string,
   body: Record<string, unknown>,
   userId: string,
 ) {
-  const { nome } = body;
-  logRequest("PUT", `/filtros/${id}`, { nome });
+  const { nome, dados } = body;
+  logRequest("PUT", `/filtros/${id}`, { nome, temDados: dados !== undefined });
 
-  if (!nome || typeof nome !== "string" || !nome.trim())
-    return erro("nome é obrigatório");
-  if (String(nome).length > 50)
-    return erro("nome deve ter no máximo 50 caracteres");
+  const campos: Record<string, unknown> = {};
+
+  if (nome !== undefined) {
+    if (!nome || typeof nome !== "string" || !nome.trim())
+      return erro("nome inválido");
+    if (String(nome).length > 50)
+      return erro("nome deve ter no máximo 50 caracteres");
+    campos.nome = String(nome).trim();
+  }
+
+  if (dados !== undefined) {
+    campos.dados = dados;
+  }
+
+  if (Object.keys(campos).length === 0)
+    return erro("Nenhum campo para atualizar");
 
   const { data, error } = await c
     .from("filtros_salvos")
-    .update({ nome: String(nome).trim() })
+    .update(campos)
     .eq("id", id)
     .eq("user_id", userId)
     .select()
     .single();
 
-  if (error) { logError("Renomear filtro", error); return erro(error.message); }
+  if (error) { logError("Atualizar filtro", error); return erro(error.message); }
 
-  logSuccess("Filtro renomeado", { id, nome });
+  logSuccess("Filtro atualizado", { id, campos: Object.keys(campos) });
   logResponse(200, data);
   return json(data);
 }

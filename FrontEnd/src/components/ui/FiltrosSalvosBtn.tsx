@@ -26,16 +26,21 @@ interface Props {
 }
 
 export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar, onLimpar }: Props) {
-  const { filtros, carregando, salvar } = useFiltrosSalvos(pagina)
-  const [aberto, setAberto] = useState(false)
-  const [nome, setNome]     = useState('')
-  const [salvando, setSalvando] = useState(false)
+  const { filtros, carregando, salvar, atualizarDados } = useFiltrosSalvos(pagina)
+  const [aberto,        setAberto]        = useState(false)
+  const [nome,          setNome]          = useState('')
+  const [salvando,      setSalvando]      = useState(false)
+  // ID do filtro existente com o mesmo nome — quando preenchido, exibe confirmação
+  const [confirmandoId, setConfirmandoId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!aberto) return
     function onClickFora(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setAberto(false)
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setAberto(false)
+        setConfirmandoId(null)
+      }
     }
     document.addEventListener('mousedown', onClickFora)
     return () => document.removeEventListener('mousedown', onClickFora)
@@ -44,10 +49,36 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
   const handleSalvar = async () => {
     const n = nome.trim()
     if (!n) return
+
+    // Verifica se já existe um filtro com o mesmo nome nesta página
+    const duplicado = filtros.find(
+      f => f.pagina === pagina && f.nome.trim().toLowerCase() === n.toLowerCase()
+    )
+    if (duplicado) {
+      // Pede confirmação antes de sobrescrever
+      setConfirmandoId(duplicado.id)
+      return
+    }
+
+    // Nome novo — cria normalmente
     setSalvando(true)
     await salvar(n, filtAtual)
     setSalvando(false)
     setNome('')
+  }
+
+  const handleSubstituir = async () => {
+    if (!confirmandoId) return
+    setSalvando(true)
+    await atualizarDados(confirmandoId, filtAtual)
+    setSalvando(false)
+    setConfirmandoId(null)
+    setNome('')
+  }
+
+  const handleCancelarSubstituicao = () => {
+    // Apenas fecha a confirmação; o nome fica no campo para o usuário editar
+    setConfirmandoId(null)
   }
 
   return (
@@ -125,29 +156,58 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
           {/* Salvar filtro atual */}
           <div className="px-4 py-3 border-t border-white/10">
             {temFiltroAtivo ? (
-              <>
-                <p className="text-[14px] mb-2" style={{ color: '#8b92a8' }}>Salvar filtro atual:</p>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Nome do filtro"
-                    value={nome}
-                    onChange={e => setNome(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleSalvar()}
-                    autoFocus
-                    className="flex-1 text-[15px] bg-[#252d42] border border-white/10 rounded-lg px-2 py-1.5 focus:outline-none focus:border-white/25"
-                    style={{ color: '#e8eaf0' }}
-                  />
-                  <button
-                    onClick={handleSalvar}
-                    disabled={!nome.trim() || salvando}
-                    className="px-3 py-1.5 rounded-lg text-[15px] font-semibold transition-all disabled:opacity-40"
-                    style={{ background: '#4da6ff', color: '#0a0f1a' }}
-                  >
-                    {salvando ? '…' : 'Salvar'}
-                  </button>
+              confirmandoId ? (
+                /* ── Confirmação de substituição ── */
+                <div className="flex flex-col gap-2">
+                  <p className="text-[14px]" style={{ color: '#f0b429' }}>
+                    ⚠ Já existe um filtro chamado <strong style={{ color: '#e8eaf0' }}>"{nome.trim()}"</strong>.
+                    Deseja substituí-lo?
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleSubstituir}
+                      disabled={salvando}
+                      className="flex-1 px-3 py-1.5 rounded-lg text-[14px] font-semibold transition-all disabled:opacity-40"
+                      style={{ background: '#4da6ff', color: '#0a0f1a' }}
+                    >
+                      {salvando ? '…' : 'Substituir'}
+                    </button>
+                    <button
+                      onClick={handleCancelarSubstituicao}
+                      disabled={salvando}
+                      className="flex-1 px-3 py-1.5 rounded-lg text-[14px] font-semibold border transition-all disabled:opacity-40"
+                      style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#8b92a8' }}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
                 </div>
-              </>
+              ) : (
+                /* ── Formulário normal ── */
+                <>
+                  <p className="text-[14px] mb-2" style={{ color: '#8b92a8' }}>Salvar filtro atual:</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nome do filtro"
+                      value={nome}
+                      onChange={e => setNome(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleSalvar()}
+                      autoFocus
+                      className="flex-1 text-[15px] bg-[#252d42] border border-white/10 rounded-lg px-2 py-1.5 focus:outline-none focus:border-white/25"
+                      style={{ color: '#e8eaf0' }}
+                    />
+                    <button
+                      onClick={handleSalvar}
+                      disabled={!nome.trim() || salvando}
+                      className="px-3 py-1.5 rounded-lg text-[15px] font-semibold transition-all disabled:opacity-40"
+                      style={{ background: '#4da6ff', color: '#0a0f1a' }}
+                    >
+                      {salvando ? '…' : 'Salvar'}
+                    </button>
+                  </div>
+                </>
+              )
             ) : (
               <p className="text-[14px] text-center" style={{ color: '#8b92a8' }}>
                 Aplique filtros de conta, categoria ou status para salvar.

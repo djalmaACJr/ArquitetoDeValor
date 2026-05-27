@@ -6,6 +6,7 @@ import { useAuth } from './useAuth'
 import type { Categoria } from '../types'
 
 interface OpResult { ok: boolean; erro: string | null }
+interface OpResultCat extends OpResult { dados: Categoria | null }
 
 async function fetchCategorias(): Promise<Categoria[]> {
   const res = await apiFetch<Categoria[]>('/categorias')
@@ -28,10 +29,10 @@ export function useCategorias() {
 
   const criar = async (payload: {
     descricao: string; id_pai?: string | null; icone?: string; cor?: string
-  }): Promise<OpResult> => {
-    const res = await apiMutate('/categorias', 'POST', payload)
+  }): Promise<OpResultCat> => {
+    const res = await apiMutate<Categoria>('/categorias', 'POST', payload)
     if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias(uid) })
-    return { ok: res.ok, erro: res.erro }
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
   const editar = async (id: string, payload: Partial<{

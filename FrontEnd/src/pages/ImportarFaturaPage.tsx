@@ -1,53 +1,49 @@
 // src/pages/ImportarFaturaPage.tsx
 //
-// Submenu "Importação de Fatura de Cartão" — F1.
-//
-// Esta entrega faz o ciclo end-to-end com o parser de PDF stubado:
-//   • Upload: usuário escolhe uma conta tipo CARTAO e envia o PDF.
-//   • Sessão é criada em arqvalor.fatura_import_sessao com status EM_ANALISE
-//     e 1 item placeholder.
-//   • Listagem de sessões anteriores (com badge de status).
-//   • Sandbox: rota /importar-fatura/:id mostra os itens da sessão e permite
-//     escolher decisão (CRIAR | ATUALIZAR | IGNORAR) por item.
-//
-// O parser real de PDF entra em F2 — o edge function `faturas` (POST) hoje
-// só valida o PDF e descarta os bytes.
+// Importação de Fatura de Cartão — ciclo completo:
+//   Fase 1 — Classificar itens (atribuir categoria ou ignorar)
+//             Botão "Aplicar todas as sugestões" aplica em lote.
+//             Sufixo "- Parcela X/Y" removido da descrição exibida.
+//   Fase 2 — Escolher modo: REGISTRO (1 lançamento por item) ou
+//             CATEGORIA (agrupar — parcelas viram grupos separados).
+//   Fase 3 — Preview/confirmação.
+//             CATEGORIA: grupos com checkboxes para separar itens.
+//             REGISTRO : botão "🔗 Vincular…" para associar manualmente.
 
 import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import { FileUp, Receipt, Trash2, ArrowLeft, AlertCircle, XCircle, RotateCcw, ChevronDown, Pencil } from 'lucide-react'
+import {
+  FileUp, Receipt, Trash2, ArrowLeft, AlertCircle,
+  XCircle, RotateCcw, ChevronDown, Pencil,
+} from 'lucide-react'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { useFaturasImport, useFaturaImportSessao } from '../hooks/useFaturasImport'
 import { formatBRL } from '../lib/utils'
 import { Field, SelectDark, Toast, ModalExcluir } from '../components/ui/shared'
+import ModalNovaCategoriaRapida from '../components/ui/ModalNovaCategoriaRapida'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import type {
-  FaturaImportSessao, FaturaImportItem, StatusFaturaImport,
+  FaturaImportSessao, FaturaImportItem, StatusFaturaImport, TxCandidata, Categoria,
 } from '../types'
 
-// ───────────────────────────────────────────────────────────────────
-// Mapas de cor/ícone por status — ficam aqui (não em shared)
-// porque são específicos deste fluxo.
-// ───────────────────────────────────────────────────────────────────
+// ── Constantes de status ────────────────────────────────────────
 const STATUS_LABEL: Record<StatusFaturaImport, string> = {
   EM_ANALISE: 'Em análise',
   CONFIRMADA: 'Confirmada',
   CANCELADA:  'Cancelada',
 }
 const STATUS_COR: Record<StatusFaturaImport, string> = {
-  EM_ANALISE: '#f0b429',  // âmbar
-  CONFIRMADA: '#00c896',  // verde
-  CANCELADA:  '#8b92a8',  // cinza
+  EM_ANALISE: '#f0b429',
+  CONFIRMADA: '#00c896',
+  CANCELADA:  '#8b92a8',
 }
 
-// ───────────────────────────────────────────────────────────────────
-// Tipos internos do fluxo de importação (fases 2 e 3)
-// ───────────────────────────────────────────────────────────────────
+// ── Tipos locais ────────────────────────────────────────────────
 type DecisaoImport = 'CRIAR' | 'ATUALIZAR'
 
 interface LancamentoPreview {
-  chave:                  string                // id do item (REGISTRO) ou catId (CATEGORIA)
+  chave:                  string
   descricao:              string
   valor:                  number
   data:                   string
@@ -59,20 +55,78 @@ interface LancamentoPreview {
   item_ids:               string[]
 }
 
+interface GrupoImport {
+  id:                     string
+  categoria_id:           string
+  item_ids:               string[]
+  decisao:                DecisaoImport
+  transacao_existente_id: string | null
+  descricao:              string
+}
 
-// ───────────────────────────────────────────────────────────────────
-// Tela principal: roteia entre listagem (sem :id) e sandbox (com :id)
-// ───────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────
+
+/** Remove "- Parcela X/Y" e variações do final da descrição. */
+function stripParcela(s: string): string {
+  return s
+    .replace(/\s*[-–—]\s*(?:parc(?:ela)?\.?\s*)?\d+\s*\/\s*\d+\s*$/i, '')
+    .replace(/\s*\(?\s*\d+\s*\/\s*\d+\s*\)?\s*$/i, '')
+    .replace(/\s+parc(?:ela)?\.?\s*\d+\s*\/\s*\d+\s*$/i, '')
+    .trim()
+}
+
+/** Inicializa grupos para o modo CATEGORIA:
+ *  – Parcelas → 1 grupo por item.
+ *  – Não-parcelas → 1 grupo por categoria. */
+function initGrupos(
+  itens:     FaturaImportItem[],
+  catPorId:  Map<string, { descricao: string }>,
+  contaNome: string,
+): GrupoImport[] {
+  const naoIgnorados = itens.filter(i => i.decisao !== 'IGNORAR' && !!i.categoria_escolhida_id)
+  const comParcela   = naoIgnorados.filter(i => i.parcela_atual != null)
+  const semParcela   = naoIgnorados.filter(i => i.parcela_atual == null)
+  const result: GrupoImport[] = []
+
+  for (const it of comParcela) {
+    result.push({
+      id:                     `parc-${it.id}`,
+      categoria_id:           it.categoria_escolhida_id!,
+      item_ids:               [it.id],
+      decisao:                it.transacao_existente_id ? 'ATUALIZAR' : 'CRIAR',
+      transacao_existente_id: it.transacao_existente_id,
+      descricao:              stripParcela(it.descricao),
+    })
+  }
+
+  const catMap = new Map<string, FaturaImportItem[]>()
+  for (const it of semParcela) {
+    const k = it.categoria_escolhida_id!
+    if (!catMap.has(k)) catMap.set(k, [])
+    catMap.get(k)!.push(it)
+  }
+  for (const [catId, items] of catMap) {
+    const txEx = items.find(i => i.transacao_existente_id)?.transacao_existente_id ?? null
+    result.push({
+      id:                     `cat-${catId}`,
+      categoria_id:           catId,
+      item_ids:               items.map(i => i.id),
+      decisao:                txEx ? 'ATUALIZAR' : 'CRIAR',
+      transacao_existente_id: txEx,
+      descricao:              `${contaNome} - ${catPorId.get(catId)?.descricao ?? ''}`.trim(),
+    })
+  }
+  return result
+}
+
+// ── Router ───────────────────────────────────────────────────────
 export default function ImportarFaturaPage() {
   const { id } = useParams()
   if (id) return <Sandbox id={id} />
   return <ListagemEUpload />
 }
 
-
-// ───────────────────────────────────────────────────────────────────
-// Listagem + Upload (rota /importar-fatura)
-// ───────────────────────────────────────────────────────────────────
+// ── Listagem + Upload ────────────────────────────────────────────
 function ListagemEUpload() {
   const navigate = useNavigate()
   const { contas, loading: loadingContas } = useContas()
@@ -80,11 +134,11 @@ function ListagemEUpload() {
 
   const cartoes = contas.filter(c => c.tipo === 'CARTAO' && c.ativa)
 
-  const [contaId,  setContaId]  = useState<string>('')
-  const [arquivo,  setArquivo]  = useState<File | null>(null)
-  const [enviando, setEnviando] = useState(false)
-  const [feedback, setFeedback] = useState<string | null>(null)
-  const [erro,     setErro]     = useState<string | null>(null)
+  const [contaId,       setContaId]       = useState<string>('')
+  const [arquivo,       setArquivo]       = useState<File | null>(null)
+  const [enviando,      setEnviando]      = useState(false)
+  const [feedback,      setFeedback]      = useState<string | null>(null)
+  const [erro,          setErro]          = useState<string | null>(null)
   const [sessaoExcluir, setSessaoExcluir] = useState<FaturaImportSessao | null>(null)
 
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
@@ -123,7 +177,6 @@ function ListagemEUpload() {
 
       <Toast msg={feedback} />
 
-      {/* ── Bloco de upload ─────────────────────────────────────────── */}
       <div className="rounded-xl border border-white/10 bg-[#1a1f2e] p-4 mb-6 max-w-2xl">
         <h2 className="text-[17px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>
           Nova importação
@@ -132,15 +185,13 @@ function ListagemEUpload() {
           Escolha o cartão e envie o PDF da fatura. Os lançamentos vão para uma
           área de revisão (sandbox) antes de serem confirmados no extrato.
         </p>
-
         <div className="grid gap-3">
           <Field label="Cartão">
             {loadingContas ? (
               <p className="text-[14px]" style={{ color: '#8b92a8' }}>Carregando…</p>
             ) : cartoes.length === 0 ? (
               <p className="text-[14px]" style={{ color: '#f0b429' }}>
-                Você ainda não tem contas do tipo Cartão.
-                {' '}
+                Você ainda não tem contas do tipo Cartão.{' '}
                 <Link to="/contas" className="underline" style={{ color: '#4da6ff' }}>Criar uma agora</Link>.
               </p>
             ) : (
@@ -157,14 +208,10 @@ function ListagemEUpload() {
 
           <Field label="PDF da fatura">
             <label
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed cursor-pointer
-                hover:bg-white/5 transition-colors"
-              style={{ borderColor: '#8b92a8', color: '#e8eaf0' }}
-            >
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed cursor-pointer hover:bg-white/5 transition-colors"
+              style={{ borderColor: '#8b92a8', color: '#e8eaf0' }}>
               <FileUp size={16} style={{ color: '#4da6ff' }} />
-              <span className="text-[15px]">
-                {arquivo ? arquivo.name : 'Escolher PDF…'}
-              </span>
+              <span className="text-[15px]">{arquivo ? arquivo.name : 'Escolher PDF…'}</span>
               <input
                 type="file"
                 accept="application/pdf,.pdf"
@@ -182,30 +229,25 @@ function ListagemEUpload() {
           <button
             onClick={enviar}
             disabled={enviando || cartoes.length === 0}
-            className="w-full md:w-auto md:self-end px-4 py-2 rounded-lg bg-av-green text-[16px] font-semibold
-              hover:bg-av-green/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ color: '#0a0f1a' }}
-          >
+            className="w-full md:w-auto md:self-end px-4 py-2 rounded-lg bg-av-green text-[16px] font-semibold hover:bg-av-green/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ color: '#0a0f1a' }}>
             {enviando ? 'Enviando…' : 'Enviar fatura'}
           </button>
         </div>
       </div>
 
-      {/* ── Histórico de sessões ────────────────────────────────────── */}
       <h2 className="text-[17px] font-semibold mb-2" style={{ color: '#e8eaf0' }}>
         Importações anteriores
       </h2>
 
       {loadingSessoes && (
-        <div className="py-8"><LoadingMascote texto="Carregando sessões…" size={120}/></div>
+        <div className="py-8"><LoadingMascote texto="Carregando sessões…" size={120} /></div>
       )}
-
       {!loadingSessoes && sessoes.length === 0 && (
         <p className="text-[15px] italic" style={{ color: '#8b92a8' }}>
           Nenhuma importação registrada ainda.
         </p>
       )}
-
       {!loadingSessoes && sessoes.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {sessoes.map(s => (
@@ -216,10 +258,7 @@ function ListagemEUpload() {
                   {s.conta?.nome ?? 'Cartão'}
                 </p>
                 <span className="text-[12px] font-semibold px-2 py-0.5 rounded-full"
-                  style={{
-                    background: `${STATUS_COR[s.status]}22`,
-                    color: STATUS_COR[s.status],
-                  }}>
+                  style={{ background: `${STATUS_COR[s.status]}22`, color: STATUS_COR[s.status] }}>
                   {STATUS_LABEL[s.status]}
                 </span>
               </div>
@@ -231,18 +270,16 @@ function ListagemEUpload() {
               <div className="flex items-center gap-2 mt-1">
                 <button
                   onClick={() => navigate(`/importar-fatura/${s.id}`)}
-                  className="flex-1 text-[14px] px-2.5 py-1.5 rounded-md border border-white/10
-                    hover:border-av-green hover:text-av-green transition-colors"
+                  className="flex-1 text-[14px] px-2.5 py-1.5 rounded-md border border-white/10 hover:border-av-green hover:text-av-green transition-colors"
                   style={{ color: '#e8eaf0' }}>
                   {s.status === 'EM_ANALISE' ? 'Revisar' : 'Ver detalhes'}
                 </button>
                 <button
                   onClick={() => setSessaoExcluir(s)}
                   title="Excluir sessão"
-                  className="w-8 h-8 rounded-md border border-white/10 flex items-center justify-center
-                    hover:bg-red-400/10 hover:border-red-400/30 transition-colors"
+                  className="w-8 h-8 rounded-md border border-white/10 flex items-center justify-center hover:bg-red-400/10 hover:border-red-400/30 transition-colors"
                   style={{ color: '#f87171' }}>
-                  <Trash2 size={14}/>
+                  <Trash2 size={14} />
                 </button>
               </div>
             </div>
@@ -263,60 +300,81 @@ function ListagemEUpload() {
   )
 }
 
-
-// ───────────────────────────────────────────────────────────────────
-// Sandbox de uma sessão (rota /importar-fatura/:id)
-//
-// Fluxo em 3 fases:
-//   1. "A classificar" — atribuir categoria a cada item (ou ignorar).
-//      Multi-seleção, filtro por descrição e bulk-action disponíveis.
-//   2. Escolha do modo de importação (após todos classificados):
-//      • "Um lançamento por registro" — um lançamento por item;
-//        parcelas recebem data = 1º do mês de vencimento.
-//      • "Agrupar por categoria" — soma itens da mesma categoria em
-//        um único lançamento datado no dia de pagamento do cartão.
-//   3. Preview dos lançamentos resultantes com CRIAR / ATUALIZAR
-//      sugerido pelo sugerir() + possibilidade de troca manual.
-//      Botão "Confirmar importação" fecha o ciclo.
-// ───────────────────────────────────────────────────────────────────
+// ── Sandbox ──────────────────────────────────────────────────────
 function Sandbox({ id }: { id: string }) {
-  const navigate = useNavigate()
-  const { sessao, loading, error, editarItem, sugerir, confirmar } = useFaturaImportSessao(id)
+  const navigate  = useNavigate()
+  const {
+    sessao, loading, error, editarItem, sugerir, confirmar,
+    aplicarSugestoes, buscarTransacoes,
+  } = useFaturaImportSessao(id)
   const { categorias } = useCategorias()
-  const { contas } = useContas()
+  const { contas }     = useContas()
 
+  // ── Estado – geral ──────────────────────────────────────────
   const [confirmando,      setConfirmando]      = useState(false)
   const [feedback,         setFeedback]         = useState<string | null>(null)
   const [filtroDesc,       setFiltroDesc]       = useState('')
   const [selecionados,     setSelecionados]     = useState<Set<string>>(new Set())
   const [emLote,           setEmLote]           = useState(false)
   const [modoImportacao,   setModoImportacao]   = useState<null | 'REGISTRO' | 'CATEGORIA'>(null)
-  const [decisoesOverride, setDecisaoOverride]  = useState<Map<string, DecisaoImport>>(new Map())
-  const [gruposEncolhidos,  setGruposEncolhidos]  = useState<Set<string>>(new Set())
+  const [gruposEncolhidos, setGruposEncolhidos] = useState<Set<string>>(new Set())
+  const [aplicandoSugest,  setAplicandoSugest]  = useState(false)
+  const [ordemFase1,       setOrdemFase1]       = useState<'original' | 'titulo_az' | 'titulo_za'>('original')
+  const sugeridoRef = useRef(false)
+
+  // ── Estado – REGISTRO: overrides de preview ─────────────────
+  const [decisoesOverride,   setDecisaoOverride]   = useState<Map<string, DecisaoImport>>(new Map())
   const [descricoesOverride, setDescricaoOverride] = useState<Map<string, string>>(new Map())
   const [editandoDesc,       setEditandoDesc]       = useState<string | null>(null)
   const [descEditTemp,       setDescEditTemp]       = useState('')
   const [previewExpandido,   setPreviewExpandido]   = useState<Set<string>>(new Set())
-  const sugeridoRef = useRef(false)
 
-  const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
+  // ── Estado – CATEGORIA: grupos ──────────────────────────────
+  const [grupos,              setGrupos]              = useState<GrupoImport[]>([])
+  const [selGrupo,            setSelGrupo]            = useState<Map<string, Set<string>>>(new Map())
+  // grupoId → set de itemIds selecionados para separar
+  const [editandoDescGrupo,   setEditandoDescGrupo]   = useState<string | null>(null)
+  const [descEditTempGrupo,   setDescEditTempGrupo]   = useState('')
 
-  // Dispara sugestão automática uma vez ao carregar
+  // ── Estado – Vincular modal ─────────────────────────────────
+  const [vincularModal,  setVincularModal]  = useState<{ grupoId?: string; itemId?: string } | null>(null)
+  const [txCandidatas,   setTxCandidatas]   = useState<TxCandidata[]>([])
+  const [buscandoTxs,    setBuscandoTxs]    = useState(false)
+  const [filtroTxBusca,  setFiltroTxBusca]  = useState('')
+
+  // ── Estado – Nova Categoria modal ───────────────────────────
+  // itemId = item-alvo (null = aplica em todos os selecionados)
+  const [novaCatCtx, setNovaCatCtx] = useState<{ itemId: string | null } | null>(null)
+
+  const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3500) }
+
+  // ── Efeito: sugestão automática ao carregar ─────────────────
   useEffect(() => {
     if (sugeridoRef.current || !sessao || sessao.status !== 'EM_ANALISE') return
     sugeridoRef.current = true
     sugerir()
   }, [sessao?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Limpa overrides e expansões ao trocar de modo
+  // ── Efeito: limpa overrides ao trocar de modo ───────────────
   useEffect(() => {
     setDecisaoOverride(new Map())
     setDescricaoOverride(new Map())
     setEditandoDesc(null)
     setPreviewExpandido(new Set())
+    setGrupos([])
+    setSelGrupo(new Map())
+    setEditandoDescGrupo(null)
   }, [modoImportacao])
 
-  // ── Dados derivados ──────────────────────────────────────────
+  // ── Efeito: inicializa grupos ao entrar no modo CATEGORIA ───
+  useEffect(() => {
+    if (modoImportacao !== 'CATEGORIA' || !sessao) return
+    const conta = contas.find(c => c.conta_id === sessao.conta_id)
+    setGrupos(initGrupos(sessao.itens ?? [], catPorId, conta?.nome ?? 'Fatura'))
+    setSelGrupo(new Map())
+  }, [modoImportacao]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Dados derivados ─────────────────────────────────────────
   const catPorId = useMemo(() => new Map(categorias.map(c => [c.id, c])), [categorias])
   const catsPai  = useMemo(() => categorias.filter(c => !c.id_pai && !c.protegida && c.ativa), [categorias])
   const catsSub  = useMemo(() => categorias.filter(c => !!c.id_pai && c.ativa), [categorias])
@@ -324,6 +382,8 @@ function Sandbox({ id }: { id: string }) {
   const itens         = sessao?.itens ?? []
   const naoClassif    = itens.filter(i => !i.categoria_escolhida_id && i.decisao !== 'IGNORAR')
   const classificados = itens.filter(i =>  i.categoria_escolhida_id || i.decisao === 'IGNORAR')
+
+  const itensSugeridos = naoClassif.filter(i => !!i.categoria_sugerida_id)
 
   const nd = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   const naoClassifFiltrados = filtroDesc.trim()
@@ -333,7 +393,15 @@ function Sandbox({ id }: { id: string }) {
   const todosSelec = naoClassifFiltrados.length > 0 && selAtivos.length === naoClassifFiltrados.length
   const algumSelec = selAtivos.length > 0
 
-  const gruposOrdenados = (() => {
+  const naoClassifOrdenados = (() => {
+    const cmp = (a: FaturaImportItem, b: FaturaImportItem) =>
+      stripParcela(a.descricao).localeCompare(stripParcela(b.descricao), 'pt-BR')
+    if (ordemFase1 === 'titulo_az') return [...naoClassifFiltrados].sort(cmp)
+    if (ordemFase1 === 'titulo_za') return [...naoClassifFiltrados].sort((a, b) => cmp(b, a))
+    return naoClassifFiltrados
+  })()
+
+  const gruposClassOrdenados = (() => {
     const m = new Map<string, FaturaImportItem[]>()
     for (const it of classificados) {
       const key = it.categoria_escolhida_id ?? '__IGNORAR__'
@@ -347,66 +415,26 @@ function Sandbox({ id }: { id: string }) {
     })
   })()
 
-  // Lançamentos do preview (fase 3) — recomputa ao trocar modo
+  // Preview REGISTRO (useMemo — não usado no modo CATEGORIA)
   const lancamentosPreview = useMemo((): LancamentoPreview[] => {
-    if (!modoImportacao || !sessao) return []
-    const itensAll       = sessao.itens ?? []
-    const classAll       = itensAll.filter(i => i.categoria_escolhida_id || i.decisao === 'IGNORAR')
-    const naoIgnoradosL  = classAll.filter(i => i.decisao !== 'IGNORAR' && i.categoria_escolhida_id)
-
-    if (modoImportacao === 'REGISTRO') {
-      const vencMes = sessao.vencimento_fatura?.slice(0, 7) ?? null
-      return naoIgnoradosL.map(it => ({
-        chave:                  it.id,
-        descricao:              it.descricao,
-        valor:                  Number(it.valor),
-        data:                   (it.parcela_atual != null && vencMes) ? `${vencMes}-01` : it.data_compra,
-        categoria_id:           it.categoria_escolhida_id!,
-        categoria_nome:         catPorId.get(it.categoria_escolhida_id!)?.descricao ?? '',
-        tipo:                   it.tipo,
-        decisaoSugerida:        (it.transacao_existente_id ? 'ATUALIZAR' : 'CRIAR') as DecisaoImport,
-        transacao_existente_id: it.transacao_existente_id,
-        item_ids:               [it.id],
-      }))
-    }
-
-    // CATEGORIA — agrupa por categoria, data = dia_pagamento do cartão no mês de vencimento
-    const conta     = contas.find(c => c.conta_id === sessao.conta_id)
-    const diaPagto  = conta?.dia_pagamento ?? 5
-    const [anoV, mesV] = (sessao.vencimento_fatura ?? '').split('-')
-    const dataLancto = (anoV && mesV)
-      ? `${anoV}-${mesV}-${String(diaPagto).padStart(2, '0')}`
-      : ''
-
-    const grupos = new Map<string, FaturaImportItem[]>()
-    for (const it of naoIgnoradosL) {
-      const key = it.categoria_escolhida_id!
-      if (!grupos.has(key)) grupos.set(key, [])
-      grupos.get(key)!.push(it)
-    }
-
-    return [...grupos.entries()].map(([catId, items]) => {
-      const catNome    = catPorId.get(catId)?.descricao ?? ''
-      const valorBruto = items.reduce(
-        (s, i) => s + (i.tipo === 'RECEITA' ? -Number(i.valor) : Number(i.valor)), 0,
-      )
-      const tipo  = valorBruto >= 0 ? 'DESPESA' as const : 'RECEITA' as const
-      const valor = Math.abs(valorBruto)
-      const txExistente = items.find(i => i.transacao_existente_id)?.transacao_existente_id ?? null
-      return {
-        chave:                  catId,
-        descricao:              `${conta?.nome ?? 'Fatura'} - ${catNome}`,
-        valor,
-        data:                   dataLancto,
-        categoria_id:           catId,
-        categoria_nome:         catNome,
-        tipo,
-        decisaoSugerida:        (txExistente ? 'ATUALIZAR' : 'CRIAR') as DecisaoImport,
-        transacao_existente_id: txExistente,
-        item_ids:               items.map(i => i.id),
-      }
-    })
-  }, [modoImportacao, sessao, catPorId, contas])
+    if (modoImportacao !== 'REGISTRO' || !sessao) return []
+    const naoIgnoradosL = (sessao.itens ?? []).filter(
+      i => i.decisao !== 'IGNORAR' && i.categoria_escolhida_id,
+    )
+    const vencMes = sessao.vencimento_fatura?.slice(0, 7) ?? null
+    return naoIgnoradosL.map(it => ({
+      chave:                  it.id,
+      descricao:              it.descricao,
+      valor:                  Number(it.valor),
+      data:                   (it.parcela_atual != null && vencMes) ? `${vencMes}-01` : it.data_compra,
+      categoria_id:           it.categoria_escolhida_id!,
+      categoria_nome:         catPorId.get(it.categoria_escolhida_id!)?.descricao ?? '',
+      tipo:                   it.tipo,
+      decisaoSugerida:        (it.transacao_existente_id ? 'ATUALIZAR' : 'CRIAR') as DecisaoImport,
+      transacao_existente_id: it.transacao_existente_id,
+      item_ids:               [it.id],
+    }))
+  }, [modoImportacao, sessao, catPorId])
 
   const totalFatura = itens.reduce(
     (s, i) => s + (i.tipo === 'RECEITA' ? -Number(i.valor) : Number(i.valor)), 0,
@@ -422,16 +450,20 @@ function Sandbox({ id }: { id: string }) {
     itens.length > 0 &&
     fase === 'preview'
 
-  // ── Handlers ─────────────────────────────────────────────────
+  // ── Handlers – Fase 1 ───────────────────────────────────────
+  const emAnalise = sessao?.status === 'EM_ANALISE'
+
   const classificar = (it: FaturaImportItem, catId: string | null) =>
     editarItem(it.id, { categoria_escolhida_id: catId || null, decisao: 'PENDENTE' })
 
   const aplicarSugestao = (it: FaturaImportItem) => {
     if (it.categoria_sugerida_id) classificar(it, it.categoria_sugerida_id)
   }
+
   const ignorar = (itemId: string) =>
     editarItem(itemId, { decisao: 'IGNORAR', categoria_escolhida_id: null })
-  const voltar  = (itemId: string) =>
+
+  const voltar = (itemId: string) =>
     editarItem(itemId, { categoria_escolhida_id: null, decisao: 'PENDENTE' })
 
   const toggleItem = (itemId: string) =>
@@ -469,15 +501,20 @@ function Sandbox({ id }: { id: string }) {
     } finally { setEmLote(false) }
   }
 
+  const handleAplicarSugestoes = async () => {
+    if (!emAnalise || aplicandoSugest || itensSugeridos.length === 0) return
+    setAplicandoSugest(true)
+    const r = await aplicarSugestoes()
+    setAplicandoSugest(false)
+    const n = r.dados?.aplicados ?? 0
+    toast(r.ok
+      ? `${n} sugestão${n !== 1 ? 'ões' : ''} aplicada${n !== 1 ? 's' : ''}.`
+      : (r.erro ?? 'Erro ao aplicar sugestões.'))
+  }
+
+  // ── Handlers – REGISTRO preview ─────────────────────────────
   const setDecisaoLancamento = (chave: string, d: DecisaoImport) =>
     setDecisaoOverride(prev => new Map(prev).set(chave, d))
-
-  const toggleGrupo = (key: string) =>
-    setGruposEncolhidos(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key); else next.add(key)
-      return next
-    })
 
   const iniciarEdicaoDesc = (chave: string, descAtual: string) => {
     setEditandoDesc(chave)
@@ -488,41 +525,150 @@ function Sandbox({ id }: { id: string }) {
     setEditandoDesc(null)
   }
   const cancelarEdicaoDesc = () => setEditandoDesc(null)
-
   const togglePreviewDetalhe = (chave: string) =>
     setPreviewExpandido(prev => {
       const next = new Set(prev)
       if (next.has(chave)) next.delete(chave); else next.add(chave)
       return next
     })
+  const toggleGrupo = (key: string) =>
+    setGruposEncolhidos(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
 
+  // ── Handlers – CATEGORIA grupos ─────────────────────────────
+  const toggleSelGrupo = (grupoId: string, itemId: string) =>
+    setSelGrupo(prev => {
+      const next = new Map(prev)
+      const sel  = new Set(next.get(grupoId) ?? [])
+      if (sel.has(itemId)) sel.delete(itemId); else sel.add(itemId)
+      next.set(grupoId, sel)
+      return next
+    })
+
+  const separarItensGrupo = (grupoId: string, idsParaSeparar: string[]) => {
+    setGrupos(prev => {
+      const idx = prev.findIndex(g => g.id === grupoId)
+      if (idx === -1) return prev
+      const grupo     = prev[idx]
+      const restantes = grupo.item_ids.filter(id => !idsParaSeparar.includes(id))
+      if (restantes.length === 0) return prev  // não deixa grupo ficar vazio
+
+      const priItem = (sessao?.itens ?? []).find(i => i.id === idsParaSeparar[0])
+      const next    = [...prev]
+      next[idx] = { ...grupo, item_ids: restantes }
+      next.push({
+        id:                     `sep-${Date.now()}`,
+        categoria_id:           grupo.categoria_id,
+        item_ids:               idsParaSeparar,
+        decisao:                'CRIAR',
+        transacao_existente_id: null,
+        descricao:              priItem ? stripParcela(priItem.descricao) : grupo.descricao,
+      })
+      return next
+    })
+    setSelGrupo(prev => { const n = new Map(prev); n.delete(grupoId); return n })
+  }
+
+  const setDecisaoGrupo = (grupoId: string, d: DecisaoImport) =>
+    setGrupos(prev => prev.map(g => g.id === grupoId ? { ...g, decisao: d } : g))
+
+  const iniciarEdicaoDescGrupo = (grupoId: string, desc: string) => {
+    setEditandoDescGrupo(grupoId)
+    setDescEditTempGrupo(desc)
+  }
+  const confirmarEdicaoDescGrupo = (grupoId: string) => {
+    if (descEditTempGrupo.trim())
+      setGrupos(prev => prev.map(g => g.id === grupoId ? { ...g, descricao: descEditTempGrupo.trim() } : g))
+    setEditandoDescGrupo(null)
+  }
+  const cancelarEdicaoDescGrupo = () => setEditandoDescGrupo(null)
+
+  // ── Handlers – Vincular modal ────────────────────────────────
+  const abrirVincular = async (params: { grupoId?: string; itemId?: string; desc?: string }) => {
+    setVincularModal({ grupoId: params.grupoId, itemId: params.itemId })
+    setFiltroTxBusca(params.desc ?? '')
+    setBuscandoTxs(true)
+    setTxCandidatas([])
+    const r = await buscarTransacoes(params.desc ?? '')
+    setBuscandoTxs(false)
+    if (r.ok) setTxCandidatas(r.dados ?? [])
+  }
+
+  const confirmarVincular = async (tx: TxCandidata) => {
+    if (!vincularModal) return
+    if (vincularModal.grupoId) {
+      setGrupos(prev => prev.map(g =>
+        g.id === vincularModal.grupoId
+          ? { ...g, transacao_existente_id: tx.id, decisao: 'ATUALIZAR' }
+          : g,
+      ))
+    } else if (vincularModal.itemId) {
+      setDecisaoOverride(prev => new Map(prev).set(vincularModal.itemId!, 'ATUALIZAR'))
+      await editarItem(vincularModal.itemId, { transacao_existente_id: tx.id })
+    }
+    setVincularModal(null)
+  }
+
+  // ── Handlers – Nova Categoria ────────────────────────────────
+  const abrirNovaCat = (itemId: string | null = null) => setNovaCatCtx({ itemId })
+
+  const aoCategoriaCriada = async (novaCat: Categoria) => {
+    // Aplica a nova categoria ao(s) item(ns) alvo
+    if (novaCatCtx?.itemId) {
+      const it = itens.find(i => i.id === novaCatCtx.itemId)
+      if (it) await classificar(it, novaCat.id)
+    } else {
+      // Modo bulk: aplica em todos os selecionados
+      await classificarSelecionados(novaCat.id)
+    }
+    setNovaCatCtx(null)
+    toast(`Categoria "${novaCat.descricao}" criada e aplicada!`)
+  }
+
+  // ── Handler – Confirmar ──────────────────────────────────────
   const handleConfirmar = async () => {
     if (!modoImportacao) { toast('Escolha o modo de importação.'); return }
     setConfirmando(true)
-    // Reaproveita as decisões/descrições do preview. As chaves seguem a
-    // semântica do backend: item.id no modo REGISTRO, categoria_id no modo
-    // CATEGORIA. lancamentosPreview.chave já segue essa regra.
-    const decisoes:   Record<string, 'CRIAR' | 'ATUALIZAR'> = {}
-    const descricoes: Record<string, string>                = {}
-    for (const l of lancamentosPreview) {
-      const decFinal = decisoesOverride.get(l.chave) ?? l.decisaoSugerida
-      decisoes[l.chave] = decFinal
-      const descOv = descricoesOverride.get(l.chave)
-      if (descOv && descOv !== l.descricao) descricoes[l.chave] = descOv
+
+    let r
+    if (modoImportacao === 'CATEGORIA') {
+      r = await confirmar({
+        modo:   'CATEGORIA',
+        grupos: grupos.map(g => ({
+          chave:                  g.id,
+          categoria_id:           g.categoria_id,
+          item_ids:               g.item_ids,
+          decisao:                g.decisao,
+          descricao:              g.descricao,
+          transacao_existente_id: g.transacao_existente_id,
+        })),
+      })
+    } else {
+      const decisoes:   Record<string, 'CRIAR' | 'ATUALIZAR'> = {}
+      const descricoes: Record<string, string>                = {}
+      for (const l of lancamentosPreview) {
+        decisoes[l.chave] = decisoesOverride.get(l.chave) ?? l.decisaoSugerida
+        const descOv = descricoesOverride.get(l.chave)
+        if (descOv && descOv !== l.descricao) descricoes[l.chave] = descOv
+      }
+      r = await confirmar({ modo: 'REGISTRO', decisoes, descricoes })
     }
-    const r = await confirmar({ modo: modoImportacao, decisoes, descricoes })
+
     setConfirmando(false)
     if (r.ok) {
-      const c = r.dados?.criadas     ?? 0
-      const u = r.dados?.atualizadas ?? 0
-      toast(`Importação confirmada. ${c} criado${c !== 1 ? 's' : ''}, ${u} atualizado${u !== 1 ? 's' : ''}.`)
+      const c_ = r.dados?.criadas     ?? 0
+      const u  = r.dados?.atualizadas ?? 0
+      toast(`Importação confirmada. ${c_} criado${c_ !== 1 ? 's' : ''}, ${u} atualizado${u !== 1 ? 's' : ''}.`)
       setTimeout(() => navigate('/importar-fatura'), 1200)
     } else {
       toast(r.erro ?? 'Falha ao confirmar.')
     }
   }
 
-  // Select de categoria reutilizado em item e bulk
+  // ── Select de categoria reutilizável ─────────────────────────
   const optsCat = (
     <>
       <option value="" style={{ background: '#0d1117' }}>— escolher categoria —</option>
@@ -537,11 +683,22 @@ function Sandbox({ id }: { id: string }) {
         )
         return <option key={p.id} value={p.id} style={{ background: '#0d1117' }}>{p.descricao}</option>
       })}
+      <option value="__NOVA_CAT__" style={{ background: '#0d1117', color: '#4da6ff' }}>
+        ✚ Nova categoria…
+      </option>
     </>
   )
 
+  // ── Filtro de texto do modal vincular ─────────────────────────
+  const txsFiltradas = filtroTxBusca.trim()
+    ? txCandidatas.filter(tx =>
+        tx.descricao.toLowerCase().includes(filtroTxBusca.toLowerCase()) ||
+        formatBRL(Number(tx.valor)).includes(filtroTxBusca),
+      )
+    : txCandidatas
+
   // ── Early returns ─────────────────────────────────────────────
-  if (loading) return <div className="py-8"><LoadingMascote texto="Carregando sessão…" size={130}/></div>
+  if (loading) return <div className="py-8"><LoadingMascote texto="Carregando sessão…" size={130} /></div>
   if (error || !sessao) return (
     <div className="p-5">
       <p className="text-[15px]" style={{ color: '#f87171' }}>{error ?? 'Sessão não encontrada.'}</p>
@@ -550,8 +707,6 @@ function Sandbox({ id }: { id: string }) {
     </div>
   )
 
-  const emAnalise = sessao.status === 'EM_ANALISE'
-
   return (
     <div className="p-5">
       <Toast msg={feedback} />
@@ -559,11 +714,11 @@ function Sandbox({ id }: { id: string }) {
       <div className="flex items-center gap-2 mb-1">
         <Link to="/importar-fatura" className="flex items-center gap-1 text-[14px]"
           style={{ color: '#8b92a8' }}>
-          <ArrowLeft size={14}/> Importações
+          <ArrowLeft size={14} /> Importações
         </Link>
       </div>
       <h1 className="text-[21px] font-bold flex items-center gap-2 mb-1" style={{ color: '#e8eaf0' }}>
-        <Receipt size={22}/> Revisão — {sessao.conta?.nome ?? 'Cartão'}
+        <Receipt size={22} /> Revisão — {sessao.conta?.nome ?? 'Cartão'}
       </h1>
       <p className="text-[14px] mb-2" style={{ color: '#8b92a8' }}>
         {sessao.arquivo_nome}
@@ -581,7 +736,7 @@ function Sandbox({ id }: { id: string }) {
       {sessao.observacao && (
         <div className="text-[13px] mb-4 px-3 py-2 rounded-lg border"
           style={{ background: 'rgba(240,180,41,0.08)', borderColor: 'rgba(240,180,41,0.25)', color: '#f0b429' }}>
-          <AlertCircle size={13} className="inline mr-1 -mt-0.5"/>
+          <AlertCircle size={13} className="inline mr-1 -mt-0.5" />
           {sessao.observacao}
         </div>
       )}
@@ -610,6 +765,18 @@ function Sandbox({ id }: { id: string }) {
                 Limpar filtro
               </button>
             )}
+            {/* Botão aplicar todas as sugestões */}
+            {itensSugeridos.length > 0 && emAnalise && (
+              <button
+                onClick={handleAplicarSugestoes}
+                disabled={aplicandoSugest}
+                className="flex items-center gap-1 text-[13px] px-3 py-1.5 rounded-lg border border-av-green/40 hover:bg-av-green/10 transition-colors disabled:opacity-50"
+                style={{ color: '#00c896' }}>
+                {aplicandoSugest
+                  ? 'Aplicando…'
+                  : `✓ Aplicar ${itensSugeridos.length} sugestão${itensSugeridos.length !== 1 ? 'ões' : ''}`}
+              </button>
+            )}
           </div>
 
           {algumSelec && (
@@ -621,10 +788,12 @@ function Sandbox({ id }: { id: string }) {
               <select
                 value=""
                 disabled={!emAnalise || emLote}
-                onChange={e => { if (e.target.value) classificarSelecionados(e.target.value) }}
+                onChange={e => {
+                  if (e.target.value === '__NOVA_CAT__') { abrirNovaCat(null); return }
+                  if (e.target.value) classificarSelecionados(e.target.value)
+                }}
                 className="flex-1 min-w-[160px] rounded-md px-2 py-1 text-[13px] border border-white/10 disabled:opacity-50"
-                style={{ background: '#0d1117', color: '#8b92a8' }}
-              >
+                style={{ background: '#0d1117', color: '#8b92a8' }}>
                 <option value="" style={{ background: '#0d1117' }}>
                   {emLote ? 'Classificando…' : '— classificar como… —'}
                 </option>
@@ -639,13 +808,16 @@ function Sandbox({ id }: { id: string }) {
                   )
                   return <option key={p.id} value={p.id} style={{ background: '#0d1117' }}>{p.descricao}</option>
                 })}
+                <option value="__NOVA_CAT__" style={{ background: '#0d1117', color: '#4da6ff' }}>
+                  ✚ Nova categoria…
+                </option>
               </select>
               <button
                 onClick={ignorarSelecionados}
                 disabled={!emAnalise || emLote}
                 className="flex items-center gap-1 text-[12px] px-2 py-1 rounded-md border border-white/10 hover:bg-red-400/10 hover:border-red-400/30 transition-colors disabled:opacity-40 flex-none"
                 style={{ color: '#8b92a8' }}>
-                <XCircle size={13}/> Ignorar selecionados
+                <XCircle size={13} /> Ignorar selecionados
               </button>
               <button
                 onClick={() => setSelecionados(new Set())}
@@ -672,7 +844,20 @@ function Sandbox({ id }: { id: string }) {
                     />
                   </th>
                   <th className="text-left px-3 py-2 w-24">Data</th>
-                  <th className="text-left px-3 py-2">Descrição</th>
+                  <th className="text-left px-3 py-2">
+                    <button
+                      onClick={() => setOrdemFase1(o =>
+                        o === 'original' ? 'titulo_az' : o === 'titulo_az' ? 'titulo_za' : 'original'
+                      )}
+                      title={ordemFase1 === 'titulo_az' ? 'A→Z (clique para Z→A)' : ordemFase1 === 'titulo_za' ? 'Z→A (clique para remover ordenação)' : 'Clique para ordenar A→Z'}
+                      className="flex items-center gap-1 select-none hover:opacity-80 transition-opacity"
+                      style={{ color: ordemFase1 !== 'original' ? '#00c896' : 'inherit' }}>
+                      Descrição
+                      <span className="text-[11px] font-bold">
+                        {ordemFase1 === 'titulo_az' ? '↑' : ordemFase1 === 'titulo_za' ? '↓' : '↕'}
+                      </span>
+                    </button>
+                  </th>
                   <th className="text-right px-3 py-2 w-28">Valor</th>
                   <th className="text-left px-3 py-2 w-48">Categoria</th>
                   <th className="px-3 py-2 w-20"></th>
@@ -681,13 +866,12 @@ function Sandbox({ id }: { id: string }) {
               <tbody>
                 {naoClassifFiltrados.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="text-center py-4 text-[13px] italic"
-                      style={{ color: '#8b92a8' }}>
+                    <td colSpan={6} className="text-center py-4 text-[13px] italic" style={{ color: '#8b92a8' }}>
                       Nenhum item encontrado para "{filtroDesc}".
                     </td>
                   </tr>
                 )}
-                {naoClassifFiltrados.map(it => (
+                {naoClassifOrdenados.map(it => (
                   <tr key={it.id}
                     className={`border-t border-white/5 transition-colors${selecionados.has(it.id) ? ' bg-av-green/5' : ''}`}>
                     <td className="px-3 py-2">
@@ -699,8 +883,9 @@ function Sandbox({ id }: { id: string }) {
                       {new Date(it.data_compra + 'T00:00').toLocaleDateString('pt-BR')}
                     </td>
                     <td className="px-3 py-2">
-                      <p className="leading-snug">{it.descricao}</p>
-                      {it.estabelecimento && (
+                      {/* Exibe descrição SEM o sufixo de parcela — info de parcela fica abaixo */}
+                      <p className="leading-snug">{stripParcela(it.descricao)}</p>
+                      {it.estabelecimento && stripParcela(it.estabelecimento) !== stripParcela(it.descricao) && (
                         <p className="text-[12px]" style={{ color: '#8b92a8' }}>{it.estabelecimento}</p>
                       )}
                       {it.parcela_atual && it.parcela_total && (
@@ -724,7 +909,10 @@ function Sandbox({ id }: { id: string }) {
                     </td>
                     <td className="px-3 py-2">
                       <select value="" disabled={!emAnalise}
-                        onChange={e => classificar(it, e.target.value || null)}
+                        onChange={e => {
+                          if (e.target.value === '__NOVA_CAT__') { abrirNovaCat(it.id); return }
+                          classificar(it, e.target.value || null)
+                        }}
                         className="w-full rounded-md px-2 py-1 text-[13px] border border-white/10 disabled:opacity-50"
                         style={{ background: '#0d1117', color: '#8b92a8' }}>
                         {optsCat}
@@ -735,7 +923,7 @@ function Sandbox({ id }: { id: string }) {
                         title="Ignorar este item"
                         className="flex items-center gap-1 text-[12px] px-2 py-1 rounded-md border border-white/10 hover:bg-red-400/10 hover:border-red-400/30 transition-colors disabled:opacity-40"
                         style={{ color: '#8b92a8' }}>
-                        <XCircle size={13}/> Ignorar
+                        <XCircle size={13} /> Ignorar
                       </button>
                     </td>
                   </tr>
@@ -746,7 +934,7 @@ function Sandbox({ id }: { id: string }) {
         </div>
       )}
 
-      {/* ══ Fase 2: Escolha do modo de importação ════════════════ */}
+      {/* ══ Fase 2: Escolha do modo ════════════════════════════ */}
       {fase === 'modo' && emAnalise && (
         <div className="mb-6">
           <h2 className="text-[17px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>
@@ -788,12 +976,9 @@ function Sandbox({ id }: { id: string }) {
                 </span>
               </div>
               <p className="text-[13px] leading-relaxed" style={{ color: '#8b92a8' }}>
-                Itens da mesma categoria viram um único lançamento, datado no dia de
-                pagamento do cartão
-                {(() => {
-                  const conta = contas.find(c => c.conta_id === sessao.conta_id)
-                  return conta?.dia_pagamento ? ` (dia ${conta.dia_pagamento})` : ''
-                })()}.
+                Itens da mesma categoria viram um único lançamento. Parcelas ficam
+                em grupos separados. Você pode redistribuir itens entre grupos
+                antes de confirmar.
               </p>
               <p className="mt-3 text-[13px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity"
                 style={{ color: '#00c896' }}>
@@ -804,7 +989,7 @@ function Sandbox({ id }: { id: string }) {
         </div>
       )}
 
-      {/* ══ Classificados (fases 1 e 2 — grupos encolhíveis) ════ */}
+      {/* ══ Classificados (fases 1 e 2) ════════════════════════ */}
       {fase !== 'preview' && classificados.length > 0 && (
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-2">
@@ -815,7 +1000,7 @@ function Sandbox({ id }: { id: string }) {
             </span>
           </div>
           <div className="flex flex-col gap-3">
-            {gruposOrdenados.map(([catId, grupo]) => {
+            {gruposClassOrdenados.map(([catId, grupo]) => {
               const isIgnorados = catId === '__IGNORAR__'
               const cat         = isIgnorados ? null : catPorId.get(catId)
               const nomeCat     = cat?.descricao ?? (isIgnorados ? 'Ignorados' : '—')
@@ -825,19 +1010,12 @@ function Sandbox({ id }: { id: string }) {
               const encolhido = gruposEncolhidos.has(catId)
               return (
                 <div key={catId} className="rounded-xl border border-white/10 overflow-hidden">
-                  {/* Cabeçalho clicável — encolhe/expande */}
                   <button
                     onClick={() => toggleGrupo(catId)}
                     className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/5 transition-colors text-left"
                     style={{ background: '#252d42' }}>
-                    <ChevronDown
-                      size={14}
-                      className="flex-none transition-transform duration-200"
-                      style={{
-                        color: '#8b92a8',
-                        transform: encolhido ? 'rotate(-90deg)' : 'rotate(0deg)',
-                      }}
-                    />
+                    <ChevronDown size={14} className="flex-none transition-transform duration-200"
+                      style={{ color: '#8b92a8', transform: encolhido ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
                     <span className="text-[15px]">{isIgnorados ? '🚫' : '📂'}</span>
                     <span className="text-[15px] font-semibold" style={{ color: '#e8eaf0' }}>{nomeCat}</span>
                     <span className="text-[12px]" style={{ color: '#8b92a8' }}>
@@ -857,7 +1035,7 @@ function Sandbox({ id }: { id: string }) {
                         {new Date(it.data_compra + 'T00:00').toLocaleDateString('pt-BR')}
                       </span>
                       <span className="flex-1 min-w-0">
-                        <span className="truncate block">{it.descricao}</span>
+                        <span className="truncate block">{stripParcela(it.descricao)}</span>
                         {it.parcela_atual && it.parcela_total && (
                           <span className="text-[11px]" style={{ color: '#8b92a8' }}>
                             Parcela {it.parcela_atual}/{it.parcela_total}
@@ -873,7 +1051,7 @@ function Sandbox({ id }: { id: string }) {
                           title={isIgnorados ? 'Reclassificar' : 'Voltar para classificar'}
                           className="p-1 rounded-md hover:bg-white/5 transition-colors flex-none"
                           style={{ color: '#8b92a8' }}>
-                          <RotateCcw size={13}/>
+                          <RotateCcw size={13} />
                         </button>
                       )}
                     </div>
@@ -885,8 +1063,8 @@ function Sandbox({ id }: { id: string }) {
         </div>
       )}
 
-      {/* ══ Fase 3: Preview e confirmação ════════════════════════ */}
-      {fase === 'preview' && (
+      {/* ══ Fase 3: Preview — REGISTRO ══════════════════════════ */}
+      {fase === 'preview' && modoImportacao === 'REGISTRO' && (
         <div className="mb-6">
           <div className="flex flex-wrap items-center gap-2 mb-3">
             {emAnalise && (
@@ -894,7 +1072,7 @@ function Sandbox({ id }: { id: string }) {
                 onClick={() => setModoImportacao(null)}
                 className="flex items-center gap-1 text-[13px] px-2 py-1 rounded-md border border-white/10 hover:bg-white/5 transition-colors"
                 style={{ color: '#8b92a8' }}>
-                <ArrowLeft size={13}/> Mudar modo
+                <ArrowLeft size={13} /> Mudar modo
               </button>
             )}
             <h2 className="text-[16px] font-semibold" style={{ color: '#e8eaf0' }}>
@@ -902,7 +1080,7 @@ function Sandbox({ id }: { id: string }) {
             </h2>
             <span className="text-[12px] font-medium px-2 py-0.5 rounded-full"
               style={{ background: 'rgba(77,166,255,0.15)', color: '#4da6ff' }}>
-              {modoImportacao === 'REGISTRO' ? 'Por registro' : 'Por categoria'}
+              Por registro
             </span>
           </div>
 
@@ -918,14 +1096,13 @@ function Sandbox({ id }: { id: string }) {
                     <th className="text-left px-3 py-2 w-24">Data</th>
                     <th className="text-left px-3 py-2">Lançamento</th>
                     <th className="text-right px-3 py-2 w-28">Valor</th>
-                    <th className="text-left px-3 py-2 w-52">Ação</th>
+                    <th className="text-left px-3 py-2 w-56">Ação</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lancamentosPreview.map(l => {
                     const dec       = decisoesOverride.get(l.chave) ?? l.decisaoSugerida
                     const descFinal = descricoesOverride.get(l.chave) ?? l.descricao
-                    const expandido = previewExpandido.has(l.chave)
                     const corCriar  = '#00c896'
                     const corAtual  = '#4da6ff'
                     return (
@@ -935,7 +1112,6 @@ function Sandbox({ id }: { id: string }) {
                             {l.data ? new Date(l.data + 'T00:00').toLocaleDateString('pt-BR') : '—'}
                           </td>
                           <td className="px-3 py-2">
-                            {/* Descrição editável inline */}
                             {editandoDesc === l.chave ? (
                               <input
                                 autoFocus
@@ -956,9 +1132,8 @@ function Sandbox({ id }: { id: string }) {
                                   <button
                                     onClick={() => iniciarEdicaoDesc(l.chave, descFinal)}
                                     className="opacity-0 group-hover/desc:opacity-100 transition-opacity p-0.5 rounded hover:bg-white/10 flex-none"
-                                    style={{ color: '#8b92a8' }}
-                                    title="Editar descrição">
-                                    <Pencil size={11}/>
+                                    style={{ color: '#8b92a8' }} title="Editar descrição">
+                                    <Pencil size={11} />
                                   </button>
                                 )}
                               </div>
@@ -966,19 +1141,6 @@ function Sandbox({ id }: { id: string }) {
                             <p className="text-[12px] mt-0.5" style={{ color: '#8b92a8' }}>
                               📂 {l.categoria_nome}
                             </p>
-                            {/* Toggle de detalhes — apenas no modo CATEGORIA */}
-                            {modoImportacao === 'CATEGORIA' && (
-                              <button
-                                onClick={() => togglePreviewDetalhe(l.chave)}
-                                className="flex items-center gap-1 text-[11px] mt-0.5 hover:opacity-80 transition-opacity"
-                                style={{ color: '#8b92a8' }}>
-                                <ChevronDown size={11} style={{
-                                  transform: expandido ? 'rotate(0deg)' : 'rotate(-90deg)',
-                                  transition: 'transform 0.15s',
-                                }}/>
-                                {l.item_ids.length} {l.item_ids.length === 1 ? 'item' : 'itens'}
-                              </button>
-                            )}
                             {l.transacao_existente_id && dec === 'ATUALIZAR' && (
                               <p className="text-[11px] mt-0.5" style={{ color: '#4da6ff' }}>
                                 🔗 Atualiza lançamento existente
@@ -990,68 +1152,228 @@ function Sandbox({ id }: { id: string }) {
                             {l.tipo === 'RECEITA' ? `−${formatBRL(l.valor)}` : formatBRL(l.valor)}
                           </td>
                           <td className="px-3 py-2">
-                            <div className="flex gap-1">
-                              {(['CRIAR', 'ATUALIZAR'] as DecisaoImport[]).map(d => {
-                                const ativo = dec === d
-                                const cor   = d === 'CRIAR' ? corCriar : corAtual
-                                const desab = d === 'ATUALIZAR' && !l.transacao_existente_id
-                                return (
-                                  <button key={d}
-                                    onClick={() => setDecisaoLancamento(l.chave, d)}
-                                    disabled={!emAnalise || desab}
-                                    title={desab ? 'Nenhum lançamento similar encontrado' : undefined}
-                                    className="text-[11px] px-2 py-0.5 rounded-md border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                                    style={{
-                                      background:  ativo ? `${cor}22` : 'transparent',
-                                      color:       ativo ? cor : '#8b92a8',
-                                      borderColor: ativo ? cor : 'rgba(255,255,255,0.1)',
-                                      fontWeight:  ativo ? 600 : 400,
-                                    }}>
-                                    {d === 'CRIAR' ? 'Criar novo' : 'Atualizar'}
-                                  </button>
-                                )
-                              })}
+                            <div className="flex flex-col gap-1">
+                              {/* CRIAR / ATUALIZAR */}
+                              <div className="flex gap-1">
+                                {(['CRIAR', 'ATUALIZAR'] as DecisaoImport[]).map(d => {
+                                  const ativo = dec === d
+                                  const cor   = d === 'CRIAR' ? corCriar : corAtual
+                                  const desab = d === 'ATUALIZAR' && !l.transacao_existente_id
+                                  return (
+                                    <button key={d}
+                                      onClick={() => setDecisaoLancamento(l.chave, d)}
+                                      disabled={!emAnalise || desab}
+                                      title={desab ? 'Nenhum lançamento similar encontrado' : undefined}
+                                      className="text-[11px] px-2 py-0.5 rounded-md border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                      style={{
+                                        background:  ativo ? `${cor}22` : 'transparent',
+                                        color:       ativo ? cor : '#8b92a8',
+                                        borderColor: ativo ? cor : 'rgba(255,255,255,0.1)',
+                                        fontWeight:  ativo ? 600 : 400,
+                                      }}>
+                                      {d === 'CRIAR' ? 'Criar novo' : 'Atualizar'}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                              {/* Vincular manualmente */}
+                              {emAnalise && (
+                                <button
+                                  onClick={() => abrirVincular({
+                                    itemId: l.chave,
+                                    desc:   stripParcela(l.descricao),
+                                  })}
+                                  className="text-[11px] px-2 py-0.5 rounded-md border border-white/10 hover:bg-av-green/10 hover:border-av-green/30 transition-colors text-left"
+                                  style={{ color: '#8b92a8' }}>
+                                  🔗 Vincular…
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
-
-                        {/* Detalhes dos itens agrupados */}
-                        {modoImportacao === 'CATEGORIA' && expandido && (
-                          <tr>
-                            <td colSpan={4} className="px-4 pb-3 pt-0">
-                              <div className="rounded-lg overflow-hidden border border-white/5 mt-1">
-                                {(sessao?.itens ?? [])
-                                  .filter(i => l.item_ids.includes(i.id))
-                                  .map((it, idx) => (
-                                    <div key={it.id}
-                                      className={`flex items-center gap-2 px-3 py-1.5 text-[12px]${idx > 0 ? ' border-t border-white/5' : ''}`}
-                                      style={{ background: '#0d1117', color: '#8b92a8' }}>
-                                      <span className="w-20 flex-none">
-                                        {new Date(it.data_compra + 'T00:00').toLocaleDateString('pt-BR')}
-                                      </span>
-                                      <span className="flex-1 truncate" style={{ color: '#e8eaf0' }}>
-                                        {it.descricao}
-                                      </span>
-                                      {it.parcela_atual && it.parcela_total && (
-                                        <span>parc. {it.parcela_atual}/{it.parcela_total}</span>
-                                      )}
-                                      <span className="font-mono flex-none"
-                                        style={{ color: it.tipo === 'RECEITA' ? '#4ade80' : '#c8d0e0' }}>
-                                        {it.tipo === 'RECEITA'
-                                          ? `−${formatBRL(Number(it.valor))}`
-                                          : formatBRL(Number(it.valor))}
-                                      </span>
-                                    </div>
-                                  ))}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
                       </Fragment>
                     )
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ Fase 3: Preview — CATEGORIA (grupos) ════════════════ */}
+      {fase === 'preview' && modoImportacao === 'CATEGORIA' && (
+        <div className="mb-6">
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            {emAnalise && (
+              <button
+                onClick={() => setModoImportacao(null)}
+                className="flex items-center gap-1 text-[13px] px-2 py-1 rounded-md border border-white/10 hover:bg-white/5 transition-colors"
+                style={{ color: '#8b92a8' }}>
+                <ArrowLeft size={13} /> Mudar modo
+              </button>
+            )}
+            <h2 className="text-[16px] font-semibold" style={{ color: '#e8eaf0' }}>
+              Lançamentos a importar
+            </h2>
+            <span className="text-[12px] font-medium px-2 py-0.5 rounded-full"
+              style={{ background: 'rgba(77,166,255,0.15)', color: '#4da6ff' }}>
+              Por categoria
+            </span>
+          </div>
+
+          {grupos.length === 0 ? (
+            <p className="text-[14px] italic" style={{ color: '#8b92a8' }}>
+              Nenhum lançamento a importar — todos os itens estão ignorados.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {grupos.map(grupo => {
+                const itensGrupo  = (sessao?.itens ?? []).filter(i => grupo.item_ids.includes(i.id))
+                const totalGrupo  = itensGrupo.reduce(
+                  (s, i) => s + (i.tipo === 'RECEITA' ? -Number(i.valor) : Number(i.valor)), 0,
+                )
+                const catNome     = catPorId.get(grupo.categoria_id)?.descricao ?? ''
+                const selAtual    = selGrupo.get(grupo.id) ?? new Set<string>()
+                const algumSelAt  = selAtual.size > 0
+                const corCriar    = '#00c896'
+                const corAtual_   = '#4da6ff'
+
+                return (
+                  <div key={grupo.id} className="rounded-xl border border-white/10 overflow-hidden">
+                    {/* Cabeçalho do grupo */}
+                    <div className="px-3 py-2" style={{ background: '#252d42' }}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>
+                          📂 {catNome}
+                        </span>
+                        <span className="text-[12px]" style={{ color: '#8b92a8' }}>
+                          {itensGrupo.length} {itensGrupo.length === 1 ? 'item' : 'itens'}
+                        </span>
+                        <span className="ml-auto text-[14px] font-semibold font-mono" style={{ color: '#e8eaf0' }}>
+                          {formatBRL(Math.abs(totalGrupo))}
+                        </span>
+                      </div>
+                      {/* Descrição editável */}
+                      <div className="mt-1.5 flex items-center gap-1.5 group/gdesc">
+                        {editandoDescGrupo === grupo.id ? (
+                          <input
+                            autoFocus
+                            value={descEditTempGrupo}
+                            onChange={e => setDescEditTempGrupo(e.target.value)}
+                            onBlur={() => confirmarEdicaoDescGrupo(grupo.id)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter')  confirmarEdicaoDescGrupo(grupo.id)
+                              if (e.key === 'Escape') cancelarEdicaoDescGrupo()
+                            }}
+                            className="flex-1 rounded px-2 py-0.5 text-[13px] border border-av-green/50 outline-none"
+                            style={{ background: '#131920', color: '#e8eaf0' }}
+                          />
+                        ) : (
+                          <>
+                            <p className="text-[13px] flex-1" style={{ color: '#8b92a8' }}>
+                              {grupo.descricao}
+                            </p>
+                            {emAnalise && (
+                              <button
+                                onClick={() => iniciarEdicaoDescGrupo(grupo.id, grupo.descricao)}
+                                className="opacity-0 group-hover/gdesc:opacity-100 transition-opacity p-0.5 rounded hover:bg-white/10"
+                                style={{ color: '#8b92a8' }} title="Editar descrição">
+                                <Pencil size={11} />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {/* Botões de decisão */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                        {(['CRIAR', 'ATUALIZAR'] as DecisaoImport[]).map(d => {
+                          const ativo = grupo.decisao === d
+                          const cor   = d === 'CRIAR' ? corCriar : corAtual_
+                          const desab = d === 'ATUALIZAR' && !grupo.transacao_existente_id
+                          return (
+                            <button key={d}
+                              onClick={() => setDecisaoGrupo(grupo.id, d)}
+                              disabled={!emAnalise || desab}
+                              title={desab ? 'Nenhum lançamento vinculado — use 🔗 Vincular para associar' : undefined}
+                              className="text-[11px] px-2 py-0.5 rounded-md border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                              style={{
+                                background:  ativo ? `${cor}22` : 'transparent',
+                                color:       ativo ? cor : '#8b92a8',
+                                borderColor: ativo ? cor : 'rgba(255,255,255,0.1)',
+                                fontWeight:  ativo ? 600 : 400,
+                              }}>
+                              {d === 'CRIAR' ? 'Criar novo' : 'Atualizar'}
+                            </button>
+                          )
+                        })}
+                        {emAnalise && (
+                          <button
+                            onClick={() => abrirVincular({
+                              grupoId: grupo.id,
+                              desc:    grupo.descricao,
+                            })}
+                            className="text-[11px] px-2 py-0.5 rounded-md border border-white/10 hover:bg-av-green/10 hover:border-av-green/30 transition-colors"
+                            style={{ color: '#8b92a8' }}>
+                            🔗 Vincular…
+                          </button>
+                        )}
+                        {grupo.transacao_existente_id && grupo.decisao === 'ATUALIZAR' && (
+                          <span className="text-[11px]" style={{ color: '#4da6ff' }}>
+                            🔗 vinculado
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Itens do grupo com checkboxes (só mostra caixas se >1 item) */}
+                    {itensGrupo.map((it, idx) => (
+                      <div key={it.id}
+                        className={`flex items-center gap-2 px-3 py-1.5 text-[13px]${idx > 0 ? ' border-t border-white/5' : ' border-t border-white/5'}`}
+                        style={{ color: '#e8eaf0', background: selAtual.has(it.id) ? 'rgba(0,200,150,0.04)' : undefined }}>
+                        {itensGrupo.length > 1 && (
+                          <input type="checkbox"
+                            checked={selAtual.has(it.id)}
+                            onChange={() => toggleSelGrupo(grupo.id, it.id)}
+                            disabled={!emAnalise}
+                            className="w-3.5 h-3.5 accent-av-green cursor-pointer disabled:opacity-40 flex-none"
+                          />
+                        )}
+                        <span className="w-20 flex-none text-[12px]" style={{ color: '#8b92a8' }}>
+                          {new Date(it.data_compra + 'T00:00').toLocaleDateString('pt-BR')}
+                        </span>
+                        <span className="flex-1 min-w-0 truncate">
+                          {stripParcela(it.descricao)}
+                        </span>
+                        {it.parcela_atual && it.parcela_total && (
+                          <span className="text-[11px] flex-none" style={{ color: '#8b92a8' }}>
+                            {it.parcela_atual}/{it.parcela_total}
+                          </span>
+                        )}
+                        <span className="font-mono flex-none text-[13px]"
+                          style={{ color: it.tipo === 'RECEITA' ? '#4ade80' : '#c8d0e0' }}>
+                          {it.tipo === 'RECEITA'
+                            ? `−${formatBRL(Number(it.valor))}`
+                            : formatBRL(Number(it.valor))}
+                        </span>
+                      </div>
+                    ))}
+
+                    {/* Ação de separar itens selecionados */}
+                    {algumSelAt && emAnalise && (
+                      <div className="px-3 py-2 border-t border-white/5"
+                        style={{ background: 'rgba(0,200,150,0.04)' }}>
+                        <button
+                          onClick={() => separarItensGrupo(grupo.id, [...selAtual])}
+                          className="text-[13px] px-3 py-1.5 rounded-md border border-av-green/40 hover:bg-av-green/10 transition-colors"
+                          style={{ color: '#00c896' }}>
+                          ↗ Separar {selAtual.size} {selAtual.size === 1 ? 'item' : 'itens'} em lançamento próprio
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -1063,7 +1385,7 @@ function Sandbox({ id }: { id: string }) {
         </p>
       )}
 
-      {/* ══ Rodapé ═══════════════════════════════════════════════ */}
+      {/* ══ Rodapé ══════════════════════════════════════════════ */}
       {emAnalise ? (
         <div className="flex flex-wrap items-center gap-2 justify-end">
           {naoClassif.length > 0 && (
@@ -1098,6 +1420,90 @@ function Sandbox({ id }: { id: string }) {
             style={{ color: '#e8eaf0' }}>
             Voltar
           </button>
+        </div>
+      )}
+
+      {/* ══ Modal: nova categoria ════════════════════════════════ */}
+      {novaCatCtx && (
+        <ModalNovaCategoriaRapida
+          categoriasPai={catsPai}
+          onCriada={aoCategoriaCriada}
+          onFechar={() => setNovaCatCtx(null)}
+        />
+      )}
+
+      {/* ══ Modal: vincular transação existente ══════════════════ */}
+      {vincularModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-lg rounded-xl border border-white/10 shadow-2xl"
+            style={{ background: '#1a1f2e' }}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <h3 className="text-[16px] font-semibold" style={{ color: '#e8eaf0' }}>
+                Vincular a lançamento existente
+              </h3>
+              <button onClick={() => setVincularModal(null)}
+                className="p-1 rounded hover:bg-white/10 transition-colors"
+                style={{ color: '#8b92a8' }}>
+                <XCircle size={18} />
+              </button>
+            </div>
+
+            <div className="px-4 py-3">
+              <input
+                type="text"
+                value={filtroTxBusca}
+                onChange={e => setFiltroTxBusca(e.target.value)}
+                placeholder="Filtrar por descrição ou valor…"
+                className="w-full rounded-lg px-3 py-2 text-[14px] border border-white/10 outline-none focus:border-av-green/50 transition-colors"
+                style={{ background: '#0d1117', color: '#e8eaf0' }}
+              />
+            </div>
+
+            <div className="px-4 pb-2 max-h-80 overflow-y-auto">
+              {buscandoTxs ? (
+                <p className="py-6 text-center text-[14px]" style={{ color: '#8b92a8' }}>Buscando…</p>
+              ) : txsFiltradas.length === 0 ? (
+                <p className="py-6 text-center text-[14px] italic" style={{ color: '#8b92a8' }}>
+                  {txCandidatas.length === 0
+                    ? 'Nenhuma transação PENDENTE/PROJEÇÃO encontrada para este cartão.'
+                    : 'Nenhuma transação corresponde ao filtro.'}
+                </p>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {txsFiltradas.map(tx => (
+                    <button
+                      key={tx.id}
+                      onClick={() => confirmarVincular(tx)}
+                      className="text-left w-full px-3 py-2 rounded-lg border border-transparent hover:border-av-green/30 hover:bg-av-green/5 transition-colors">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[14px] leading-snug truncate" style={{ color: '#e8eaf0' }}>
+                          {tx.descricao}
+                        </span>
+                        <span className="text-[14px] font-mono flex-none" style={{ color: '#e8eaf0' }}>
+                          {formatBRL(Number(tx.valor))}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[12px] mt-0.5" style={{ color: '#8b92a8' }}>
+                        <span>{new Date(tx.data + 'T00:00').toLocaleDateString('pt-BR')}</span>
+                        <span>·</span>
+                        <span>{tx.status}</span>
+                        {tx.categoria && <><span>·</span><span>{tx.categoria.descricao}</span></>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end px-4 py-3 border-t border-white/10">
+              <button
+                onClick={() => setVincularModal(null)}
+                className="px-3 py-1.5 text-[14px] rounded-lg border border-white/10 hover:border-white/30 transition-colors"
+                style={{ color: '#8b92a8' }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

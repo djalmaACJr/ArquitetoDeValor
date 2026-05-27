@@ -17,10 +17,11 @@ const CORES_ALL = [
   '#607d8b','#636e72','#2d3436','#95a5a6','#7f8c8d','#34495e','#b2bec3','#dfe6e9',
 ]
 const ICONES_SM = ['🏠','🍔','🚗','💊','💰','💳','📈','💼']
-const ICONES_ALL = [
+const ICONES_ALL = [...new Set([
   // Moradia
   '🏠','🏢','🔑','🛋','🛏','🚿','🪴','🧹',
   '💡','⚡','💧','🔧','🔨','🛠','🪣','📦',
+  '🛁','🪞','🚪','🪟','🪑','🧺','🧼','🧽',
   // Alimentação
   '🍔','🍕','🍣','🍜','🥗','🥐','🛒','🍳',
   '🥩','🥦','🍷','🍺','☕','🧃','🍦','🎂',
@@ -47,8 +48,9 @@ const ICONES_ALL = [
   '🐶','🐱','🐾','🌱','🌻','🌿','🍃','🏡',
   // Serviços & Assinaturas
   '📺','📻','🔔','📧','📮','🗓','📅','⏰',
+  '☎️','📞',
   '🔄','🧾','📋','📌','🗃','🗄','🔏','🏷',
-]
+])]
 
 // ── Drawer ────────────────────────────────────────────────────
 // Responsivo: full-width em mobile, 420px fixo em desktop.
@@ -174,7 +176,9 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (c: 
 const ICONE_NOME: Record<string, string> = {
   '🏠':'Casa','🏢':'Prédio','🏡':'Casa com jardim','🔑':'Chave','💡':'Energia elétrica',
   '⚡':'Eletricidade','💧':'Água','🔧':'Manutenção','🔨':'Obra/reforma','📦':'Caixa/mudança',
-  '🧹':'Limpeza','🪴':'Plantas','🛋':'Mobília','🛏':'Quarto','🚿':'Banho','🪣':'Faxina',
+  '🧹':'Limpeza','🪴':'Plantas','🛋':'Mobília','🛏':'Cama/quarto','🚿':'Chuveiro/banho','🪣':'Faxina',
+  '🛁':'Banheira/hidro','🪞':'Espelho','🚪':'Porta/entrada','🪟':'Janela','🪑':'Cadeira/sala',
+  '🧺':'Lavanderia/cesto','🧼':'Sabão/higiene','🧽':'Esponja/limpeza',
   '🍔':'Hambúrguer','🍕':'Pizza','🍣':'Sushi','🍜':'Macarrão','🥗':'Salada','🥐':'Padaria',
   '🛒':'Supermercado','🍳':'Cozinha','🥩':'Carne','🍷':'Vinho','🍺':'Cerveja','☕':'Café',
   '🎂':'Bolo/aniversário','🍦':'Sorvete','🧃':'Suco','🥦':'Verduras',
@@ -206,6 +210,7 @@ const ICONE_NOME: Record<string, string> = {
   '🐱':'Gato/pet','🐾':'Pet/veterinário','🌱':'Jardim/planta','🌻':'Flores',
   '🌿':'Natureza','👨':'Adulto','👩':'Adulta',
   '👴':'Idoso','👵':'Idosa','🤝':'Acordos/parcerias',
+  '☎️':'Telefone fixo','📞':'Telefone/ligação',
   '🔔':'Assinatura/alerta','📧':'E-mail/serviço','📮':'Correios','🗓':'Agenda/mensalidade',
   '📅':'Data/vencimento','⏰':'Prazo/alarme','🔄':'Recorrente/transferência',
   '📋':'Fatura/lista','📌':'Fixo/importante','🏷':'Etiqueta/preço',
@@ -221,10 +226,18 @@ const ICONE_TAGS: Record<string, string[]> = {
   '🏢': ['predio','apartamento','condominio','empresa'],
   '🔑': ['chave','aluguel','acesso','imovel'],
   '🛋': ['sofa','sala','movel','decoracao'],
-  '🛏': ['cama','quarto','dormir'],
+  '🛏': ['cama','quarto','dormir','travesseiro'],
   '🚿': ['banho','chuveiro','agua'],
   '🪴': ['planta','jardim','natureza'],
   '🧹': ['limpeza','faxina','diarista'],
+  '🛁': ['banheira','banho','hidro','spa','toalha'],
+  '🪞': ['espelho','banheiro','quarto','reflexo'],
+  '🚪': ['porta','entrada','acesso','casa'],
+  '🪟': ['janela','ventilacao','quarto','casa'],
+  '🪑': ['cadeira','sala','movel','mesa','escritorio'],
+  '🧺': ['cesto','roupa','lavanderia','lavar','toalha','roupas'],
+  '🧼': ['sabao','higiene','limpeza','banho','detergente'],
+  '🧽': ['esponja','limpeza','louca','cozinha','esfregao'],
   '💡': ['luz','energia','eletricidade','conta de luz'],
   '⚡': ['energia','eletricidade','luz','choque'],
   '💧': ['agua','conta de agua','hidraulica'],
@@ -339,6 +352,8 @@ const ICONE_TAGS: Record<string, string[]> = {
   '🌻': ['flor','jardim','decoracao'],
   '🏡': ['casa','sitio','chacara'],
   // Serviços & Assinaturas
+  '☎️': ['telefone','fixo','residencial','discagem','linha'],
+  '📞': ['telefone','ligacao','chamada','fone'],
   '🔔': ['notificacao','assinatura','alerta'],
   '📧': ['email','servico','comunicacao'],
   '🗓': ['agenda','data','parcela','mensalidade'],

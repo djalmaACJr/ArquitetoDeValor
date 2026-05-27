@@ -3,9 +3,12 @@ import { useState, useEffect, useRef } from 'react'
 import { Plus, Pencil, X as XIcon, ChevronDown, ChevronUp, Shield, RefreshCw, ArrowLeft } from 'lucide-react'
 import { useCategorias } from '../hooks/useCategorias'
 import {
-  Drawer, ColorPicker, IconPicker, Field, Input, SelectDark,
-  Toggle, PreviewBadge, BtnSalvar, BtnCancelar, Segmented, Toast, ModalExcluir,
+  Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, SelectDark,
 } from '../components/ui/shared'
+import FormCamposCategoria, {
+  FORM_CATEGORIA_VAZIO, formDeCategoriaExistente, validarFormCategoria,
+  type FormCategoriaState,
+} from '../components/ui/FormCamposCategoria'
 import type { Categoria } from '../types'
 import { apiFetch, apiMutate, extrairLista } from '../lib/api'
 import { formatBRL, formatData, STATUS_LABEL, STATUS_COR } from '../lib/utils'
@@ -291,20 +294,9 @@ function PainelReclassificacao({
   )
 }
 
-// ── Tipos do formulário ───────────────────────────────────────────────────────
-type Nivel = 'pai' | 'sub'
-interface FormState {
-  descricao: string; nivel: Nivel; id_pai: string
-  icone: string; cor: string; ativa: boolean
-}
-const FORM_VAZIO: FormState = { descricao: '', nivel: 'pai', id_pai: '', icone: '🏠', cor: '#00c896', ativa: true }
-
-function formDeCat(c: Categoria): FormState {
-  return {
-    descricao: c.descricao, nivel: c.id_pai ? 'sub' : 'pai',
-    id_pai: c.id_pai ?? '', icone: c.icone ?? '🏠', cor: c.cor ?? '#00c896', ativa: c.ativa,
-  }
-}
+// Os tipos e helpers de formulário vêm do componente compartilhado.
+// Alias local para manter legibilidade no código abaixo.
+type FormState = FormCategoriaState
 
 // ── Botão de ação pequeno ─────────────────────────────────────────────────────
 function AcaoBtn({ onClick, title, danger = false, children }: {
@@ -340,7 +332,7 @@ export default function CategoriasPage() {
   const [drawerOpen,   setDrawerOpen]   = useState(false)
   const [editando,     setEditando]     = useState<Categoria | null>(null)
   const [excluindo,    setExcluindo]    = useState<Categoria | null>(null)
-  const [form,         setForm]         = useState<FormState>(FORM_VAZIO)
+  const [form,         setForm]         = useState<FormState>(FORM_CATEGORIA_VAZIO)
   const [erro,         setErro]         = useState<string | null>(null)
   const [salvando,     setSalvando]     = useState(false)
   const [feedback,     setFeedback]     = useState<string | null>(null)
@@ -353,13 +345,18 @@ export default function CategoriasPage() {
   const set    = (p: Partial<FormState>) => setForm(f => ({ ...f, ...p }))
   const toast  = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
 
-  const abrirNovo   = () => { setEditando(null); setForm(FORM_VAZIO); setErro(null); setDrawerOpen(true) }
-  const abrirEditar = (c: Categoria) => { setEditando(c); setForm(formDeCat(c)); setErro(null); setDrawerOpen(true) }
-  const fechar      = () => { setDrawerOpen(false); setEditando(null); setErro(null) }
+  const abrirNovo      = () => { setEditando(null); setForm(FORM_CATEGORIA_VAZIO); setErro(null); setDrawerOpen(true) }
+  const abrirNovaSub   = (pai: Categoria) => {
+    setEditando(null)
+    setForm({ ...FORM_CATEGORIA_VAZIO, nivel: 'sub', id_pai: pai.id, icone: pai.icone ?? '🏠', cor: pai.cor ?? '#00c896' })
+    setErro(null); setDrawerOpen(true)
+  }
+  const abrirEditar    = (c: Categoria) => { setEditando(c); setForm(formDeCategoriaExistente(c)); setErro(null); setDrawerOpen(true) }
+  const fechar         = () => { setDrawerOpen(false); setEditando(null); setErro(null) }
 
   const salvar = async () => {
-    if (!form.descricao.trim()) { setErro('Descrição é obrigatória.'); return }
-    if (form.nivel === 'sub' && !form.id_pai) { setErro('Selecione a categoria pai.'); return }
+    const msgErro = validarFormCategoria(form)
+    if (msgErro) { setErro(msgErro); return }
     setSalvando(true); setErro(null)
     const payload = {
       descricao: form.descricao.trim(),
@@ -491,6 +488,9 @@ export default function CategoriasPage() {
                     )}
                     {!p.protegida && (
                       <>
+                        <AcaoBtn onClick={() => abrirNovaSub(p)} title="Nova subcategoria">
+                          <Plus size={12} />
+                        </AcaoBtn>
                         <AcaoBtn onClick={() => setCatReclassif(p)} title="Reclassificar transações">
                           <RefreshCw size={12} />
                         </AcaoBtn>
@@ -573,53 +573,16 @@ export default function CategoriasPage() {
             labelSalvar="Salvar categoria" labelEditar="Atualizar" /></>
         }>
 
-        <Field label="Nível" data-tutorial="cat-nivel">
-          <Segmented
-            opcoes={[{ value: 'pai', label: 'Categoria pai' }, { value: 'sub', label: 'Subcategoria' }]}
-            value={form.nivel} onChange={v => set({ nivel: v as Nivel, id_pai: '' })} />
-        </Field>
+        <FormCamposCategoria
+          form={form}
+          onChange={set}
+          categoriasPai={pais}
+          editandoId={editando?.id ?? null}
+          mostrarAtiva={!!editando}
+          erro={erro}
+        />
 
-        {form.nivel === 'sub' && (
-          <Field label="Categoria pai *">
-            <SelectDark value={form.id_pai} onChange={e => set({ id_pai: e.target.value })}>
-              <option value="">Selecione...</option>
-              {pais.filter(p => !p.protegida && p.id !== editando?.id).map(p => (
-                <option key={p.id} value={p.id} style={{ background: '#1a1f2e', color: '#e8eaf0' }}>
-                  {p.icone ?? ''} {p.descricao}
-                </option>
-              ))}
-            </SelectDark>
-          </Field>
-        )}
-
-        <Field label="Descrição *" data-tutorial="cat-descricao">
-          <div className="relative">
-            <Input value={form.descricao} onChange={e => set({ descricao: e.target.value })}
-              placeholder="Ex: Alimentação" maxLength={50} />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[14px]"
-              style={{ color: '#8b92a8' }}>{form.descricao.length}/50</span>
-          </div>
-        </Field>
-
-        <Field label="Ícone" data-tutorial="cat-icone">
-          <IconPicker value={form.icone} onChange={v => set({ icone: v })} />
-        </Field>
-
-        <Field label="Cor">
-          <ColorPicker value={form.cor} onChange={v => set({ cor: v })} />
-        </Field>
-
-        {editando && (
-          <Field label="Status">
-            <Toggle checked={form.ativa} onChange={v => set({ ativa: v })}
-              label={form.ativa ? 'Ativa' : 'Inativa'} />
-          </Field>
-        )}
-
-        <Field label="Pré-visualização" data-tutorial="cat-preview">
-          <PreviewBadge icone={form.icone} label={form.descricao || 'Nova categoria'} cor={form.cor} />
-        </Field>
-
+        {/* Botão excluir — exclusivo do modo edição, fora do componente compartilhado */}
         {editando && !editando.protegida && (
           <button onClick={() => setExcluindo(editando)}
             className="w-full py-2 text-[16px] font-semibold border border-red-400/20 rounded-lg
@@ -627,11 +590,6 @@ export default function CategoriasPage() {
             style={{ color: '#f87171' }}>
             Excluir categoria
           </button>
-        )}
-
-        {erro && (
-          <p className="text-[16px] bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2"
-            style={{ color: '#f87171' }}>{erro}</p>
         )}
       </Drawer>
 

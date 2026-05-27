@@ -60,10 +60,16 @@ Deno.serve(async (req: Request) => {
     }
 
     // POST /faturas/:id/sugerir
-    if (m === "POST"   &&  id && acao === "sugerir")   return await sugerir(c, id, userId);
+    if (m === "POST"   &&  id && acao === "sugerir")           return await sugerir(c, id, userId);
 
     // POST /faturas/:id/confirmar
-    if (m === "POST"   &&  id && acao === "confirmar") return await confirmar(c, req, id, userId);
+    if (m === "POST"   &&  id && acao === "confirmar")         return await confirmar(c, req, id, userId);
+
+    // POST /faturas/:id/aplicar-sugestoes — aplica categoria_sugerida→escolhida em lote
+    if (m === "POST"   &&  id && acao === "aplicar-sugestoes") return await aplicarSugestoes(c, id);
+
+    // GET /faturas/:id/transacoes — candidatas para vincular manualmente
+    if (m === "GET"    &&  id && acao === "transacoes")        return await listarTransacoesCandidatas(c, req, id);
 
     // DELETE /faturas/:id
     if (m === "DELETE" &&  id && !acao) return await excluir(c, id);
@@ -515,38 +521,28 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
       await aprenderPadrao(c, userId, item.descricao, item.categoria_escolhida_id!, sessao.conta_id);
     }
   } else {
-    // MODO CATEGORIA: 1 lançamento por categoria, data = dia_pagamento da conta
-    // no mês de vencimento; observacao = detalhamento dos itens.
-    const grupos = new Map<string, Item[]>();
-    for (const it of naoIgnorados) {
-      const k = it.categoria_escolhida_id!;
-      if (!grupos.has(k)) grupos.set(k, []);
-      grupos.get(k)!.push(it);
-    }
-
-    const venc = sessao.vencimento_fatura as string | null;
+    // MODO CATEGORIA
+    const venc     = sessao.vencimento_fatura as string | null;
     const diaPagto = conta?.dia_pagamento ?? 5;
     const dataLancto = venc
       ? `${venc.slice(0, 7)}-${String(diaPagto).padStart(2, "0")}`
-      : (venc ?? new Date().toISOString().slice(0, 10));
+      : new Date().toISOString().slice(0, 10);
 
-    for (const [catId, items] of grupos) {
-      const decisaoFinal: "CRIAR" | "ATUALIZAR" =
-        decisoesOv[catId] ??
-        (items.find((i) => i.transacao_existente_id) ? "ATUALIZAR" : "CRIAR");
-
-      // Soma respeitando tipo do item (RECEITA reduz total da despesa)
+    // Função interna: cria/atualiza 1 transação para um grupo de itens.
+    const processarGrupo = async (
+      catId:        string,
+      items:        Item[],
+      decisaoFinal: "CRIAR" | "ATUALIZAR",
+      descricao:    string,
+      txAlvo:       string | null,
+    ): Promise<void> => {
       const valorBruto = items.reduce(
         (s, i) => s + (i.tipo === "RECEITA" ? -Number(i.valor) : Number(i.valor)), 0,
       );
       const tipoTx = valorBruto >= 0 ? "DESPESA" : "RECEITA";
       const valor  = Math.abs(valorBruto);
-      if (valor <= 0) continue; // categoria que se anulou (estornos totalizam zero)
+      if (valor <= 0) return;
 
-      const descricaoDefault = `${conta?.nome ?? "Fatura"} - ${catNome.get(catId) ?? ""}`.trim();
-      const descricao        = (descricoesOv[catId] ?? descricaoDefault).trim();
-
-      // Detalhamento dos itens vai em observacao para auditoria
       const detalhe = items
         .map((i) => `${i.descricao.trim()} R$ ${Number(i.valor).toFixed(2).replace(".", ",")}`)
         .join(" + ");
@@ -554,42 +550,67 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
 
       let txCriadaId: string | null = null;
 
-      if (decisaoFinal === "ATUALIZAR") {
-        const txAlvo = items.find((i) => i.transacao_existente_id)?.transacao_existente_id;
-        if (txAlvo) {
-          const { data: tx, error } = await c.from("transacoes").update({
-            descricao, valor, data: dataLancto,
-            categoria_id: catId, tipo: tipoTx,
-            status: "PENDENTE", observacao,
-          }).eq("id", txAlvo).select("id").single();
-          if (error) { logWarn("update cat", error.message); continue; }
-          txCriadaId = tx?.id ?? null;
-          atualizadas++;
-        }
+      if (decisaoFinal === "ATUALIZAR" && txAlvo) {
+        const { data: tx, error } = await c.from("transacoes").update({
+          descricao, valor, data: dataLancto,
+          categoria_id: catId, tipo: tipoTx, status: "PENDENTE", observacao,
+        }).eq("id", txAlvo).select("id").single();
+        if (error) { logWarn("update grupo cat", error.message); return; }
+        txCriadaId = tx?.id ?? null;
+        atualizadas++;
       } else {
         const { data: tx, error } = await c.from("transacoes").insert({
-          user_id:      userId,
-          conta_id:     sessao.conta_id,
-          categoria_id: catId,
-          descricao, valor, data: dataLancto,
-          tipo: tipoTx, status: "PENDENTE", observacao,
+          user_id: userId, conta_id: sessao.conta_id,
+          categoria_id: catId, descricao, valor,
+          data: dataLancto, tipo: tipoTx, status: "PENDENTE", observacao,
         }).select("id").single();
-        if (error) { logWarn("insert cat", error.message); continue; }
+        if (error) { logWarn("insert grupo cat", error.message); return; }
         txCriadaId = tx?.id ?? null;
         criadas++;
       }
 
-      // Marca TODOS os itens do grupo com a mesma tx — assim a sandbox
-      // ainda mostra que esses itens foram absorvidos por aquele lançamento.
       if (txCriadaId) {
         await c.from("fatura_import_item")
           .update({ transacao_criada_id: txCriadaId, decisao: decisaoFinal })
           .in("id", items.map((i) => i.id));
       }
-
-      // Aprende padrão por item (não por grupo)
       for (const item of items) {
         await aprenderPadrao(c, userId, item.descricao, catId, sessao.conta_id);
+      }
+    };
+
+    if (body.grupos && Array.isArray(body.grupos) && (body.grupos as unknown[]).length > 0) {
+      // ── Novo: front enviou grupos explícitos (parcelas separadas, etc.) ──
+      type GrupoP = {
+        chave: string; categoria_id: string; item_ids: string[];
+        decisao: "CRIAR" | "ATUALIZAR"; descricao?: string;
+        transacao_existente_id?: string | null;
+      };
+      for (const g of body.grupos as GrupoP[]) {
+        const gItems = naoIgnorados.filter((i) => (g.item_ids as string[]).includes(i.id));
+        if (gItems.length === 0) continue;
+        const defDesc = `${conta?.nome ?? "Fatura"} - ${catNome.get(g.categoria_id) ?? ""}`.trim();
+        const descricao = (g.descricao ?? descricoesOv[g.chave] ?? defDesc).trim();
+        const txAlvo = (g.transacao_existente_id as string | null) ??
+          gItems.find((i) => i.transacao_existente_id)?.transacao_existente_id ?? null;
+        await processarGrupo(g.categoria_id, gItems, g.decisao, descricao, txAlvo);
+      }
+    } else {
+      // ── Legado: 1 lançamento por categoria_id ──────────────────────────
+      const catGrupos = new Map<string, Item[]>();
+      for (const it of naoIgnorados) {
+        const k = it.categoria_escolhida_id!;
+        if (!catGrupos.has(k)) catGrupos.set(k, []);
+        catGrupos.get(k)!.push(it);
+      }
+      for (const [catId, items] of catGrupos) {
+        const decisaoFinal: "CRIAR" | "ATUALIZAR" =
+          decisoesOv[catId] ??
+          (items.find((i) => i.transacao_existente_id) ? "ATUALIZAR" : "CRIAR");
+        const defDesc = `${conta?.nome ?? "Fatura"} - ${catNome.get(catId) ?? ""}`.trim();
+        const descricao = (descricoesOv[catId] ?? defDesc).trim();
+        const txAlvo = items.find((i) => i.transacao_existente_id)?.transacao_existente_id ?? null;
+        await processarGrupo(catId, items, decisaoFinal, descricao, txAlvo);
       }
     }
   }
@@ -641,26 +662,24 @@ async function aprenderPadrao(
 // ── Sugerir categorias + decisão ──────────────────────────────
 //
 // Para cada item sem categoria escolhida:
-//   1. Busca padrões do assistente → categoria_sugerida_id
-//   2. Busca transações PENDENTE/PROJECAO na mesma conta com descrição
-//      similar + valor próximo → transacao_existente_id + decisao sugerida
-//      (ATUALIZAR quando há match; CRIAR quando não há)
+//   1. Normaliza descrição removendo "- Parcela X/Y" antes do match.
+//   2. Busca padrões do assistente → categoria_sugerida_id.
+//   3. Busca transações PENDENTE/PROJECAO na mesma conta, dentro de
+//      ±90 dias do vencimento. melhorTransacao aplica critérios mais
+//      rígidos (sim ≥ 0.55, val ±5%, número de parcela deve bater).
 //
-// Os campos são gravados nos itens mas NÃO sobrescrevem categoria_escolhida_id
-// (respeita escolha já feita pelo usuário). Idempotente: pode ser chamado
-// várias vezes sem perda de dados.
+// Idempotente — pode ser chamado várias vezes sem perda de dados.
 async function sugerir(c: ReturnType<typeof db>, sessaoId: string, userId: string) {
   logRequest("POST", `/faturas/${sessaoId}/sugerir`);
 
   const { data: sessao, error: errSessao } = await c
     .from("fatura_import_sessao")
-    .select("id, conta_id, status")
+    .select("id, conta_id, status, vencimento_fatura")
     .eq("id", sessaoId)
     .single();
   if (errSessao || !sessao) return erro("Sessão não encontrada", 404);
   if (sessao.status !== "EM_ANALISE") return erro("Sessão não está em análise", 422);
 
-  // Itens pendentes de sugestão (sem categoria escolhida e sem decisão final)
   const { data: itens, error: errItens } = await c
     .from("fatura_import_item")
     .select("id, descricao, valor, parcela_atual, parcela_total")
@@ -670,32 +689,53 @@ async function sugerir(c: ReturnType<typeof db>, sessaoId: string, userId: strin
   if (errItens) return erro(errItens.message);
   if (!itens?.length) return json({ atualizados: 0 });
 
-  // Padrões do assistente com categoria definida
   const { data: padroes } = await c
     .from("assistente_lancamentos")
     .select("descricao, categoria_id")
     .eq("user_id", userId)
     .not("categoria_id", "is", null);
 
-  // Transações pendentes/projeção na mesma conta (candidatos ao ATUALIZAR)
-  const { data: txs } = await c
+  // Candidatos ao ATUALIZAR: mesma conta, dentro de ±90 dias do vencimento.
+  const venc = sessao.vencimento_fatura as string | null;
+  let txQuery = c
     .from("transacoes")
-    .select("id, descricao, valor, categoria_id, id_recorrencia, nr_parcela, total_parcelas")
+    .select("id, descricao, valor, categoria_id, nr_parcela, total_parcelas, data")
     .eq("user_id", userId)
-    .eq("conta_id", sessao.conta_id)
+    .eq("conta_id", sessao.conta_id as string)
     .in("status", ["PENDENTE", "PROJECAO"])
-    .order("data_transacao", { ascending: false })
+    .order("data", { ascending: false })
     .limit(300);
+  if (venc) {
+    const vd = new Date(venc + "T12:00:00Z");
+    const from = new Date(vd); from.setDate(from.getDate() - 90);
+    const to   = new Date(vd); to.setDate(to.getDate()   + 30);
+    txQuery = txQuery.gte("data", from.toISOString().slice(0, 10));
+    txQuery = txQuery.lte("data", to.toISOString().slice(0, 10));
+  }
+  const { data: txs } = await txQuery;
 
   let atualizados = 0;
   for (const item of itens) {
-    const catId   = melhorCategoria(item.descricao, padroes ?? []);
-    const txMatch = melhorTransacao(item, txs ?? [], catId);
+    // Descrição normalizada (sem sufixo de parcela) para matching
+    const descNorm = normDescParaMatch(item.descricao as string);
+    const catId    = melhorCategoria(descNorm, padroes ?? []);
+    const txMatch  = melhorTransacao(
+      {
+        descricao:    item.descricao as string,
+        valor:        item.valor as number,
+        parcela_atual: item.parcela_atual as number | null,
+      },
+      (txs ?? []) as Array<{
+        id: string; descricao: string; valor: number;
+        categoria_id: string | null; nr_parcela: number | null; data: string;
+      }>,
+      catId,
+      venc,
+    );
 
     const patch: Record<string, unknown> = {};
-    if (catId)    patch.categoria_sugerida_id  = catId;
-    if (txMatch)  patch.transacao_existente_id = txMatch.id;
-    // Fallback: se não achou categoria via assistente mas a tx tem uma → usa ela
+    if (catId)   patch.categoria_sugerida_id  = catId;
+    if (txMatch) patch.transacao_existente_id = txMatch.id;
     if (!catId && txMatch?.categoria_id) patch.categoria_sugerida_id = txMatch.categoria_id;
 
     if (Object.keys(patch).length === 0) continue;
@@ -709,6 +749,17 @@ async function sugerir(c: ReturnType<typeof db>, sessaoId: string, userId: strin
 
 
 // ── Helpers de similaridade ────────────────────────────────────
+
+// Remove sufixo de parcela da descrição para matching no assistente.
+// "Netflix - Parcela 6/12" → "Netflix"
+// "UBER EATS (2/3)"        → "UBER EATS"
+function normDescParaMatch(s: string): string {
+  return s
+    .replace(/\s*[-–—]\s*(?:parc(?:ela)?\.?\s*)?\d+\s*\/\s*\d+\s*$/i, "")
+    .replace(/\s*\(?\s*\d+\s*\/\s*\d+\s*\)?\s*$/i, "")
+    .replace(/\s+parc(?:ela)?\.?\s*\d+\s*\/\s*\d+\s*$/i, "")
+    .trim();
+}
 
 function normTxt(s: string): string {
   return s
@@ -761,27 +812,153 @@ function melhorCategoria(
 }
 
 function melhorTransacao(
-  item: { descricao: string; valor: number },
-  txs: Array<{ id: string; descricao: string; valor: number; categoria_id: string | null }>,
+  item: { descricao: string; valor: number; parcela_atual: number | null },
+  txs: Array<{
+    id: string; descricao: string; valor: number;
+    categoria_id: string | null; nr_parcela: number | null; data: string;
+  }>,
   catSugeridaId: string | null,
+  vencimento: string | null,
 ): { id: string; categoria_id: string | null } | null {
+  const temParcela = item.parcela_atual != null;
+  // Critérios mais rígidos que v1 — evita falsos positivos
+  const threshSim  = temParcela ? 0.40 : 0.55;  // era 0.35 para tudo
+  const threshVal  = temParcela ? 0.02 : 0.05;  // era 0.15 para tudo
+  const janelaDias = temParcela ? 60   : 45;
+
   let best: { id: string; score: number; categoria_id: string | null } | null = null;
 
   for (const tx of txs) {
+    // 1. Filtro de data — tx deve estar dentro da janela do vencimento
+    if (vencimento && tx.data) {
+      const diffMs = Math.abs(
+        new Date(vencimento + "T12:00:00Z").getTime() -
+        new Date(tx.data    + "T12:00:00Z").getTime(),
+      );
+      if (diffMs > janelaDias * 86_400_000) continue;
+    }
+
+    // 2. Filtro de valor
     const valDiff = Math.abs(tx.valor - item.valor) / Math.max(item.valor, 0.01);
-    if (valDiff > 0.15) continue;
+    if (valDiff > threshVal) continue;
 
-    const sim = simTexto(item.descricao, tx.descricao);
-    if (sim < 0.35) continue;
+    // 3. Para parcelas: pula se nr_parcela não bate (evita casar parc 2 com parc 5)
+    if (temParcela && tx.nr_parcela != null && tx.nr_parcela !== item.parcela_atual) {
+      continue;
+    }
 
-    // Bônus se a categoria da tx coincide com a categoria sugerida
-    const catBonus = catSugeridaId && tx.categoria_id === catSugeridaId ? 0.15 : 0;
-    const score = sim * 0.7 + (1 - valDiff) * 0.15 + catBonus;
+    // 4. Similaridade de texto com descrição normalizada (sem "- Parcela X/Y")
+    const descNorm = normDescParaMatch(item.descricao);
+    const sim = simTexto(descNorm, tx.descricao);
+    if (sim < threshSim) continue;
+
+    // 5. Score final
+    const catBonus   = catSugeridaId && tx.categoria_id === catSugeridaId ? 0.10 : 0;
+    const parcBonus  = temParcela && tx.nr_parcela === item.parcela_atual  ? 0.20 : 0;
+    const score = sim * 0.65 + (1 - valDiff) * 0.15 + catBonus + parcBonus;
     if (!best || score > best.score) {
       best = { id: tx.id, score, categoria_id: tx.categoria_id };
     }
   }
   return best;
+}
+
+
+// ── Aplicar todas as sugestões de categoria em lote ──────────
+//
+// Copia categoria_sugerida_id → categoria_escolhida_id para todos os
+// itens pendentes que ainda não foram classificados manualmente.
+// Agrupa por categoria para minimizar roundtrips.
+async function aplicarSugestoes(c: ReturnType<typeof db>, sessaoId: string) {
+  logRequest("POST", `/faturas/${sessaoId}/aplicar-sugestoes`);
+
+  const { data: itens, error } = await c
+    .from("fatura_import_item")
+    .select("id, categoria_sugerida_id")
+    .eq("sessao_id", sessaoId)
+    .is("categoria_escolhida_id", null)
+    .not("categoria_sugerida_id", "is", null)
+    .neq("decisao", "IGNORAR");
+
+  if (error) return erro(error.message);
+  if (!itens?.length) return json({ aplicados: 0 });
+
+  // 1 UPDATE por categoria sugerida (minimiza roundtrips)
+  const porCat = new Map<string, string[]>();
+  for (const it of itens) {
+    const catId = it.categoria_sugerida_id as string;
+    if (!porCat.has(catId)) porCat.set(catId, []);
+    porCat.get(catId)!.push(it.id as string);
+  }
+
+  let aplicados = 0;
+  for (const [catId, ids] of porCat) {
+    const { error: err } = await c
+      .from("fatura_import_item")
+      .update({ categoria_escolhida_id: catId })
+      .in("id", ids);
+    if (!err) aplicados += ids.length;
+  }
+
+  logSuccess("Sugestões aplicadas", { sessaoId, aplicados });
+  return json({ aplicados });
+}
+
+
+// ── Listar transações candidatas para vincular manualmente ────
+//
+// GET /faturas/:id/transacoes?q=<texto>
+// Retorna PENDENTE/PROJECAO da conta do cartão, filtradas por ±90 dias
+// do vencimento. Filtragem por texto via `q` é feita em memória.
+async function listarTransacoesCandidatas(
+  c: ReturnType<typeof db>,
+  req: Request,
+  sessaoId: string,
+) {
+  logRequest("GET", `/faturas/${sessaoId}/transacoes`);
+  const q = new URL(req.url).searchParams.get("q")?.trim() ?? "";
+
+  const { data: sessao, error: errSessao } = await c
+    .from("fatura_import_sessao")
+    .select("conta_id, vencimento_fatura")
+    .eq("id", sessaoId)
+    .single();
+  if (errSessao || !sessao) return erro("Sessão não encontrada", 404);
+
+  let query = c
+    .from("transacoes")
+    .select("id, descricao, valor, data, tipo, status, categoria_id, categoria:categorias(descricao)")
+    .eq("conta_id", sessao.conta_id as string)
+    .in("status", ["PENDENTE", "PROJECAO"])
+    .order("data", { ascending: false })
+    .limit(100);
+
+  if (sessao.vencimento_fatura) {
+    const vd   = new Date((sessao.vencimento_fatura as string) + "T12:00:00Z");
+    const from = new Date(vd); from.setDate(from.getDate() - 90);
+    const to   = new Date(vd); to.setDate(to.getDate()   + 30);
+    query = query.gte("data", from.toISOString().slice(0, 10));
+    query = query.lte("data", to.toISOString().slice(0, 10));
+  }
+
+  const { data, error } = await query;
+  if (error) return erro(error.message);
+
+  let result = (data ?? []) as Array<{
+    id: string; descricao: string; valor: number; data: string;
+    tipo: string; status: string; categoria_id: string | null;
+    categoria: { descricao: string } | null;
+  }>;
+
+  if (q) {
+    const qn = normTxt(q);
+    result = result.filter(
+      (tx) => normTxt(tx.descricao).includes(qn) || simTexto(q, tx.descricao) >= 0.20,
+    );
+  }
+
+  logResponse(200, { count: result.length });
+  return json({ dados: result.slice(0, 50) });
 }
 
 

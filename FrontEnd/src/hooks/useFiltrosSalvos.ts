@@ -32,9 +32,19 @@ export function useFiltrosSalvos(pagina?: string) {
   const renomear = async (id: string, novoNome: string): Promise<boolean> => {
     const { ok } = await apiMutate(`/filtros/${id}`, 'PUT', { nome: novoNome.trim() })
     if (ok) {
-      // Optimistic-ish: atualiza cache localmente sem refetch
       qc.setQueryData<FiltroSalvo[]>(qk.filtros(uid), prev =>
         prev?.map(f => f.id === id ? { ...f, nome: novoNome.trim() } : f) ?? []
+      )
+    }
+    return ok
+  }
+
+  /** Substitui os dados de um filtro existente (mantém o nome). */
+  const atualizarDados = async (id: string, dados: Record<string, unknown>): Promise<boolean> => {
+    const { ok } = await apiMutate(`/filtros/${id}`, 'PUT', { dados })
+    if (ok) {
+      qc.setQueryData<FiltroSalvo[]>(qk.filtros(uid), prev =>
+        prev?.map(f => f.id === id ? { ...f, dados } : f) ?? []
       )
     }
     return ok
@@ -55,5 +65,5 @@ export function useFiltrosSalvos(pagina?: string) {
     qc.setQueryData<FiltroSalvo[]>(qk.filtros(uid), [])
   }
 
-  return { filtros, carregando, salvar, renomear, excluir, excluirTodos }
+  return { filtros, carregando, salvar, renomear, atualizarDados, excluir, excluirTodos }
 }

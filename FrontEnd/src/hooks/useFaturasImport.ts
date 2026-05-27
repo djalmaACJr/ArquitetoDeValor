@@ -11,10 +11,19 @@ import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import { supabase } from '../lib/supabase'
 import type {
-  FaturaImportSessao, FaturaImportItem, DecisaoFaturaImport,
+  FaturaImportSessao, FaturaImportItem, DecisaoFaturaImport, TxCandidata,
 } from '../types'
 
 interface OpResult<T = unknown> { ok: boolean; dados: T | null; erro: string | null }
+
+interface GrupoPayload {
+  chave:                   string
+  categoria_id:            string
+  item_ids:                string[]
+  decisao:                 'CRIAR' | 'ATUALIZAR'
+  descricao?:              string
+  transacao_existente_id?: string | null
+}
 
 async function fetchSessoes(): Promise<FaturaImportSessao[]> {
   const res = await apiFetch<FaturaImportSessao[]>('/faturas')
@@ -152,18 +161,32 @@ export function useFaturaImportSessao(id: string | null) {
     return { ok: r.ok, dados: r.dados ?? null, erro: r.erro }
   }
 
+  /** Aplica todas as categoria_sugerida_id como categoria_escolhida_id em lote. */
+  const aplicarSugestoes = async (): Promise<OpResult<{ aplicados: number }>> => {
+    const r = await apiMutate<{ aplicados: number }>(`/faturas/${id}/aplicar-sugestoes`, 'POST')
+    if (r.ok) await invalidarSessao()
+    return { ok: r.ok, dados: r.dados ?? null, erro: r.erro }
+  }
+
+  /** Busca transações candidatas para vincular manualmente (PENDENTE/PROJECAO da conta). */
+  const buscarTransacoes = async (q?: string): Promise<OpResult<TxCandidata[]>> => {
+    if (!id) return { ok: false, dados: null, erro: 'Sessão não carregada' }
+    const qs = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
+    const r = await apiFetch<TxCandidata[]>(`/faturas/${id}/transacoes${qs}`)
+    return { ok: r.ok, dados: r.ok ? (r.dados ?? []) : null, erro: r.erro }
+  }
+
   /**
    * Confirma a sessão aplicando as decisões dos itens em arqvalor.transacoes.
-   * Payload opcional contém o modo e overrides escolhidos pelo usuário na UI:
-   *   - modo:       REGISTRO (1 lançamento por item) ou CATEGORIA (agrupado).
-   *   - decisoes:   override CRIAR/ATUALIZAR por chave (item.id ou categoria_id
-   *                 conforme o modo).
-   *   - descricoes: override de descrição por chave.
+   *   - modo REGISTRO: decisoes + descricoes por item.id
+   *   - modo CATEGORIA: grupos[] com agrupamento explícito (parcelas separadas)
+   *                     ou legado decisoes/descricoes por categoria_id
    */
   const confirmar = async (payload?: {
-    modo:        'REGISTRO' | 'CATEGORIA'
-    decisoes?:   Record<string, 'CRIAR' | 'ATUALIZAR'>
-    descricoes?: Record<string, string>
+    modo:         'REGISTRO' | 'CATEGORIA'
+    decisoes?:    Record<string, 'CRIAR' | 'ATUALIZAR'>
+    descricoes?:  Record<string, string>
+    grupos?:      GrupoPayload[]
   }): Promise<OpResult<{ criadas: number; atualizadas: number; modo: string }>> => {
     const r = await apiMutate<{ criadas: number; atualizadas: number; modo: string }>(
       `/faturas/${id}/confirmar`, 'POST', payload,
@@ -190,5 +213,7 @@ export function useFaturaImportSessao(id: string | null) {
     setCategoria,
     sugerir,
     confirmar,
+    aplicarSugestoes,
+    buscarTransacoes,
   }
 }
