@@ -79,28 +79,33 @@ function stripParcela(s: string): string {
  *  – Parcelas → 1 grupo por item.
  *  – Não-parcelas → 1 grupo por categoria. */
 function initGrupos(
-  itens:     FaturaImportItem[],
-  catPorId:  Map<string, { descricao: string }>,
-  contaNome: string,
+  itens:            FaturaImportItem[],
+  catPorId:         Map<string, { descricao: string }>,
+  contaNome:        string,
+  separarPorCartao: boolean,
 ): GrupoImport[] {
   const naoIgnorados = itens.filter(i => i.decisao !== 'IGNORAR' && !!i.categoria_escolhida_id)
-  const comParcela   = naoIgnorados.filter(i => i.parcela_atual != null)
-  const semParcela   = naoIgnorados.filter(i => i.parcela_atual == null)
+
+  // Parcelas com transação já vinculada = financiamento rastreado → grupo próprio (ATUALIZAR)
+  const parcelaComTx = naoIgnorados.filter(i => i.parcela_atual != null && !!i.transacao_existente_id)
+  // Todos os demais (sem parcela, ou parcela sem tx existente) → agrupam por categoria
+  const paraAgrupar  = naoIgnorados.filter(i => !(i.parcela_atual != null && !!i.transacao_existente_id))
+
   const result: GrupoImport[] = []
 
-  for (const it of comParcela) {
+  for (const it of parcelaComTx) {
     result.push({
       id:                     `parc-${it.id}`,
       categoria_id:           it.categoria_escolhida_id!,
       item_ids:               [it.id],
-      decisao:                it.transacao_existente_id ? 'ATUALIZAR' : 'CRIAR',
+      decisao:                'ATUALIZAR',
       transacao_existente_id: it.transacao_existente_id,
       descricao:              stripParcela(it.descricao),
     })
   }
 
   const catMap = new Map<string, FaturaImportItem[]>()
-  for (const it of semParcela) {
+  for (const it of paraAgrupar) {
     const k = it.categoria_escolhida_id!
     if (!catMap.has(k)) catMap.set(k, [])
     catMap.get(k)!.push(it)
@@ -113,7 +118,9 @@ function initGrupos(
       item_ids:               items.map(i => i.id),
       decisao:                txEx ? 'ATUALIZAR' : 'CRIAR',
       transacao_existente_id: txEx,
-      descricao:              `${contaNome} - ${catPorId.get(catId)?.descricao ?? ''}`.trim(),
+      descricao:              separarPorCartao
+          ? `${contaNome} - ${catPorId.get(catId)?.descricao ?? ''}`.trim()
+          : (catPorId.get(catId)?.descricao ?? '').trim(),
     })
   }
   return result
@@ -329,6 +336,7 @@ function Sandbox({ id }: { id: string }) {
   const [descEditTemp,       setDescEditTemp]       = useState('')
 
   // ── Estado – CATEGORIA: grupos ──────────────────────────────
+  const [separarPorCartao,    setSepararPorCartao]    = useState<boolean | null>(null)
   const [grupos,              setGrupos]              = useState<GrupoImport[]>([])
   const [selGrupo,            setSelGrupo]            = useState<Map<string, Set<string>>>(new Map())
   // grupoId → set de itemIds selecionados para separar
@@ -362,15 +370,16 @@ function Sandbox({ id }: { id: string }) {
     setGrupos([])
     setSelGrupo(new Map())
     setEditandoDescGrupo(null)
+    setSepararPorCartao(null)
   }, [modoImportacao])
 
   // ── Efeito: inicializa grupos ao entrar no modo CATEGORIA ───
   useEffect(() => {
-    if (modoImportacao !== 'CATEGORIA' || !sessao) return
+    if (modoImportacao !== 'CATEGORIA' || !sessao || separarPorCartao === null) return
     const conta = contas.find(c => c.conta_id === sessao.conta_id)
-    setGrupos(initGrupos(sessao.itens ?? [], catPorId, conta?.nome ?? 'Fatura'))
+    setGrupos(initGrupos(sessao.itens ?? [], catPorId, conta?.nome ?? 'Fatura', separarPorCartao))
     setSelGrupo(new Map())
-  }, [modoImportacao]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [modoImportacao, separarPorCartao]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Dados derivados ─────────────────────────────────────────
   const catPorId = useMemo(() => new Map(categorias.map(c => [c.id, c])), [categorias])
@@ -446,7 +455,8 @@ function Sandbox({ id }: { id: string }) {
   const podeConfirmar =
     sessao?.status === 'EM_ANALISE' &&
     itens.length > 0 &&
-    fase === 'preview'
+    fase === 'preview' &&
+    (modoImportacao !== 'CATEGORIA' || separarPorCartao !== null)
 
   // ── Handlers – Fase 1 ───────────────────────────────────────
   const emAnalise = sessao?.status === 'EM_ANALISE'
@@ -701,7 +711,13 @@ function Sandbox({ id }: { id: string }) {
 
   return (
     <div className="p-5">
-      <Toast msg={feedback} />
+      {/* Notificação flutuante — visível independente do scroll */}
+      {feedback && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-lg border border-av-green/40 text-[15px] font-semibold"
+          style={{ background: '#1a1f2e', color: '#00c896', maxWidth: '90vw' }}>
+          {feedback}
+        </div>
+      )}
 
       <div className="flex items-center gap-2 mb-1">
         <Link to="/importar-fatura" className="flex items-center gap-1 text-[14px]"
@@ -1019,7 +1035,10 @@ function Sandbox({ id }: { id: string }) {
                       </span>
                     )}
                   </button>
-                  {!encolhido && grupo.map((it, idx) => (
+                  {!encolhido && [...grupo].sort((a, b) => {
+                      const d = stripParcela(a.descricao).localeCompare(stripParcela(b.descricao), 'pt-BR')
+                      return d !== 0 ? d : a.data_compra.localeCompare(b.data_compra)
+                    }).map((it, idx) => (
                     <div key={it.id}
                       className={`flex items-center gap-2 px-3 py-2 text-[13px] flex-wrap${idx > 0 ? ' border-t border-white/5' : ' border-t border-white/5'}`}
                       style={{ color: '#e8eaf0' }}>
@@ -1214,7 +1233,31 @@ function Sandbox({ id }: { id: string }) {
             </span>
           </div>
 
-          {grupos.length === 0 ? (
+          {separarPorCartao === null ? (
+            <div className="rounded-xl border border-white/10 p-5" style={{ background: '#1a1f2e' }}>
+              <p className="text-[15px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>
+                Deseja separar os grupos por cartão?
+              </p>
+              <p className="text-[13px] mb-4" style={{ color: '#8b92a8' }}>
+                Se sim, o nome do cartão será incluído no título de cada grupo.
+                Se não, os grupos terão apenas o nome da categoria.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => setSepararPorCartao(true)}
+                  className="px-4 py-2 rounded-lg border border-white/10 hover:border-av-green/50 hover:bg-av-green/5 transition-all text-[14px]"
+                  style={{ color: '#e8eaf0' }}>
+                  Sim, incluir nome do cartão
+                </button>
+                <button
+                  onClick={() => setSepararPorCartao(false)}
+                  className="px-4 py-2 rounded-lg border border-white/10 hover:border-av-green/50 hover:bg-av-green/5 transition-all text-[14px]"
+                  style={{ color: '#e8eaf0' }}>
+                  Não, só por categoria
+                </button>
+              </div>
+            </div>
+          ) : grupos.length === 0 ? (
             <p className="text-[14px] italic" style={{ color: '#8b92a8' }}>
               Nenhum lançamento a importar — todos os itens estão ignorados.
             </p>

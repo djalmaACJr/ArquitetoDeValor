@@ -366,9 +366,23 @@ export default function LancamentosPage() {
   // ── Auto-colapsar header ao rolar; mostrar botão "voltar ao topo" ──
   // `overrideManual`: ativado quando o usuário clica em expandir/recolher
   // enquanto está scrollado. Desativa o auto-collapse até voltar ao topo.
+  //
+  // Raiz do problema com poucos registros:
+  //   O header sticky faz parte do fluxo normal → sua altura conta no
+  //   scrollHeight. Ao colapsar, scrollHeight diminui. Se a diferença for
+  //   maior que (scrollTop - 20), o browser clipa scrollTop para perto de
+  //   zero → event y<20 → expande → header cresce → scrollTop sobe →
+  //   colapsa de novo → loop / pisca.
+  //
+  // Solução definitiva (sem timers):
+  //   Só colapsa se `scrollable > headerH`.
+  //   Como a economia máxima possível é toda a altura do header atual,
+  //   essa guarda garante que mesmo no pior caso o scrollTop não cai para
+  //   zero. Matematicamente: novo scrollable = (scrollable - economia) ≥
+  //   (scrollable - headerH) > 0 → scrollTop nunca clipa para < 20.
   const [headerColapsado,   setHeaderColapsado]   = useState(false)
   const [mostrarVoltarTopo, setMostrarVoltarTopo] = useState(false)
-  const overrideManualRef = useRef(false)
+  const overrideManualRef  = useRef(false)
   useEffect(() => {
     const main = document.querySelector('main') as HTMLElement | null
     if (!main) return
@@ -379,11 +393,16 @@ export default function LancamentosPage() {
       requestAnimationFrame(() => {
         const y = main!.scrollTop
         if (y < 20) {
-          // Topo: zera override e força expandido
           overrideManualRef.current = false
           setHeaderColapsado(false)
         } else if (y > 120 && !overrideManualRef.current) {
-          setHeaderColapsado(true)
+          // Só colapsa quando há conteúdo scrollável suficiente para que o
+          // scrollTop não caia para perto do topo após o header encolher
+          const scrollavel = main!.scrollHeight - main!.clientHeight
+          const headerH    = stickyRef.current?.offsetHeight ?? 0
+          if (scrollavel > headerH) {
+            setHeaderColapsado(true)
+          }
         }
         setMostrarVoltarTopo(y > 240)
         ticking = false

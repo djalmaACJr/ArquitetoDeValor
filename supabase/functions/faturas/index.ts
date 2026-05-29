@@ -56,7 +56,7 @@ Deno.serve(async (req: Request) => {
     if (m === "PUT"    &&  id && acao === "itens") {
       const itemId = extrairItemId(req);
       if (!itemId) return erro("itemId inválido", 400);
-      return await editarItem(c, id, itemId, await req.json());
+      return await editarItem(c, id, itemId, await req.json(), userId);
     }
 
     // POST /faturas/:id/sugerir
@@ -314,13 +314,19 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
 
 
 // ── Atualizar item da sessão (decisão do usuário) ──────────────
-async function editarItem(c: ReturnType<typeof db>, sessaoId: string, itemId: string, body: Record<string, unknown>) {
+async function editarItem(
+  c: ReturnType<typeof db>,
+  sessaoId: string,
+  itemId: string,
+  body: Record<string, unknown>,
+  userId: string,
+) {
   logRequest("PUT", `/faturas/${sessaoId}/itens/${itemId}`, body);
 
   // Confirma posse via cascade — o item precisa pertencer à sessão
   const { data: item, error: errBusca } = await c
     .from("fatura_import_item")
-    .select("id")
+    .select("id, descricao")
     .eq("id", itemId)
     .eq("sessao_id", sessaoId)
     .maybeSingle();
@@ -351,6 +357,24 @@ async function editarItem(c: ReturnType<typeof db>, sessaoId: string, itemId: st
 
   if (error) { logError("Editar item fatura", error); return erro(error.message); }
   logDebug("Item atualizado", { id: itemId, decisao: data.decisao });
+
+  // Modo híbrido: registra novo padrão se o usuário classificou manualmente.
+  // Não sobrescreve padrão existente — o upsert definitivo fica no confirmar().
+  const catEscolhida = (body.categoria_escolhida_id ?? null) as string | null;
+  if (catEscolhida) {
+    const { data: sessao } = await c
+      .from("fatura_import_sessao")
+      .select("conta_id")
+      .eq("id", sessaoId)
+      .single();
+    await aprenderPadraoSeNovo(
+      c, userId,
+      (data.descricao ?? item.descricao) as string,
+      catEscolhida,
+      (sessao?.conta_id ?? null) as string | null,
+    );
+  }
+
   return json(data);
 }
 
@@ -620,6 +644,40 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
 
   logSuccess("Sessão confirmada", { sessaoId, modo, criadas, atualizadas });
   return json({ mensagem: "Importação confirmada.", criadas, atualizadas, modo });
+}
+
+
+/** Insere novo padrão no assistente SE não existir um para a mesma descrição.
+ *  Usado durante a classificação manual (modo híbrido) — não sobrescreve. */
+async function aprenderPadraoSeNovo(
+  c: ReturnType<typeof db>,
+  userId: string,
+  descricao: string,
+  categoriaId: string,
+  contaId: string | null,
+) {
+  const desc = normDescParaMatch(descricao).trim();
+  if (desc.length < 2 || desc.length > 200 || !categoriaId) return;
+
+  const { data: existente } = await c
+    .from("assistente_lancamentos")
+    .select("id")
+    .eq("user_id", userId)
+    .ilike("descricao", desc)
+    .limit(1)
+    .maybeSingle();
+
+  if (existente?.id) return; // padrão já existe → não sobrescreve
+
+  const { error } = await c.from("assistente_lancamentos").insert({
+    descricao:        desc,
+    categoria_id:     categoriaId,
+    conta_origem_id:  contaId,
+    conta_destino_id: null,
+    is_transferencia: false,
+    user_id:          userId,
+  });
+  if (error) logError("aprenderPadraoSeNovo", error);
 }
 
 
@@ -897,7 +955,16 @@ async function aplicarSugestoes(c: ReturnType<typeof db>, sessaoId: string) {
       .from("fatura_import_item")
       .update({ categoria_escolhida_id: catId })
       .in("id", ids);
-    if (!err) aplicados += ids.length;
+    if (err) {
+      logError("Aplicar sugestão categoria", { catId, ids, err });
+    } else {
+      aplicados += ids.length;
+    }
+  }
+
+  if (aplicados === 0 && porCat.size > 0) {
+    logWarn("Nenhum item atualizado — possível problema de permissão", { sessaoId });
+    return erro("Nenhum item foi atualizado. Verifique permissões da sessão.", 422);
   }
 
   logSuccess("Sugestões aplicadas", { sessaoId, aplicados });
