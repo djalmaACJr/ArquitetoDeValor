@@ -19,11 +19,12 @@ import { useState } from 'react'
 import { XCircle } from 'lucide-react'
 import { useCategorias } from '../../hooks/useCategorias'
 import type { Categoria } from '../../types'
-import FormCamposCategoria, {
+import FormCamposCategoria from './FormCamposCategoria'
+import {
   FORM_CATEGORIA_VAZIO,
   validarFormCategoria,
   type FormCategoriaState,
-} from './FormCamposCategoria'
+} from './formCategoriaShared'
 
 interface Props {
   /** Lista de categorias pai disponíveis para seleção (sem protegidas). */

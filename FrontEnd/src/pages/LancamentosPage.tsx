@@ -550,7 +550,7 @@ export default function LancamentosPage() {
       }
     }, 400)
     return () => { clearTimeout(timer); ctrl.abort(); pararBuscaRef.current = null }
-  }, [pesquisa, escopoPesquisa, mes, filtContas, filtCats, filtStatus, buscaNonce, buscaLimiteExtra])
+  }, [pesquisa, escopoPesquisa, mes, filtContas, filtCats, filtStatus, buscaNonce, buscaLimiteExtra, temFiltroAtivo])
 
   const limparPesquisa = () => { setPesquisa(''); setEscopoPesquisa('MES_ATUAL') }
 

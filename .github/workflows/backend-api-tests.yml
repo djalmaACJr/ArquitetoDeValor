@@ -31,6 +31,11 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
           TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+          # Segundo usuário para testes de RLS (cross-user isolation).
+          # Sem isso, ~9 testes de segurança pulam graciosamente.
+          # Cadastre como Secrets no GitHub: Settings → Secrets → Actions.
+          TEST_EMAIL_B: ${{ secrets.TEST_EMAIL_B }}
+          TEST_PASSWORD_B: ${{ secrets.TEST_PASSWORD_B }}
 
       - name: Salvar resultado dos testes
         if: always()

@@ -114,9 +114,11 @@ beforeAll(async () => {
   });
 
   // ── CA-CAT09 ─────────────────────────────────────────────
-  test("CA-CAT09 — POST /categorias rejeita descrição > 20 chars com 400", async () => {
+  // Limite passou de 20 para 50 chars (migration 20260527000003).
+  // Testa que > 50 ainda é rejeitado.
+  test("CA-CAT09 — POST /categorias rejeita descrição > 50 chars com 400", async () => {
     const { status } = await api("/categorias", "POST", {
-      descricao: "A".repeat(21),
+      descricao: "A".repeat(51),
     });
     expect(status).toBe(400);
   });

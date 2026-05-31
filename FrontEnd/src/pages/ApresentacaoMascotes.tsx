@@ -97,14 +97,35 @@ export default function ApresentacaoMascotes() {
   // mentores em outra ocasião), pré-carrega nos campos para o usuário só
   // editar o que quiser. `apelidos` chega vazio na 1ª renderização e
   // populado depois do fetch.
-  useEffect(() => {
+  //
+  // Padrão React 19 "derived state on dependency change": compara as
+  // dependências e atualiza state inline, em vez de usar useEffect com
+  // setState (anti-pattern que causa render em cascata).
+  const [apelidosBaseDep, setApelidosBaseDep] = useState({
+    sabio:     apelidos.sabio,
+    arquiteta: apelidos.arquiteta,
+    gato:      apelidos.gato,
+    raposa:    apelidos.raposa,
+  })
+  if (
+    apelidosBaseDep.sabio     !== apelidos.sabio     ||
+    apelidosBaseDep.arquiteta !== apelidos.arquiteta ||
+    apelidosBaseDep.gato      !== apelidos.gato      ||
+    apelidosBaseDep.raposa    !== apelidos.raposa
+  ) {
+    setApelidosBaseDep({
+      sabio:     apelidos.sabio,
+      arquiteta: apelidos.arquiteta,
+      gato:      apelidos.gato,
+      raposa:    apelidos.raposa,
+    })
     setApelidosTodos(prev => ({
       sabio:     apelidos.sabio     ?? prev.sabio,
       arquiteta: apelidos.arquiteta ?? prev.arquiteta,
       gato:      apelidos.gato      ?? prev.gato,
       raposa:    apelidos.raposa    ?? prev.raposa,
     }))
-  }, [apelidos.sabio, apelidos.arquiteta, apelidos.gato, apelidos.raposa])
+  }
   const [salvando, setSalvando] = useState(false)
   // Anima o emoji 🎲 quando o usuário clica em "Aleatório" — o dado rola,
   // chacoalha um pouco e cai. Dura ~900ms; só depois disso a fase muda.

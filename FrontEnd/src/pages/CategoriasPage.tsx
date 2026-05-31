@@ -5,10 +5,11 @@ import { useCategorias } from '../hooks/useCategorias'
 import {
   Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, SelectDark,
 } from '../components/ui/shared'
-import FormCamposCategoria, {
+import FormCamposCategoria from '../components/ui/FormCamposCategoria'
+import {
   FORM_CATEGORIA_VAZIO, formDeCategoriaExistente, validarFormCategoria,
   type FormCategoriaState,
-} from '../components/ui/FormCamposCategoria'
+} from '../components/ui/formCategoriaShared'
 import type { Categoria } from '../types'
 import { apiFetch, apiMutate, extrairLista } from '../lib/api'
 import { formatBRL, formatData, STATUS_LABEL, STATUS_COR } from '../lib/utils'

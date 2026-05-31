@@ -774,7 +774,7 @@ export default function ComparativoMensalPage() {
         borderWidth: 1.5, borderRadius: 6,
       },
     ],
-  }), [resumoA, resumoB])
+  }), [resumoA, resumoB, inicioA, fimA])
 
   const chartBarCats = useMemo((): ChartData<'bar'> => {
     const top = [...comparativo]

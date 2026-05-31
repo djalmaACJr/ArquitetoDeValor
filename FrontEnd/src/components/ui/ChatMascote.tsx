@@ -77,11 +77,16 @@ export default function ChatMascote({
   const [anexarContexto, setAnexarContexto] = useState(false)
   const [contextoJaEnviado, setContextoJaEnviado] = useState(false)
 
-  // Reset quando o conteúdo da tela muda (mudou de página/seção)
-  useEffect(() => {
+  // Reset quando o conteúdo da tela muda (mudou de página/seção).
+  // Padrão React 19 "derived state on prop change": compara o último
+  // título visto e atualiza state inline, evitando o anti-pattern
+  // "setState dentro de useEffect" que causa render em cascata.
+  const [tituloAnterior, setTituloAnterior] = useState(contextoPagina?.titulo)
+  if (tituloAnterior !== contextoPagina?.titulo) {
+    setTituloAnterior(contextoPagina?.titulo)
     setAnexarContexto(false)
     setContextoJaEnviado(false)
-  }, [contextoPagina?.titulo])
+  }
 
   // Screenshot — só relevante se o provedor ativo aceitar visão.
   const { provedorAtivo } = useIAPreferencia()

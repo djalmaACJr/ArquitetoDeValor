@@ -54,7 +54,9 @@
       "Bash(deno check *)",
       "Bash(deno lint *)",
       "Bash(r)",
-      "Bash(powershell -Command \"\\(Get-Content tests/07_seguranca_rls.test.ts -Raw\\) -replace 'async \\\\\\(\\\\\\) => \\\\{if \\\\\\(guardarUserB\\\\\\(\\\\\\)\\\\\\) return;const', \\\\\"async \\(\\) => {`r`n    if \\(guardarUserB\\(\\)\\) return;`r`n    const\\\\\" | Set-Content tests/07_seguranca_rls.test.ts -NoNewline\")"
+      "Bash(powershell -Command \"\\(Get-Content tests/07_seguranca_rls.test.ts -Raw\\) -replace 'async \\\\\\(\\\\\\) => \\\\{if \\\\\\(guardarUserB\\\\\\(\\\\\\)\\\\\\) return;const', \\\\\"async \\(\\) => {`r`n    if \\(guardarUserB\\(\\)\\) return;`r`n    const\\\\\" | Set-Content tests/07_seguranca_rls.test.ts -NoNewline\")",
+      "Bash(echo \"exit:$?\")",
+      "Bash(grep -E \"^\\\\.env\\(\\\\.example\\)?$\" .gitignore)"
     ]
   }
 }

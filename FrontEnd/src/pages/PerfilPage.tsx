@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import type { FormEvent } from 'react'
 import {
   User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown,
@@ -882,10 +882,14 @@ export default function PerfilPage() {
   const emailAtual = emailPerfil
 
   // ── Nome ────────────────────────────────────────────────────
-  const [nome, setNome]         = useState(nomeAtual)
-  // Quando o fetch da tabela resolve, ressincroniza o input controlado.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { setNome(nomeAtual) }, [nomeAtual])
+  // Padrão React 19 "derived state on prop change": quando o fetch
+  // resolve `nomeAtual`, ressincroniza o input controlado sem useEffect.
+  const [nome, setNome]               = useState(nomeAtual)
+  const [nomeAtualPrev, setNomeAtualPrev] = useState(nomeAtual)
+  if (nomeAtualPrev !== nomeAtual) {
+    setNomeAtualPrev(nomeAtual)
+    setNome(nomeAtual)
+  }
   const [fbNome, setFbNome]     = useState<Feedback | null>(null)
   const [loadNome, setLoadNome] = useState(false)
 
