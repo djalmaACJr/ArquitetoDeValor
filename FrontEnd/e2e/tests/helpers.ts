@@ -31,12 +31,24 @@ export async function abrirNovoLancamento(page: Page, tipo: TipoLancamento = 'De
  * keydown global do teclado para digitar dígitos/operadores. Por isso, depois de
  * abrir, basta usar `page.keyboard.press(...)` para cada caractere e clicar OK.
  *
+ * IMPORTANTE: o input Descrição abre um dropdown "Sugestões do assistente" após
+ * 400ms de debounce quando o input está FOCADO e tem 2+ chars. Esse dropdown
+ * fica abaixo do input e pode cobrir o botão Valor — causando flakiness em CI
+ * (Calculadora não abre porque o click é interceptado). Por isso, tiramos o foco
+ * antes de clicar no Valor: o dropdown só abre se o input estiver focado.
+ *
  * @param valor formato BR (ex: '99,90', '7500', '12,5'). Aceita ',' ou '.'.
  */
 export async function preencherValor(page: Page, drawer: Locator, valor: string) {
+  // Tira o foco de qualquer input — fecha o dropdown de Sugestões do Assistente
+  // que poderia estar interceptando o click no botão Valor.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+  await page.waitForTimeout(150)
+
   await drawer.getByRole('button', { name: 'Valor' }).click()
-  // Aguarda a Calculadora montar e ficar visível antes de digitar
-  await drawer.getByRole('button', { name: /^OK$/ }).waitFor({ state: 'visible', timeout: 5_000 })
+  // Aguarda a Calculadora montar e ficar visível antes de digitar (timeout
+  // generoso pra tolerar CI lento).
+  await drawer.getByRole('button', { name: /^OK$/ }).waitFor({ state: 'visible', timeout: 10_000 })
 
   for (const ch of valor) {
     if (ch >= '0' && ch <= '9') {
@@ -47,5 +59,5 @@ export async function preencherValor(page: Page, drawer: Locator, valor: string)
   }
 
   await drawer.getByRole('button', { name: /^OK$/ }).click()
-  await page.waitForTimeout(150)
+  await page.waitForTimeout(200)
 }
