@@ -282,9 +282,12 @@ export default function ApresentacaoMascotes() {
     return <LayoutTema onConcluir={aoConcluirTema}/>
   }
 
-  // Última etapa do 1º acesso: avisa sobre os dados de exemplo
-  if (fase === 'aviso-dados' && escolhido) {
-    return <LayoutAvisoDados mascote={escolhido} onConcluir={aoConcluirAvisoDados}/>
+  // Última etapa do 1º acesso: avisa sobre os dados de exemplo.
+  // No fluxo "Aleatório" `escolhido` é null — usa 'sabio' como fallback
+  // visual (mascote padrão); o que importa é mostrar o aviso e o botão
+  // de concluir, não trocar por outro mentor.
+  if (fase === 'aviso-dados') {
+    return <LayoutAvisoDados mascote={escolhido ?? 'sabio'} onConcluir={aoConcluirAvisoDados}/>
   }
 
   return (
