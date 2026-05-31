@@ -56,7 +56,17 @@
       "Bash(r)",
       "Bash(powershell -Command \"\\(Get-Content tests/07_seguranca_rls.test.ts -Raw\\) -replace 'async \\\\\\(\\\\\\) => \\\\{if \\\\\\(guardarUserB\\\\\\(\\\\\\)\\\\\\) return;const', \\\\\"async \\(\\) => {`r`n    if \\(guardarUserB\\(\\)\\) return;`r`n    const\\\\\" | Set-Content tests/07_seguranca_rls.test.ts -NoNewline\")",
       "Bash(echo \"exit:$?\")",
-      "Bash(grep -E \"^\\\\.env\\(\\\\.example\\)?$\" .gitignore)"
+      "Bash(grep -E \"^\\\\.env\\(\\\\.example\\)?$\" .gitignore)",
+      "Bash(python -c \"import docx; print\\(docx.__version__\\)\")",
+      "Bash(python3 -c \"import docx; print\\(docx.__version__\\)\")",
+      "Bash(pip install *)",
+      "Bash(python -c ' *)",
+      "Bash(python -m pip show python-docx)",
+      "Bash(python -m pip install python-docx)",
+      "Bash(where python *)",
+      "Bash(/c/Users/djjun/AppData/Local/Programs/Python/Python39/python.exe -c ' *)",
+      "Bash(PYTHONIOENCODING=utf-8 /c/Users/djjun/AppData/Local/Programs/Python/Python39/python.exe -c ' *)",
+      "Bash(PYTHONIOENCODING=utf-8 \"/c/Users/djjun/AppData/Local/Programs/Python/Python39/python.exe\" \"Documentação/_update_spec_v2_0.py\")"
     ]
   }
 }
