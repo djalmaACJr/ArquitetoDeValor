@@ -460,7 +460,11 @@ function SecaoExport() {
       // Cor é metadado visual do app — não interessa no export.
       // Ícone mantido por ser parte do uso prático (emoji informativo).
       if (exportarCategorias) {
-        const pais = categorias.filter(c => !c.id_pai)
+        // Só categorias ATIVAS: inativadas representam histórico que o
+        // usuário decidiu esconder e não fazem sentido carregar pra outro
+        // ambiente / importar de volta.
+        const catsAtivas = categorias.filter(c => c.ativa)
+        const pais = catsAtivas.filter(c => !c.id_pai)
         type Row = import('../lib/exportUtils').ExportRow
         const rows: Row[] = []
         pais.forEach(p => {
@@ -470,7 +474,7 @@ function SecaoExport() {
             icone:     p.icone ?? '',
             _style:    'group',
           })
-          categorias.filter(s => s.id_pai === p.id).forEach(s => {
+          catsAtivas.filter(s => s.id_pai === p.id).forEach(s => {
             rows.push({
               categoria: p.descricao,
               sub:       s.descricao,

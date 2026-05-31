@@ -147,10 +147,10 @@ export function useFaturaImportSessao(id: string | null) {
   const invalidarSessao = () =>
     qc.invalidateQueries({ queryKey: qk.faturaImportSessao(uid, id ?? '') })
 
-  /** Atualiza metadados/decisões de fluxo da sessão (modo, separar_por_cartao). */
+  /** Atualiza metadados/decisões de fluxo da sessão (modo, separar_por_cartao, valor_total). */
   const editarSessao = async (
     payload: Partial<Pick<FaturaImportSessao,
-      'modo_importacao' | 'separar_por_cartao' | 'observacao' | 'status'
+      'modo_importacao' | 'separar_por_cartao' | 'observacao' | 'status' | 'valor_total'
     >>,
   ): Promise<OpResult<FaturaImportSessao>> => {
     const r = await apiMutate<FaturaImportSessao>(`/faturas/${id}`, 'PUT', payload)

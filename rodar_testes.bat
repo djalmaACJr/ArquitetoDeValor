@@ -9,20 +9,31 @@ echo ================================================
 echo   ARQUITETO DE VALOR - TESTES AUTOMATIZADOS
 echo ================================================
 echo.
-echo   1. Todos os modulos
+echo   --- Modulos de dominio ---
+echo   1. Todos os modulos (dominio + seguranca)
 echo   2. Contas
 echo   3. Categorias
 echo   4. Transacoes
 echo   5. Transferencias
 echo   6. Lembretes
 echo   7. Assistente de Lancamentos
+echo.
+echo   --- Seguranca ---
+echo  12. Todos os testes de seguranca
+echo  13. RLS (isolamento entre usuarios)
+echo  14. Triggers (FK cross-user, protecoes)
+echo  15. RPCs (SECURITY INVOKER)
+echo  16. Auth + CORS
+echo.
+echo   --- Manutencao ---
 echo   8. Limpar (com backup e restore)
 echo   9. Backup manual
 echo  10. Restore manual
 echo  11. Configurar nivel de logs
+echo.
 echo   0. Sair
 echo.
-set /p OPC="Digite a opcao (0-11): "
+set /p OPC="Digite a opcao (0-16): "
 
 if "%OPC%"=="0"  goto FIM
 if "%OPC%"=="1"  goto OPC1
@@ -36,6 +47,11 @@ if "%OPC%"=="8"  goto OPC8
 if "%OPC%"=="9"  goto OPC9
 if "%OPC%"=="10" goto OPC10
 if "%OPC%"=="11" goto OPC11
+if "%OPC%"=="12" goto OPC12
+if "%OPC%"=="13" goto OPC13
+if "%OPC%"=="14" goto OPC14
+if "%OPC%"=="15" goto OPC15
+if "%OPC%"=="16" goto OPC16
 echo Opcao invalida.
 goto MENU
 
@@ -116,6 +132,31 @@ echo Aplicando...
 supabase secrets set --project-ref ftpelncgrakpphytfrfo LOG_LEVEL=%LL% ENVIRONMENT=test
 timeout /t 5 /nobreak >nul
 echo Configurado: %LL%
+goto PAUSA
+
+:OPC12
+set TESTFILE=tests/07_seguranca_rls.test.ts tests/08_seguranca_triggers.test.ts tests/09_seguranca_rpc.test.ts tests/10_seguranca_auth_cors.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC13
+set TESTFILE=tests/07_seguranca_rls.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC14
+set TESTFILE=tests/08_seguranca_triggers.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC15
+set TESTFILE=tests/09_seguranca_rpc.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC16
+set TESTFILE=tests/10_seguranca_auth_cors.test.ts
+call :RUNMOD
 goto PAUSA
 
 :RUNTODOS

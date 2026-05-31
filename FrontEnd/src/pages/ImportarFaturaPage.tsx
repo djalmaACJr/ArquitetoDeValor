@@ -661,10 +661,6 @@ function Sandbox({ id }: { id: string }) {
   // filtramos as tx CRIADAS por confirmar anterior (transacao_criada_id).
   // Sem isso, depois de "Reabrir análise" o tx criado aparece em
   // txTodasCartao E na soma de itens — dobrando o valor.
-  const txIdsVinculadas = new Set(
-    itens.filter(i => i.decisao !== 'IGNORAR' && i.transacao_existente_id)
-         .map(i => i.transacao_existente_id as string),
-  )
   const txIdsRepresentadas = new Set<string>()
   for (const i of itens) {
     if (i.decisao === 'IGNORAR') continue
