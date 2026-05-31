@@ -62,7 +62,13 @@ const RE_VENCIMENTO =
 //   "Djalma A C Junior"        (nome do titular antes do total)
 //   "Fechamento da próxima fatura ..."
 //   "Pagamento em 06 ABR"      (pagamento recebido pelo Nubank — não é compra)
-const DESC_PROIBIDA = /^(a\s|de\s|até\s|fechamento|saldo|total|pagamento\b|limite|próxim|emiss[ãa]o|valor\s+m[áa]ximo)/i;
+//
+// IMPORTANTE: "a", "de", "até" só são proibidos quando vêm seguidos de
+// dia+mês (padrão "a 28 ABR"). Sem essa restrição, mercadores legítimos
+// como "De Roma Pizzaria" / "A Casa do Pão" eram bloqueados — fonte
+// conhecida de discrepância entre soma parseada e total da fatura.
+const DESC_PROIBIDA =
+  /^(a|de|até)\s+\d{1,2}\s+(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\b|^(fechamento|saldo|total|pagamento\b|limite|próxim|emiss[ãa]o|valor\s+m[áa]ximo)/i;
 
 function parseDataNubank(dia: string, mesAbrev: string, ano: number): string | null {
   const mes = MESES_PT[mesAbrev.toUpperCase()];
@@ -129,12 +135,16 @@ export const parserNubank: ParserFatura = {
       const data_compra = parseDataNubank(dia, mesAbrev, anoUsado);
       let   valor       = parseValorBR(valorRaw);
 
-      // Transações internacionais trazem a taxa de câmbio antes do valor real:
-      //   "Claude.Ai Subscription BRL 110.00 = USD 21.32 Conversão: BRL 5.34 = USD 1 = R$ 5,34 R$ 113,98"
-      // O não-guloso para em R$ 5,34 (taxa); o valor real R$ 113,98 fica logo
-      // após o fim do match. Detectamos pelo padrão "BRL X = USD" na descrição
-      // e relemos o trecho seguinte para corrigir o valor.
-      if (/BRL\s+[\d.]+\s*=\s*USD/i.test(desc)) {
+      // Transações internacionais trazem a TAXA de câmbio antes do valor real:
+      //   A) "Claude.Ai Subscription BRL 110.00 = USD 21.32 Conversão: BRL 5.34 = USD 1 = R$ 5,34 R$ 113,98"
+      //   B) "Anthropic USD 5.00 Conversão: USD 1 = R$ 5,21 R$ 26,07"
+      //   C) "Deepseek USD 2.12 Conversão: USD 1 = R$ 5,18 R$ 10,99"
+      //
+      // Em todos os casos o não-guloso para no PRIMEIRO R$ X,YY (que é a
+      // taxa de conversão, ~R$ 5 / USD), não no valor real. Detectamos por
+      // "Conversão" na descrição (cobre todos os formatos) e relemos o
+      // trecho seguinte ao match pra pegar o valor real.
+      if (/convers[ãa]o/i.test(desc)) {
         const pos   = (m.index ?? 0) + m[0].length;
         const apos  = texto1L.slice(pos, pos + 50);
         const mReal = apos.match(/^\s*R\$\s*([\d.]+,\d{2})/i);

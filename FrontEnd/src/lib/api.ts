@@ -50,10 +50,10 @@ export async function apiFetch<T = unknown>(
   }
 }
 
-// ── POST / PUT / DELETE ───────────────────────────────────────────────────────
+// ── POST / PUT / PATCH / DELETE ───────────────────────────────────────────────
 export async function apiMutate<T = unknown>(
   path: string,
-  method: 'POST' | 'PUT' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   body?: unknown
 ): Promise<ApiResult<T>> {
   try {

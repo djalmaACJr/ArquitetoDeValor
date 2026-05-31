@@ -155,6 +155,10 @@ export interface FaturaImportSessao {
   valor_total:         number | null
   status:              StatusFaturaImport
   observacao:          string | null
+  // Decisões de fluxo persistidas — o usuário pode pausar a revisão e
+  // voltar de onde parou sem refazer os "menus iniciais".
+  modo_importacao:     'REGISTRO' | 'CATEGORIA' | null
+  separar_por_cartao:  boolean | null
   criado_em:           string
   atualizado_em:       string
   // Vindo do JOIN no GET
@@ -180,8 +184,19 @@ export interface FaturaImportItem {
   transacao_criada_id:    string | null
   hash_match:             string | null
   observacao:             string | null
+  // Persistência do estado de edição (modo CATEGORIA + descrição custom):
+  // grupo_chave        — identifica grupos separados manualmente. NULL = item
+  //                      pertence ao grupo "default" da categoria.
+  // descricao_override — descrição customizada (modo REGISTRO por item,
+  //                      modo CATEGORIA replicada nos itens do grupo).
+  grupo_chave:            string | null
+  descricao_override:     string | null
   criado_em:              string
   atualizado_em:          string
+  // Join: snapshot da transação vinculada (apenas quando transacao_existente_id != null).
+  // Usado pra mostrar a descrição/status atuais da projeção/pendência em vez
+  // do texto cru do PDF, evitando confusão na tela de Revisão.
+  transacao_existente?:   { descricao: string; status: string; data: string } | null
 }
 
 // Transação candidata para vincular manualmente em importação de fatura
@@ -194,4 +209,9 @@ export interface TxCandidata {
   status:       string
   categoria_id: string | null
   categoria?:   { descricao: string } | null
+  // Conta onde a transação existe — útil pra mostrar na UI quando a busca
+  // retorna transações de contas diferentes do cartão da fatura (ex.: uma
+  // projeção lançada na conta corrente).
+  conta_id?:    string
+  conta?:       { nome: string; tipo: string } | null
 }

@@ -10,12 +10,14 @@
 
 import type { ParserFatura, ParsedFatura } from "./tipos.ts";
 import { parserNubank }   from "./nubank.ts";
+import { parserInter }    from "./inter.ts";
+import { parserC6 }       from "./c6.ts";
 import { parserGenerico } from "./generico.ts";
 
 const PARSERS: ParserFatura[] = [
   parserNubank,
-  // parserInter,    // TODO F2.x
-  // parserC6,       // TODO F2.x
+  parserInter,
+  parserC6,
   parserGenerico,    // fallback — sempre por último
 ];
 

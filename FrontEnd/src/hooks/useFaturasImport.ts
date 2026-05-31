@@ -38,16 +38,24 @@ async function fetchSessao(id: string): Promise<FaturaImportSessao> {
   return res.dados
 }
 
+/** Resultado do upload, com `codigo` opcional pra erros estruturados
+ *  (ex.: SENHA_OBRIGATORIA / SENHA_INCORRETA pra PDFs protegidos). */
+export type UploadFaturaResult = OpResult<FaturaImportSessao> & { codigo?: string }
+
 /**
  * Upload do PDF (multipart). `apiFetch`/`apiMutate` só fazem JSON, então
  * montamos fetch direto aqui mantendo o mesmo padrão de auth.
+ *
+ * `senha` é opcional — usada apenas pra PDFs protegidos. NÃO é persistida
+ * em lugar algum; vai no FormData só desta request e é descartada.
  */
 async function uploadFatura(payload: {
   conta_id: string
   arquivo:  File
   vencimento_fatura?: string | null
   valor_total?:       number | null
-}): Promise<OpResult<FaturaImportSessao>> {
+  senha?:             string
+}): Promise<UploadFaturaResult> {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.access_token) return { ok: false, dados: null, erro: 'Não autenticado' }
 
@@ -56,6 +64,7 @@ async function uploadFatura(payload: {
   form.append('arquivo', payload.arquivo)
   if (payload.vencimento_fatura) form.append('vencimento_fatura', payload.vencimento_fatura)
   if (payload.valor_total != null) form.append('valor_total', String(payload.valor_total))
+  if (payload.senha)               form.append('senha', payload.senha)
 
   try {
     const res = await fetch(
@@ -70,11 +79,12 @@ async function uploadFatura(payload: {
         body: form,
       }
     )
-    const data = await res.json().catch(() => ({}))
+    const data = await res.json().catch(() => ({} as Record<string, unknown>))
     return {
-      ok:    res.ok,
-      dados: res.ok ? (data as FaturaImportSessao) : null,
-      erro:  res.ok ? null : (data.erro ?? `Erro ${res.status}`),
+      ok:     res.ok,
+      dados:  res.ok ? (data as FaturaImportSessao) : null,
+      erro:   res.ok ? null : (String((data as { erro?: string }).erro ?? '') || `Erro ${res.status}`),
+      codigo: res.ok ? undefined : ((data as { codigo?: string }).codigo ?? undefined),
     }
   } catch (e) {
     return { ok: false, dados: null, erro: (e as Error).message }
@@ -100,7 +110,8 @@ export function useFaturasImport() {
     arquivo:  File
     vencimento_fatura?: string | null
     valor_total?:       number | null
-  }) => {
+    senha?:             string
+  }): Promise<UploadFaturaResult> => {
     const r = await uploadFatura(payload)
     if (r.ok) await invalidar()
     return r
@@ -136,17 +147,46 @@ export function useFaturaImportSessao(id: string | null) {
   const invalidarSessao = () =>
     qc.invalidateQueries({ queryKey: qk.faturaImportSessao(uid, id ?? '') })
 
+  /** Atualiza metadados/decisões de fluxo da sessão (modo, separar_por_cartao). */
+  const editarSessao = async (
+    payload: Partial<Pick<FaturaImportSessao,
+      'modo_importacao' | 'separar_por_cartao' | 'observacao' | 'status'
+    >>,
+  ): Promise<OpResult<FaturaImportSessao>> => {
+    const r = await apiMutate<FaturaImportSessao>(`/faturas/${id}`, 'PUT', payload)
+    if (r.ok) await invalidarSessao()
+    return { ok: r.ok, dados: r.dados, erro: r.erro }
+  }
+
+  type PatchItem = Partial<Pick<FaturaImportItem,
+    'decisao' | 'categoria_escolhida_id' | 'transacao_existente_id' |
+    'descricao' | 'valor' | 'data_compra' | 'estabelecimento' |
+    'parcela_atual' | 'parcela_total' | 'observacao' |
+    'grupo_chave' | 'descricao_override'
+  >>
+
   const editarItem = async (
     itemId: string,
-    payload: Partial<Pick<FaturaImportItem,
-      'decisao' | 'categoria_escolhida_id' | 'transacao_existente_id' |
-      'descricao' | 'valor' | 'data_compra' | 'estabelecimento' |
-      'parcela_atual' | 'parcela_total' | 'observacao'
-    >>
+    payload: PatchItem,
   ): Promise<OpResult<FaturaImportItem>> => {
     const r = await apiMutate<FaturaImportItem>(`/faturas/${id}/itens/${itemId}`, 'PUT', payload)
     if (r.ok) await invalidarSessao()
     return { ok: r.ok, dados: r.dados, erro: r.erro }
+  }
+
+  /** Aplica o mesmo patch em vários itens de uma vez. Usado para
+   *  persistir edições de GRUPO inteiro (vincular, mudar descrição,
+   *  alternar CRIAR/ATUALIZAR) sem N requisições sequenciais. */
+  const patchItensBulk = async (
+    itemIds: string[],
+    patch:   PatchItem,
+  ): Promise<OpResult<{ atualizados: number }>> => {
+    if (itemIds.length === 0) return { ok: true, dados: { atualizados: 0 }, erro: null }
+    const r = await apiMutate<{ atualizados: number }>(
+      `/faturas/${id}/itens-bulk`, 'PATCH', { item_ids: itemIds, patch },
+    )
+    if (r.ok) await invalidarSessao()
+    return { ok: r.ok, dados: r.dados ?? null, erro: r.erro }
   }
 
   const setDecisao = (itemId: string, decisao: DecisaoFaturaImport) =>
@@ -168,10 +208,21 @@ export function useFaturaImportSessao(id: string | null) {
     return { ok: r.ok, dados: r.dados ?? null, erro: r.erro }
   }
 
-  /** Busca transações candidatas para vincular manualmente (PENDENTE/PROJECAO da conta). */
-  const buscarTransacoes = async (q?: string): Promise<OpResult<TxCandidata[]>> => {
+  /** Busca transações candidatas para vincular manualmente (PENDENTE/PROJECAO).
+   *  O `modo` muda a janela de datas considerada:
+   *    - CATEGORIA: apenas o mês do vencimento (lançamento agrupado fica
+   *                 datado no dia de pagamento, dentro do mês do venc.).
+   *    - REGISTRO:  do mês do vencimento até 2 meses antes (a compra real
+   *                 costuma cair em mês anterior ao venc.). */
+  const buscarTransacoes = async (
+    q?: string,
+    modo?: 'REGISTRO' | 'CATEGORIA',
+  ): Promise<OpResult<TxCandidata[]>> => {
     if (!id) return { ok: false, dados: null, erro: 'Sessão não carregada' }
-    const qs = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
+    const params = new URLSearchParams()
+    if (q?.trim())  params.set('q', q.trim())
+    if (modo)       params.set('modo', modo)
+    const qs = params.toString() ? `?${params}` : ''
     const r = await apiFetch<TxCandidata[]>(`/faturas/${id}/transacoes${qs}`)
     return { ok: r.ok, dados: r.ok ? (r.dados ?? []) : null, erro: r.erro }
   }
@@ -208,7 +259,9 @@ export function useFaturaImportSessao(id: string | null) {
     sessao,
     loading,
     error: error ? (error as Error).message : null,
+    editarSessao,
     editarItem,
+    patchItensBulk,
     setDecisao,
     setCategoria,
     sugerir,

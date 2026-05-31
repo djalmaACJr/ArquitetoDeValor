@@ -20,7 +20,7 @@ import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWa
 // Usamos `npm:` (suportado no Supabase Edge Runtime) em vez de esm.sh:
 // o esm.sh fazia o pdfjs-dist falhar em iniciar (worker resolver não acha
 // em Deno Edge). O npm: deixa o Supabase resolver e bundlear nativamente.
-import { extractText } from "npm:unpdf@1.3.0";
+import { extractText, getDocumentProxy } from "npm:unpdf@1.3.0";
 import { parsearFatura } from "./parsers/index.ts";
 import type { ParsedLinha } from "./parsers/index.ts";
 
@@ -57,6 +57,13 @@ Deno.serve(async (req: Request) => {
       const itemId = extrairItemId(req);
       if (!itemId) return erro("itemId inválido", 400);
       return await editarItem(c, id, itemId, await req.json(), userId);
+    }
+
+    // PATCH /faturas/:id/itens-bulk — aplica o mesmo patch em vários itens.
+    // Usado quando o usuário edita o grupo inteiro (vincular, descrição,
+    // decisão CRIAR/ATUALIZAR), evitando N PUTs sequenciais.
+    if (m === "PATCH"  &&  id && acao === "itens-bulk") {
+      return await editarItensBulk(c, id, await req.json());
     }
 
     // POST /faturas/:id/sugerir
@@ -123,9 +130,13 @@ async function buscarPorId(c: ReturnType<typeof db>, id: string) {
     return erro("Sessão de importação não encontrada", 404);
   }
 
+  // Inclui a descrição/status atuais da transação VINCULADA (quando há).
+  // Sem isso, o frontend exibia a descrição do PDF mesmo depois do usuário
+  // editar a descrição da transação real — gerava confusão na Revisão.
+  // PostgREST infere o join pelo FK fatura_import_item.transacao_existente_id.
   const { data: itens, error: errItens } = await c
     .from("fatura_import_item")
-    .select("*")
+    .select("*, transacao_existente:transacoes!fatura_import_item_transacao_existente_id_fkey(descricao, status, data)")
     .eq("sessao_id", id)
     .order("data_compra", { ascending: true })
     .order("criado_em",   { ascending: true });
@@ -155,6 +166,8 @@ async function criar(c: ReturnType<typeof db>, req: Request, userId: string) {
   //   arquivo             (File, PDF)
   //   vencimento_fatura?  (string YYYY-MM-DD, opcional — override do parser)
   //   valor_total?        (string numérico,     opcional — override do parser)
+  //   senha?              (string, opcional — senha do PDF protegido. NUNCA é
+  //                        persistida; vive só no escopo desta request.)
   const contentType = req.headers.get("content-type") ?? "";
   if (!contentType.includes("multipart/form-data")) {
     return erro("Content-Type deve ser multipart/form-data", 415);
@@ -165,6 +178,7 @@ async function criar(c: ReturnType<typeof db>, req: Request, userId: string) {
   const vencForm  = String(form.get("vencimento_fatura") ?? "").trim() || null;
   const totalRaw  = String(form.get("valor_total") ?? "").trim();
   const totalForm = totalRaw ? Number(totalRaw.replace(",", ".")) : null;
+  const senhaPdf  = String(form.get("senha") ?? "");  // pode ser vazio
 
   if (!contaId) return erro("conta_id é obrigatório", 422);
   if (!arquivo) return erro("arquivo PDF é obrigatório", 422);
@@ -186,19 +200,58 @@ async function criar(c: ReturnType<typeof db>, req: Request, userId: string) {
   // API nova do unpdf >= 1.x aceita Uint8Array direto, sem precisar de
   // getDocumentProxy separado. Retorna { totalPages, text } com text já
   // mesclado quando passamos mergePages: true.
+  //
+  // Senha (quando o PDF é protegido): repassada APENAS pra esta chamada
+  // do extractText. Não é logada, não vai pro banco, não vira observação.
+  // Some do escopo assim que a request termina.
   let textoCompleto = "";
   let totalPaginas  = 0;
   try {
     const bytes = new Uint8Array(ab);
-    const r = await extractText(bytes, { mergePages: true });
+    // Usa getDocumentProxy explicitamente para garantir que o `password`
+    // seja repassado ao pdfjs (a versão atual de unpdf não expõe password
+    // de forma confiável via extractText direto).
+    const docProxy = senhaPdf
+      ? await getDocumentProxy(bytes, { password: senhaPdf } as Parameters<typeof getDocumentProxy>[1])
+      : await getDocumentProxy(bytes);
+    const r = await extractText(docProxy, { mergePages: true });
     totalPaginas  = r.totalPages;
     textoCompleto = Array.isArray(r.text) ? r.text.join("\n") : String(r.text);
     logDebug("PDF extraído", { paginas: totalPaginas, bytes: textoCompleto.length });
   } catch (e) {
-    const msg = (e as Error)?.message ?? String(e);
+    const msg   = (e as Error)?.message ?? String(e);
+    const lower = msg.toLowerCase();
     logError("unpdf extractText", { msg, stack: (e as Error)?.stack });
+
+    // pdfjs (via unpdf) lança PasswordException quando o PDF é protegido.
+    // Códigos do PasswordException:
+    //   1 = NEED_PASSWORD       → senha ausente
+    //   2 = INCORRECT_PASSWORD  → senha errada
+    // O code vem como propriedade .code no erro — confiar nele é mais
+    // robusto que substring matching, porque a mensagem em si pode variar
+    // entre versões do pdfjs (ex.: "PasswordException", "No password given",
+    // "Incorrect Password", etc.).
+    const errCode = (e as { code?: number })?.code;
+    const ehPwException =
+      errCode === 1 || errCode === 2 ||
+      lower.includes("passwordexception") || lower.includes("password");
+    if (ehPwException || lower.includes("encrypted")) {
+      // Se já tinha senha e mesmo assim falhou → senha errada.
+      // Senão (sem senha ou code=2 explícito) → pede a senha.
+      const codigo = (senhaPdf && (errCode !== 1)) || errCode === 2 ||
+                     lower.includes("incorrect") || lower.includes("invalid")
+        ? "SENHA_INCORRETA"
+        : "SENHA_OBRIGATORIA";
+      return json({
+        erro: codigo === "SENHA_INCORRETA"
+          ? "Senha incorreta. Tente novamente."
+          : "Este PDF está protegido. Informe a senha para continuar.",
+        codigo,
+      }, 401);
+    }
+
     // Devolve a mensagem real do unpdf pra o front mostrar — assim o
-    // usuário pode reportar o motivo exato se for diferente de "PDF imagem".
+    // usuário pode reportar o motivo exato se for diferente de PDF imagem.
     return erro(`Falha ao ler o PDF: ${msg}`, 422);
   }
 
@@ -228,11 +281,20 @@ async function criar(c: ReturnType<typeof db>, req: Request, userId: string) {
 
   // ── Persistência: sessão + itens ────────────────────────────
   // Trigger trg_validar_conta_cartao_fatura bloqueia se conta não for CARTAO.
-  // Quando parser não extrai nada, guarda uma amostra do texto pra debug do
-  // formato — facilita ajustar a regex sem precisar reupar o PDF.
-  let observacao = resultado.avisos.length > 0
+  // Quando o parser não extrai NENHUM lançamento, guarda uma AMOSTRA do
+  // texto extraído pra debug do formato. Quando o parser acha itens mas
+  // o total diverge, o usuário tem ferramentas próprias na UI (ignorar
+  // itens, ajustar valor da fatura, vincular projeções) — então não
+  // poluímos a observacao com a AMOSTRA gigante nesses casos.
+  const observacaoBase = resultado.avisos.length > 0
     ? `Emissor: ${resultado.emissor}. ${resultado.avisos.join(" | ")}`
     : `Emissor: ${resultado.emissor}`;
+
+  const observacao = resultado.lancamentos.length === 0
+    ? `${observacaoBase}\n\nAMOSTRA (primeiros 12000 chars do PDF):\n${
+        textoCompleto.replace(/\s+/g, " ").slice(0, 12000)
+      }`
+    : observacaoBase;
 
   const { data: sessao, error: errSessao } = await c
     .from("fatura_import_sessao")
@@ -296,9 +358,14 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   if (body.status !== undefined && !STATUS_SESSAO.includes(body.status as typeof STATUS_SESSAO[number])) {
     return erro(`status inválido: use ${STATUS_SESSAO.join(" | ")}`, 422);
   }
+  if (body.modo_importacao !== undefined && body.modo_importacao !== null
+      && !["REGISTRO", "CATEGORIA"].includes(body.modo_importacao as string)) {
+    return erro("modo_importacao inválido: use REGISTRO | CATEGORIA", 422);
+  }
 
   const campos = camposParaAtualizar(body, [
     "status", "vencimento_fatura", "valor_total", "observacao",
+    "modo_importacao", "separar_por_cartao",
   ]);
   const { data, error } = await c
     .from("fatura_import_sessao")
@@ -347,6 +414,7 @@ async function editarItem(
     "decisao", "categoria_escolhida_id", "transacao_existente_id",
     "descricao", "valor", "tipo", "data_compra", "estabelecimento",
     "parcela_atual", "parcela_total", "observacao",
+    "grupo_chave", "descricao_override",
   ]);
   const { data, error } = await c
     .from("fatura_import_item")
@@ -358,24 +426,76 @@ async function editarItem(
   if (error) { logError("Editar item fatura", error); return erro(error.message); }
   logDebug("Item atualizado", { id: itemId, decisao: data.decisao });
 
-  // Modo híbrido: registra novo padrão se o usuário classificou manualmente.
-  // Não sobrescreve padrão existente — o upsert definitivo fica no confirmar().
-  const catEscolhida = (body.categoria_escolhida_id ?? null) as string | null;
-  if (catEscolhida) {
-    const { data: sessao } = await c
-      .from("fatura_import_sessao")
-      .select("conta_id")
-      .eq("id", sessaoId)
-      .single();
-    await aprenderPadraoSeNovo(
-      c, userId,
-      (data.descricao ?? item.descricao) as string,
-      catEscolhida,
-      (sessao?.conta_id ?? null) as string | null,
-    );
-  }
+  // OBS: o aprendizado do assistente (descricao → categoria) acontece APENAS
+  // no /confirmar. Se o usuário muda categoria/vincula/desvincula várias
+  // vezes durante a revisão, só o estado FINAL é o que merece virar padrão
+  // pra próxima fatura. Aprender a cada PUT pluralizaria os padrões com
+  // decisões intermediárias.
+  // referência: userId mantido só pra compatibilidade da assinatura.
+  void userId;
 
   return json(data);
+}
+
+
+// ── Atualizar vários itens com o mesmo patch ───────────────────
+//
+// Body: { item_ids: string[], patch: { ... mesmos campos de editarItem } }
+// Usado pelo front quando o usuário edita um GRUPO inteiro no modo
+// CATEGORIA — mudar descrição do grupo, vincular o grupo a uma tx,
+// alternar decisão CRIAR/ATUALIZAR — e queremos persistir tudo numa
+// requisição só.
+async function editarItensBulk(
+  c: ReturnType<typeof db>,
+  sessaoId: string,
+  body: Record<string, unknown>,
+) {
+  logRequest("PATCH", `/faturas/${sessaoId}/itens-bulk`, body);
+
+  const ids   = (body.item_ids as unknown[] | undefined) ?? [];
+  const patch = (body.patch    as Record<string, unknown> | undefined) ?? {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return erro("item_ids vazio", 422);
+  }
+  if (Object.keys(patch).length === 0) {
+    return erro("patch vazio", 422);
+  }
+  if (patch.decisao !== undefined && !DECISOES.includes(patch.decisao as Decisao)) {
+    return erro(`decisao inválida: use ${DECISOES.join(" | ")}`, 422);
+  }
+
+  // Garante posse: todos os itens precisam pertencer à sessão (o RLS já
+  // garantiria pelo user_id, mas dupla checagem aqui evita silent-noop).
+  const idsStr = (ids as string[]).filter((x) => typeof x === "string");
+  const { data: pertencem, error: errBusca } = await c
+    .from("fatura_import_item")
+    .select("id")
+    .eq("sessao_id", sessaoId)
+    .in("id", idsStr);
+  if (errBusca) return erro(errBusca.message);
+  if ((pertencem?.length ?? 0) !== idsStr.length) {
+    return erro("Um ou mais itens não pertencem à sessão", 404);
+  }
+
+  const campos = camposParaAtualizar(patch, [
+    "decisao", "categoria_escolhida_id", "transacao_existente_id",
+    "descricao", "valor", "tipo", "data_compra", "estabelecimento",
+    "parcela_atual", "parcela_total", "observacao",
+    "grupo_chave", "descricao_override",
+  ]);
+  if (Object.keys(campos).length === 0) {
+    return erro("Nenhum campo válido no patch", 422);
+  }
+
+  const { data, error } = await c
+    .from("fatura_import_item")
+    .update(campos)
+    .in("id", idsStr)
+    .select();
+
+  if (error) { logError("Editar itens bulk", error); return erro(error.message); }
+  logDebug("Itens atualizados em bulk", { sessaoId, count: data?.length });
+  return json({ atualizados: data?.length ?? 0, itens: data });
 }
 
 
@@ -464,7 +584,12 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
 
       let txCriadaId: string | null = null;
 
-      if (decisaoFinal === "ATUALIZAR" && item.transacao_existente_id) {
+      let idRecVinculo: string | null = null;
+      // Em RE-CONFIRMAÇÃO (após "Reabrir análise"), o item já tem
+      // transacao_criada_id apontando pra tx criada na confirmação anterior.
+      // Tratamos como ATUALIZAR pra evitar duplicação.
+      const txParaAtualizar = item.transacao_existente_id ?? item.transacao_criada_id ?? null;
+      if ((decisaoFinal === "ATUALIZAR" || txParaAtualizar) && txParaAtualizar) {
         // Atualiza tx existente. Trigger fn_preservar_valor_projetado preserva
         // valor_projetado se status atual era PROJECAO.
         const { data: txAtual, error } = await c
@@ -478,11 +603,12 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
             status:       "PENDENTE",
             observacao:   item.observacao,
           })
-          .eq("id", item.transacao_existente_id)
-          .select("id")
+          .eq("id", txParaAtualizar)
+          .select("id, id_recorrencia")
           .single();
         if (error) { logWarn("update tx", error.message); continue; }
         txCriadaId = txAtual?.id ?? null;
+        idRecVinculo = (txAtual?.id_recorrencia as string | null) ?? null;
         atualizadas++;
       } else if (item.parcela_total && item.parcela_total > 1 && item.parcela_atual) {
         // CRIAR série de parcelas (mesma id_recorrencia, MENSAL, intervalo 1).
@@ -542,7 +668,11 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
       }
 
       // Aprende: descricao_normalizada → categoria. Conta_origem = a conta CARTAO.
-      await aprenderPadrao(c, userId, item.descricao, item.categoria_escolhida_id!, sessao.conta_id);
+      // Se vinculou a uma série recorrente, registra o id_recorrencia pra
+      // próxima fatura cair direto na próxima parcela.
+      await aprenderPadrao(
+        c, userId, item.descricao, item.categoria_escolhida_id!, sessao.conta_id, idRecVinculo,
+      );
     }
   } else {
     // MODO CATEGORIA
@@ -573,14 +703,16 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
       const observacao = `Cartão ${conta?.nome ?? ""} | ${detalhe}`.slice(0, 2000);
 
       let txCriadaId: string | null = null;
+      let idRecVinculo: string | null = null;
 
       if (decisaoFinal === "ATUALIZAR" && txAlvo) {
         const { data: tx, error } = await c.from("transacoes").update({
           descricao, valor, data: dataLancto,
           categoria_id: catId, tipo: tipoTx, status: "PENDENTE", observacao,
-        }).eq("id", txAlvo).select("id").single();
+        }).eq("id", txAlvo).select("id, id_recorrencia").single();
         if (error) { logWarn("update grupo cat", error.message); return; }
         txCriadaId = tx?.id ?? null;
+        idRecVinculo = (tx?.id_recorrencia as string | null) ?? null;
         atualizadas++;
       } else {
         const { data: tx, error } = await c.from("transacoes").insert({
@@ -599,7 +731,7 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
           .in("id", items.map((i) => i.id));
       }
       for (const item of items) {
-        await aprenderPadrao(c, userId, item.descricao, catId, sessao.conta_id);
+        await aprenderPadrao(c, userId, item.descricao, catId, sessao.conta_id, idRecVinculo);
       }
     };
 
@@ -615,9 +747,16 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
         if (gItems.length === 0) continue;
         const defDesc = `${conta?.nome ?? "Fatura"} - ${catNome.get(g.categoria_id) ?? ""}`.trim();
         const descricao = (g.descricao ?? descricoesOv[g.chave] ?? defDesc).trim();
+        // Alvo do UPDATE: prioridade
+        //   1. explícito do front (transacao_existente_id do grupo)
+        //   2. qualquer item com transacao_existente_id (vínculo manual/sugerido)
+        //   3. qualquer item com transacao_criada_id (RE-CONFIRMAÇÃO após Reabrir —
+        //      sem isso, o reconfirmar criaria tx duplicada ao invés de atualizar)
         const txAlvo = (g.transacao_existente_id as string | null) ??
-          gItems.find((i) => i.transacao_existente_id)?.transacao_existente_id ?? null;
-        await processarGrupo(g.categoria_id, gItems, g.decisao, descricao, txAlvo);
+          gItems.find((i) => i.transacao_existente_id)?.transacao_existente_id ??
+          gItems.find((i) => i.transacao_criada_id)?.transacao_criada_id ?? null;
+        const decisaoEfetiva = txAlvo ? "ATUALIZAR" : g.decisao;
+        await processarGrupo(g.categoria_id, gItems, decisaoEfetiva, descricao, txAlvo);
       }
     } else {
       // ── Legado: 1 lançamento por categoria_id ──────────────────────────
@@ -628,12 +767,13 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
         catGrupos.get(k)!.push(it);
       }
       for (const [catId, items] of catGrupos) {
-        const decisaoFinal: "CRIAR" | "ATUALIZAR" =
-          decisoesOv[catId] ??
-          (items.find((i) => i.transacao_existente_id) ? "ATUALIZAR" : "CRIAR");
         const defDesc = `${conta?.nome ?? "Fatura"} - ${catNome.get(catId) ?? ""}`.trim();
         const descricao = (descricoesOv[catId] ?? defDesc).trim();
-        const txAlvo = items.find((i) => i.transacao_existente_id)?.transacao_existente_id ?? null;
+        // Mesmo princípio: vínculo > tx criada anteriormente.
+        const txAlvo = items.find((i) => i.transacao_existente_id)?.transacao_existente_id
+          ?? items.find((i) => i.transacao_criada_id)?.transacao_criada_id ?? null;
+        const decisaoFinal: "CRIAR" | "ATUALIZAR" =
+          decisoesOv[catId] ?? (txAlvo ? "ATUALIZAR" : "CRIAR");
         await processarGrupo(catId, items, decisaoFinal, descricao, txAlvo);
       }
     }
@@ -647,67 +787,46 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
 }
 
 
-/** Insere novo padrão no assistente SE não existir um para a mesma descrição.
- *  Usado durante a classificação manual (modo híbrido) — não sobrescreve. */
-async function aprenderPadraoSeNovo(
-  c: ReturnType<typeof db>,
-  userId: string,
-  descricao: string,
-  categoriaId: string,
-  contaId: string | null,
-) {
-  const desc = normDescParaMatch(descricao).trim();
-  if (desc.length < 2 || desc.length > 200 || !categoriaId) return;
-
-  const { data: existente } = await c
-    .from("assistente_lancamentos")
-    .select("id")
-    .eq("user_id", userId)
-    .ilike("descricao", desc)
-    .limit(1)
-    .maybeSingle();
-
-  if (existente?.id) return; // padrão já existe → não sobrescreve
-
-  const { error } = await c.from("assistente_lancamentos").insert({
-    descricao:        desc,
-    categoria_id:     categoriaId,
-    conta_origem_id:  contaId,
-    conta_destino_id: null,
-    is_transferencia: false,
-    user_id:          userId,
-  });
-  if (error) logError("aprenderPadraoSeNovo", error);
-}
-
-
 /** Upsert no assistente_lancamentos: descrição (case-insensitive) → categoria.
- *  Replica o padrão de upsert manual do edge function /assistente. */
+ *  Replica o padrão de upsert manual do edge function /assistente.
+ *
+ *  `idRecorrenciaVinculo` (opcional): quando o item da fatura foi vinculado
+ *  a uma transação que faz parte de uma série recorrente (parcelado/projeção),
+ *  registramos o id_recorrencia da série. Na próxima fatura, /sugerir usa
+ *  isso pra apontar diretamente à próxima parcela da mesma série — mesmo
+ *  que a descrição da fatura ("Shopee*Goldenmoon Come") seja diferente do
+ *  nome amigável do lançamento ("POCO X7 PRO - Shopee").
+ */
 async function aprenderPadrao(
   c: ReturnType<typeof db>,
   userId: string,
   descricao: string,
   categoriaId: string,
   contaId: string,
+  idRecorrenciaVinculo: string | null = null,
 ) {
   const desc = descricao.trim();
   if (desc.length < 2 || desc.length > 200 || !categoriaId) return;
 
   const { data: existente } = await c
     .from("assistente_lancamentos")
-    .select("id")
+    .select("id, id_recorrencia_vinculo")
     .eq("user_id", userId)
     .ilike("descricao", desc)
     .limit(1)
     .maybeSingle();
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     descricao:        desc,
     categoria_id:     categoriaId,
     conta_origem_id:  contaId,
     conta_destino_id: null,
     is_transferencia: false,
   };
+  // Só atualiza id_recorrencia_vinculo quando temos um novo vínculo.
+  // Se o caller passou null, preserva o valor anterior (não sobrescreve
+  // com null um vínculo já aprendido em uma fatura anterior).
+  if (idRecorrenciaVinculo) payload.id_recorrencia_vinculo = idRecorrenciaVinculo;
 
   if (existente?.id) {
     await c.from("assistente_lancamentos").update(payload).eq("id", existente.id);
@@ -749,18 +868,20 @@ async function sugerir(c: ReturnType<typeof db>, sessaoId: string, userId: strin
 
   const { data: padroes } = await c
     .from("assistente_lancamentos")
-    .select("descricao, categoria_id")
+    .select("descricao, categoria_id, id_recorrencia_vinculo")
     .eq("user_id", userId)
     .not("categoria_id", "is", null);
 
   // Candidatos ao ATUALIZAR: mesma conta, dentro de ±90 dias do vencimento.
+  // Exclui perna de transferência (provisionamento de pagamento da fatura).
   const venc = sessao.vencimento_fatura as string | null;
   let txQuery = c
     .from("transacoes")
-    .select("id, descricao, valor, categoria_id, nr_parcela, total_parcelas, data")
+    .select("id, descricao, valor, categoria_id, nr_parcela, total_parcelas, data, id_recorrencia, status")
     .eq("user_id", userId)
     .eq("conta_id", sessao.conta_id as string)
     .in("status", ["PENDENTE", "PROJECAO"])
+    .is("id_par_transferencia", null)
     .order("data", { ascending: false })
     .limit(300);
   if (venc) {
@@ -772,21 +893,56 @@ async function sugerir(c: ReturnType<typeof db>, sessaoId: string, userId: strin
   }
   const { data: txs } = await txQuery;
 
+  type TxCand = {
+    id: string; descricao: string; valor: number;
+    categoria_id: string | null; nr_parcela: number | null;
+    total_parcelas: number | null;
+    data: string; id_recorrencia: string | null; status: string;
+  };
+  const txsCand = (txs ?? []) as TxCand[];
+
   let atualizados = 0;
   for (const item of itens) {
     // Descrição normalizada (sem sufixo de parcela) para matching
     const descNorm = normDescParaMatch(item.descricao as string);
-    const catId    = melhorCategoria(descNorm, padroes ?? []);
-    const txMatch  = melhorTransacao(
+    const padraoMatch = melhorCategoriaComVinculo(descNorm, padroes ?? []);
+    const catId      = padraoMatch?.categoria_id ?? null;
+
+    // Atalho: se o padrão aprendido tem id_recorrencia_vinculo, tenta achar
+    // a próxima parcela ainda em aberto (PENDENTE/PROJECAO) da mesma série,
+    // de preferência uma cujo valor seja compatível com o item da fatura.
+    let txDirect: { id: string; categoria_id: string | null } | null = null;
+    if (padraoMatch?.id_recorrencia_vinculo) {
+      const candidatosSerie = txsCand.filter(
+        (t) => t.id_recorrencia === padraoMatch.id_recorrencia_vinculo,
+      );
+      if (candidatosSerie.length > 0) {
+        // Critério: valor com ±2% (parcelas costumam ter valor consistente).
+        const itemVal = Number(item.valor);
+        const porValor = candidatosSerie.filter(
+          (t) => Math.abs(t.valor - itemVal) / Math.max(itemVal, 0.01) < 0.02,
+        );
+        // Se sobrou candidato, prefere PENDENTE > PROJECAO, depois data
+        // mais antiga (próxima parcela = a mais antiga ainda em aberto).
+        const pool = porValor.length > 0 ? porValor : candidatosSerie;
+        pool.sort((a, b) => {
+          const sa = a.status === "PENDENTE" ? 0 : 1;
+          const sb = b.status === "PENDENTE" ? 0 : 1;
+          if (sa !== sb) return sa - sb;
+          return a.data.localeCompare(b.data);
+        });
+        const pick = pool[0];
+        if (pick) txDirect = { id: pick.id, categoria_id: pick.categoria_id };
+      }
+    }
+
+    const txMatch = txDirect ?? melhorTransacao(
       {
         descricao:    item.descricao as string,
         valor:        item.valor as number,
         parcela_atual: item.parcela_atual as number | null,
       },
-      (txs ?? []) as Array<{
-        id: string; descricao: string; valor: number;
-        categoria_id: string | null; nr_parcela: number | null; data: string;
-      }>,
+      txsCand,
       catId,
       venc,
     );
@@ -845,28 +1001,35 @@ function simTexto(a: string, b: string): number {
   return hit / Math.max(ta.size, tb.size);
 }
 
-function melhorCategoria(
+/** Acha o melhor padrão aprendido para uma descrição e retorna a categoria
+ *  + o id_recorrencia_vinculo (quando o padrão foi aprendido como vínculo
+ *  a uma série recorrente). Usado em /sugerir pra encadear
+ *  "padrão aprendido → próxima parcela da série". */
+function melhorCategoriaComVinculo(
   desc: string,
-  padroes: Array<{ descricao: string; categoria_id: string | null }>,
-): string | null {
+  padroes: Array<{ descricao: string; categoria_id: string | null; id_recorrencia_vinculo?: string | null }>,
+): { categoria_id: string; id_recorrencia_vinculo: string | null } | null {
   const dn = normTxt(desc);
-  let best: { id: string; score: number } | null = null;
+  let best: { categoria_id: string; id_recorrencia_vinculo: string | null; score: number } | null = null;
 
   for (const p of padroes) {
     if (!p.categoria_id) continue;
     const pn = normTxt(p.descricao);
     let score = 0;
     if (dn.includes(pn)) {
-      // Substring match: mais longo = mais específico
       score = 0.5 + (pn.length / Math.max(dn.length, 1)) * 0.5;
     } else {
       score = simTexto(desc, p.descricao) * 0.8;
     }
     if (score >= 0.3 && (!best || score > best.score)) {
-      best = { id: p.categoria_id, score };
+      best = {
+        categoria_id:           p.categoria_id,
+        id_recorrencia_vinculo: p.id_recorrencia_vinculo ?? null,
+        score,
+      };
     }
   }
-  return best?.id ?? null;
+  return best ? { categoria_id: best.categoria_id, id_recorrencia_vinculo: best.id_recorrencia_vinculo } : null;
 }
 
 function melhorTransacao(
@@ -974,16 +1137,28 @@ async function aplicarSugestoes(c: ReturnType<typeof db>, sessaoId: string) {
 
 // ── Listar transações candidatas para vincular manualmente ────
 //
-// GET /faturas/:id/transacoes?q=<texto>
-// Retorna PENDENTE/PROJECAO da conta do cartão, filtradas por ±90 dias
-// do vencimento. Filtragem por texto via `q` é feita em memória.
+// GET /faturas/:id/transacoes?q=<texto>&modo=REGISTRO|CATEGORIA
+// Retorna PENDENTE/PROJECAO de TODAS as contas do usuário (não só do
+// cartão da fatura) — útil quando o usuário projeta a despesa do cartão
+// na conta corrente (fluxo de caixa global).
+//
+// JANELA DE DATAS — depende do `modo` do front:
+//   • CATEGORIA: apenas o MÊS DO VENCIMENTO. Lançamento agrupado nasce
+//                datado no dia de pagamento (dentro desse mês).
+//   • REGISTRO:  do início do mês "venc − 2 meses" até o FIM do mês do
+//                vencimento. Cada item mantém a data da compra, que
+//                tipicamente cai 1–2 meses antes do venc.
+// EM AMBOS: nada FUTURO ao mês do vencimento. Sem isso, lançamentos de
+// meses seguintes apareciam errados na busca.
 async function listarTransacoesCandidatas(
   c: ReturnType<typeof db>,
   req: Request,
   sessaoId: string,
 ) {
   logRequest("GET", `/faturas/${sessaoId}/transacoes`);
-  const q = new URL(req.url).searchParams.get("q")?.trim() ?? "";
+  const url  = new URL(req.url);
+  const q    = url.searchParams.get("q")?.trim() ?? "";
+  const modo = (url.searchParams.get("modo") ?? "REGISTRO").toUpperCase();
 
   const { data: sessao, error: errSessao } = await c
     .from("fatura_import_sessao")
@@ -992,20 +1167,49 @@ async function listarTransacoesCandidatas(
     .single();
   if (errSessao || !sessao) return erro("Sessão não encontrada", 404);
 
+  // Restringe ao MESMO cartão da fatura — só lançamentos da própria conta
+  // do cartão podem ser vinculados. Antes a busca era global, mas isso
+  // confundia o usuário (mostrava projeções de outras contas).
+  //
+  // Exclui também a perna RECEITA de transferências (id_par_transferencia
+  // não nulo): essas tx são provisionamento de pagamento da fatura — a
+  // entrada de um valor vindo de outra conta. Elas não correspondem a
+  // itens de compra da fatura e poluem tanto a busca do modal Vincular
+  // quanto a validação "tx do cartão sem vínculo".
   let query = c
     .from("transacoes")
-    .select("id, descricao, valor, data, tipo, status, categoria_id, categoria:categorias(descricao)")
+    .select(
+      "id, descricao, valor, data, tipo, status, " +
+      "categoria_id, categoria:categorias(descricao), " +
+      "conta_id, conta:contas(nome, tipo)",
+    )
     .eq("conta_id", sessao.conta_id as string)
     .in("status", ["PENDENTE", "PROJECAO"])
+    .is("id_par_transferencia", null)
     .order("data", { ascending: false })
-    .limit(100);
+    .limit(200);
 
   if (sessao.vencimento_fatura) {
-    const vd   = new Date((sessao.vencimento_fatura as string) + "T12:00:00Z");
-    const from = new Date(vd); from.setDate(from.getDate() - 90);
-    const to   = new Date(vd); to.setDate(to.getDate()   + 30);
-    query = query.gte("data", from.toISOString().slice(0, 10));
-    query = query.lte("data", to.toISOString().slice(0, 10));
+    // Constrói a janela com base no MÊS do vencimento, em UTC, pra evitar
+    // bugs de fuso. Mês de venc. = "AAAA-MM-01" → último dia = (MM+1)/00.
+    const vencStr  = sessao.vencimento_fatura as string;       // "YYYY-MM-DD"
+    const [ya, ma] = vencStr.split("-").map(Number);
+    // Início do mês "venc − N"
+    const inicioMes = (offsetMeses: number) => {
+      const d = new Date(Date.UTC(ya, ma - 1 + offsetMeses, 1));
+      return d.toISOString().slice(0, 10);
+    };
+    // Último dia do mês "venc + N" (dia 0 do mês seguinte)
+    const fimMes = (offsetMeses: number) => {
+      const d = new Date(Date.UTC(ya, ma + offsetMeses, 0));
+      return d.toISOString().slice(0, 10);
+    };
+
+    const fromDate = modo === "CATEGORIA" ? inicioMes(0)  : inicioMes(-2);
+    const toDate   = fimMes(0);  // sempre fim do mês de vencimento
+    logDebug("Janela vincular", { modo, fromDate, toDate });
+    query = query.gte("data", fromDate);
+    query = query.lte("data", toDate);
   }
 
   const { data, error } = await query;
@@ -1013,8 +1217,9 @@ async function listarTransacoesCandidatas(
 
   let result = (data ?? []) as Array<{
     id: string; descricao: string; valor: number; data: string;
-    tipo: string; status: string; categoria_id: string | null;
-    categoria: { descricao: string } | null;
+    tipo: string; status: string;
+    categoria_id: string | null; categoria: { descricao: string } | null;
+    conta_id: string;             conta:     { nome: string; tipo: string } | null;
   }>;
 
   if (q) {
@@ -1024,8 +1229,11 @@ async function listarTransacoesCandidatas(
     );
   }
 
+  // Já filtrado pra mesma conta — só ordena por data desc.
+  result.sort((a, b) => b.data.localeCompare(a.data));
+
   logResponse(200, { count: result.length });
-  return json({ dados: result.slice(0, 50) });
+  return json({ dados: result.slice(0, 80) });
 }
 
 

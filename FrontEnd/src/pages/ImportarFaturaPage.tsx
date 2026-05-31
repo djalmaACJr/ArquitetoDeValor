@@ -14,7 +14,7 @@ import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import {
   FileUp, Receipt, Trash2, ArrowLeft, AlertCircle,
-  XCircle, RotateCcw, ChevronDown, Pencil,
+  XCircle, RotateCcw, ChevronDown, ChevronRight, Pencil,
 } from 'lucide-react'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
@@ -75,9 +75,15 @@ function stripParcela(s: string): string {
     .trim()
 }
 
-/** Inicializa grupos para o modo CATEGORIA:
- *  – Parcelas → 1 grupo por item.
- *  – Não-parcelas → 1 grupo por categoria. */
+/** Inicializa grupos para o modo CATEGORIA, reconstruindo do estado
+ *  persistido em fatura_import_item:
+ *  - Items com `grupo_chave` setado → grupo customizado (separado).
+ *  - Items sem `grupo_chave`:
+ *      • Parcelas com transação vinculada → 1 grupo por item.
+ *      • Demais → 1 grupo por categoria_escolhida_id.
+ *  Cada grupo herda descricao/decisao/transacao_existente_id do primeiro
+ *  item (no caso de grupo custom) ou do item-com-tx (no caso de grupo por
+ *  categoria). descricao_override SEMPRE manda sobre o resto. */
 function initGrupos(
   itens:            FaturaImportItem[],
   catPorId:         Map<string, { descricao: string }>,
@@ -86,42 +92,75 @@ function initGrupos(
 ): GrupoImport[] {
   const naoIgnorados = itens.filter(i => i.decisao !== 'IGNORAR' && !!i.categoria_escolhida_id)
 
-  // Parcelas com transação já vinculada = financiamento rastreado → grupo próprio (ATUALIZAR)
-  const parcelaComTx = naoIgnorados.filter(i => i.parcela_atual != null && !!i.transacao_existente_id)
-  // Todos os demais (sem parcela, ou parcela sem tx existente) → agrupam por categoria
-  const paraAgrupar  = naoIgnorados.filter(i => !(i.parcela_atual != null && !!i.transacao_existente_id))
-
   const result: GrupoImport[] = []
 
-  for (const it of parcelaComTx) {
-    result.push({
-      id:                     `parc-${it.id}`,
-      categoria_id:           it.categoria_escolhida_id!,
-      item_ids:               [it.id],
-      decisao:                'ATUALIZAR',
-      transacao_existente_id: it.transacao_existente_id,
-      descricao:              stripParcela(it.descricao),
-    })
+  // 1) Grupos customizados persistidos (separados manualmente).
+  const porChave = new Map<string, FaturaImportItem[]>()
+  const semChave: FaturaImportItem[] = []
+  for (const it of naoIgnorados) {
+    if (it.grupo_chave) {
+      if (!porChave.has(it.grupo_chave)) porChave.set(it.grupo_chave, [])
+      porChave.get(it.grupo_chave)!.push(it)
+    } else {
+      semChave.push(it)
+    }
   }
-
-  const catMap = new Map<string, FaturaImportItem[]>()
-  for (const it of paraAgrupar) {
-    const k = it.categoria_escolhida_id!
-    if (!catMap.has(k)) catMap.set(k, [])
-    catMap.get(k)!.push(it)
-  }
-  for (const [catId, items] of catMap) {
-    const txEx = items.find(i => i.transacao_existente_id)?.transacao_existente_id ?? null
+  for (const [chave, items] of porChave) {
+    const first = items[0]
+    const descOv  = first.descricao_override?.trim()
+    const descTx  = first.transacao_existente?.descricao?.trim()
+    const txEx    = first.transacao_existente_id
     result.push({
-      id:                     `cat-${catId}`,
-      categoria_id:           catId,
+      id:                     chave,
+      categoria_id:           first.categoria_escolhida_id!,
       item_ids:               items.map(i => i.id),
       decisao:                txEx ? 'ATUALIZAR' : 'CRIAR',
       transacao_existente_id: txEx,
-      descricao:              separarPorCartao
-          ? `${contaNome} - ${catPorId.get(catId)?.descricao ?? ''}`.trim()
-          : (catPorId.get(catId)?.descricao ?? '').trim(),
+      descricao:              descOv || descTx || stripParcela(first.descricao),
     })
+  }
+
+  // 2) Items sem grupo_chave → agrupa por (transacao_existente_id || categoria_id).
+  //    Múltiplos itens ligados à MESMA transação ficam em UM grupo só
+  //    (ex.: 7 itens de Supermercado vinculados manualmente ao mesmo
+  //    lançamento recorrente). Itens cada um ligado a um tx DIFERENTE
+  //    viram grupos individuais (ex.: parcelas 5/12 e 6/12 do Optical
+  //    Plus, vinculadas a projeções de meses diferentes).
+  type Bucket = { chave: string; items: FaturaImportItem[]; txId: string | null; catId: string }
+  const buckets = new Map<string, Bucket>()
+  for (const it of semChave) {
+    const tx  = it.transacao_existente_id
+    const cat = it.categoria_escolhida_id!
+    const k   = tx ? `tx:${tx}` : `cat:${cat}`
+    if (!buckets.has(k)) buckets.set(k, { chave: k, items: [], txId: tx, catId: cat })
+    buckets.get(k)!.items.push(it)
+  }
+  for (const { chave, items, txId, catId } of buckets.values()) {
+    const itComOv    = items.find(i => i.descricao_override?.trim())
+    const descOv     = itComOv?.descricao_override?.trim()
+    const itComTx    = items.find(i => i.transacao_existente_id) ?? items[0]
+    const descTxVinc = itComTx.transacao_existente?.descricao?.trim()
+    // Decisão: respeita escolha persistida do item (CRIAR/ATUALIZAR);
+    // só usa o default baseado em txId quando o item ainda está PENDENTE.
+    const itDec    = items.find(i => i.decisao === 'CRIAR' || i.decisao === 'ATUALIZAR')?.decisao
+    const decisao  = (itDec as 'CRIAR' | 'ATUALIZAR' | undefined) ?? (txId ? 'ATUALIZAR' : 'CRIAR')
+    // ID do grupo:
+    //  - vinculado     → `tx-${txId}` (estável; agrupa todos itens dessa tx)
+    //  - cat default   → `cat-${catId}` (compatível com IDs anteriores)
+    const groupId = txId ? `tx-${txId}` : `cat-${catId}`
+    // Descrição default quando não há override nem tx vinculada:
+    const descDefault = separarPorCartao
+      ? `${contaNome} - ${catPorId.get(catId)?.descricao ?? ''}`.trim()
+      : (catPorId.get(catId)?.descricao ?? '').trim()
+    result.push({
+      id:                     groupId,
+      categoria_id:           catId,
+      item_ids:               items.map(i => i.id),
+      decisao,
+      transacao_existente_id: txId,
+      descricao:              descOv || descTxVinc || descDefault,
+    })
+    void chave
   }
   return result
 }
@@ -150,21 +189,57 @@ function ListagemEUpload() {
 
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
 
-  const enviar = async () => {
-    setErro(null)
+  // Senha de PDFs protegidos.
+  //   precisaSenha === null  → PDF não precisa (caso normal).
+  //   precisaSenha === 'NOVA'      → 1ª vez pedindo; o usuário ainda não informou.
+  //   precisaSenha === 'INCORRETA' → usuário informou, mas estava errada.
+  // A senha vive APENAS neste state — não vai pra localStorage, não é salva
+  // em nenhum lugar persistente. Ao sucesso ou cancelamento, é descartada.
+  const [precisaSenha, setPrecisaSenha] = useState<null | 'NOVA' | 'INCORRETA'>(null)
+  const [senhaInput,   setSenhaInput]   = useState('')
+
+  const enviarComSenha = async (senha?: string) => {
     if (!contaId)  { setErro('Escolha um cartão.'); return }
     if (!arquivo)  { setErro('Selecione o PDF da fatura.'); return }
+    setErro(null)
     setEnviando(true)
-    const r = await importar({ conta_id: contaId, arquivo })
+    const r = await importar({ conta_id: contaId, arquivo, senha })
     setEnviando(false)
+
+    // PDF protegido — pede senha ao usuário em vez de mostrar erro genérico.
+    // Se já enviamos uma senha e o backend ainda retorna SENHA_OBRIGATORIA,
+    // tratamos como INCORRETA — pdfjs pode classificar errado a mensagem,
+    // mas se o usuário mandou senha e o servidor ainda diz "protegido",
+    // a senha não funcionou.
+    if (!r.ok && (r.codigo === 'SENHA_OBRIGATORIA' || r.codigo === 'SENHA_INCORRETA')) {
+      const senhaTentada = !!senha
+      const estado: 'NOVA' | 'INCORRETA' =
+        r.codigo === 'SENHA_INCORRETA' || senhaTentada ? 'INCORRETA' : 'NOVA'
+      setPrecisaSenha(estado)
+      return
+    }
+
     if (r.ok && r.dados) {
+      // Sucesso: zera estado da senha pra não vazar entre uploads.
+      setSenhaInput('')
+      setPrecisaSenha(null)
       setArquivo(null)
       toast('Fatura recebida — abra a sandbox para revisar.')
       navigate(`/importar-fatura/${r.dados.id}`)
-    } else {
-      setErro(r.erro ?? 'Falha ao enviar a fatura.')
+      return
     }
+
+    setErro(r.erro ?? 'Falha ao enviar a fatura.')
   }
+
+  const enviar = () => enviarComSenha(undefined)
+
+  const cancelarSenha = () => {
+    setPrecisaSenha(null)
+    setSenhaInput('')
+  }
+
+  const reenviarComSenha = () => enviarComSenha(senhaInput)
 
   const handleExcluir = async () => {
     if (!sessaoExcluir) return
@@ -223,7 +298,14 @@ function ListagemEUpload() {
                 type="file"
                 accept="application/pdf,.pdf"
                 className="hidden"
-                onChange={e => setArquivo(e.target.files?.[0] ?? null)}
+                onChange={e => {
+                  // Novo arquivo: reseta qualquer estado anterior de senha
+                  // — a senha do PDF anterior não vale pro novo upload.
+                  setArquivo(e.target.files?.[0] ?? null)
+                  setPrecisaSenha(null)
+                  setSenhaInput('')
+                  setErro(null)
+                }}
               />
             </label>
           </Field>
@@ -233,9 +315,60 @@ function ListagemEUpload() {
               style={{ color: '#f87171' }}>{erro}</p>
           )}
 
+          {/* Caixa de senha — aparece quando o backend reporta PDF protegido.
+              A senha vai SÓ no FormData desta request e some no setSenhaInput('')
+              após sucesso ou cancelamento. Não vai pra localStorage nem pro banco. */}
+          {precisaSenha && (
+            <div className="rounded-lg border px-3 py-3 flex flex-col gap-2"
+              style={{
+                background:  precisaSenha === 'INCORRETA' ? 'rgba(248,113,113,0.08)' : 'rgba(240,180,41,0.08)',
+                borderColor: precisaSenha === 'INCORRETA' ? 'rgba(248,113,113,0.30)' : 'rgba(240,180,41,0.30)',
+              }}>
+              <p className="text-[14px]" style={{ color: precisaSenha === 'INCORRETA' ? '#f87171' : '#f0b429' }}>
+                🔒 {precisaSenha === 'INCORRETA'
+                  ? 'Senha incorreta. Tente novamente.'
+                  : 'Este PDF está protegido por senha. Informe a senha para analisarmos a fatura.'}
+              </p>
+              <p className="text-[12px]" style={{ color: '#8b92a8' }}>
+                A senha é usada apenas para abrir este PDF agora.
+                Ela <strong>não é armazenada</strong> em nenhum lugar.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <input
+                  type="password"
+                  autoFocus
+                  value={senhaInput}
+                  onChange={e => setSenhaInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && senhaInput.length > 0 && !enviando) reenviarComSenha()
+                    if (e.key === 'Escape') cancelarSenha()
+                  }}
+                  placeholder="Senha do PDF"
+                  className="flex-1 min-w-[160px] rounded px-2 py-1.5 text-[14px] border outline-none"
+                  style={{ background: '#0d1117', color: '#e8eaf0', borderColor: 'rgba(255,255,255,0.15)' }}
+                  autoComplete="off"
+                />
+                <button
+                  onClick={reenviarComSenha}
+                  disabled={enviando || senhaInput.length === 0}
+                  className="px-3 py-1.5 rounded-md text-[14px] font-semibold bg-av-green hover:bg-av-green/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ color: '#0a0f1a' }}>
+                  {enviando ? 'Lendo…' : 'Abrir PDF'}
+                </button>
+                <button
+                  onClick={cancelarSenha}
+                  disabled={enviando}
+                  className="px-3 py-1.5 rounded-md text-[14px] border border-white/10 hover:border-white/30 transition-colors disabled:opacity-50"
+                  style={{ color: '#8b92a8' }}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
           <button
             onClick={enviar}
-            disabled={enviando || cartoes.length === 0}
+            disabled={enviando || cartoes.length === 0 || !!precisaSenha}
             className="w-full md:w-auto md:self-end px-4 py-2 rounded-lg bg-av-green text-[16px] font-semibold hover:bg-av-green/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ color: '#0a0f1a' }}>
             {enviando ? 'Enviando…' : 'Enviar fatura'}
@@ -311,8 +444,9 @@ function ListagemEUpload() {
 function Sandbox({ id }: { id: string }) {
   const navigate  = useNavigate()
   const {
-    sessao, loading, error, editarItem, sugerir, confirmar,
-    aplicarSugestoes, buscarTransacoes,
+    sessao, loading, error,
+    editarSessao, editarItem, patchItensBulk,
+    sugerir, confirmar, aplicarSugestoes, buscarTransacoes,
   } = useFaturaImportSessao(id)
   const { categorias } = useCategorias()
   const { contas }     = useContas()
@@ -342,6 +476,19 @@ function Sandbox({ id }: { id: string }) {
   // grupoId → set de itemIds selecionados para separar
   const [editandoDescGrupo,   setEditandoDescGrupo]   = useState<string | null>(null)
   const [descEditTempGrupo,   setDescEditTempGrupo]   = useState('')
+  // grupoId → nome (string) que o usuário digitou pra "Separar X itens em
+  // novo lançamento". Vazio cai num fallback (descrição do primeiro item).
+  const [nomeSeparacao,       setNomeSeparacao]       = useState<Map<string, string>>(new Map())
+
+  // ── Estado – edição inline do valor total da fatura ─────────
+  const [editandoValorTotal, setEditandoValorTotal] = useState(false)
+  const [valorTotalTemp,     setValorTotalTemp]     = useState('')
+
+  // ── Estado – tx do cartão no mês de vencimento ──────────────
+  // Lista TODAS as transações PENDENTE/PROJEÇÃO do cartão no mês de
+  // vencimento. Usado pra mostrar quais delas NÃO foram vinculadas a
+  // nenhum item importado (provavelmente esquecidas pelo usuário).
+  const [txTodasCartao, setTxTodasCartao] = useState<TxCandidata[]>([])
 
   // ── Estado – Vincular modal ─────────────────────────────────
   const [vincularModal,  setVincularModal]  = useState<{ grupoId?: string; itemId?: string } | null>(null)
@@ -362,7 +509,21 @@ function Sandbox({ id }: { id: string }) {
     sugerir()
   }, [sessao?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Efeito: hidrata modo + separar_por_cartao do banco ──────
+  // Disparado uma vez por sessão. Permite que o usuário volte à tela e
+  // pegue exatamente de onde parou (mesmo modo, mesma decisão de
+  // agrupar por cartão).
+  const hidratadoRef = useRef(false)
+  useEffect(() => {
+    if (hidratadoRef.current || !sessao) return
+    hidratadoRef.current = true
+    if (sessao.modo_importacao) setModoImportacao(sessao.modo_importacao)
+    if (sessao.separar_por_cartao != null) setSepararPorCartao(sessao.separar_por_cartao)
+  }, [sessao?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Efeito: limpa overrides ao trocar de modo ───────────────
+  // separarPorCartao NÃO é resetada aqui — ela é persistida na sessão
+  // e gerenciada explicitamente em chooseSepararPorCartao().
   useEffect(() => {
     setDecisaoOverride(new Map())
     setDescricaoOverride(new Map())
@@ -370,8 +531,37 @@ function Sandbox({ id }: { id: string }) {
     setGrupos([])
     setSelGrupo(new Map())
     setEditandoDescGrupo(null)
-    setSepararPorCartao(null)
   }, [modoImportacao])
+
+  // ── Wrappers que persistem decisões de fluxo no banco ───────
+  const chooseModo = (m: null | 'REGISTRO' | 'CATEGORIA') => {
+    setModoImportacao(m)
+    editarSessao({ modo_importacao: m })
+    if (m !== 'CATEGORIA') {
+      // Sair de CATEGORIA descarta a flag de separar_por_cartao (faz
+      // sentido só naquele modo). Persiste null pra próxima visita.
+      setSepararPorCartao(null)
+      editarSessao({ separar_por_cartao: null })
+    }
+  }
+  const chooseSepararPorCartao = (b: boolean) => {
+    setSepararPorCartao(b)
+    editarSessao({ separar_por_cartao: b })
+  }
+
+  // ── Efeito: lista tx do cartão no mês de venc ──────────────
+  // Só durante a revisão; serve para o painel "lançamentos não vinculados"
+  // da fase de validação final. Refaz quando a sessão muda OU quando os
+  // itens mudam (vincular/desvincular altera o conjunto coberto).
+  useEffect(() => {
+    if (!sessao || sessao.status !== 'EM_ANALISE') return
+    let cancelled = false
+    ;(async () => {
+      const r = await buscarTransacoes(undefined, 'CATEGORIA')
+      if (!cancelled && r.ok) setTxTodasCartao(r.dados ?? [])
+    })()
+    return () => { cancelled = true }
+  }, [sessao?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Efeito: inicializa grupos ao entrar no modo CATEGORIA ───
   useEffect(() => {
@@ -431,13 +621,18 @@ function Sandbox({ id }: { id: string }) {
     const vencMes = sessao.vencimento_fatura?.slice(0, 7) ?? null
     return naoIgnoradosL.map(it => ({
       chave:                  it.id,
-      descricao:              it.descricao,
+      // Persisted override (de edições anteriores) vence o texto cru do PDF.
+      descricao:              it.descricao_override?.trim() || it.descricao,
       valor:                  Number(it.valor),
       data:                   (it.parcela_atual != null && vencMes) ? `${vencMes}-01` : it.data_compra,
       categoria_id:           it.categoria_escolhida_id!,
       categoria_nome:         catPorId.get(it.categoria_escolhida_id!)?.descricao ?? '',
       tipo:                   it.tipo,
-      decisaoSugerida:        (it.transacao_existente_id ? 'ATUALIZAR' : 'CRIAR') as DecisaoImport,
+      decisaoSugerida:        (
+        (it.decisao === 'CRIAR' || it.decisao === 'ATUALIZAR')
+          ? it.decisao
+          : (it.transacao_existente_id ? 'ATUALIZAR' : 'CRIAR')
+      ) as DecisaoImport,
       transacao_existente_id: it.transacao_existente_id,
       item_ids:               [it.id],
     }))
@@ -446,6 +641,59 @@ function Sandbox({ id }: { id: string }) {
   const totalFatura = itens.reduce(
     (s, i) => s + (i.tipo === 'RECEITA' ? -Number(i.valor) : Number(i.valor)), 0,
   )
+
+  // ── Validação: total esperado do CARTÃO no mês após a importação ──
+  // A regra correta NÃO é "soma dos itens da fatura == valor_total". É
+  // "total dos lançamentos no mês após o import == valor_total da fatura".
+  //
+  // Por que? Vincular um item a uma PROJEÇÃO substitui o valor da projeção
+  // pelo valor real do item (o valor projetado vira referência via trigger
+  // fn_preservar_valor_projetado). Então o que cai no mês = (itens novos
+  // ou vinculados) + (projeções/pendências do mês que NÃO foram tocadas).
+  //
+  //   Total esperado mês = Σ itens não-ignorados (valor da fatura)
+  //                     + Σ tx pendente/projeção do mês não-vinculadas
+  //
+  // No caso do usuário (Inter 33,40 vinculando a projeção 33,89, com mais
+  // uma projeção residual 0,49 não tocada): 33,40 + 0,49 = 33,89 ✓
+  //
+  // IMPORTANTE: além das tx vinculadas (transacao_existente_id), também
+  // filtramos as tx CRIADAS por confirmar anterior (transacao_criada_id).
+  // Sem isso, depois de "Reabrir análise" o tx criado aparece em
+  // txTodasCartao E na soma de itens — dobrando o valor.
+  const txIdsVinculadas = new Set(
+    itens.filter(i => i.decisao !== 'IGNORAR' && i.transacao_existente_id)
+         .map(i => i.transacao_existente_id as string),
+  )
+  const txIdsRepresentadas = new Set<string>()
+  for (const i of itens) {
+    if (i.decisao === 'IGNORAR') continue
+    if (i.transacao_existente_id) txIdsRepresentadas.add(i.transacao_existente_id)
+    if (i.transacao_criada_id)    txIdsRepresentadas.add(i.transacao_criada_id)
+  }
+  const totalItensImport = itens.reduce(
+    (s, i) => i.decisao === 'IGNORAR'
+      ? s
+      : s + (i.tipo === 'RECEITA' ? -Number(i.valor) : Number(i.valor)),
+    0,
+  )
+  // Tx do cartão no mês de venc que NÃO são representadas por nenhum item
+  // — nem vinculadas, nem criadas por confirmar anterior. Provavelmente
+  // projeções recorrentes que ficaram de fora — ou que não pertencem a
+  // esta fatura (cancelamento, etc.).
+  const txNaoVinculadas = txTodasCartao.filter(tx => !txIdsRepresentadas.has(tx.id))
+  const totalUntouchedMes = txNaoVinculadas.reduce(
+    (s, tx) => s + (tx.tipo === 'RECEITA' ? -Number(tx.valor) : Number(tx.valor)),
+    0,
+  )
+  const totalEsperadoMes = Math.round((totalItensImport + totalUntouchedMes) * 100) / 100
+
+  const valorFaturaInformado = sessao?.valor_total ?? null
+  const diferencaFatura = valorFaturaInformado != null
+    ? Math.round((totalEsperadoMes - valorFaturaInformado) * 100) / 100
+    : null
+  // 1 centavo de tolerância pra arredondamento de parcelas / câmbio.
+  const conferiu = diferencaFatura == null || Math.abs(diferencaFatura) <= 0.01
 
   const fase: 'classificar' | 'modo' | 'preview' =
     naoClassif.length > 0 ? 'classificar'
@@ -456,7 +704,8 @@ function Sandbox({ id }: { id: string }) {
     sessao?.status === 'EM_ANALISE' &&
     itens.length > 0 &&
     fase === 'preview' &&
-    (modoImportacao !== 'CATEGORIA' || separarPorCartao !== null)
+    (modoImportacao !== 'CATEGORIA' || separarPorCartao !== null) &&
+    conferiu
 
   // ── Handlers – Fase 1 ───────────────────────────────────────
   const emAnalise = sessao?.status === 'EM_ANALISE'
@@ -521,15 +770,26 @@ function Sandbox({ id }: { id: string }) {
   }
 
   // ── Handlers – REGISTRO preview ─────────────────────────────
-  const setDecisaoLancamento = (chave: string, d: DecisaoImport) =>
+  // Em REGISTRO, `chave` é o id do item. Persistimos no banco ao mesmo tempo
+  // que atualizamos a UI — assim o usuário pode pausar e voltar sem perder
+  // as edições.
+  const setDecisaoLancamento = (chave: string, d: DecisaoImport) => {
     setDecisaoOverride(prev => new Map(prev).set(chave, d))
+    if (d === 'CRIAR' || d === 'ATUALIZAR') {
+      editarItem(chave, { decisao: d })
+    }
+  }
 
   const iniciarEdicaoDesc = (chave: string, descAtual: string) => {
     setEditandoDesc(chave)
     setDescEditTemp(descAtual)
   }
   const confirmarEdicaoDesc = (chave: string) => {
-    if (descEditTemp.trim()) setDescricaoOverride(prev => new Map(prev).set(chave, descEditTemp.trim()))
+    const desc = descEditTemp.trim()
+    if (desc) {
+      setDescricaoOverride(prev => new Map(prev).set(chave, desc))
+      editarItem(chave, { descricao_override: desc })
+    }
     setEditandoDesc(null)
   }
   const cancelarEdicaoDesc = () => setEditandoDesc(null)
@@ -550,40 +810,96 @@ function Sandbox({ id }: { id: string }) {
       return next
     })
 
-  const separarItensGrupo = (grupoId: string, idsParaSeparar: string[]) => {
+  /** Cria um grupo NOVO a partir de itens selecionados de um grupo existente.
+   *  `descricaoCustom` é o nome do lançamento informado pelo usuário; se vazio,
+   *  usa a descrição do primeiro item como fallback.
+   *  Retorna o id do grupo recém-criado (ou null se a separação não aconteceu),
+   *  para que o caller possa, p.ex., abrir o modal de vincular já apontando
+   *  para o novo grupo. */
+  const separarItensGrupo = (grupoId: string, idsParaSeparar: string[], descricaoCustom?: string): string | null => {
+    const grupoAtual = grupos.find(g => g.id === grupoId)
+    if (!grupoAtual) return null
+    const restantes = grupoAtual.item_ids.filter(id => !idsParaSeparar.includes(id))
+    if (restantes.length === 0) return null  // não deixa grupo ficar vazio
+
+    const priItem = (sessao?.itens ?? []).find(i => i.id === idsParaSeparar[0])
+    const descNovo = (descricaoCustom ?? '').trim()
+      || (priItem ? stripParcela(priItem.descricao) : grupoAtual.descricao)
+    // `sep-${uuid}` é estável (não depende de Date.now()) — necessário pra
+    // que o grupo persistido seja recuperável depois do reload da sessão.
+    const novoId = `sep-${crypto.randomUUID()}`
+
     setGrupos(prev => {
       const idx = prev.findIndex(g => g.id === grupoId)
       if (idx === -1) return prev
       const grupo     = prev[idx]
-      const restantes = grupo.item_ids.filter(id => !idsParaSeparar.includes(id))
-      if (restantes.length === 0) return prev  // não deixa grupo ficar vazio
-
-      const priItem = (sessao?.itens ?? []).find(i => i.id === idsParaSeparar[0])
+      const restantesR = grupo.item_ids.filter(id => !idsParaSeparar.includes(id))
+      if (restantesR.length === 0) return prev
       const next    = [...prev]
-      next[idx] = { ...grupo, item_ids: restantes }
+      next[idx] = { ...grupo, item_ids: restantesR }
       next.push({
-        id:                     `sep-${Date.now()}`,
+        id:                     novoId,
         categoria_id:           grupo.categoria_id,
         item_ids:               idsParaSeparar,
         decisao:                'CRIAR',
         transacao_existente_id: null,
-        descricao:              priItem ? stripParcela(priItem.descricao) : grupo.descricao,
+        descricao:              descNovo,
       })
       return next
     })
     setSelGrupo(prev => { const n = new Map(prev); n.delete(grupoId); return n })
+    setNomeSeparacao(prev => { const n = new Map(prev); n.delete(grupoId); return n })
+
+    // Persistir: marca os itens com grupo_chave + descricao_override.
+    // Decisao=CRIAR e transacao_existente_id=null (resetando se vieram
+    // herdados do grupo anterior).
+    patchItensBulk(idsParaSeparar, {
+      grupo_chave:            novoId,
+      descricao_override:     descNovo,
+      decisao:                'CRIAR',
+      transacao_existente_id: null,
+    })
+
+    return novoId
   }
 
-  const setDecisaoGrupo = (grupoId: string, d: DecisaoImport) =>
+  /** Separa os itens em um grupo novo e, na sequência, abre o modal de
+   *  vincular já apontando para esse novo grupo — fluxo "Shopee*Goldenmoon
+   *  Come → POCO X7 PRO" em uma única ação. */
+  const separarEAbrirVincular = (grupoId: string, idsParaSeparar: string[], descricaoCustom?: string) => {
+    const novoId = separarItensGrupo(grupoId, idsParaSeparar, descricaoCustom)
+    if (!novoId) return
+    abrirVincular({ grupoId: novoId })
+  }
+
+  const setDecisaoGrupo = (grupoId: string, d: DecisaoImport) => {
+    const g = grupos.find(g => g.id === grupoId)
     setGrupos(prev => prev.map(g => g.id === grupoId ? { ...g, decisao: d } : g))
+    if (g && (d === 'CRIAR' || d === 'ATUALIZAR')) {
+      patchItensBulk(g.item_ids, { decisao: d })
+    }
+  }
+
+  /** Encolhe/expande o quadro de um grupo (esconde a lista de itens e o
+   *  toolbar de decisão; mantém o cabeçalho clicável). */
+  const toggleGrupoEncolhido = (grupoId: string) =>
+    setGruposEncolhidos(prev => {
+      const next = new Set(prev)
+      if (next.has(grupoId)) next.delete(grupoId); else next.add(grupoId)
+      return next
+    })
 
   const iniciarEdicaoDescGrupo = (grupoId: string, desc: string) => {
     setEditandoDescGrupo(grupoId)
     setDescEditTempGrupo(desc)
   }
   const confirmarEdicaoDescGrupo = (grupoId: string) => {
-    if (descEditTempGrupo.trim())
-      setGrupos(prev => prev.map(g => g.id === grupoId ? { ...g, descricao: descEditTempGrupo.trim() } : g))
+    const desc = descEditTempGrupo.trim()
+    if (desc) {
+      const g = grupos.find(g => g.id === grupoId)
+      setGrupos(prev => prev.map(g => g.id === grupoId ? { ...g, descricao: desc } : g))
+      if (g) patchItensBulk(g.item_ids, { descricao_override: desc })
+    }
     setEditandoDescGrupo(null)
   }
   const cancelarEdicaoDescGrupo = () => setEditandoDescGrupo(null)
@@ -591,10 +907,17 @@ function Sandbox({ id }: { id: string }) {
   // ── Handlers – Vincular modal ────────────────────────────────
   const abrirVincular = async (params: { grupoId?: string; itemId?: string; desc?: string }) => {
     setVincularModal({ grupoId: params.grupoId, itemId: params.itemId })
-    setFiltroTxBusca(params.desc ?? '')
+    // Abre com filtro vazio — usuário busca se quiser. Pré-filtrar pela
+    // descrição do grupo (ex.: "Shopee*Goldenmoon") esconde candidatas
+    // legítimas com nomes que já foram cuidados (ex.: "POCO X7 PRO").
+    setFiltroTxBusca('')
     setBuscandoTxs(true)
     setTxCandidatas([])
-    const r = await buscarTransacoes(params.desc ?? '')
+    // grupoId → CATEGORIA (lançamento agrupado, datado no venc.)
+    // itemId  → REGISTRO  (lançamento por item, compra real costuma ser
+    //                      em mês anterior ao venc.)
+    const modoBusca = params.grupoId ? 'CATEGORIA' : 'REGISTRO'
+    const r = await buscarTransacoes(undefined, modoBusca)
     setBuscandoTxs(false)
     if (r.ok) setTxCandidatas(r.dados ?? [])
   }
@@ -602,14 +925,37 @@ function Sandbox({ id }: { id: string }) {
   const confirmarVincular = async (tx: TxCandidata) => {
     if (!vincularModal) return
     if (vincularModal.grupoId) {
+      // Ao vincular manualmente, adota a descrição da transação escolhida
+      // (a "Optical Plus" etc.) — o nome que o usuário já cuidou na projeção
+      // sempre prevalece sobre o texto cru da fatura. Usuário pode reescrever
+      // depois pelo botão de editar descrição se quiser.
+      const descAdotada = tx.descricao?.trim()
+      const grupoId = vincularModal.grupoId
+      const g = grupos.find(g => g.id === grupoId)
       setGrupos(prev => prev.map(g =>
-        g.id === vincularModal.grupoId
-          ? { ...g, transacao_existente_id: tx.id, decisao: 'ATUALIZAR' }
+        g.id === grupoId
+          ? {
+              ...g,
+              transacao_existente_id: tx.id,
+              decisao:                'ATUALIZAR',
+              descricao:              descAdotada || g.descricao,
+            }
           : g,
       ))
+      if (g) {
+        // Persiste vínculo + decisao + descricao no grupo inteiro.
+        await patchItensBulk(g.item_ids, {
+          transacao_existente_id: tx.id,
+          decisao:                'ATUALIZAR',
+          descricao_override:     descAdotada || g.descricao,
+        })
+      }
     } else if (vincularModal.itemId) {
       setDecisaoOverride(prev => new Map(prev).set(vincularModal.itemId!, 'ATUALIZAR'))
-      await editarItem(vincularModal.itemId, { transacao_existente_id: tx.id })
+      await editarItem(vincularModal.itemId, {
+        transacao_existente_id: tx.id,
+        decisao:                'ATUALIZAR',
+      })
     }
     setVincularModal(null)
   }
@@ -691,13 +1037,86 @@ function Sandbox({ id }: { id: string }) {
     </>
   )
 
-  // ── Filtro de texto do modal vincular ─────────────────────────
-  const txsFiltradas = filtroTxBusca.trim()
-    ? txCandidatas.filter(tx =>
-        tx.descricao.toLowerCase().includes(filtroTxBusca.toLowerCase()) ||
-        formatBRL(Number(tx.valor)).includes(filtroTxBusca),
+  // ── Filtro + ordenação do modal vincular ─────────────────────
+  // Descobre a categoria-alvo do que está sendo vinculado (grupo ou item)
+  // pra priorizar candidatas da mesma categoria no topo. Depois ordena
+  // alfabeticamente.
+  // contextoVincular: snapshot do que está sendo vinculado (grupo ou item
+  // individual) — exibido no topo do modal pra o usuário ter certeza sobre
+  // qual registro vai receber o vínculo.
+  type ContextoVincular = {
+    tipo:           'GRUPO' | 'ITEM'
+    categoriaNome:  string
+    descricao:      string
+    valorTotal:     number
+    itens:          Array<{ descricao: string; valor: number; data: string; tipo: 'RECEITA' | 'DESPESA' }>
+  }
+  const contextoVincular: ContextoVincular | null = (() => {
+    if (!vincularModal) return null
+    const itensSessao = sessao?.itens ?? []
+    if (vincularModal.grupoId) {
+      const g = grupos.find(gr => gr.id === vincularModal.grupoId)
+      if (!g) return null
+      const itens = itensSessao.filter(i => g.item_ids.includes(i.id))
+      const total = itens.reduce(
+        (s, i) => s + (i.tipo === 'RECEITA' ? -Number(i.valor) : Number(i.valor)), 0,
       )
-    : txCandidatas
+      return {
+        tipo:           'GRUPO',
+        categoriaNome:  catPorId.get(g.categoria_id)?.descricao ?? '',
+        descricao:      g.descricao,
+        valorTotal:     Math.abs(total),
+        itens:          itens.map(i => ({
+          descricao: stripParcela(i.descricao),
+          valor:     Number(i.valor),
+          data:      i.data_compra,
+          tipo:      i.tipo,
+        })),
+      }
+    }
+    const it = itensSessao.find(i => i.id === vincularModal.itemId)
+    if (!it) return null
+    return {
+      tipo:           'ITEM',
+      categoriaNome:  it.categoria_escolhida_id
+        ? (catPorId.get(it.categoria_escolhida_id)?.descricao ?? '')
+        : '',
+      descricao:      it.descricao_override?.trim() || stripParcela(it.descricao),
+      valorTotal:     Number(it.valor),
+      itens:          [{
+        descricao: stripParcela(it.descricao),
+        valor:     Number(it.valor),
+        data:      it.data_compra,
+        tipo:      it.tipo,
+      }],
+    }
+  })()
+  const categoriaAlvoVincular = (() => {
+    if (!vincularModal) return null
+    if (vincularModal.grupoId) {
+      return grupos.find(g => g.id === vincularModal.grupoId)?.categoria_id ?? null
+    }
+    if (vincularModal.itemId) {
+      return (sessao?.itens ?? []).find(i => i.id === vincularModal.itemId)?.categoria_escolhida_id ?? null
+    }
+    return null
+  })()
+
+  const txsFiltradas = (() => {
+    const filtrado = filtroTxBusca.trim()
+      ? txCandidatas.filter(tx =>
+          tx.descricao.toLowerCase().includes(filtroTxBusca.toLowerCase()) ||
+          formatBRL(Number(tx.valor)).includes(filtroTxBusca),
+        )
+      : txCandidatas
+    // Ordena: mesma categoria primeiro, depois alfabético (pt-BR, case-insensitive).
+    return [...filtrado].sort((a, b) => {
+      const ma = categoriaAlvoVincular && a.categoria_id === categoriaAlvoVincular ? 0 : 1
+      const mb = categoriaAlvoVincular && b.categoria_id === categoriaAlvoVincular ? 0 : 1
+      if (ma !== mb) return ma - mb
+      return a.descricao.localeCompare(b.descricao, 'pt-BR', { sensitivity: 'base' })
+    })
+  })()
 
   // ── Early returns ─────────────────────────────────────────────
   if (loading) return <div className="py-8"><LoadingMascote texto="Carregando sessão…" size={130} /></div>
@@ -725,9 +1144,29 @@ function Sandbox({ id }: { id: string }) {
           <ArrowLeft size={14} /> Importações
         </Link>
       </div>
-      <h1 className="text-[21px] font-bold flex items-center gap-2 mb-1" style={{ color: '#e8eaf0' }}>
-        <Receipt size={22} /> Revisão — {sessao.conta?.nome ?? 'Cartão'}
-      </h1>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <h1 className="text-[21px] font-bold flex items-center gap-2" style={{ color: '#e8eaf0' }}>
+          <Receipt size={22} /> Revisão — {sessao.conta?.nome ?? 'Cartão'}
+        </h1>
+        {sessao.status === 'CONFIRMADA' && (
+          <button
+            onClick={async () => {
+              const ok = confirm(
+                'Reabrir a análise vai voltar a sessão para EM_ANÁLISE. ' +
+                'As transações já criadas/atualizadas permanecem no extrato — ' +
+                'se você confirmar novamente, pode duplicar lançamentos. Continuar?',
+              )
+              if (!ok) return
+              const r = await editarSessao({ status: 'EM_ANALISE' })
+              if (!r.ok) toast(r.erro ?? 'Falha ao reabrir.')
+            }}
+            className="px-3 py-1.5 rounded-lg border text-[14px] hover:bg-av-yellow/10 transition-colors"
+            style={{ color: '#f0b429', borderColor: 'rgba(240,180,41,0.40)' }}
+            title="Voltar a sessão pra EM_ANÁLISE pra verificar/editar">
+            ↺ Reabrir análise
+          </button>
+        )}
+      </div>
       <p className="text-[14px] mb-2" style={{ color: '#8b92a8' }}>
         {sessao.arquivo_nome}
         {' '}· <span style={{ color: STATUS_COR[sessao.status] }}>{STATUS_LABEL[sessao.status]}</span>
@@ -742,10 +1181,132 @@ function Sandbox({ id }: { id: string }) {
       </p>
 
       {sessao.observacao && (
-        <div className="text-[13px] mb-4 px-3 py-2 rounded-lg border"
+        <div className="text-[13px] mb-4 px-3 py-2 rounded-lg border whitespace-pre-wrap"
           style={{ background: 'rgba(240,180,41,0.08)', borderColor: 'rgba(240,180,41,0.25)', color: '#f0b429' }}>
           <AlertCircle size={13} className="inline mr-1 -mt-0.5" />
           {sessao.observacao}
+        </div>
+      )}
+
+      {/* ══ Validação: soma dos lançamentos vs valor da fatura ════
+          O total que o sistema vai criar como lançamentos precisa bater
+          com o valor da fatura. Diferença bloqueia o "Confirmar". O
+          usuário pode ignorar itens extras ou corrigir o valor da fatura. */}
+      {fase === 'preview' && emAnalise && (
+        <div className="mb-4 px-3 py-3 rounded-lg border"
+          style={{
+            background:  conferiu ? 'rgba(74,222,128,0.08)' : 'rgba(248,113,113,0.08)',
+            borderColor: conferiu ? 'rgba(74,222,128,0.30)' : 'rgba(248,113,113,0.40)',
+          }}>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
+            <span style={{ color: conferiu ? '#4ade80' : '#f87171' }}>
+              {conferiu ? '✓ Total do mês confere com a fatura' : '⚠ Total esperado do mês diferente do valor da fatura'}
+            </span>
+            <span style={{ color: '#8b92a8' }}
+              title={
+                `Itens da fatura: ${formatBRL(totalItensImport)}` +
+                (Math.abs(totalUntouchedMes) > 0.01
+                  ? ` + Pendências/projeções do mês não-vinculadas: ${formatBRL(totalUntouchedMes)}`
+                  : '')
+              }>
+              Total esperado no mês: <strong style={{ color: '#e8eaf0' }}>{formatBRL(totalEsperadoMes)}</strong>
+            </span>
+            <span style={{ color: '#8b92a8' }}>
+              Valor da fatura:{' '}
+              {editandoValorTotal ? (
+                <input
+                  autoFocus
+                  type="text"
+                  inputMode="decimal"
+                  value={valorTotalTemp}
+                  onChange={e => setValorTotalTemp(e.target.value)}
+                  onBlur={async () => {
+                    const limpo = valorTotalTemp.replace(/\./g, '').replace(',', '.').trim()
+                    const n = Number(limpo)
+                    if (Number.isFinite(n) && n > 0) {
+                      await editarSessao({ valor_total: n })
+                    }
+                    setEditandoValorTotal(false)
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter')  (e.target as HTMLInputElement).blur()
+                    if (e.key === 'Escape') setEditandoValorTotal(false)
+                  }}
+                  className="inline-block w-24 rounded px-2 py-0.5 text-[13px] border border-av-green/50 outline-none"
+                  style={{ background: '#131920', color: '#e8eaf0' }}
+                />
+              ) : (
+                <>
+                  <strong style={{ color: '#e8eaf0' }}>
+                    {valorFaturaInformado != null ? formatBRL(valorFaturaInformado) : '—'}
+                  </strong>
+                  <button
+                    onClick={() => {
+                      setValorTotalTemp(
+                        valorFaturaInformado != null
+                          ? String(valorFaturaInformado).replace('.', ',')
+                          : '',
+                      )
+                      setEditandoValorTotal(true)
+                    }}
+                    className="ml-1 p-0.5 rounded hover:bg-white/10 transition-colors align-middle"
+                    style={{ color: '#4da6ff' }}
+                    title="Editar valor da fatura">
+                    <Pencil size={11} />
+                  </button>
+                </>
+              )}
+            </span>
+            {diferencaFatura != null && !conferiu && (
+              <span style={{ color: '#f87171' }}>
+                Diferença: <strong>{diferencaFatura > 0 ? '+' : ''}{formatBRL(diferencaFatura)}</strong>
+              </span>
+            )}
+          </div>
+          {!conferiu && (
+            <p className="text-[12px] mt-1.5" style={{ color: '#f87171' }}>
+              {diferencaFatura != null && diferencaFatura > 0
+                ? 'O total esperado supera a fatura. Ignore itens extras, vincule a projeções existentes ou ajuste valores.'
+                : 'O total esperado é menor que a fatura. Pode faltar item — confira se há projeções pendentes a vincular, ou ajuste o valor da fatura acima.'}
+              {' '}A importação fica bloqueada até bater.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* ══ Lançamentos do cartão NÃO vinculados a itens importados ═
+          Projeções/pendências do cartão no mês de venc que ficaram de
+          fora — possivelmente esquecidas pelo usuário, ou que de fato
+          não vieram nesta fatura (cancelamento de subscription, etc.). */}
+      {fase === 'preview' && emAnalise && txNaoVinculadas.length > 0 && (
+        <div className="mb-4 px-3 py-3 rounded-lg border"
+          style={{ background: 'rgba(240,180,41,0.06)', borderColor: 'rgba(240,180,41,0.25)' }}>
+          <p className="text-[13px] font-semibold mb-2" style={{ color: '#f0b429' }}>
+            ⚠ {txNaoVinculadas.length} {txNaoVinculadas.length === 1 ? 'lançamento' : 'lançamentos'} no extrato deste cartão sem vínculo com a fatura
+          </p>
+          <p className="text-[12px] mb-2" style={{ color: '#8b92a8' }}>
+            Estes lançamentos (PENDENTE/PROJEÇÃO) existem no extrato deste cartão para o mês do vencimento mas não foram vinculados a nenhum item desta fatura.
+            Confira se eles deveriam ter sido vinculados — ou se cancelou/saiu da fatura.
+          </p>
+          <ul className="space-y-1 max-h-40 overflow-y-auto pr-1">
+            {txNaoVinculadas.map(tx => (
+              <li key={tx.id} className="flex items-center gap-2 text-[12px] py-0.5">
+                <span className="flex-1 truncate" style={{ color: '#e8eaf0' }}>
+                  {tx.descricao}
+                </span>
+                <span style={{ color: '#8b92a8' }}>
+                  {new Date(tx.data + 'T00:00').toLocaleDateString('pt-BR')}
+                </span>
+                <span style={{ color: '#8b92a8' }}>· {tx.status}</span>
+                {tx.categoria?.descricao && (
+                  <span style={{ color: '#8b92a8' }}>· {tx.categoria.descricao}</span>
+                )}
+                <span className="font-mono flex-none" style={{ color: '#e8eaf0' }}>
+                  {formatBRL(Number(tx.valor))}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -954,7 +1515,7 @@ function Sandbox({ id }: { id: string }) {
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <button
-              onClick={() => setModoImportacao('REGISTRO')}
+              onClick={() => chooseModo('REGISTRO')}
               className="text-left p-4 rounded-xl border border-white/10 hover:border-av-green/50 hover:bg-av-green/5 transition-all group"
               style={{ background: '#1a1f2e' }}>
               <div className="flex items-center gap-2 mb-2">
@@ -974,7 +1535,7 @@ function Sandbox({ id }: { id: string }) {
             </button>
 
             <button
-              onClick={() => setModoImportacao('CATEGORIA')}
+              onClick={() => chooseModo('CATEGORIA')}
               className="text-left p-4 rounded-xl border border-white/10 hover:border-av-green/50 hover:bg-av-green/5 transition-all group"
               style={{ background: '#1a1f2e' }}>
               <div className="flex items-center gap-2 mb-2">
@@ -1080,7 +1641,7 @@ function Sandbox({ id }: { id: string }) {
           <div className="flex flex-wrap items-center gap-2 mb-3">
             {emAnalise && (
               <button
-                onClick={() => setModoImportacao(null)}
+                onClick={() => chooseModo(null)}
                 className="flex items-center gap-1 text-[13px] px-2 py-1 rounded-md border border-white/10 hover:bg-white/5 transition-colors"
                 style={{ color: '#8b92a8' }}>
                 <ArrowLeft size={13} /> Mudar modo
@@ -1138,7 +1699,6 @@ function Sandbox({ id }: { id: string }) {
                               />
                             ) : (
                               <div className="flex items-center gap-1.5 group/desc">
-                                <p className="leading-snug flex-1">{descFinal}</p>
                                 {emAnalise && (
                                   <button
                                     onClick={() => iniciarEdicaoDesc(l.chave, descFinal)}
@@ -1147,6 +1707,7 @@ function Sandbox({ id }: { id: string }) {
                                     <Pencil size={11} />
                                   </button>
                                 )}
+                                <p className="leading-snug flex-1">{descFinal}</p>
                               </div>
                             )}
                             <p className="text-[12px] mt-0.5" style={{ color: '#8b92a8' }}>
@@ -1218,7 +1779,7 @@ function Sandbox({ id }: { id: string }) {
           <div className="flex flex-wrap items-center gap-2 mb-3">
             {emAnalise && (
               <button
-                onClick={() => setModoImportacao(null)}
+                onClick={() => chooseModo(null)}
                 className="flex items-center gap-1 text-[13px] px-2 py-1 rounded-md border border-white/10 hover:bg-white/5 transition-colors"
                 style={{ color: '#8b92a8' }}>
                 <ArrowLeft size={13} /> Mudar modo
@@ -1244,13 +1805,13 @@ function Sandbox({ id }: { id: string }) {
               </p>
               <div className="flex flex-wrap gap-3">
                 <button
-                  onClick={() => setSepararPorCartao(true)}
+                  onClick={() => chooseSepararPorCartao(true)}
                   className="px-4 py-2 rounded-lg border border-white/10 hover:border-av-green/50 hover:bg-av-green/5 transition-all text-[14px]"
                   style={{ color: '#e8eaf0' }}>
                   Sim, incluir nome do cartão
                 </button>
                 <button
-                  onClick={() => setSepararPorCartao(false)}
+                  onClick={() => chooseSepararPorCartao(false)}
                   className="px-4 py-2 rounded-lg border border-white/10 hover:border-av-green/50 hover:bg-av-green/5 transition-all text-[14px]"
                   style={{ color: '#e8eaf0' }}>
                   Não, só por categoria
@@ -1264,7 +1825,11 @@ function Sandbox({ id }: { id: string }) {
           ) : (
             <div className="flex flex-col gap-3">
               {grupos.map(grupo => {
-                const itensGrupo  = (sessao?.itens ?? []).filter(i => grupo.item_ids.includes(i.id))
+                const itensGrupo  = (sessao?.itens ?? [])
+                  .filter(i => grupo.item_ids.includes(i.id))
+                  // (3) ordena por descrição (case/acento-insensitive)
+                  .slice()
+                  .sort((a, b) => stripParcela(a.descricao).localeCompare(stripParcela(b.descricao), 'pt-BR'))
                 const totalGrupo  = itensGrupo.reduce(
                   (s, i) => s + (i.tipo === 'RECEITA' ? -Number(i.valor) : Number(i.valor)), 0,
                 )
@@ -1273,24 +1838,52 @@ function Sandbox({ id }: { id: string }) {
                 const algumSelAt  = selAtual.size > 0
                 const corCriar    = '#00c896'
                 const corAtual_   = '#4da6ff'
+                const encolhido   = gruposEncolhidos.has(grupo.id)
+                // (1) Vinculação: se há tx vinculada, o grupo VAI atualizar
+                // uma transação existente. Mostramos isso de forma proeminente,
+                // com cor de borda diferente e badge no header.
+                const ehVinculado = !!grupo.transacao_existente_id
+                const nomeSep     = nomeSeparacao.get(grupo.id) ?? ''
 
                 return (
-                  <div key={grupo.id} className="rounded-xl border border-white/10 overflow-hidden">
+                  <div key={grupo.id} className="rounded-xl border overflow-hidden"
+                    style={{
+                      borderColor: ehVinculado ? 'rgba(77,166,255,0.40)' : 'rgba(255,255,255,0.10)',
+                    }}>
                     {/* Cabeçalho do grupo */}
-                    <div className="px-3 py-2" style={{ background: '#252d42' }}>
+                    <div className="px-3 py-2"
+                      style={{ background: ehVinculado ? 'rgba(77,166,255,0.10)' : '#252d42' }}>
                       <div className="flex flex-wrap items-center gap-2">
+                        {/* Toggle encolher/expandir */}
+                        <button
+                          onClick={() => toggleGrupoEncolhido(grupo.id)}
+                          title={encolhido ? 'Expandir' : 'Encolher'}
+                          className="flex-none flex items-center justify-center rounded transition-colors hover:bg-white/10"
+                          style={{ width: 18, height: 18, color: '#8b92a8' }}
+                        >
+                          {encolhido ? <ChevronRight size={12}/> : <ChevronDown size={12}/>}
+                        </button>
                         <span className="text-[14px] font-semibold" style={{ color: '#e8eaf0' }}>
                           📂 {catNome}
                         </span>
                         <span className="text-[12px]" style={{ color: '#8b92a8' }}>
                           {itensGrupo.length} {itensGrupo.length === 1 ? 'item' : 'itens'}
                         </span>
+                        {/* (1) Badge bem visível: vinculado vs novo */}
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                          style={
+                            ehVinculado
+                              ? { background: 'rgba(77,166,255,0.20)', color: '#4da6ff', border: '1px solid rgba(77,166,255,0.40)' }
+                              : { background: 'rgba(0,200,150,0.15)', color: '#00c896', border: '1px solid rgba(0,200,150,0.35)' }
+                          }>
+                          {ehVinculado ? '🔗 Atualiza existente' : '🆕 Novo lançamento'}
+                        </span>
                         <span className="ml-auto text-[14px] font-semibold font-mono" style={{ color: '#e8eaf0' }}>
                           {formatBRL(Math.abs(totalGrupo))}
                         </span>
                       </div>
-                      {/* Descrição editável */}
-                      <div className="mt-1.5 flex items-center gap-1.5 group/gdesc">
+                      {/* Descrição editável — sempre com pencil visível */}
+                      <div className="mt-1.5 flex items-center gap-1.5">
                         {editandoDescGrupo === grupo.id ? (
                           <input
                             autoFocus
@@ -1306,63 +1899,60 @@ function Sandbox({ id }: { id: string }) {
                           />
                         ) : (
                           <>
-                            <p className="text-[13px] flex-1" style={{ color: '#8b92a8' }}>
-                              {grupo.descricao}
-                            </p>
                             {emAnalise && (
                               <button
                                 onClick={() => iniciarEdicaoDescGrupo(grupo.id, grupo.descricao)}
-                                className="opacity-0 group-hover/gdesc:opacity-100 transition-opacity p-0.5 rounded hover:bg-white/10"
-                                style={{ color: '#8b92a8' }} title="Editar descrição">
-                                <Pencil size={11} />
+                                className="p-0.5 rounded transition-colors hover:bg-white/10 flex-none"
+                                style={{ color: '#4da6ff' }} title="Editar descrição do lançamento">
+                                <Pencil size={12} />
                               </button>
                             )}
+                            <p className="text-[13px] flex-1" style={{ color: '#c8d0e0' }}>
+                              <span style={{ color: '#8b92a8' }}>Descrição:</span> {grupo.descricao || <em style={{ color: '#8b92a8' }}>(vazio)</em>}
+                            </p>
                           </>
                         )}
                       </div>
-                      {/* Botões de decisão */}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                        {(['CRIAR', 'ATUALIZAR'] as DecisaoImport[]).map(d => {
-                          const ativo = grupo.decisao === d
-                          const cor   = d === 'CRIAR' ? corCriar : corAtual_
-                          const desab = d === 'ATUALIZAR' && !grupo.transacao_existente_id
-                          return (
-                            <button key={d}
-                              onClick={() => setDecisaoGrupo(grupo.id, d)}
-                              disabled={!emAnalise || desab}
-                              title={desab ? 'Nenhum lançamento vinculado — use 🔗 Vincular para associar' : undefined}
-                              className="text-[11px] px-2 py-0.5 rounded-md border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                              style={{
-                                background:  ativo ? `${cor}22` : 'transparent',
-                                color:       ativo ? cor : '#8b92a8',
-                                borderColor: ativo ? cor : 'rgba(255,255,255,0.1)',
-                                fontWeight:  ativo ? 600 : 400,
-                              }}>
-                              {d === 'CRIAR' ? 'Criar novo' : 'Atualizar'}
+                      {/* Botões de decisão (escondidos quando encolhido) */}
+                      {!encolhido && (
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                          {(['CRIAR', 'ATUALIZAR'] as DecisaoImport[]).map(d => {
+                            const ativo = grupo.decisao === d
+                            const cor   = d === 'CRIAR' ? corCriar : corAtual_
+                            const desab = d === 'ATUALIZAR' && !grupo.transacao_existente_id
+                            return (
+                              <button key={d}
+                                onClick={() => setDecisaoGrupo(grupo.id, d)}
+                                disabled={!emAnalise || desab}
+                                title={desab ? 'Nenhum lançamento vinculado — use 🔗 Vincular para associar' : undefined}
+                                className="text-[11px] px-2 py-0.5 rounded-md border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                style={{
+                                  background:  ativo ? `${cor}22` : 'transparent',
+                                  color:       ativo ? cor : '#8b92a8',
+                                  borderColor: ativo ? cor : 'rgba(255,255,255,0.1)',
+                                  fontWeight:  ativo ? 600 : 400,
+                                }}>
+                                {d === 'CRIAR' ? 'Criar novo' : 'Atualizar'}
+                              </button>
+                            )
+                          })}
+                          {emAnalise && (
+                            <button
+                              onClick={() => abrirVincular({
+                                grupoId: grupo.id,
+                                desc:    grupo.descricao,
+                              })}
+                              className="text-[11px] px-2 py-0.5 rounded-md border border-white/10 hover:bg-av-green/10 hover:border-av-green/30 transition-colors"
+                              style={{ color: '#8b92a8' }}>
+                              🔗 Vincular…
                             </button>
-                          )
-                        })}
-                        {emAnalise && (
-                          <button
-                            onClick={() => abrirVincular({
-                              grupoId: grupo.id,
-                              desc:    grupo.descricao,
-                            })}
-                            className="text-[11px] px-2 py-0.5 rounded-md border border-white/10 hover:bg-av-green/10 hover:border-av-green/30 transition-colors"
-                            style={{ color: '#8b92a8' }}>
-                            🔗 Vincular…
-                          </button>
-                        )}
-                        {grupo.transacao_existente_id && grupo.decisao === 'ATUALIZAR' && (
-                          <span className="text-[11px]" style={{ color: '#4da6ff' }}>
-                            🔗 vinculado
-                          </span>
-                        )}
-                      </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Itens do grupo com checkboxes (só mostra caixas se >1 item) */}
-                    {itensGrupo.map((it, idx) => (
+                    {/* Itens do grupo — escondidos quando encolhido. Ordenados por descrição. */}
+                    {!encolhido && itensGrupo.map((it, idx) => (
                       <div key={it.id}
                         className={`flex items-center gap-2 px-3 py-1.5 text-[13px]${idx > 0 ? ' border-t border-white/5' : ' border-t border-white/5'}`}
                         style={{ color: '#e8eaf0', background: selAtual.has(it.id) ? 'rgba(0,200,150,0.04)' : undefined }}>
@@ -1394,15 +1984,45 @@ function Sandbox({ id }: { id: string }) {
                       </div>
                     ))}
 
-                    {/* Ação de separar itens selecionados */}
-                    {algumSelAt && emAnalise && (
-                      <div className="px-3 py-2 border-t border-white/5"
+                    {/* (4) Caixa pra nomear o lançamento ao separar itens.
+                        Aparece quando há checkbox marcado em algum item do grupo. */}
+                    {!encolhido && algumSelAt && emAnalise && (
+                      <div className="px-3 py-2 border-t border-white/5 flex flex-wrap items-center gap-2"
                         style={{ background: 'rgba(0,200,150,0.04)' }}>
+                        <span className="text-[12px] font-semibold" style={{ color: '#00c896' }}>
+                          {selAtual.size} {selAtual.size === 1 ? 'item' : 'itens'} para separar
+                        </span>
+                        <input
+                          type="text"
+                          value={nomeSep}
+                          onChange={e =>
+                            setNomeSeparacao(prev => {
+                              const n = new Map(prev)
+                              n.set(grupo.id, e.target.value)
+                              return n
+                            })
+                          }
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              separarItensGrupo(grupo.id, [...selAtual], nomeSep)
+                            }
+                          }}
+                          placeholder="Nome do novo lançamento (opcional)"
+                          className="flex-1 min-w-[180px] rounded px-2 py-1 text-[13px] border outline-none"
+                          style={{ background: '#131920', color: '#e8eaf0', borderColor: 'rgba(0,200,150,0.30)' }}
+                        />
                         <button
-                          onClick={() => separarItensGrupo(grupo.id, [...selAtual])}
-                          className="text-[13px] px-3 py-1.5 rounded-md border border-av-green/40 hover:bg-av-green/10 transition-colors"
+                          onClick={() => separarItensGrupo(grupo.id, [...selAtual], nomeSep)}
+                          className="text-[13px] px-3 py-1 rounded-md border border-av-green/40 hover:bg-av-green/10 transition-colors"
                           style={{ color: '#00c896' }}>
-                          ↗ Separar {selAtual.size} {selAtual.size === 1 ? 'item' : 'itens'} em lançamento próprio
+                          ↗ Separar
+                        </button>
+                        <button
+                          onClick={() => separarEAbrirVincular(grupo.id, [...selAtual], nomeSep)}
+                          className="text-[13px] px-3 py-1 rounded-md border border-av-blue/40 hover:bg-av-blue/10 transition-colors"
+                          style={{ color: '#4da6ff', borderColor: 'rgba(77,166,255,0.40)' }}
+                          title="Separar em novo grupo e já abrir o modal de vincular">
+                          ↗🔗 Separar e vincular
                         </button>
                       </div>
                     )}
@@ -1483,9 +2103,50 @@ function Sandbox({ id }: { id: string }) {
               </button>
             </div>
 
+            {/* Contexto: o que está sendo vinculado.
+                Pra grupos com vários itens, lista os primeiros 5 (com botão
+                "ver mais" se houver mais). Pra item único, só os dados dele. */}
+            {contextoVincular && (
+              <div className="px-4 py-3 border-b border-white/10"
+                style={{ background: 'rgba(77,166,255,0.06)' }}>
+                <p className="text-[11px] uppercase tracking-wide mb-1" style={{ color: '#8b92a8' }}>
+                  Vinculando {contextoVincular.tipo === 'GRUPO'
+                    ? `${contextoVincular.itens.length} ${contextoVincular.itens.length === 1 ? 'item' : 'itens'}`
+                    : '1 item'}
+                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[14px] font-semibold leading-snug" style={{ color: '#e8eaf0' }}>
+                      {contextoVincular.descricao || <em style={{ color: '#8b92a8' }}>(sem descrição)</em>}
+                    </p>
+                    <p className="text-[12px] mt-0.5" style={{ color: '#8b92a8' }}>
+                      📂 {contextoVincular.categoriaNome || '—'}
+                    </p>
+                  </div>
+                  <span className="text-[14px] font-mono flex-none font-semibold" style={{ color: '#e8eaf0' }}>
+                    {formatBRL(contextoVincular.valorTotal)}
+                  </span>
+                </div>
+                {contextoVincular.tipo === 'GRUPO' && contextoVincular.itens.length > 1 && (
+                  <ul className="mt-2 space-y-0.5 max-h-32 overflow-y-auto pr-1">
+                    {contextoVincular.itens.map((it, i) => (
+                      <li key={i} className="flex items-center gap-2 text-[12px]" style={{ color: '#8b92a8' }}>
+                        <span className="flex-none">·</span>
+                        <span className="flex-1 truncate">{it.descricao}</span>
+                        <span className="font-mono flex-none">
+                          {it.tipo === 'RECEITA' ? `−${formatBRL(it.valor)}` : formatBRL(it.valor)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <div className="px-4 py-3">
               <input
                 type="text"
+                autoFocus
                 value={filtroTxBusca}
                 onChange={e => setFiltroTxBusca(e.target.value)}
                 placeholder="Filtrar por descrição ou valor…"
@@ -1500,7 +2161,7 @@ function Sandbox({ id }: { id: string }) {
               ) : txsFiltradas.length === 0 ? (
                 <p className="py-6 text-center text-[14px] italic" style={{ color: '#8b92a8' }}>
                   {txCandidatas.length === 0
-                    ? 'Nenhuma transação PENDENTE/PROJEÇÃO encontrada para este cartão.'
+                    ? 'Nenhum lançamento PENDENTE/PROJEÇÃO neste cartão dentro do período da fatura.'
                     : 'Nenhuma transação corresponde ao filtro.'}
                 </p>
               ) : (
@@ -1518,7 +2179,7 @@ function Sandbox({ id }: { id: string }) {
                           {formatBRL(Number(tx.valor))}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2 text-[12px] mt-0.5" style={{ color: '#8b92a8' }}>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] mt-0.5" style={{ color: '#8b92a8' }}>
                         <span>{new Date(tx.data + 'T00:00').toLocaleDateString('pt-BR')}</span>
                         <span>·</span>
                         <span>{tx.status}</span>
