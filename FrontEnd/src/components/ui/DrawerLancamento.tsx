@@ -293,7 +293,7 @@ export default function DrawerLancamento({
       setQtdAdicional('3')
       setCalcAberta(false)
       setTimeout(() => descricaoRef.current?.focus(), 320)
-      if (lancamentoProp.id_par_transferencia && !formInicial.conta_destino_id) {
+      if (lancamentoProp.id_par_transferencia && (!formInicial.conta_destino_id || formInicial.conta_id === formInicial.conta_destino_id)) {
         apiFetch<{ conta_origem_id?: string; conta_destino_id?: string }>(`/transferencias/${lancamentoProp.id_par_transferencia}`)
           .then(res => {
             if (res.ok && res.dados) {
@@ -324,7 +324,7 @@ export default function DrawerLancamento({
           setEditando(data)
           setForm(formInicial)
           setEscopo('SOMENTE_ESTE')
-          if (data.id_par_transferencia && !formInicial.conta_destino_id) {
+          if (data.id_par_transferencia && (!formInicial.conta_destino_id || formInicial.conta_id === formInicial.conta_destino_id)) {
             const trfRes = await apiFetch<{ conta_origem_id?: string; conta_destino_id?: string }>(`/transferencias/${data.id_par_transferencia}`)
             if (trfRes.ok && trfRes.dados) {
               const { conta_origem_id, conta_destino_id } = trfRes.dados
