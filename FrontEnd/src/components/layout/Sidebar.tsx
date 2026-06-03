@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, List, CreditCard, Tag,
+  LayoutDashboard, List, CreditCard, Tag, Target,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
   ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2, TrendingUp, X,
   Receipt,
@@ -94,7 +94,8 @@ interface NavItem {
 
 const navPrincipal: NavItem[] = [
   { to: '/',            icon: <LayoutDashboard size={15}/>, label: 'Painel principal' },
-  { to: '/lancamentos', icon: <List size={15}/>,            label: 'Extratos' },
+  { to: '/lancamentos', icon: <List size={15}/>,            label: 'Extratos'         },
+  { to: '/objetivos',   icon: <Target size={15}/>,          label: 'Objetivos'        },
 ]
 const navCadastros: NavItem[] = [
   { to: '/contas',     icon: <CreditCard size={15}/>, label: 'Contas' },

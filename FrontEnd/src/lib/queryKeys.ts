@@ -48,4 +48,8 @@ export const qk = {
   // Importação de fatura de cartão
   faturasImport:        (uid: Uid)               => ['faturas-import', uid] as const,
   faturaImportSessao:   (uid: Uid, id: string)   => ['faturas-import', uid, id] as const,
+
+  // Objetivos financeiros
+  objetivos:       (uid: Uid, f?: unknown)   => ['objetivos', uid, f ?? null] as const,
+  objetivoDetalhe: (uid: Uid, id: string)    => ['objetivos', uid, id]        as const,
 }

@@ -20,11 +20,12 @@ echo   8. Relatorios
 echo   9. Transferencias
 echo  10. Lembretes
 echo  11. Assistente de Lancamentos
-echo  12. Abrir relatorio HTML do ultimo run
-echo  13. Modo visual (--ui)
+echo  12. Objetivos
+echo  13. Abrir relatorio HTML do ultimo run
+echo  14. Modo visual (--ui)
 echo   0. Sair
 echo.
-set /p OPC="Digite a opcao (0-13): "
+set /p OPC="Digite a opcao (0-14): "
 
 if "%OPC%"=="0"  goto FIM
 if "%OPC%"=="1"  goto OPC1
@@ -40,6 +41,7 @@ if "%OPC%"=="10" goto OPC10
 if "%OPC%"=="11" goto OPC11
 if "%OPC%"=="12" goto OPC12
 if "%OPC%"=="13" goto OPC13
+if "%OPC%"=="14" goto OPC14
 echo Opcao invalida.
 goto MENU
 
@@ -99,12 +101,17 @@ call :RUNTEST
 goto PAUSA
 
 :OPC12
+set TESTFILE=e2e/tests/10_objetivos.spec.ts
+call :RUNTEST
+goto PAUSA
+
+:OPC13
 echo.
 echo Abrindo relatorio HTML...
 npm run test:e2e:report
 goto PAUSA
 
-:OPC13
+:OPC14
 echo.
 echo Iniciando modo visual (--ui)...
 echo Certifique-se que o frontend esta rodando em http://localhost:5173

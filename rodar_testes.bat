@@ -17,23 +17,24 @@ echo   4. Transacoes
 echo   5. Transferencias
 echo   6. Lembretes
 echo   7. Assistente de Lancamentos
+echo   8. Objetivos
 echo.
 echo   --- Seguranca ---
-echo  12. Todos os testes de seguranca
-echo  13. RLS (isolamento entre usuarios)
-echo  14. Triggers (FK cross-user, protecoes)
-echo  15. RPCs (SECURITY INVOKER)
-echo  16. Auth + CORS
+echo  13. Todos os testes de seguranca
+echo  14. RLS (isolamento entre usuarios)
+echo  15. Triggers (FK cross-user, protecoes)
+echo  16. RPCs (SECURITY INVOKER)
+echo  17. Auth + CORS
 echo.
 echo   --- Manutencao ---
-echo   8. Limpar (com backup e restore)
-echo   9. Backup manual
-echo  10. Restore manual
-echo  11. Configurar nivel de logs
+echo   9. Limpar (com backup e restore)
+echo  10. Backup manual
+echo  11. Restore manual
+echo  12. Configurar nivel de logs
 echo.
 echo   0. Sair
 echo.
-set /p OPC="Digite a opcao (0-16): "
+set /p OPC="Digite a opcao (0-17): "
 
 if "%OPC%"=="0"  goto FIM
 if "%OPC%"=="1"  goto OPC1
@@ -52,6 +53,7 @@ if "%OPC%"=="13" goto OPC13
 if "%OPC%"=="14" goto OPC14
 if "%OPC%"=="15" goto OPC15
 if "%OPC%"=="16" goto OPC16
+if "%OPC%"=="17" goto OPC17
 echo Opcao invalida.
 goto MENU
 
@@ -90,37 +92,42 @@ call :RUNMOD
 goto PAUSA
 
 :OPC8
+set TESTFILE=tests/11_objetivos.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC9
 echo.
 echo ATENCAO: Este teste apagara todos os dados.
 echo Um backup sera feito antes e restore depois.
 echo.
 set /p CONF="Tem certeza? (S/N): "
-if /i "%CONF%"=="S" goto CONF8
+if /i "%CONF%"=="S" goto CONF9
 goto MENU
-:CONF8
+:CONF9
 call backup.bat
 if errorlevel 1 goto PAUSA
 call limpar_test.bat
 call restore.bat
 goto PAUSA
 
-:OPC9
+:OPC10
 echo.
 echo Fazendo backup manual...
 call backup.bat
 goto PAUSA
 
-:OPC10
+:OPC11
 echo.
 echo ATENCAO: Vai recriar dados a partir do ultimo backup.
 set /p CONF="Tem certeza? (S/N): "
-if /i "%CONF%"=="S" goto CONF10
+if /i "%CONF%"=="S" goto CONF11
 goto MENU
-:CONF10
+:CONF11
 call restore.bat
 goto PAUSA
 
-:OPC11
+:OPC12
 echo.
 echo   1 - DEBUG    2 - INFO    3 - ERROR    4 - NONE
 set /p NL="Nivel (1-4): "
@@ -134,27 +141,27 @@ timeout /t 5 /nobreak >nul
 echo Configurado: %LL%
 goto PAUSA
 
-:OPC12
+:OPC13
 set TESTFILE=tests/07_seguranca_rls.test.ts tests/08_seguranca_triggers.test.ts tests/09_seguranca_rpc.test.ts tests/10_seguranca_auth_cors.test.ts
 call :RUNMOD
 goto PAUSA
 
-:OPC13
+:OPC14
 set TESTFILE=tests/07_seguranca_rls.test.ts
 call :RUNMOD
 goto PAUSA
 
-:OPC14
+:OPC15
 set TESTFILE=tests/08_seguranca_triggers.test.ts
 call :RUNMOD
 goto PAUSA
 
-:OPC15
+:OPC16
 set TESTFILE=tests/09_seguranca_rpc.test.ts
 call :RUNMOD
 goto PAUSA
 
-:OPC16
+:OPC17
 set TESTFILE=tests/10_seguranca_auth_cors.test.ts
 call :RUNMOD
 goto PAUSA

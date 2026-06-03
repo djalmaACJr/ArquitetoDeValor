@@ -488,3 +488,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/faturas/deno.json"
 entrypoint = "./functions/faturas/index.ts"
+
+[functions.objetivos]
+enabled = true
+verify_jwt = false
+import_map = "./functions/objetivos/deno.json"
+entrypoint = "./functions/objetivos/index.ts"

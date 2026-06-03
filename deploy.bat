@@ -21,11 +21,12 @@ echo  11 - lembretes
 echo  12 - chat_mascote
 echo  13 - ia_configs
 echo  14 - faturas
-echo  15 - Configurar nivel de logs
-echo  16 - Configurar IA_KEYS_ENCRYPTION_KEY (cripto das api_keys de IA)
-echo  17 - Deploy com --debug (usar nesta maquina)
+echo  15 - objetivos
+echo  16 - Configurar nivel de logs
+echo  17 - Configurar IA_KEYS_ENCRYPTION_KEY (cripto das api_keys de IA)
+echo  18 - Deploy com --debug (usar nesta maquina)
 echo.
-set /p opcao="Digite a opcao desejada (1-17): "
+set /p opcao="Digite a opcao desejada (1-18): "
 
 if "%opcao%"=="1"  goto todos
 if "%opcao%"=="2"  goto contas
@@ -41,9 +42,10 @@ if "%opcao%"=="11" goto lembretes
 if "%opcao%"=="12" goto chat_mascote
 if "%opcao%"=="13" goto ia_configs
 if "%opcao%"=="14" goto faturas
-if "%opcao%"=="15" goto config_log
-if "%opcao%"=="16" goto config_ia_key
-if "%opcao%"=="17" goto debug_mode
+if "%opcao%"=="15" goto objetivos
+if "%opcao%"=="16" goto config_log
+if "%opcao%"=="17" goto config_ia_key
+if "%opcao%"=="18" goto debug_mode
 echo Opcao invalida! & pause & exit /b
 
 :debug_mode
@@ -67,8 +69,9 @@ echo  11 - lembretes
 echo  12 - chat_mascote
 echo  13 - ia_configs
 echo  14 - faturas
+echo  15 - objetivos
 echo.
-set /p mod_debug="Digite o modulo (1-14): "
+set /p mod_debug="Digite o modulo (1-15): "
 
 if "%mod_debug%"=="1"  goto debug_todos
 if "%mod_debug%"=="2"  goto debug_contas
@@ -84,6 +87,7 @@ if "%mod_debug%"=="11" goto debug_lembretes
 if "%mod_debug%"=="12" goto debug_chat_mascote
 if "%mod_debug%"=="13" goto debug_ia_configs
 if "%mod_debug%"=="14" goto debug_faturas
+if "%mod_debug%"=="15" goto debug_objetivos
 echo Opcao invalida! & pause & exit /b
 
 :debug_contas
@@ -177,6 +181,13 @@ supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] faturas deployed
 goto fim
 
+:debug_objetivos
+echo.
+echo [DEPLOY --debug] objetivos...
+supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo --debug
+echo [OK] objetivos deployed
+goto fim
+
 :debug_todos
 echo.
 echo [DEPLOY --debug] contas...
@@ -217,6 +228,9 @@ supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] faturas...
 supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo --debug
+echo.
+echo [DEPLOY --debug] objetivos...
+supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [OK] Todos os modulos deployados com --debug
 goto fim
@@ -386,6 +400,13 @@ supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo
 echo [OK] faturas deployed
 goto fim
 
+:objetivos
+echo.
+echo [DEPLOY] objetivos...
+supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo
+echo [OK] objetivos deployed
+goto fim
+
 :todos
 echo.
 echo [DEPLOY] contas...
@@ -426,6 +447,9 @@ supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] faturas...
 supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo
+echo.
+echo [DEPLOY] objetivos...
+supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [OK] Todos os modulos deployados
 goto fim

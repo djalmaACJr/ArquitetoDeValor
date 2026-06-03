@@ -31,3 +31,10 @@ export type EscopoEdicao = typeof ESCOPOS_EDICAO[number]
 // ── Tipo de recorrência (interno do banco) ───────────────────
 export const TIPOS_RECORRENCIA_BANCO = ['PARCELA', 'PROJECAO'] as const
 export type TipoRecorrenciaBanco = typeof TIPOS_RECORRENCIA_BANCO[number]
+
+// ── Objetivos Financeiros ─────────────────────────────────────
+export const TIPOS_OBJETIVO = ['SONHO', 'OBJETIVO', 'PROJETO', 'CRESCIMENTO'] as const
+export type TipoObjetivo = typeof TIPOS_OBJETIVO[number]
+
+export const STATUS_OBJETIVO = ['EM_PROGRESSO', 'ATINGIDO', 'CANCELADO'] as const
+export type StatusObjetivo = typeof STATUS_OBJETIVO[number]

@@ -2,8 +2,8 @@
 
 // Enums centralizados em lib/constants.ts — importados e re-exportados aqui
 // para preservar `import type { TipoConta } from '../types'` existentes.
-import type { TipoConta, TipoTransacao, StatusTransacao } from '../lib/constants'
-export type { TipoConta, TipoTransacao, StatusTransacao }
+import type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia } from '../lib/constants'
+export type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia }
 
 export interface CartaoVirtual {
   id:      string   // uuid local, gerado no front via crypto.randomUUID()
@@ -197,6 +197,51 @@ export interface FaturaImportItem {
   // Usado pra mostrar a descrição/status atuais da projeção/pendência em vez
   // do texto cru do PDF, evitando confusão na tela de Revisão.
   transacao_existente?:   { descricao: string; status: string; data: string } | null
+}
+
+// ── Objetivos Financeiros ─────────────────────────────────────
+export interface Revisao {
+  data:                string
+  valor_meta_anterior: number
+  motivo:              string
+}
+
+export interface SnapshotProgresso {
+  data_snapshot:  string
+  valor_atingido: number
+  percentual:     number
+}
+
+export interface Objetivo {
+  id:             string
+  user_id:        string
+  tipo:           TipoObjetivo
+  nome:           string
+  descricao:      string | null
+  icone:          string
+  cor:            string
+  ativo:          boolean
+  valor_meta:     number
+  data_inicio:    string
+  data_fim:       string
+  conta_id:       string | null
+  categoria_id:   string | null
+  frequencia:     Frequencia | null
+  contas_projeto:      string[]
+  contas_sonho:        string[]
+  categorias_objetivo: string[]
+  valor_atingido: number
+  percentual:     number
+  status:         StatusObjetivo
+  revisoes:       Revisao[]
+  criado_em:      string
+  atualizado_em:  string
+  // campos extras da vw_objetivos_detalhes
+  dias_restantes:       number
+  conta_nome:           string | null
+  categoria_descricao:  string | null
+  // campo extra do GET /:id
+  progresso?:     SnapshotProgresso[]
 }
 
 // Transação candidata para vincular manualmente em importação de fatura
