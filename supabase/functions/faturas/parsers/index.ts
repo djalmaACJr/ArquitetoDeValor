@@ -9,15 +9,17 @@
 //   2. Importe aqui e adicione na lista `PARSERS` ANTES do genérico.
 
 import type { ParserFatura, ParsedFatura } from "./tipos.ts";
-import { parserNubank }   from "./nubank.ts";
-import { parserInter }    from "./inter.ts";
-import { parserC6 }       from "./c6.ts";
-import { parserGenerico } from "./generico.ts";
+import { parserNubank }      from "./nubank.ts";
+import { parserInter }       from "./inter.ts";
+import { parserC6 }          from "./c6.ts";
+import { parserMercadoPago } from "./mercadopago.ts";
+import { parserGenerico }    from "./generico.ts";
 
 const PARSERS: ParserFatura[] = [
   parserNubank,
   parserInter,
   parserC6,
+  parserMercadoPago,
   parserGenerico,    // fallback — sempre por último
 ];
 

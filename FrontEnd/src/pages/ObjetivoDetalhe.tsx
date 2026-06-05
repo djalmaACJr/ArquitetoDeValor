@@ -6,7 +6,7 @@ import { Doughnut, Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, ArcElement, Tooltip, Legend,
   CategoryScale, LinearScale, PointElement, LineElement, Filler,
-  BarElement,
+  BarElement, type ChartDataset,
 } from 'chart.js'
 import { useObjetivoDetalhe, useObjetivos } from '../hooks/useObjetivos'
 import { useContas } from '../hooks/useContas'
@@ -349,7 +349,7 @@ function EvolucaoSaldoSonho({
               footer: items => {
                 const tot = items
                   .filter(it => it.dataset.type !== 'line')
-                  .reduce((s, it) => s + (it.parsed.y as number), 0)
+                  .reduce((s: number, it) => s + (it.parsed.y as number), 0)
                 return `Total: ${formatBRL(tot)}`
               },
             },
@@ -392,7 +392,7 @@ function EvolucaoSaldoSonho({
 
         {/* Colunas */}
         <div className="grid pb-1 text-[11px] uppercase tracking-wide"
-          style={{ gridTemplateColumns: '12px 1fr 5.5rem 5.5rem 5.5rem', color: '#8b92a8', gap: '0 8px' }}>
+          style={{ gridTemplateColumns: '12px 1fr 8rem 8rem 8.5rem', color: '#8b92a8', gap: '0 12px' }}>
           <span />
           <span>Conta</span>
           {temPrev
@@ -411,7 +411,7 @@ function EvolucaoSaldoSonho({
             const corDelta = delta > 0 ? '#00c896' : delta < 0 ? '#f87171' : '#8b92a8'
             return (
               <div key={c.conta_id} className="grid py-1.5 items-center"
-                style={{ gridTemplateColumns: '12px 1fr 5.5rem 5.5rem 5.5rem', gap: '0 8px' }}>
+                style={{ gridTemplateColumns: '12px 1fr 8rem 8rem 8.5rem', gap: '0 12px' }}>
                 <span className="w-2.5 h-2.5 rounded-sm" style={{ background: corConta(c) }} />
                 <span className="text-[12px] text-white/70 truncate" title={c.nome}>{c.nome}</span>
                 {temPrev ? (
@@ -434,7 +434,7 @@ function EvolucaoSaldoSonho({
         {/* Total */}
         {temPrev && (
           <div className="grid pt-2 mt-1 border-t border-white/8 items-center font-semibold"
-            style={{ gridTemplateColumns: '12px 1fr 5.5rem 5.5rem 5.5rem', gap: '0 8px' }}>
+            style={{ gridTemplateColumns: '12px 1fr 8rem 8rem 8.5rem', gap: '0 12px' }}>
             <span />
             <span className="text-[11px] text-white/40 uppercase tracking-wide">Total</span>
             <span className="text-[13px] text-right tabular-nums" style={{ color: '#8b92a8' }}>{formatBRL(totalPrev)}</span>
@@ -586,14 +586,14 @@ function EvolucaoMensalObjetivo({
               pointRadius: 0,
               order: 1,
             },
-          ],
+          ] as ChartDataset<'bar', (number | null)[]>[],
         }}
         options={{
           responsive: true,
           plugins: {
             legend: { display: false },
             tooltip: {
-              callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y)}` },
+              callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y ?? 0)}` },
             },
           },
           scales: {
@@ -967,6 +967,37 @@ function GraficoCategoriasAno({
   const corPos = (cat: CatVis) => PALETTE_POS[visPos.indexOf(cat) % PALETTE_POS.length]
   const corNeg = (cat: CatVis) => PALETTE_NEG[visNeg.indexOf(cat) % PALETTE_NEG.length]
 
+  // Escala y2 explícita: garante que 0 esteja sempre visível com folga
+  const yoyValues = yoyPct.filter((v): v is number => v !== null)
+  const yoyMin = yoyValues.length > 0 ? Math.min(...yoyValues) : 0
+  const yoyMax = yoyValues.length > 0 ? Math.max(...yoyValues) : 100
+  const rangePad = Math.max(20, (yoyMax - yoyMin) * 0.15)
+  const y2min = Math.floor((Math.min(0, yoyMin) - rangePad) / 10) * 10
+  const y2max = Math.ceil((Math.max(0, yoyMax) + rangePad) / 10) * 10
+
+  // Plugin inline: desenha linha do zero no eixo y2 diretamente no canvas
+  const zeroLinePlugin = {
+    id: 'crescZeroLine',
+    afterDraw(chart: ChartJS) {
+      const scale = chart.scales['y2']
+      if (!scale) return
+      const y0 = scale.getPixelForValue(0)
+      const { top, bottom, left, right } = chart.chartArea
+      if (y0 < top || y0 > bottom) return
+      const c = chart.ctx
+      c.save()
+      c.strokeStyle = 'rgba(255,255,255,0.35)'
+      c.lineWidth = 1.5
+      c.setLineDash([6, 4])
+      c.beginPath()
+      c.moveTo(left, y0)
+      c.lineTo(right, y0)
+      c.stroke()
+      c.setLineDash([])
+      c.restore()
+    },
+  }
+
   return (
     <section className="bg-[#1a1f2e] rounded-xl p-4 border border-white/5">
       <h2 className="text-[15px] font-semibold text-white/70 mb-1">Arrecadação por Ano</h2>
@@ -975,7 +1006,8 @@ function GraficoCategoriasAno({
       </p>
 
       <Bar
-        data={{ labels, datasets: [...barDatasets, lineYoY, lineMeta] }}
+        plugins={[zeroLinePlugin]}
+        data={{ labels, datasets: [...barDatasets, lineYoY, lineMeta] as ChartDataset<'bar', (number | null)[]>[] }}
         options={{
           responsive: true,
           onClick: (_, elements) => {
@@ -997,7 +1029,7 @@ function GraficoCategoriasAno({
                     if (v == null) return ''
                     return ` ${ctx.dataset.label}: ${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
                   }
-                  return ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y)}`
+                  return ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y ?? 0)}`
                 },
                 footer: items => {
                   const bar = items.find(i => i.dataset.yAxisID !== 'y2')
@@ -1021,8 +1053,10 @@ function GraficoCategoriasAno({
             },
             y2: {
               position: 'right',
+              min: y2min,
+              max: y2max,
               grid: { drawOnChartArea: false },
-              ticks: { color: '#f0b429', font: { size: 11 }, callback: v => `${v}%` },
+              ticks: { color: '#f0b429', font: { size: 11 }, callback: v => `${Number(v) >= 0 ? '+' : ''}${v}%` },
             },
           },
         }}
@@ -1760,6 +1794,7 @@ export default function ObjetivoDetalhe() {
           mensagem="O objetivo será marcado como cancelado."
           onConfirmar={onExcluir}
           onCancelar={() => setExcluindo(false)}
+          salvando={false}
         />
       )}
 

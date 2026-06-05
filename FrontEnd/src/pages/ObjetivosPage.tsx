@@ -16,6 +16,13 @@ const TIPO_TABS: { value: TipoObjetivo | 'TODOS'; label: string }[] = [
   { value: 'CRESCIMENTO', label: '📈 Crescimento' },
 ]
 
+const TEMAS: { tipo: TipoObjetivo; emoji: string; label: string }[] = [
+  { tipo: 'SONHO',       emoji: '💭', label: 'Sonhos'       },
+  { tipo: 'OBJETIVO',    emoji: '🎯', label: 'Objetivos'    },
+  { tipo: 'PROJETO',     emoji: '📦', label: 'Projetos'     },
+  { tipo: 'CRESCIMENTO', emoji: '📈', label: 'Crescimento'  },
+]
+
 const STATUS_OPCOES: { value: StatusObjetivo | ''; label: string }[] = [
   { value: '',             label: 'Qualquer status' },
   { value: 'EM_PROGRESSO', label: 'Em progresso'    },
@@ -152,13 +159,38 @@ export default function ObjetivosPage() {
             Criar primeiro objetivo
           </button>
         </div>
-      ) : (
+      ) : tipoFiltro !== 'TODOS' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {objetivos.map(o => (
             <CardObjetivo key={o.id} objetivo={o}
               onEditar={abrirEditar}
               onExcluir={setExcluindo} />
           ))}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-8">
+          {TEMAS.map(tema => {
+            const lista = objetivos.filter(o => o.tipo === tema.tipo)
+            if (lista.length === 0) return null
+            return (
+              <section key={tema.tipo}>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[18px]">{tema.emoji}</span>
+                  <h2 className="text-[15px] font-semibold text-white/80">{tema.label}</h2>
+                  <span className="text-[12px] px-1.5 py-0.5 rounded-full bg-white/5 text-white/40">
+                    {lista.length}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {lista.map(o => (
+                    <CardObjetivo key={o.id} objetivo={o}
+                      onEditar={abrirEditar}
+                      onExcluir={setExcluindo} />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
         </div>
       )}
 
@@ -177,6 +209,7 @@ export default function ObjetivosPage() {
           mensagem="O objetivo será marcado como cancelado."
           onConfirmar={confirmarExclusao}
           onCancelar={() => setExcluindo(null)}
+          salvando={false}
         />
       )}
 

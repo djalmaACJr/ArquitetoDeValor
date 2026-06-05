@@ -51,7 +51,10 @@
       "PowerShell(Rename-Item \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-frames.png\" \"sabio-frames.png\")",
       "PowerShell(Rename-Item \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-andando.webm\" \"sabio-andando.webm\")",
       "Read(//c/Pessoal/ArquitetoDeValor/FrontEnd/public/mascotes/**)",
-      "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" scripts/gerar_anim_mascote.py gato)"
+      "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" scripts/gerar_anim_mascote.py gato)",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/chart.js/package.json'\\).version\\)\")",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/react-chartjs-2/package.json'\\).version\\)\")",
+      "Bash(supabase --version)"
     ],
     "additionalDirectories": [
       "C:\\Pessoal\\ArquitetoDeValor\\scripts",
