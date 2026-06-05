@@ -237,9 +237,11 @@ export interface Objetivo {
   criado_em:      string
   atualizado_em:  string
   // campos extras da vw_objetivos_detalhes
-  dias_restantes:       number
-  conta_nome:           string | null
-  categoria_descricao:  string | null
+  saldo_base:                   number
+  dias_restantes:               number
+  conta_nome:                   string | null
+  categoria_descricao:          string | null
+  crescimento_mensal_necessario: number | null
   // campo extra do GET /:id
   progresso?:     SnapshotProgresso[]
 }

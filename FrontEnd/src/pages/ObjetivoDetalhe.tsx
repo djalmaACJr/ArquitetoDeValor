@@ -163,19 +163,13 @@ async function fetchTxsObjetivo(objetivo: Objetivo): Promise<Transacao[]> {
 
   const hoje        = new Date().toISOString().split('T')[0]
   const mesCorrente = hoje.slice(0, 7)
-
-  // CRESCIMENTO: inclui RECEITA e DESPESA para cálculo do líquido
-  // OBJETIVO: apenas RECEITA (rastreamento de renda)
   const ehCrescimento = objetivo.tipo === 'CRESCIMENTO'
-  const tiposValidos = ehCrescimento
-    ? ['RECEITA', 'DESPESA']
-    : ['RECEITA']
 
   // Não exibir períodos futuros (projeções):
   // - CRESCIMENTO: corta no dia de hoje (comparação YoY justa).
   // - OBJETIVO: corta no mês corrente inteiro (Resumo por Mês vai até o mês atual).
   return unicas.filter(t => {
-    if (!tiposValidos.includes(t.tipo)) return false
+    if (!['RECEITA', 'DESPESA'].includes(t.tipo)) return false
     if (t.data < objetivo.data_inicio || t.data > objetivo.data_fim) return false
     return ehCrescimento ? t.data <= hoje : t.data.slice(0, 7) <= mesCorrente
   })
@@ -1462,10 +1456,16 @@ function BarraProgresso({ objetivo }: { objetivo: Objetivo }) {
                : objetivo.status === 'CANCELADO' ? '#636e72'
                : tipoCor[objetivo.tipo] ?? '#4da6ff'
 
+  const crescimentoMeta = objetivo.tipo === 'SONHO'
+    ? objetivo.valor_meta - objetivo.saldo_base
+    : null
+
   const subtitulo = objetivo.tipo === 'OBJETIVO'
     ? `${formatBRL(objetivo.valor_atingido)}/mês de ${formatBRL(objetivo.valor_meta)}/mês`
     : objetivo.tipo === 'CRESCIMENTO'
     ? `${objetivo.valor_atingido >= 0 ? '+' : ''}${objetivo.valor_atingido.toFixed(1)}% de crescimento (meta: +${objetivo.valor_meta.toFixed(1)}%)`
+    : objetivo.tipo === 'SONHO'
+    ? `${formatBRL(objetivo.valor_atingido)} crescidos de ${formatBRL(crescimentoMeta ?? 0)} necessários`
     : `${formatBRL(objetivo.valor_atingido)} de ${formatBRL(objetivo.valor_meta)}`
 
   return (
@@ -1489,6 +1489,19 @@ function BarraProgresso({ objetivo }: { objetivo: Objetivo }) {
         </span>
         <span>{formatData(objetivo.data_fim)}</span>
       </div>
+
+      {/* Estimativa mensal — apenas SONHO em progresso */}
+      {objetivo.tipo === 'SONHO' && objetivo.crescimento_mensal_necessario != null &&
+       objetivo.crescimento_mensal_necessario > 0 && (
+        <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
+          <span className="text-[12px]" style={{ color: '#8b92a8' }}>
+            Crescimento mensal necessário para atingir a meta
+          </span>
+          <span className="text-[13px] font-semibold tabular-nums" style={{ color: baraCor }}>
+            {formatBRL(objetivo.crescimento_mensal_necessario)}/mês
+          </span>
+        </div>
+      )}
     </section>
   )
 }
@@ -1714,9 +1727,9 @@ export default function ObjetivoDetalhe() {
         </p>
       )}
 
-      {/* Histórico de progresso (snapshots) — não no OBJETIVO, que usa
-          a Evolução Mensal (derivada dos lançamentos) no lugar dos snapshots. */}
-      {objetivo.tipo !== 'OBJETIVO' && objetivo.progresso && objetivo.progresso.length >= 2 && (
+      {/* Histórico de progresso (snapshots) — não no OBJETIVO (usa Evolução Mensal)
+          nem no CRESCIMENTO (usa Arrecadação por Ano com dados anuais completos). */}
+      {objetivo.tipo !== 'OBJETIVO' && objetivo.tipo !== 'CRESCIMENTO' && objetivo.progresso && objetivo.progresso.length >= 2 && (
         <div className="mb-4">
           <HistoricoProgresso
             snapshots={objetivo.progresso}
