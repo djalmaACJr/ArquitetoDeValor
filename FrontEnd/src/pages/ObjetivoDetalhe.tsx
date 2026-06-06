@@ -93,7 +93,7 @@ function HistoricoProgresso({
             legend: { display: false },
             tooltip: {
               callbacks: {
-                label: ctx => ` ${formatBRL(ctx.parsed.y)}`,
+                label: ctx => ` ${formatBRL(ctx.parsed.y ?? 0)}`,
               },
             },
           },
@@ -329,7 +329,7 @@ function EvolucaoSaldoSonho({
         Clique num mês para comparar com o anterior
       </p>
       <Bar
-        data={{ labels: meses.map(fmtMes), datasets }}
+        data={{ labels: meses.map(fmtMes), datasets: datasets as ChartDataset<'bar', number[]>[] }}
         options={{
           responsive: true,
           onClick: (_, elements) => {
@@ -339,12 +339,14 @@ function EvolucaoSaldoSonho({
             legend: { display: false },
             tooltip: {
               mode: 'index',
-              callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y)}` },
-              footer: items => {
-                const tot = items
-                  .filter(it => it.dataset.type !== 'line')
-                  .reduce((s: number, it) => s + (it.parsed.y as number), 0)
-                return `Total: ${formatBRL(tot)}`
+              callbacks: {
+                label: ctx => ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y ?? 0)}`,
+                footer: items => {
+                  const tot = items
+                    .filter(it => (it.dataset as { type?: string }).type !== 'line')
+                    .reduce((s: number, it) => s + (it.parsed.y as number), 0)
+                  return `Total: ${formatBRL(tot)}`
+                },
               },
             },
           },

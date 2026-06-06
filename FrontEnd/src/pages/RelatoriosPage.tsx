@@ -149,7 +149,7 @@ function LinhaGrupo({
 
       {/* Subcategorias com 3º nível inline por descrição */}
       {aberto && grupo.subcategorias.map(sub => {
-        const subKey = sub.categoria_id ?? sub.categoria_nome
+        const subKey = `${grupo.tipo}:${sub.categoria_id ?? sub.categoria_nome}`
         const subExpandido = expandidosSubs.has(subKey)
         const temDescricoes = sub.porDescricao.length > 1
         return (
@@ -966,7 +966,7 @@ export default function RelatoriosPage() {
   // Também limpa subs expandidas ao mudar nível ou ao re-buscar.
   useEffect(() => {
     if (nivel === 3) {
-      setGruposAbertos(new Set(grupos.map(g => g.nome)))
+      setGruposAbertos(new Set(grupos.map(g => `${g.tipo}:${g.nome}`)))
     } else {
       setGruposAbertos(new Set())
     }
@@ -1341,8 +1341,8 @@ export default function RelatoriosPage() {
                     <LinhaGrupo
                       key={`${i}-${nivel}`}
                       grupo={g} meses={meses} oculto={oculto}
-                      aberto={gruposAbertos.has(g.nome)}
-                      onToggleAberto={() => toggleGrupo(g.nome)}
+                      aberto={gruposAbertos.has(`${g.tipo}:${g.nome}`)}
+                      onToggleAberto={() => toggleGrupo(`${g.tipo}:${g.nome}`)}
                       expandidosSubs={subsExpandidos}
                       onToggleSub={toggleSub}
                       onCelulaClick={(catId, catNome, mes, titulo) => setDrillDown({ titulo, categoria_id: catId, categoria_nome: catNome, mes })} />
@@ -1399,8 +1399,8 @@ export default function RelatoriosPage() {
                     <LinhaGrupo
                       key={`${i}-${nivel}`}
                       grupo={g} meses={meses} oculto={oculto}
-                      aberto={gruposAbertos.has(g.nome)}
-                      onToggleAberto={() => toggleGrupo(g.nome)}
+                      aberto={gruposAbertos.has(`${g.tipo}:${g.nome}`)}
+                      onToggleAberto={() => toggleGrupo(`${g.tipo}:${g.nome}`)}
                       expandidosSubs={subsExpandidos}
                       onToggleSub={toggleSub}
                       onCelulaClick={(catId, catNome, mes, titulo) => setDrillDown({ titulo, categoria_id: catId, categoria_nome: catNome, mes })} />

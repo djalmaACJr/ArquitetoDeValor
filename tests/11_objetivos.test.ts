@@ -14,6 +14,7 @@ let categoriaId:    string;   // categoria reutilizada de /categorias
 let sonhoId:        string;
 let objetivoId:     string;
 let projetoId:      string;
+let crescimentoId:  string;   // CRESCIMENTO criado em CA-OBJ14
 
 // ── Helpers ───────────────────────────────────────────────────
 const hoje = new Date().toISOString().split("T")[0];
@@ -397,5 +398,89 @@ describe("Objetivos — CA-OBJ01 a CA-OBJ13", () => {
   test("CA-OBJ13g — sem autenticação retorna 401", async () => {
     const { status } = await apiSemAuth("/objetivos");
     expect(status).toBe(401);
+  });
+
+  // ── CA-OBJ14: CRESCIMENTO — criação ─────────────────────────
+  test("CA-OBJ14 — POST /objetivos cria CRESCIMENTO com categorias_objetivo e retorna 201", async () => {
+    const anoPassado = `${new Date().getFullYear() - 1}-01-01`;
+    const { status, data } = await api("/objetivos", "POST", {
+      tipo:                 "CRESCIMENTO",
+      nome:                 "Jest OBJ Crescimento Receitas",
+      descricao:            "Meta de crescimento YoY de 20%",
+      valor_meta:           20,        // % alvo de crescimento ano a ano
+      data_inicio:          anoPassado,
+      data_fim:             fimAno,
+      categorias_objetivo:  [categoriaId],
+      icone:                "📈",
+      cor:                  "#00c896",
+    });
+
+    expect(status).toBe(201);
+    expect(data.dados).toBeDefined();
+    expect(data.dados.id).toBeDefined();
+    expect(data.dados.tipo).toBe("CRESCIMENTO");
+    expect(data.dados.nome).toBe("Jest OBJ Crescimento Receitas");
+    expect(data.dados.valor_meta).toBe(20);
+    expect(Array.isArray(data.dados.categorias_objetivo)).toBe(true);
+    expect(data.dados.categorias_objetivo).toContain(categoriaId);
+    expect(data.dados.status).toBe("EM_PROGRESSO");
+    expect(data.dados.ativo).toBe(true);
+    crescimentoId = data.dados.id as string;
+  });
+
+  // ── CA-OBJ15: CRESCIMENTO — filtro por tipo ─────────────────
+  test("CA-OBJ15 — GET /objetivos?tipo=CRESCIMENTO retorna apenas CRESCIMENTOs", async () => {
+    const { status, data } = await api("/objetivos?tipo=CRESCIMENTO");
+    expect(status).toBe(200);
+    expect(Array.isArray(data.dados)).toBe(true);
+    expect(data.dados.length).toBeGreaterThan(0);
+    for (const o of data.dados) {
+      expect(o.tipo).toBe("CRESCIMENTO");
+    }
+  });
+
+  // ── CA-OBJ16: CRESCIMENTO — validação de campos ─────────────
+  test("CA-OBJ16a — CRESCIMENTO sem categorias_objetivo retorna 400", async () => {
+    const anoPassado = `${new Date().getFullYear() - 1}-01-01`;
+    const { status } = await api("/objetivos", "POST", {
+      tipo:        "CRESCIMENTO",
+      nome:        "Jest OBJ Crescimento Sem Cat",
+      valor_meta:  15,
+      data_inicio: anoPassado,
+      data_fim:    fimAno,
+      // categorias_objetivo ausente
+    });
+    expect(status).toBe(400);
+  });
+
+  test("CA-OBJ16b — CRESCIMENTO com categorias_objetivo vazio retorna 400", async () => {
+    const anoPassado = `${new Date().getFullYear() - 1}-01-01`;
+    const { status } = await api("/objetivos", "POST", {
+      tipo:                "CRESCIMENTO",
+      nome:                "Jest OBJ Crescimento Cat Vazia",
+      valor_meta:          15,
+      data_inicio:         anoPassado,
+      data_fim:            fimAno,
+      categorias_objetivo: [],  // vazio deve ser rejeitado
+    });
+    expect(status).toBe(400);
+  });
+
+  // ── CA-OBJ17: CRESCIMENTO — detalhe e progresso ─────────────
+  test("CA-OBJ17 — GET /objetivos/:id de CRESCIMENTO retorna detalhe com progresso", async () => {
+    const { status, data } = await api(`/objetivos/${crescimentoId}`);
+    expect(status).toBe(200);
+    expect(data.dados.id).toBe(crescimentoId);
+    expect(data.dados.tipo).toBe("CRESCIMENTO");
+    expect(Array.isArray(data.dados.categorias_objetivo)).toBe(true);
+    // dias_restantes calculado
+    expect(typeof data.dados.dias_restantes).toBe("number");
+    expect(data.dados.dias_restantes).toBeGreaterThanOrEqual(0);
+    // progresso: array de snapshots (pode estar vazio antes de sincronizar)
+    expect(Array.isArray(data.dados.progresso)).toBe(true);
+    // valor_atingido: % YoY calculado (numérico)
+    expect(typeof data.dados.valor_atingido).toBe("number");
+    // percentual: relativo à meta (valor_meta = % alvo)
+    expect(typeof data.dados.percentual).toBe("number");
   });
 });
