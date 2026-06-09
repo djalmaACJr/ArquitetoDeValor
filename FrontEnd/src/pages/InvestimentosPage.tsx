@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
 import { useContas } from '../hooks/useContas'
 import LoadingMascote from '../components/ui/LoadingMascote'
+import { SelectDark } from '../components/ui/shared'
 import { formatBRL } from '../lib/utils'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR } from '../lib/constants'
 import type { InvestimentoDashboardTipo } from '../types'
@@ -80,6 +81,8 @@ export default function InvestimentosPage() {
   const [contaId, setContaId] = useState<string>('')
   const { dashboard, loading, error } = useInvestimentosDashboard(contaId || null)
   const { contas } = useContas()
+  // Só contas de investimento são relevantes na carteira
+  const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO')
 
   if (loading) return <LoadingMascote />
 
@@ -97,16 +100,17 @@ export default function InvestimentosPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <select
+          <SelectDark
             value={contaId}
             onChange={(e) => setContaId(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-white/10 bg-white/[0.02] text-[13px] text-white"
+            style={{ width: 'auto' }}
+            className="!text-[13px] !py-2"
           >
             <option value="">Todas as contas</option>
-            {contas.map((c) => (
+            {contasInvest.map((c) => (
               <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>
             ))}
-          </select>
+          </SelectDark>
           <Link to="/investimentos/dividendos"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
               text-[13px] text-white transition-all hover:border-white/25">
