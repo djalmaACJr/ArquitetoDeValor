@@ -23,6 +23,14 @@ const STATUS_OPCOES: { value: StatusObjetivo | ''; label: string }[] = [
   { value: 'CANCELADO',    label: 'Cancelado'        },
 ]
 
+// Ordem e identidade visual dos grupos por tipo (mesmas cores do CardObjetivo)
+const TIPO_GRUPOS: { tipo: TipoObjetivo; label: string; cor: string }[] = [
+  { tipo: 'SONHO',       label: '💭 Sonhos',      cor: '#7F77DD' },
+  { tipo: 'OBJETIVO',    label: '🎯 Objetivos',   cor: '#4da6ff' },
+  { tipo: 'PROJETO',     label: '📦 Projetos',    cor: '#f0b429' },
+  { tipo: 'CRESCIMENTO', label: '📈 Crescimento', cor: '#00c896' },
+]
+
 export default function ObjetivosPage() {
   const [tipoFiltro,   setTipoFiltro]   = useState<TipoObjetivo | 'TODOS'>('TODOS')
   const [statusFiltro, setStatusFiltro] = useState<StatusObjetivo | ''>('')
@@ -153,12 +161,30 @@ export default function ObjetivosPage() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-          {objetivos.map(o => (
-            <CardObjetivo key={o.id} objetivo={o}
-              onEditar={abrirEditar}
-              onExcluir={setExcluindo} />
-          ))}
+        <div className="flex flex-col gap-7">
+          {TIPO_GRUPOS.map(({ tipo, label, cor }) => {
+            const grupo = objetivos.filter(o => o.tipo === tipo)
+            if (grupo.length === 0) return null
+            return (
+              <section key={tipo}>
+                <div className="flex items-center gap-2 mb-3">
+                  <h2 className="text-[15px] font-semibold" style={{ color: cor }}>{label}</h2>
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-full"
+                    style={{ background: `${cor}22`, color: cor }}>
+                    {grupo.length}
+                  </span>
+                  <div className="flex-1 h-px" style={{ background: `${cor}22` }} />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {grupo.map(o => (
+                    <CardObjetivo key={o.id} objetivo={o}
+                      onEditar={abrirEditar}
+                      onExcluir={setExcluindo} />
+                  ))}
+                </div>
+              </section>
+            )
+          })}
         </div>
       )}
 

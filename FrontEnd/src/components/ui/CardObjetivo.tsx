@@ -70,11 +70,11 @@ export function CardObjetivo({
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <Link to={`/objetivos/${objetivo.id}`}
-            className="w-7 h-7 rounded-lg border border-white/10 flex items-center justify-center
-              hover:border-av-blue/50 hover:text-av-blue transition-colors"
-            style={{ color: '#8b92a8' }}
-            title="Ver detalhes">
-            <BarChart2 size={12} />
+            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all
+              hover:brightness-125 hover:scale-105"
+            style={{ background: `${tipoCor}26`, border: `1.5px solid ${tipoCor}66`, color: tipoCor }}
+            title="Ver detalhes e gráficos">
+            <BarChart2 size={16} />
           </Link>
           <button onClick={() => onEditar(objetivo)}
             className="w-7 h-7 rounded-lg border border-white/10 flex items-center justify-center

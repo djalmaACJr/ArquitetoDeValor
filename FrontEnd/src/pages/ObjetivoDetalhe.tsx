@@ -411,7 +411,7 @@ function EvolucaoSaldoSonho({
             const corDelta = delta > 0 ? '#00c896' : delta < 0 ? '#f87171' : '#8b92a8'
             return (
               <div key={c.conta_id} className="grid py-1.5 items-center"
-                style={{ gridTemplateColumns: '12px 1fr 5.5rem 5.5rem 5.5rem', gap: '0 8px' }}>
+                style={{ gridTemplateColumns: '12px 1fr 5.5rem 5.5rem 7.5rem', gap: '0 18px' }}>
                 <span className="w-2.5 h-2.5 rounded-sm" style={{ background: corConta(c) }} />
                 <span className="text-[12px] text-white/70 truncate" title={c.nome}>{c.nome}</span>
                 {temPrev ? (
@@ -433,8 +433,8 @@ function EvolucaoSaldoSonho({
 
         {/* Total */}
         {temPrev && (
-          <div className="grid pt-2 mt-1 border-t border-white/8 items-center font-semibold"
-            style={{ gridTemplateColumns: '12px 1fr 5.5rem 5.5rem 5.5rem', gap: '0 8px' }}>
+          <div className="grid pt-4 mt-3 border-t border-white/8 items-center font-semibold"
+            style={{ gridTemplateColumns: '12px 1fr 5.5rem 5.5rem 7.5rem', gap: '0 18px' }}>
             <span />
             <span className="text-[11px] text-white/40 uppercase tracking-wide">Total</span>
             <span className="text-[13px] text-right tabular-nums" style={{ color: '#8b92a8' }}>{formatBRL(totalPrev)}</span>
