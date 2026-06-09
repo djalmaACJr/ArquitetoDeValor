@@ -26,6 +26,7 @@ const ApresentacaoMascotes   = lazy(() => import('./pages/ApresentacaoMascotes')
 const PerfilPage             = lazy(() => import('./pages/PerfilPage'))
 const ObjetivosPage          = lazy(() => import('./pages/ObjetivosPage'))
 const ObjetivoDetalhe        = lazy(() => import('./pages/ObjetivoDetalhe'))
+const SobrePage              = lazy(() => import('./pages/SobrePage'))
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
@@ -85,6 +86,7 @@ export default function App() {
             <Route path="importar-fatura"      element={<ImportarFaturaPage/>}/>
             <Route path="importar-fatura/:id"  element={<ImportarFaturaPage/>}/>
             <Route path="perfil"       element={<PerfilPage/>}/>
+            <Route path="sobre"        element={<SobrePage/>}/>
           </Route>
           <Route path="*" element={<Navigate to="/" replace/>}/>
         </Routes>

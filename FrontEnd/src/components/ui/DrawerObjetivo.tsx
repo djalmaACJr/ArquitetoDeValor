@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   Drawer, Field, BtnSalvar, BtnCancelar, ColorPicker, IconPicker, SelectDark,
 } from './shared'
@@ -84,9 +84,15 @@ export function DrawerObjetivo({
   const { contas }     = useContas()
   const { categorias } = useCategorias()
 
-  useEffect(() => {
+  // Reinicializa o form quando o drawer abre ou troca de objetivo. Padrão
+  // "ajustar estado na renderização" (React docs) — evita setState em efeito.
+  const [prevOpen, setPrevOpen] = useState(open)
+  const [prevObjetivo, setPrevObjetivo] = useState(objetivo)
+  if (open !== prevOpen || objetivo !== prevObjetivo) {
+    setPrevOpen(open)
+    setPrevObjetivo(objetivo)
     if (open) { setForm(objetivo ? de(objetivo) : VAZIO); setErro(null) }
-  }, [open, objetivo])
+  }
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm(f => ({ ...f, [k]: v }))

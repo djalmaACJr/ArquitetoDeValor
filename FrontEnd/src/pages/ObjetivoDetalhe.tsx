@@ -32,7 +32,7 @@ function fmtMes(anoMes: string): string {
 }
 
 function extrairAtivo(descricao: string): string {
-  return descricao.trim().split(/[\s\-\/]/)[0].toUpperCase().slice(0, 12) || descricao.slice(0, 12)
+  return descricao.trim().split(/[\s\-/]/)[0].toUpperCase().slice(0, 12) || descricao.slice(0, 12)
 }
 
 const PALETTE = [
@@ -784,7 +784,8 @@ function ResumoPorMes({ transacoes, valorMeta }: { transacoes: Transacao[]; valo
   function toggle(mes: string) {
     setExpandidos(prev => {
       const next = new Set(prev)
-      next.has(mes) ? next.delete(mes) : next.add(mes)
+      if (next.has(mes)) next.delete(mes)
+      else next.add(mes)
       return next
     })
   }
@@ -1529,7 +1530,7 @@ function ResumoPorAno({
   // Maior variação (em módulo) entre todos os anos — escala das barras, para
   // que a maior fique cheia e as demais proporcionais (a meta de 5% saturaria
   // todas, já que os crescimentos são muito acima dela).
-  const maxAbsYoy = yoyPorAno.reduce(
+  const maxAbsYoy = yoyPorAno.reduce<number>(
     (m, v) => (v !== null ? Math.max(m, Math.abs(v)) : m), 0,
   )
 
