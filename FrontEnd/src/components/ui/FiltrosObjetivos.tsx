@@ -4,7 +4,8 @@ const TIPO_TABS: { value: TipoObjetivo | 'TODOS'; label: string }[] = [
   { value: 'TODOS',       label: 'Todos'         },
   { value: 'SONHO',       label: '💭 Sonhos'      },
   { value: 'OBJETIVO',    label: '🎯 Objetivos'   },
-  { value: 'PROJETO',     label: '📦 Projetos'    },
+  // PROJETO oculto por hora — desenvolvimento futuro.
+  // { value: 'PROJETO',     label: '📦 Projetos'    },
   { value: 'CRESCIMENTO', label: '📈 Crescimento' },
 ]
 

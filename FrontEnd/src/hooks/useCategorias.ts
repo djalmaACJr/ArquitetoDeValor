@@ -1,4 +1,5 @@
 // src/hooks/useCategorias.ts
+import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
@@ -58,4 +59,14 @@ export function useCategorias() {
     editar,
     excluir,
   }
+}
+
+/** Mapa memoizado `id da categoria → descrição`, para resolver nomes a partir do id. */
+export function useNomesCategoria(): Record<string, string> {
+  const { categorias } = useCategorias()
+  return useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const cat of categorias) m[cat.id] = cat.descricao
+    return m
+  }, [categorias])
 }

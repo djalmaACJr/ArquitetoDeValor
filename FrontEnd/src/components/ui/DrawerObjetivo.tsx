@@ -36,7 +36,8 @@ const VAZIO: FormState = {
 const TIPO_OPCOES: { value: TipoObjetivo; label: string; desc: string }[] = [
   { value: 'SONHO',       label: '💭 Sonho',       desc: 'Meta de saldo numa conta'          },
   { value: 'OBJETIVO',    label: '🎯 Objetivo',    desc: 'Receita recorrente por categoria'  },
-  { value: 'PROJETO',     label: '📦 Projeto',     desc: 'Orçamento de despesas'             },
+  // PROJETO oculto por hora — desenvolvimento futuro.
+  // { value: 'PROJETO',     label: '📦 Projeto',     desc: 'Orçamento de despesas'             },
   { value: 'CRESCIMENTO', label: '📈 Crescimento', desc: '% de crescimento de receitas'      },
 ]
 
@@ -167,7 +168,7 @@ export function DrawerObjetivo({
 
       {/* Tipo (só na criação) */}
       {!editando && (
-        <Field label="Tipo">
+        <Field label="Tipo" data-tutorial="objetivo-tipo">
           <div className="grid grid-cols-2 gap-2">
             {TIPO_OPCOES.map(op => (
               <button key={op.value} onClick={() => set('tipo', op.value)}
@@ -186,7 +187,7 @@ export function DrawerObjetivo({
       )}
 
       {/* Nome */}
-      <Field label="Nome">
+      <Field label="Nome" data-tutorial="objetivo-nome">
         <input value={form.nome} onChange={e => set('nome', e.target.value)} maxLength={100}
           placeholder={form.tipo === 'CRESCIMENTO' ? 'Ex.: Crescimento de renda em 10%' : 'Ex.: Fundo de emergência'}
           className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[15px]
@@ -195,7 +196,7 @@ export function DrawerObjetivo({
       </Field>
 
       {/* Valor meta — R$ para os demais, % para CRESCIMENTO */}
-      <Field label={form.tipo === 'CRESCIMENTO' ? 'Meta de crescimento (%)' : 'Valor da meta (R$)'}>
+      <Field label={form.tipo === 'CRESCIMENTO' ? 'Meta de crescimento (%)' : 'Valor da meta (R$)'} data-tutorial="objetivo-meta">
         <div className="relative">
           <input value={form.valor_meta} onChange={e => set('valor_meta', e.target.value)}
             type="number"
@@ -218,7 +219,7 @@ export function DrawerObjetivo({
       </Field>
 
       {/* Período */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3" data-tutorial="objetivo-periodo">
         <Field label="Data início">
           <input type="date" value={form.data_inicio} onChange={e => set('data_inicio', e.target.value)}
             className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[15px]
@@ -235,7 +236,7 @@ export function DrawerObjetivo({
 
       {/* Campos por tipo */}
       {form.tipo === 'SONHO' && (
-        <Field label="Contas monitoradas">
+        <Field label="Contas monitoradas" data-tutorial="objetivo-alvo">
           <MultiSelect options={optsContasMulti} values={form.contas_sonho}
             onChange={v => set('contas_sonho', v)} placeholder="Selecione as contas…" />
         </Field>
@@ -243,7 +244,7 @@ export function DrawerObjetivo({
 
       {form.tipo === 'OBJETIVO' && (
         <>
-          <Field label="Categorias de receita (pode selecionar várias)">
+          <Field label="Categorias de receita (pode selecionar várias)" data-tutorial="objetivo-alvo">
             <MultiSelect
               options={optsCatsMulti}
               values={form.categorias_objetivo}
@@ -264,7 +265,7 @@ export function DrawerObjetivo({
       )}
 
       {(form.tipo === 'CRESCIMENTO') && (
-        <Field label="Categorias de receita a monitorar">
+        <Field label="Categorias de receita a monitorar" data-tutorial="objetivo-alvo">
           <MultiSelect
             options={optsCatsMulti}
             values={form.categorias_objetivo}
@@ -289,7 +290,7 @@ export function DrawerObjetivo({
       )}
 
       {/* Ícone e cor */}
-      <Field label="Ícone">
+      <Field label="Ícone" data-tutorial="objetivo-icone">
         <IconPicker value={form.icone} onChange={v => set('icone', v)} />
       </Field>
       <Field label="Cor">

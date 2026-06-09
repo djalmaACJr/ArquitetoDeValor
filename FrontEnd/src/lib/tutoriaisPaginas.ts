@@ -523,6 +523,90 @@ export const TUTORIAL_ASSINATURAS: PassoTutorial[] = [
   },
 ]
 
+export const TUTORIAL_OBJETIVOS: PassoTutorial[] = [
+  {
+    titulo: 'Bem-vindo aos Objetivos',
+    texto: 'Aqui você acompanha suas metas financeiras de longo prazo. Há três tipos:\n• 💭 Sonho — meta de saldo acumulado numa ou mais contas.\n• 🎯 Objetivo — receita recorrente por categoria.\n• 📈 Crescimento — % de aumento das receitas ano a ano.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Filtrar por tipo e status',
+    texto: 'Use as abas para ver só Sonhos, Objetivos ou Crescimento. Em "Todos", os objetivos aparecem agrupados por tipo. O seletor de status filtra entre Em progresso, Atingido e Cancelado.',
+    seletor: '[data-tutorial="objetivos-filtros"]',
+  },
+  {
+    titulo: 'Sincronizar progresso',
+    texto: 'Recalcula o progresso de todos os objetivos com base nos lançamentos e saldos atuais. O sistema já sincroniza sozinho, mas use este botão para forçar a atualização imediata.',
+    seletor: '[data-tutorial="objetivos-sincronizar"]',
+  },
+  {
+    titulo: 'Novo objetivo',
+    texto: 'Cria um novo objetivo. Daqui a pouco vamos abrir este formulário para conhecer cada campo.',
+    seletor: '[data-tutorial="objetivos-novo"]',
+  },
+  {
+    titulo: 'Seus objetivos',
+    texto: 'Cada card mostra o progresso até a meta, o percentual atingido e o prazo restante. Clique em "Detalhes" para ver gráficos de evolução, e nos ícones para editar ou cancelar.',
+    seletor: '[data-tutorial="objetivos-lista"]',
+  },
+  {
+    titulo: 'Formulário de objetivo',
+    texto: 'Vamos explorar os campos do cadastro.',
+    seletor: '',
+    flutuante: true,
+    grupo: 'drawer-intro',
+  },
+  {
+    titulo: 'Tipo do objetivo',
+    texto: 'Escolha o tipo conforme o que você quer acompanhar. Os campos abaixo mudam de acordo: Sonho pede contas, Objetivo e Crescimento pedem categorias de receita.',
+    seletor: '[data-tutorial="objetivo-tipo"]',
+    posicao: 'esquerda',
+    grupo: 'drawer-objetivo',
+  },
+  {
+    titulo: 'Nome',
+    texto: 'Identifica o objetivo na lista. Use algo claro como "Reserva de emergência", "Renda de aluguéis" ou "Crescer faturamento 10%".',
+    seletor: '[data-tutorial="objetivo-nome"]',
+    posicao: 'esquerda',
+    grupo: 'drawer-objetivo',
+  },
+  {
+    titulo: 'Meta',
+    texto: 'Define o alvo. Para Sonho e Objetivo é um valor em R$; para Crescimento é a porcentagem de aumento esperada sobre o ano base.',
+    seletor: '[data-tutorial="objetivo-meta"]',
+    posicao: 'esquerda',
+    grupo: 'drawer-objetivo',
+  },
+  {
+    titulo: 'Período',
+    texto: 'Início e término do objetivo. O prazo é usado para calcular quanto falta por mês (Sonho) e para comparar ano a ano (Crescimento).',
+    seletor: '[data-tutorial="objetivo-periodo"]',
+    posicao: 'esquerda',
+    grupo: 'drawer-objetivo',
+  },
+  {
+    titulo: 'O que monitorar',
+    texto: 'Aqui você vincula o objetivo aos seus dados:\n• Sonho — as contas cujo saldo soma para a meta.\n• Objetivo / Crescimento — as categorias de receita acompanhadas.',
+    seletor: '[data-tutorial="objetivo-alvo"]',
+    posicao: 'esquerda',
+    grupo: 'drawer-objetivo',
+  },
+  {
+    titulo: 'Ícone e Cor',
+    texto: 'Personalize a identidade visual do objetivo — usada no card e nos gráficos de detalhe.',
+    seletor: '[data-tutorial="objetivo-icone"]',
+    posicao: 'esquerda',
+    grupo: 'drawer-objetivo',
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Você pode reabrir este tutorial a qualquer momento pelo botão ❓ na sidebar ou pelo atalho F1. Bons objetivos!',
+    seletor: '',
+    flutuante: true,
+  },
+]
+
 export const TUTORIAL_PROJECAO: PassoTutorial[] = [
   {
     titulo: 'Projeção de Economia',

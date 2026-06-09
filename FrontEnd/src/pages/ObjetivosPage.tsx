@@ -6,13 +6,16 @@ import { DrawerObjetivo } from '../components/ui/DrawerObjetivo'
 import { FiltrosObjetivos } from '../components/ui/FiltrosObjetivos'
 import { Toast, ModalExcluir } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
+import TutorialTour from '../components/ui/TutorialTour'
+import { TUTORIAL_OBJETIVOS } from '../lib/tutoriaisPaginas'
 import type { Objetivo, TipoObjetivo, StatusObjetivo } from '../types'
 import type { CriarObjetivoInput, EditarObjetivoInput } from '../hooks/useObjetivos'
 
 const TEMAS: { tipo: TipoObjetivo; emoji: string; label: string }[] = [
   { tipo: 'SONHO',       emoji: '💭', label: 'Sonhos'      },
   { tipo: 'OBJETIVO',    emoji: '🎯', label: 'Objetivos'   },
-  { tipo: 'PROJETO',     emoji: '📦', label: 'Projetos'    },
+  // PROJETO oculto por hora — desenvolvimento futuro.
+  // { tipo: 'PROJETO',     emoji: '📦', label: 'Projetos'    },
   { tipo: 'CRESCIMENTO', emoji: '📈', label: 'Crescimento' },
 ]
 
@@ -82,6 +85,7 @@ export default function ObjetivosPage() {
         <div className="flex items-center gap-2">
           <button onClick={onSincronizar} disabled={sincronizando}
             title="Sincronizar progresso"
+            data-tutorial="objetivos-sincronizar"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
               text-[13px] transition-all hover:border-white/25 disabled:opacity-50"
             style={{ color: '#8b92a8' }}>
@@ -89,6 +93,7 @@ export default function ObjetivosPage() {
             Sincronizar
           </button>
           <button onClick={abrirNovo}
+            data-tutorial="objetivos-novo"
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[14px] font-medium
               bg-av-green/15 border border-av-green/30 text-av-green hover:bg-av-green/25 transition-all">
             <Plus size={15} />
@@ -98,14 +103,17 @@ export default function ObjetivosPage() {
       </div>
 
       {/* Filtros */}
-      <FiltrosObjetivos
-        tipoFiltro={tipoFiltro}
-        statusFiltro={statusFiltro}
-        onTipoChange={setTipoFiltro}
-        onStatusChange={setStatusFiltro}
-      />
+      <div data-tutorial="objetivos-filtros">
+        <FiltrosObjetivos
+          tipoFiltro={tipoFiltro}
+          statusFiltro={statusFiltro}
+          onTipoChange={setTipoFiltro}
+          onStatusChange={setStatusFiltro}
+        />
+      </div>
 
       {/* Conteúdo */}
+      <div data-tutorial="objetivos-lista">
       {loading ? (
         <div className="flex justify-center py-20">
           <LoadingMascote texto="Carregando objetivos…" size={120} />
@@ -160,6 +168,7 @@ export default function ObjetivosPage() {
           })}
         </div>
       )}
+      </div>
 
       {/* Drawer criar/editar */}
       <DrawerObjetivo
@@ -181,6 +190,14 @@ export default function ObjetivosPage() {
       )}
 
       <Toast msg={toast} />
+
+      <TutorialTour
+        pageKey="objetivos-v1"
+        passos={TUTORIAL_OBJETIVOS}
+        onStep={(_idx, passo) => {
+          if (passo.grupo === 'drawer-objetivo' && !drawerAberto) abrirNovo()
+        }}
+      />
     </div>
   )
 }

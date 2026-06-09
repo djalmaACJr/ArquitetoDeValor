@@ -10,7 +10,7 @@ import {
 } from 'chart.js'
 import { useObjetivoDetalhe, useObjetivos } from '../hooks/useObjetivos'
 import { useContas } from '../hooks/useContas'
-import { useCategorias } from '../hooks/useCategorias'
+import { useNomesCategoria } from '../hooks/useCategorias'
 import { DrawerObjetivo } from '../components/ui/DrawerObjetivo'
 import { ModalExcluir, Toast } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
@@ -449,6 +449,8 @@ function EvolucaoSaldoSonho({
 // ── Seção: Gráfico de rosca por ativo ─────────────────────────
 
 function GraficoAtivos({ transacoes }: { transacoes: Transacao[] }) {
+  const [expandido, setExpandido] = useState(false)
+
   const grupos = useMemo(() => {
     const map: Record<string, number> = {}
     for (const t of transacoes) {
@@ -465,9 +467,12 @@ function GraficoAtivos({ transacoes }: { transacoes: Transacao[] }) {
   const tops  = grupos.slice(0, TOP)
   const resto = grupos.slice(TOP)
   const restTotal = resto.reduce((s, [,v]) => s + v, 0)
+  const temOutros = restTotal > 0 && !expandido
 
-  const labels = [...tops.map(([k]) => k), ...(restTotal > 0 ? ['Outros'] : [])]
-  const values = [...tops.map(([,v]) => v), ...(restTotal > 0 ? [restTotal] : [])]
+  // Expandido: todos os itens (ranqueados por valor). Colapsado: TOP + "Outros".
+  const itens  = expandido ? grupos : tops
+  const labels = [...itens.map(([k]) => k), ...(temOutros ? ['Outros'] : [])]
+  const values = [...itens.map(([,v]) => v), ...(temOutros ? [restTotal] : [])]
   const cores  = labels.map((_, i) => PALETTE[i % PALETTE.length])
 
   return (
@@ -493,15 +498,114 @@ function GraficoAtivos({ transacoes }: { transacoes: Transacao[] }) {
         </div>
       </div>
 
-      {/* Legenda em grade de 2 colunas — nome fixo + linha tracejada + valor + % */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+      {/* Legenda em 2 colunas preenchidas por coluna (top→bottom) —
+          posição + nome + linha tracejada + valor + % */}
+      <div className="columns-1 sm:columns-2 gap-x-4">
+        {labels.map((label, i) => {
+          const ehOutros = temOutros && label === 'Outros'
+          return (
+            <div
+              key={label}
+              onClick={ehOutros ? () => setExpandido(true) : undefined}
+              role={ehOutros ? 'button' : undefined}
+              title={ehOutros ? `Expandir os ${resto.length} itens restantes` : label}
+              className={`flex items-center gap-1.5 text-[12px] min-w-0 break-inside-avoid mb-1.5${
+                ehOutros ? ' cursor-pointer hover:text-white' : ''}`}
+            >
+              <span className="w-5 flex-shrink-0 text-right tabular-nums" style={{ color: '#8b92a8' }}>
+                {ehOutros ? '' : `${i + 1}.`}
+              </span>
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: cores[i] }} />
+              <span className="w-[52px] flex-shrink-0 text-white/80 font-medium truncate">
+                {ehOutros ? `Outros (${resto.length})` : label}
+              </span>
+              <div className="flex-1 border-b border-dashed border-white/10 mx-1 mb-px" />
+              <span className="flex-shrink-0 text-white/50 tabular-nums">{formatBRL(values[i])}</span>
+              <span className="w-7 text-right flex-shrink-0 font-semibold tabular-nums" style={{ color: cores[i] }}>
+                {((values[i] / total) * 100).toFixed(0)}%
+              </span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Expandir / recolher */}
+      {(temOutros || expandido) && (
+        <button
+          onClick={() => setExpandido(v => !v)}
+          className="mt-2.5 text-[12px] font-medium text-av-blue hover:underline"
+        >
+          {expandido ? 'Mostrar menos' : `Ver todos os ${grupos.length} ativos`}
+        </button>
+      )}
+
+      {/* Total */}
+      <div className="mt-3 pt-2.5 border-t border-white/8 flex justify-between text-[12px]">
+        <span style={{ color: '#8b92a8' }}>Total no período</span>
+        <span className="font-semibold text-white/80">{formatBRL(total)}</span>
+      </div>
+    </section>
+  )
+}
+
+// ── Seção: % por categoria (OBJETIVO multi-categoria) ─────────
+// Espelha o "Retorno por Ativo", mas agrupa pelas categorias do objetivo.
+// Só faz sentido quando há mais de uma categoria selecionada.
+
+function GraficoCategorias({ transacoes }: { transacoes: Transacao[] }) {
+  const nomesCat = useNomesCategoria()
+
+  // Agrupa por id (não por nome) — mesma chave/ordenação do "Resumo por Mês",
+  // garantindo que as cores casem entre os dois quadros.
+  const grupos = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const t of transacoes) {
+      const id = t.categoria_id ?? '__sem__'
+      map[id] = (map[id] ?? 0) + t.valor
+    }
+    return Object.entries(map).sort(([,a],[,b]) => b - a)
+  }, [transacoes])
+
+  const total = grupos.reduce((s, [,v]) => s + v, 0)
+  // Só faz sentido com 2+ categorias distintas com valor — com uma só, o donut
+  // seria 100% de uma fatia. O componente decide com base nos dados reais.
+  if (grupos.length < 2 || total === 0) return null
+
+  const labels = grupos.map(([id]) => nomesCat[id] ?? 'Sem categoria')
+  const values = grupos.map(([,v]) => v)
+  const cores  = labels.map((_, i) => PALETTE[i % PALETTE.length])
+
+  return (
+    <section className="bg-[#1a1f2e] rounded-xl p-4 border border-white/5">
+      <h2 className="text-[15px] font-semibold text-white/70 mb-4">Retorno por Categoria</h2>
+
+      {/* Donut centralizado */}
+      <div className="flex justify-center mb-4">
+        <div style={{ width: 170, height: 170 }}>
+          <Doughnut
+            data={{ labels, datasets: [{ data: values, backgroundColor: cores, borderWidth: 0, hoverOffset: 4 }] }}
+            options={{
+              responsive: false,
+              cutout: '66%',
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: { label: ctx => ` ${formatBRL(ctx.parsed)} (${((ctx.parsed / total) * 100).toFixed(1)}%)` },
+                },
+              },
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Legenda — nome flexível (categorias têm nomes longos) */}
+      <div className="grid grid-cols-1 gap-x-4 gap-y-1.5">
         {labels.map((label, i) => (
           <div key={label} className="flex items-center gap-1.5 text-[12px] min-w-0">
             <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: cores[i] }} />
-            <span className="w-[52px] flex-shrink-0 text-white/80 font-medium truncate" title={label}>{label}</span>
-            <div className="flex-1 border-b border-dashed border-white/10 mx-1 mb-px" />
+            <span className="flex-1 min-w-0 text-white/80 font-medium truncate" title={label}>{label}</span>
             <span className="flex-shrink-0 text-white/50 tabular-nums">{formatBRL(values[i])}</span>
-            <span className="w-7 text-right flex-shrink-0 font-semibold tabular-nums" style={{ color: cores[i] }}>
+            <span className="w-9 text-right flex-shrink-0 font-semibold tabular-nums" style={{ color: cores[i] }}>
               {((values[i] / total) * 100).toFixed(0)}%
             </span>
           </div>
@@ -612,6 +716,33 @@ function EvolucaoMensalObjetivo({
 
 function ResumoPorMes({ transacoes, valorMeta }: { transacoes: Transacao[]; valorMeta: number }) {
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
+  const nomeCat = useNomesCategoria()
+
+  // Categorias ordenadas pelo total no período (maior primeiro), com cor fixa —
+  // para casar com a ordem/cores do "Retorno por Categoria".
+  const legenda = useMemo(() => {
+    const totais: Record<string, number> = {}
+    for (const t of transacoes) {
+      const id = t.categoria_id ?? '__sem__'
+      totais[id] = (totais[id] ?? 0) + t.valor
+    }
+    const totalGeral = Object.values(totais).reduce((s, v) => s + v, 0)
+    return Object.entries(totais)
+      .sort(([,a],[,b]) => b - a)
+      .map(([id, valor], i) => ({
+        id,
+        nome:  nomeCat[id] ?? 'Sem categoria',
+        cor:   PALETTE[i % PALETTE.length],
+        valor,
+        pct:   totalGeral > 0 ? (valor / totalGeral) * 100 : 0,
+      }))
+  }, [transacoes, nomeCat])
+
+  const corCat = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const c of legenda) m[c.id] = c.cor
+    return m
+  }, [legenda])
 
   const porMes = useMemo(() => {
     const map: Record<string, Transacao[]> = {}
@@ -622,11 +753,23 @@ function ResumoPorMes({ transacoes, valorMeta }: { transacoes: Transacao[]; valo
     }
     return Object.entries(map)
       .sort(([a], [b]) => b.localeCompare(a))
-      .map(([mes, txs]) => ({
-        mes,
-        txs: txs.sort((a, b) => b.data.localeCompare(a.data)),
-        total: txs.reduce((s, t) => s + t.valor, 0),
-      }))
+      .map(([mes, txs]) => {
+        // Total por categoria dentro do mês (segmentos empilhados da barra).
+        const porCatMap: Record<string, number> = {}
+        for (const t of txs) {
+          const id = t.categoria_id ?? '__sem__'
+          porCatMap[id] = (porCatMap[id] ?? 0) + t.valor
+        }
+        const porCat = Object.entries(porCatMap)
+          .map(([id, valor]) => ({ id, valor }))
+          .sort((a, b) => b.valor - a.valor)
+        return {
+          mes,
+          txs: txs.sort((a, b) => b.valor - a.valor),
+          total: txs.reduce((s, t) => s + t.valor, 0),
+          porCat,
+        }
+      })
   }, [transacoes])
 
   if (porMes.length === 0) {
@@ -649,11 +792,28 @@ function ResumoPorMes({ transacoes, valorMeta }: { transacoes: Transacao[]; valo
   return (
     <section className="bg-[#1a1f2e] rounded-xl border border-white/5 overflow-hidden">
       <h2 className="text-[15px] font-semibold text-white/70 px-4 pt-4 pb-2">Resumo por Mês</h2>
+
+      {/* Legenda de cores por categoria */}
+      {legenda.length > 1 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 px-4 pb-3">
+          {legenda.map(({ id, nome, cor, valor, pct }) => (
+            <div
+              key={id}
+              className="flex items-center gap-1.5 text-[12px] min-w-0"
+              title={`${nome}: ${formatBRL(valor)} (${pct.toFixed(1)}%)`}
+            >
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: cor }} />
+              <span className="text-white/70 truncate">{nome}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="divide-y divide-white/5">
-        {porMes.map(({ mes, txs, total }) => {
+        {porMes.map(({ mes, txs, total, porCat }) => {
           const pct   = valorMeta > 0 ? Math.min(100, (total / valorMeta) * 100) : 0
           const aberto = expandidos.has(mes)
-          const corBarra = pct >= 100 ? '#00c896' : pct >= 70 ? '#f0b429' : '#4da6ff'
+          const corPct = pct >= 100 ? '#00c896' : pct >= 70 ? '#f0b429' : '#4da6ff'
 
           return (
             <div key={mes}>
@@ -668,13 +828,31 @@ function ResumoPorMes({ transacoes, valorMeta }: { transacoes: Transacao[]; valo
                 }
                 <span className="w-16 flex-shrink-0 text-[14px] font-medium text-white/80">{fmtMes(mes)}</span>
 
-                {/* Barra de progresso compacta */}
-                <div className="flex-1 h-1.5 rounded-full bg-white/8">
-                  <div className="h-full rounded-full transition-all"
-                    style={{ width: `${pct}%`, background: corBarra }} />
+                {/* Barra empilhada: a largura total = pct da meta; dentro dela,
+                    cada categoria ocupa uma fatia proporcional ao seu valor.
+                    O title resume os valores do gráfico ao passar o mouse. */}
+                <div
+                  className="flex-1 h-1.5 rounded-full bg-white/8 overflow-hidden"
+                  title={[
+                    ...porCat.map(({ id, valor }) =>
+                      `${nomeCat[id] ?? 'Sem categoria'}: ${formatBRL(valor)}` +
+                      (total > 0 ? ` (${((valor / total) * 100).toFixed(0)}%)` : '')),
+                    `Total: ${formatBRL(total)}`,
+                  ].join('\n')}
+                >
+                  <div className="h-full flex transition-all" style={{ width: `${pct}%` }}>
+                    {total > 0 && porCat.map(({ id, valor }) => (
+                      <div
+                        key={id}
+                        className="h-full"
+                        style={{ width: `${(valor / total) * 100}%`, background: corCat[id] ?? '#4da6ff' }}
+                        title={`${nomeCat[id] ?? 'Sem categoria'}: ${formatBRL(valor)}`}
+                      />
+                    ))}
+                  </div>
                 </div>
 
-                <span className="w-16 text-right flex-shrink-0 text-[14px] font-semibold" style={{ color: corBarra }}>
+                <span className="w-16 text-right flex-shrink-0 text-[14px] font-semibold" style={{ color: corPct }}>
                   {pct.toFixed(0)}%
                 </span>
                 <span className="w-24 text-right flex-shrink-0 text-[14px] text-white/70">
@@ -721,7 +899,6 @@ function GraficoCategoriasAno({
   dataFim:    string
   valorMeta:  number
 }) {
-  const { categorias: todasCats } = useCategorias()
   const anoBase = parseInt(dataInicio.slice(0, 4))
   const anoFim  = Math.min(new Date().getFullYear(), parseInt(dataFim.slice(0, 4)))
 
@@ -729,11 +906,7 @@ function GraficoCategoriasAno({
   const [expandPos, setExpandPos] = useState(false)
   const [expandNeg, setExpandNeg] = useState(false)
 
-  const nomesCat = useMemo(() => {
-    const m: Record<string, string> = {}
-    for (const cat of todasCats) m[cat.id] = cat.descricao
-    return m
-  }, [todasCats])
+  const nomesCat = useNomesCategoria()
 
   const { anos, categorias, totaisPorAnoCat, totaisPorAno } = useMemo(() => {
     const anos: number[] = []
@@ -1337,7 +1510,9 @@ function ResumoPorAno({
     const isParcialAno = ano === anoAtual && mmddHoje < '12-31'
     const prevCompar   = isParcialAno ? (ytdPorAno[prevAno] ?? 0) : porAno[i - 1].total
     const totalCompar  = isParcialAno ? (ytdPorAno[ano] ?? 0) : total
-    return prevCompar > 0 ? ((totalCompar - prevCompar) / prevCompar) * 100 : null
+    // Divide pelo |denominador| para manter o sinal correto do crescimento
+    // mesmo quando o total anterior é negativo (apenas zero fica indefinido).
+    return prevCompar !== 0 ? ((totalCompar - prevCompar) / Math.abs(prevCompar)) * 100 : null
   })
 
   // Exclui o ano corrente parcial (YTD) da média — ainda não completou o ciclo
@@ -1350,6 +1525,13 @@ function ResumoPorAno({
   const mediaYoy   = yoyValidos.length > 0
     ? yoyValidos.reduce((s, v) => s + v, 0) / yoyValidos.length
     : null
+
+  // Maior variação (em módulo) entre todos os anos — escala das barras, para
+  // que a maior fique cheia e as demais proporcionais (a meta de 5% saturaria
+  // todas, já que os crescimentos são muito acima dela).
+  const maxAbsYoy = yoyPorAno.reduce(
+    (m, v) => (v !== null ? Math.max(m, Math.abs(v)) : m), 0,
+  )
 
   return (
     <section className="bg-[#1a1f2e] rounded-xl border border-white/5 overflow-hidden">
@@ -1375,16 +1557,20 @@ function ResumoPorAno({
           // vs base: no ano parcial compara YTD vs YTD-base (proporcional ao período)
           const baseCompar = isParcialAno ? (ytdPorAno[anoBase] ?? 0) : baseTotal
           const totalVsBase = isParcialAno ? (ytdPorAno[ano] ?? 0) : total
-          const vsBase = !isBase && baseCompar > 0
-            ? ((totalVsBase - baseCompar) / baseCompar) * 100 : null
+          const vsBase = !isBase && baseCompar !== 0
+            ? ((totalVsBase - baseCompar) / Math.abs(baseCompar)) * 100 : null
 
           const metaOk  = yoy !== null && yoy >= valorMeta
           const corYoy  = yoy === null ? '#8b92a8'
                         : yoy >= valorMeta ? '#00c896'
                         : yoy >= 0         ? '#f0b429'
                         : '#f87171'
-          const barPct  = isBase ? 0 : yoy !== null
-            ? Math.min(100, Math.max(0, (yoy / valorMeta) * 100)) : 0
+          // Largura proporcional à maior variação do período (em módulo), para
+          // diferenciar os anos. Anos negativos também exibem barra (vermelha,
+          // via corYoy) correndo para o lado oposto; só o ano-base fica sem barra.
+          const barPct  = isBase || yoy === null || maxAbsYoy === 0
+            ? 0
+            : (Math.abs(yoy) / maxAbsYoy) * 100
 
           return (
             <div key={ano} className="px-4 py-3">
@@ -1413,11 +1599,20 @@ function ResumoPorAno({
                 </span>
               </div>
 
-              {/* Barra YoY relativa à meta */}
+              {/* Barra YoY divergente a partir do centro: crescimento positivo
+                  corre para a direita, negativo para a esquerda. barPct (0..100)
+                  ocupa no máximo metade da trilha de cada lado. */}
               {!isBase && (
-                <div className="mt-2 h-1 rounded-full bg-white/8">
-                  <div className="h-full rounded-full transition-all"
-                    style={{ width: `${barPct}%`, background: corYoy }} />
+                <div className="mt-2 h-1 rounded-full bg-white/8 relative overflow-hidden">
+                  {/* marca central */}
+                  <div className="absolute top-0 h-full w-px bg-white/20"
+                    style={{ left: '50%' }} />
+                  <div className="absolute top-0 h-full rounded-full transition-all"
+                    style={{
+                      width: `${barPct / 2}%`,
+                      background: corYoy,
+                      ...(yoy !== null && yoy < 0 ? { right: '50%' } : { left: '50%' }),
+                    }} />
                 </div>
               )}
             </div>
@@ -1459,7 +1654,7 @@ function BarraProgresso({ objetivo }: { objetivo: Objetivo }) {
                : tipoCor[objetivo.tipo] ?? '#4da6ff'
 
   const crescimentoMeta = objetivo.tipo === 'SONHO'
-    ? objetivo.valor_meta - objetivo.saldo_base
+    ? Math.max(0, objetivo.valor_meta - objetivo.saldo_base)
     : null
 
   const subtitulo = objetivo.tipo === 'OBJETIVO'
@@ -1495,12 +1690,16 @@ function BarraProgresso({ objetivo }: { objetivo: Objetivo }) {
       {/* Estimativa mensal — apenas SONHO em progresso */}
       {objetivo.tipo === 'SONHO' && objetivo.crescimento_mensal_necessario != null &&
        objetivo.crescimento_mensal_necessario > 0 && (
-        <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
-          <span className="text-[12px]" style={{ color: '#8b92a8' }}>
-            Crescimento mensal necessário para atingir a meta
+        <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between gap-3 rounded-lg px-3 py-2.5"
+          style={{ background: baraCor + '14', border: `1px solid ${baraCor}33` }}>
+          <span className="text-[12px] leading-tight" style={{ color: '#8b92a8' }}>
+            Crescimento mensal necessário<br />para atingir a meta
           </span>
-          <span className="text-[13px] font-semibold tabular-nums" style={{ color: baraCor }}>
-            {formatBRL(objetivo.crescimento_mensal_necessario)}/mês
+          <span className="flex items-baseline gap-1 whitespace-nowrap" style={{ color: baraCor }}>
+            <span className="text-[22px] font-bold tabular-nums leading-none">
+              {formatBRL(objetivo.crescimento_mensal_necessario)}
+            </span>
+            <span className="text-[12px] font-medium opacity-70">/mês</span>
           </span>
         </div>
       )}
@@ -1538,14 +1737,21 @@ function ContasSonho({ objetivo }: { objetivo: Objetivo }) {
         {contasVinculadas.length === 1 ? 'Conta monitorada' : `${contasVinculadas.length} contas monitoradas`}
       </h2>
       <div className="flex flex-col gap-2">
-        {contasVinculadas.map(c => (
-          <div key={c.conta_id} className="flex items-center justify-between text-[14px]">
-            <span className="text-white/80 font-medium">{c.nome}</span>
-            <span className="tabular-nums" style={{ color: '#8b92a8' }}>
-              {formatBRL(c.saldo_atual)}
-            </span>
-          </div>
-        ))}
+        {(() => {
+          const totalSaldo = contasVinculadas.reduce((s, c) => s + c.saldo_atual, 0)
+          return contasVinculadas.map(c => {
+            const pct = totalSaldo !== 0 ? (c.saldo_atual / totalSaldo) * 100 : 0
+            return (
+              <div key={c.conta_id} className="flex items-center justify-between text-[14px]">
+                <span className="text-white/80 font-medium">{c.nome}</span>
+                <span className="tabular-nums flex items-baseline gap-1.5" style={{ color: '#8b92a8' }}>
+                  {formatBRL(c.saldo_atual)}
+                  <span className="text-[12px] text-white/40">({pct.toFixed(1)}%)</span>
+                </span>
+              </div>
+            )
+          })
+        })()}
         {contasVinculadas.length > 1 && (
           <div className="pt-2 mt-1 border-t border-white/8 flex justify-between text-[13px]">
             <span style={{ color: '#8b92a8' }}>Total</span>
@@ -1751,6 +1957,8 @@ export default function ObjetivoDetalhe() {
             cor={cor}
           />
           <GraficoAtivos transacoes={transacoes} />
+          {/* Auto-oculta quando há menos de 2 categorias com valor. */}
+          <GraficoCategorias transacoes={transacoes} />
           <ResumoPorMes transacoes={transacoes} valorMeta={objetivo.valor_meta} />
         </div>
       )}

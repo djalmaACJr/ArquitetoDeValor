@@ -111,6 +111,14 @@ export function CardObjetivo({
               {objetivo.valor_atingido >= 0 ? '+' : ''}{objetivo.valor_atingido.toFixed(1)}%
               {' '}de meta {objetivo.valor_meta.toFixed(1)}%
             </span>
+          ) : objetivo.tipo === 'SONHO' ? (
+            // SONHO: valor_atingido = crescimento desde o início; o percentual
+            // usa (valor_meta − saldo_base) como denominador, então é esse o
+            // valor que deve aparecer aqui (não a meta absoluta). Math.max(0)
+            // evita "de R$ 0,00"/negativo quando o saldo base já passou da meta.
+            <span className="text-[13px]" style={{ color: '#8b92a8' }}>
+              {formatBRL(objetivo.valor_atingido)} de {formatBRL(Math.max(0, objetivo.valor_meta - objetivo.saldo_base))}
+            </span>
           ) : (
             <span className="text-[13px]" style={{ color: '#8b92a8' }}>
               {formatBRL(objetivo.valor_atingido)} de {formatBRL(objetivo.valor_meta)}
