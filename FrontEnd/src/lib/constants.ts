@@ -38,3 +38,39 @@ export type TipoObjetivo = typeof TIPOS_OBJETIVO[number]
 
 export const STATUS_OBJETIVO = ['EM_PROGRESSO', 'ATINGIDO', 'CANCELADO'] as const
 export type StatusObjetivo = typeof STATUS_OBJETIVO[number]
+
+// ── Investimentos ─────────────────────────────────────────────
+export const TIPOS_ATIVO_INV = [
+  'ACOES', 'ETF', 'FII', 'STOCKS',
+  'ETF_INTERNACIONAL', 'RENDA_FIXA', 'CRIPTOMOEDAS', 'TESOURO_DIRETO',
+] as const
+export type TipoAtivoInvestimento = typeof TIPOS_ATIVO_INV[number]
+
+export const STATUS_POSICAO_INV = ['ATIVA', 'ENCERRADA'] as const
+export type StatusPosicaoInvestimento = typeof STATUS_POSICAO_INV[number]
+
+export const TIPOS_OPERACAO_INV = ['COMPRA', 'VENDA', 'APORTE', 'RESGATE', 'DIVIDENDO'] as const
+export type TipoOperacaoInvestimento = typeof TIPOS_OPERACAO_INV[number]
+
+// Rótulos amigáveis e cor consistente por tipo de ativo
+export const TIPO_ATIVO_LABEL: Record<TipoAtivoInvestimento, string> = {
+  ACOES:             'Ações',
+  ETF:               'ETF',
+  FII:               'FIIs',
+  STOCKS:            'Stocks',
+  ETF_INTERNACIONAL: 'ETF Internacional',
+  RENDA_FIXA:        'Renda Fixa',
+  CRIPTOMOEDAS:      'Criptomoedas',
+  TESOURO_DIRETO:    'Tesouro Direto',
+}
+
+export const TIPO_ATIVO_COR: Record<TipoAtivoInvestimento, string> = {
+  ACOES:             '#3b82f6',
+  ETF:               '#06b6d4',
+  FII:               '#00c896',
+  STOCKS:            '#8b5cf6',
+  ETF_INTERNACIONAL: '#ec4899',
+  RENDA_FIXA:        '#f59e0b',
+  CRIPTOMOEDAS:      '#f97316',
+  TESOURO_DIRETO:    '#10b981',
+}

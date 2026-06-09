@@ -494,3 +494,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/objetivos/deno.json"
 entrypoint = "./functions/objetivos/index.ts"
+
+[functions.investimentos]
+enabled = true
+verify_jwt = false
+import_map = "./functions/investimentos/deno.json"
+entrypoint = "./functions/investimentos/index.ts"

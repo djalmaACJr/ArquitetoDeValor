@@ -96,6 +96,7 @@ const navPrincipal: NavItem[] = [
   { to: '/',            icon: <LayoutDashboard size={15}/>, label: 'Painel principal' },
   { to: '/lancamentos', icon: <List size={15}/>,            label: 'Extratos'         },
   { to: '/objetivos',   icon: <Target size={15}/>,          label: 'Objetivos'        },
+  { to: '/investimentos', icon: <TrendingUp size={15}/>,    label: 'Investimentos'    },
 ]
 const navCadastros: NavItem[] = [
   { to: '/contas',     icon: <CreditCard size={15}/>, label: 'Contas' },

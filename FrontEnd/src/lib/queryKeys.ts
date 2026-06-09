@@ -52,4 +52,14 @@ export const qk = {
   // Objetivos financeiros
   objetivos:       (uid: Uid, f?: unknown)   => ['objetivos', uid, f ?? null] as const,
   objetivoDetalhe: (uid: Uid, id: string)    => ['objetivos', uid, id]        as const,
+
+  // Investimentos
+  invAtivos:     (uid: Uid, f?: unknown) => ['inv-ativos', uid, f ?? null]     as const,
+  invAtivo:      (uid: Uid, id: string)  => ['inv-ativos', uid, id]            as const,
+  invPosicoes:   (uid: Uid, f?: unknown) => ['inv-posicoes', uid, f ?? null]   as const,
+  invOperacoes:  (uid: Uid, f?: unknown) => ['inv-operacoes', uid, f ?? null]  as const,
+  invDividendos: (uid: Uid, f?: unknown) => ['inv-dividendos', uid, f ?? null] as const,
+  invTiposDividendo: (uid: Uid)          => ['inv-tipos-dividendo', uid]       as const,
+  invAlocacoes:  (uid: Uid)              => ['inv-alocacoes', uid]             as const,
+  invDashboard:  (uid: Uid, contaId?: string | null) => ['inv-dashboard', uid, contaId ?? null] as const,
 }

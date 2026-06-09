@@ -26,6 +26,9 @@ const ApresentacaoMascotes   = lazy(() => import('./pages/ApresentacaoMascotes')
 const PerfilPage             = lazy(() => import('./pages/PerfilPage'))
 const ObjetivosPage          = lazy(() => import('./pages/ObjetivosPage'))
 const ObjetivoDetalhe        = lazy(() => import('./pages/ObjetivoDetalhe'))
+const InvestimentosPage      = lazy(() => import('./pages/InvestimentosPage'))
+const AtivosInvestimentosPage = lazy(() => import('./pages/AtivosInvestimentosPage'))
+const DividendosPage         = lazy(() => import('./pages/DividendosPage'))
 const SobrePage              = lazy(() => import('./pages/SobrePage'))
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -83,6 +86,9 @@ export default function App() {
             <Route path="importexport" element={<ImportExportPage/>}/>
             <Route path="objetivos"        element={<ObjetivosPage/>}/>
             <Route path="objetivos/:id"    element={<ObjetivoDetalhe/>}/>
+            <Route path="investimentos"        element={<InvestimentosPage/>}/>
+            <Route path="investimentos/ativos" element={<AtivosInvestimentosPage/>}/>
+            <Route path="investimentos/dividendos" element={<DividendosPage/>}/>
             <Route path="importar-fatura"      element={<ImportarFaturaPage/>}/>
             <Route path="importar-fatura/:id"  element={<ImportarFaturaPage/>}/>
             <Route path="perfil"       element={<PerfilPage/>}/>

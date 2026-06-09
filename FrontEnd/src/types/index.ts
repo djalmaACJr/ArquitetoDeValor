@@ -2,8 +2,10 @@
 
 // Enums centralizados em lib/constants.ts — importados e re-exportados aqui
 // para preservar `import type { TipoConta } from '../types'` existentes.
-import type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia } from '../lib/constants'
-export type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia }
+import type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia,
+  TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento } from '../lib/constants'
+export type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia,
+  TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento }
 
 export interface CartaoVirtual {
   id:      string   // uuid local, gerado no front via crypto.randomUUID()
@@ -244,6 +246,123 @@ export interface Objetivo {
   crescimento_mensal_necessario: number | null
   // campo extra do GET /:id
   progresso?:     SnapshotProgresso[]
+}
+
+// ── Investimentos ─────────────────────────────────────────────
+export interface InvestimentoAtivo {
+  id:           string
+  user_id:      string
+  ticker:       string
+  nome:         string
+  tipo_ativo:   TipoAtivoInvestimento
+  moeda:        string
+  descricao:    string | null
+  nota_usuario: number | null
+  ativo_pai:    string | null
+  created_at:   string
+  updated_at:   string
+}
+
+export interface InvestimentoPosicao {
+  id:          string
+  user_id:     string
+  ativo_id:    string
+  conta_id:    string
+  quantidade:  number
+  preco_custo: number
+  valor_custo: number
+  data_compra: string
+  status:      StatusPosicaoInvestimento
+  created_at:  string
+  updated_at:  string
+  // joins opcionais (GET lista)
+  inv_ativos?: { ticker: string; nome: string; tipo_ativo: TipoAtivoInvestimento } | null
+  contas?:     { nome: string } | null
+}
+
+export interface InvestimentoOperacao {
+  id:             string
+  user_id:        string
+  posicao_id:     string
+  tipo_operacao:  TipoOperacaoInvestimento
+  conta_id:       string
+  quantidade:     number
+  preco_unitario: number
+  valor_total:    number
+  data_operacao:  string
+  created_at:     string
+}
+
+export interface InvestimentoTipoDividendo {
+  id:           string
+  user_id:      string
+  nome:         string
+  categoria_id: string | null
+  ativo:        boolean
+  created_at:   string
+  updated_at:   string
+  // join opcional (GET lista)
+  categorias?:  { descricao: string; icone: string | null; cor: string | null } | null
+}
+
+export interface InvestimentoDividendo {
+  id:                   string
+  user_id:              string
+  ativo_id:             string
+  conta_id:             string
+  valor:                number
+  data_pagamento:       string
+  tipo_ativo:           TipoAtivoInvestimento
+  tipo_dividendo_id:    string | null
+  descricao:            string | null
+  transacao_extrato_id: string | null
+  created_at:           string
+  inv_ativos?:          { ticker: string; nome: string } | null
+  inv_tipos_dividendo?: { nome: string } | null
+}
+
+export interface InvestimentoAlocacaoTipo {
+  id:               string
+  user_id:          string
+  tipo_ativo:       TipoAtivoInvestimento
+  percentual_ideal: number
+  created_at:       string
+  updated_at:       string
+}
+
+export interface InvestimentoHistoricoMensal {
+  id:                  string
+  user_id:             string
+  ativo_id:            string
+  conta_id:            string
+  mes_ano:             string
+  valor_mercado:       number
+  quantidade:          number
+  preco_medio:         number
+  variacao_percentual: number
+  rentabilidade_mes:   number
+  created_at:          string
+}
+
+// Linha agregada por tipo de ativo, devolvida por GET /investimentos/dashboard
+export interface InvestimentoDashboardTipo {
+  tipo_ativo:        TipoAtivoInvestimento
+  valor_custo:       number
+  valor_mercado:     number
+  ganho_perda:       number
+  rentabilidade_pct: number
+  dividendos:        number
+  percentual_atual:  number
+  percentual_ideal:  number
+  desvio_pct:        number
+}
+
+export interface InvestimentoDashboard {
+  total_custo:      number
+  total_mercado:    number
+  ganho_perda:      number
+  total_dividendos: number
+  tipos:            InvestimentoDashboardTipo[]
 }
 
 // Transação candidata para vincular manualmente em importação de fatura
