@@ -68,13 +68,13 @@ export function CardObjetivo({
             {ref && <p className="text-[13px] truncate" style={{ color: '#8b92a8' }}>{ref}</p>}
           </div>
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           <Link to={`/objetivos/${objetivo.id}`}
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all
-              hover:brightness-125 hover:scale-105"
-            style={{ background: `${tipoCor}26`, border: `1.5px solid ${tipoCor}66`, color: tipoCor }}
-            title="Ver detalhes e gráficos">
-            <BarChart2 size={16} />
+            className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg border border-av-blue/40
+              bg-av-blue/10 text-av-blue hover:bg-av-blue/20 hover:border-av-blue/70 transition-colors"
+            title="Ver detalhes">
+            <BarChart2 size={13} />
+            <span className="text-[12px] font-medium">Detalhes</span>
           </Link>
           <button onClick={() => onEditar(objetivo)}
             className="w-7 h-7 rounded-lg border border-white/10 flex items-center justify-center

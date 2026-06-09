@@ -6,7 +6,7 @@ import { Doughnut, Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, ArcElement, Tooltip, Legend,
   CategoryScale, LinearScale, PointElement, LineElement, Filler,
-  BarElement,
+  BarElement, type ChartDataset,
 } from 'chart.js'
 import { useObjetivoDetalhe, useObjetivos } from '../hooks/useObjetivos'
 import { useContas } from '../hooks/useContas'
@@ -93,7 +93,7 @@ function HistoricoProgresso({
             legend: { display: false },
             tooltip: {
               callbacks: {
-                label: ctx => ` ${formatBRL(ctx.parsed.y)}`,
+                label: ctx => ` ${formatBRL(ctx.parsed.y ?? 0)}`,
               },
             },
           },
@@ -163,19 +163,13 @@ async function fetchTxsObjetivo(objetivo: Objetivo): Promise<Transacao[]> {
 
   const hoje        = new Date().toISOString().split('T')[0]
   const mesCorrente = hoje.slice(0, 7)
-
-  // CRESCIMENTO: inclui RECEITA e DESPESA para cálculo do líquido
-  // OBJETIVO: apenas RECEITA (rastreamento de renda)
   const ehCrescimento = objetivo.tipo === 'CRESCIMENTO'
-  const tiposValidos = ehCrescimento
-    ? ['RECEITA', 'DESPESA']
-    : ['RECEITA']
 
   // Não exibir períodos futuros (projeções):
   // - CRESCIMENTO: corta no dia de hoje (comparação YoY justa).
   // - OBJETIVO: corta no mês corrente inteiro (Resumo por Mês vai até o mês atual).
   return unicas.filter(t => {
-    if (!tiposValidos.includes(t.tipo)) return false
+    if (!['RECEITA', 'DESPESA'].includes(t.tipo)) return false
     if (t.data < objetivo.data_inicio || t.data > objetivo.data_fim) return false
     return ehCrescimento ? t.data <= hoje : t.data.slice(0, 7) <= mesCorrente
   })
@@ -335,7 +329,7 @@ function EvolucaoSaldoSonho({
         Clique num mês para comparar com o anterior
       </p>
       <Bar
-        data={{ labels: meses.map(fmtMes), datasets }}
+        data={{ labels: meses.map(fmtMes), datasets: datasets as ChartDataset<'bar', number[]>[] }}
         options={{
           responsive: true,
           onClick: (_, elements) => {
@@ -345,12 +339,14 @@ function EvolucaoSaldoSonho({
             legend: { display: false },
             tooltip: {
               mode: 'index',
-              callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y)}` },
-              footer: items => {
-                const tot = items
-                  .filter(it => it.dataset.type !== 'line')
-                  .reduce((s, it) => s + (it.parsed.y as number), 0)
-                return `Total: ${formatBRL(tot)}`
+              callbacks: {
+                label: ctx => ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y ?? 0)}`,
+                footer: items => {
+                  const tot = items
+                    .filter(it => (it.dataset as { type?: string }).type !== 'line')
+                    .reduce((s: number, it) => s + (it.parsed.y as number), 0)
+                  return `Total: ${formatBRL(tot)}`
+                },
               },
             },
           },
@@ -392,7 +388,7 @@ function EvolucaoSaldoSonho({
 
         {/* Colunas */}
         <div className="grid pb-1 text-[11px] uppercase tracking-wide"
-          style={{ gridTemplateColumns: '12px 1fr 5.5rem 5.5rem 5.5rem', color: '#8b92a8', gap: '0 8px' }}>
+          style={{ gridTemplateColumns: '12px 1fr 8rem 8rem 8.5rem', color: '#8b92a8', gap: '0 12px' }}>
           <span />
           <span>Conta</span>
           {temPrev
@@ -411,7 +407,7 @@ function EvolucaoSaldoSonho({
             const corDelta = delta > 0 ? '#00c896' : delta < 0 ? '#f87171' : '#8b92a8'
             return (
               <div key={c.conta_id} className="grid py-1.5 items-center"
-                style={{ gridTemplateColumns: '12px 1fr 5.5rem 5.5rem 7.5rem', gap: '0 18px' }}>
+                style={{ gridTemplateColumns: '12px 1fr 8rem 8rem 8.5rem', gap: '0 12px' }}>
                 <span className="w-2.5 h-2.5 rounded-sm" style={{ background: corConta(c) }} />
                 <span className="text-[12px] text-white/70 truncate" title={c.nome}>{c.nome}</span>
                 {temPrev ? (
@@ -433,8 +429,8 @@ function EvolucaoSaldoSonho({
 
         {/* Total */}
         {temPrev && (
-          <div className="grid pt-4 mt-3 border-t border-white/8 items-center font-semibold"
-            style={{ gridTemplateColumns: '12px 1fr 5.5rem 5.5rem 7.5rem', gap: '0 18px' }}>
+          <div className="grid pt-2 mt-1 border-t border-white/8 items-center font-semibold"
+            style={{ gridTemplateColumns: '12px 1fr 8rem 8rem 8.5rem', gap: '0 12px' }}>
             <span />
             <span className="text-[11px] text-white/40 uppercase tracking-wide">Total</span>
             <span className="text-[13px] text-right tabular-nums" style={{ color: '#8b92a8' }}>{formatBRL(totalPrev)}</span>
@@ -586,14 +582,14 @@ function EvolucaoMensalObjetivo({
               pointRadius: 0,
               order: 1,
             },
-          ],
+          ] as ChartDataset<'bar', (number | null)[]>[],
         }}
         options={{
           responsive: true,
           plugins: {
             legend: { display: false },
             tooltip: {
-              callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y)}` },
+              callbacks: { label: ctx => ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y ?? 0)}` },
             },
           },
           scales: {
@@ -967,6 +963,37 @@ function GraficoCategoriasAno({
   const corPos = (cat: CatVis) => PALETTE_POS[visPos.indexOf(cat) % PALETTE_POS.length]
   const corNeg = (cat: CatVis) => PALETTE_NEG[visNeg.indexOf(cat) % PALETTE_NEG.length]
 
+  // Escala y2 explícita: garante que 0 esteja sempre visível com folga
+  const yoyValues = yoyPct.filter((v): v is number => v !== null)
+  const yoyMin = yoyValues.length > 0 ? Math.min(...yoyValues) : 0
+  const yoyMax = yoyValues.length > 0 ? Math.max(...yoyValues) : 100
+  const rangePad = Math.max(20, (yoyMax - yoyMin) * 0.15)
+  const y2min = Math.floor((Math.min(0, yoyMin) - rangePad) / 10) * 10
+  const y2max = Math.ceil((Math.max(0, yoyMax) + rangePad) / 10) * 10
+
+  // Plugin inline: desenha linha do zero no eixo y2 diretamente no canvas
+  const zeroLinePlugin = {
+    id: 'crescZeroLine',
+    afterDraw(chart: ChartJS) {
+      const scale = chart.scales['y2']
+      if (!scale) return
+      const y0 = scale.getPixelForValue(0)
+      const { top, bottom, left, right } = chart.chartArea
+      if (y0 < top || y0 > bottom) return
+      const c = chart.ctx
+      c.save()
+      c.strokeStyle = 'rgba(255,255,255,0.35)'
+      c.lineWidth = 1.5
+      c.setLineDash([6, 4])
+      c.beginPath()
+      c.moveTo(left, y0)
+      c.lineTo(right, y0)
+      c.stroke()
+      c.setLineDash([])
+      c.restore()
+    },
+  }
+
   return (
     <section className="bg-[#1a1f2e] rounded-xl p-4 border border-white/5">
       <h2 className="text-[15px] font-semibold text-white/70 mb-1">Arrecadação por Ano</h2>
@@ -975,7 +1002,8 @@ function GraficoCategoriasAno({
       </p>
 
       <Bar
-        data={{ labels, datasets: [...barDatasets, lineYoY, lineMeta] }}
+        plugins={[zeroLinePlugin]}
+        data={{ labels, datasets: [...barDatasets, lineYoY, lineMeta] as ChartDataset<'bar', (number | null)[]>[] }}
         options={{
           responsive: true,
           onClick: (_, elements) => {
@@ -997,7 +1025,7 @@ function GraficoCategoriasAno({
                     if (v == null) return ''
                     return ` ${ctx.dataset.label}: ${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
                   }
-                  return ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y)}`
+                  return ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y ?? 0)}`
                 },
                 footer: items => {
                   const bar = items.find(i => i.dataset.yAxisID !== 'y2')
@@ -1021,8 +1049,10 @@ function GraficoCategoriasAno({
             },
             y2: {
               position: 'right',
+              min: y2min,
+              max: y2max,
               grid: { drawOnChartArea: false },
-              ticks: { color: '#f0b429', font: { size: 11 }, callback: v => `${v}%` },
+              ticks: { color: '#f0b429', font: { size: 11 }, callback: v => `${Number(v) >= 0 ? '+' : ''}${v}%` },
             },
           },
         }}
@@ -1428,10 +1458,16 @@ function BarraProgresso({ objetivo }: { objetivo: Objetivo }) {
                : objetivo.status === 'CANCELADO' ? '#636e72'
                : tipoCor[objetivo.tipo] ?? '#4da6ff'
 
+  const crescimentoMeta = objetivo.tipo === 'SONHO'
+    ? objetivo.valor_meta - objetivo.saldo_base
+    : null
+
   const subtitulo = objetivo.tipo === 'OBJETIVO'
     ? `${formatBRL(objetivo.valor_atingido)}/mês de ${formatBRL(objetivo.valor_meta)}/mês`
     : objetivo.tipo === 'CRESCIMENTO'
     ? `${objetivo.valor_atingido >= 0 ? '+' : ''}${objetivo.valor_atingido.toFixed(1)}% de crescimento (meta: +${objetivo.valor_meta.toFixed(1)}%)`
+    : objetivo.tipo === 'SONHO'
+    ? `${formatBRL(objetivo.valor_atingido)} crescidos de ${formatBRL(crescimentoMeta ?? 0)} necessários`
     : `${formatBRL(objetivo.valor_atingido)} de ${formatBRL(objetivo.valor_meta)}`
 
   return (
@@ -1455,6 +1491,19 @@ function BarraProgresso({ objetivo }: { objetivo: Objetivo }) {
         </span>
         <span>{formatData(objetivo.data_fim)}</span>
       </div>
+
+      {/* Estimativa mensal — apenas SONHO em progresso */}
+      {objetivo.tipo === 'SONHO' && objetivo.crescimento_mensal_necessario != null &&
+       objetivo.crescimento_mensal_necessario > 0 && (
+        <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
+          <span className="text-[12px]" style={{ color: '#8b92a8' }}>
+            Crescimento mensal necessário para atingir a meta
+          </span>
+          <span className="text-[13px] font-semibold tabular-nums" style={{ color: baraCor }}>
+            {formatBRL(objetivo.crescimento_mensal_necessario)}/mês
+          </span>
+        </div>
+      )}
     </section>
   )
 }
@@ -1680,9 +1729,9 @@ export default function ObjetivoDetalhe() {
         </p>
       )}
 
-      {/* Histórico de progresso (snapshots) — não no OBJETIVO, que usa
-          a Evolução Mensal (derivada dos lançamentos) no lugar dos snapshots. */}
-      {objetivo.tipo !== 'OBJETIVO' && objetivo.progresso && objetivo.progresso.length >= 2 && (
+      {/* Histórico de progresso (snapshots) — não no OBJETIVO (usa Evolução Mensal)
+          nem no CRESCIMENTO (usa Arrecadação por Ano com dados anuais completos). */}
+      {objetivo.tipo !== 'OBJETIVO' && objetivo.tipo !== 'CRESCIMENTO' && objetivo.progresso && objetivo.progresso.length >= 2 && (
         <div className="mb-4">
           <HistoricoProgresso
             snapshots={objetivo.progresso}
@@ -1760,6 +1809,7 @@ export default function ObjetivoDetalhe() {
           mensagem="O objetivo será marcado como cancelado."
           onConfirmar={onExcluir}
           onCancelar={() => setExcluindo(false)}
+          salvando={false}
         />
       )}
 

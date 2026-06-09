@@ -51,7 +51,21 @@
       "PowerShell(Rename-Item \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-frames.png\" \"sabio-frames.png\")",
       "PowerShell(Rename-Item \"FrontEnd\\\\public\\\\mascotes\\\\conselheiro-andando.webm\" \"sabio-andando.webm\")",
       "Read(//c/Pessoal/ArquitetoDeValor/FrontEnd/public/mascotes/**)",
-      "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" scripts/gerar_anim_mascote.py gato)"
+      "Bash(\"C:\\\\Users\\\\djjun\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python39\\\\python.exe\" scripts/gerar_anim_mascote.py gato)",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/chart.js/package.json'\\).version\\)\")",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/react-chartjs-2/package.json'\\).version\\)\")",
+      "Bash(supabase --version)",
+      "Bash(npx vite *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5199)",
+      "PowerShell(Start-Process -NoNewWindow -FilePath \"cmd.exe\" -ArgumentList \"/c\", \"cd C:\\\\Pessoal\\\\ArquitetoDeValor\\\\FrontEnd && npx vite --port 5199 > C:\\\\Temp\\\\vite_output.txt 2>&1\")",
+      "PowerShell($job = Start-Job -ScriptBlock { Set-Location \"C:\\\\Pessoal\\\\ArquitetoDeValor\\\\FrontEnd\"; npx vite --port 5199 2>&1 }; Write-Output \"Job ID: $\\($job.Id\\)\")",
+      "PowerShell(Start-Sleep -Seconds 10; $r = try { \\(Invoke-WebRequest -Uri \"http://localhost:5199\" -TimeoutSec 3 -UseBasicParsing\\).StatusCode } catch { \"not ready\" }; Write-Output \"Status: $r\"; Receive-Job -Id 1 -Keep | Select-Object -Last 10)",
+      "PowerShell(try { \\(Invoke-WebRequest -Uri \"http://localhost:5173\" -TimeoutSec 2 -UseBasicParsing\\).StatusCode } catch { \"not running\" })",
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\('jest:', p.dependencies?.jest || p.devDependencies?.jest || 'não encontrado'\\); console.log\\('ts-jest:', p.dependencies?.['ts-jest'] || p.devDependencies?.['ts-jest'] || 'não encontrado'\\)\")",
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\('scripts:', JSON.stringify\\(p.scripts, null, 2\\)\\)\")",
+      "Bash(Test-Path \"c:\\\\Pessoal\\\\ArquitetoDeValor\\\\node_modules\\\\.bin\\\\jest.cmd\")",
+      "Bash(python -c \"import sys,json; p=json.load\\(sys.stdin\\); [print\\(k,':',v\\) for k,v in p.get\\('scripts',{}\\).items\\(\\) if 'e2e' in k or 'dev' in k]\")",
+      "Bash(node -e \"const p=require\\('./package.json'\\); Object.entries\\(p.scripts||{}\\).filter\\(\\([k]\\)=>k.includes\\('e2e'\\)||k.includes\\('dev'\\)\\).forEach\\(\\([k,v]\\)=>console.log\\(k,':',v\\)\\)\")"
     ],
     "additionalDirectories": [
       "C:\\Pessoal\\ArquitetoDeValor\\scripts",

@@ -3,32 +3,17 @@ import { Plus, RefreshCw } from 'lucide-react'
 import { useObjetivos } from '../hooks/useObjetivos'
 import { CardObjetivo } from '../components/ui/CardObjetivo'
 import { DrawerObjetivo } from '../components/ui/DrawerObjetivo'
+import { FiltrosObjetivos } from '../components/ui/FiltrosObjetivos'
 import { Toast, ModalExcluir } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import type { Objetivo, TipoObjetivo, StatusObjetivo } from '../types'
 import type { CriarObjetivoInput, EditarObjetivoInput } from '../hooks/useObjetivos'
 
-const TIPO_TABS: { value: TipoObjetivo | 'TODOS'; label: string }[] = [
-  { value: 'TODOS',       label: 'Todos'         },
-  { value: 'SONHO',       label: '💭 Sonhos'      },
-  { value: 'OBJETIVO',    label: '🎯 Objetivos'   },
-  { value: 'PROJETO',     label: '📦 Projetos'    },
-  { value: 'CRESCIMENTO', label: '📈 Crescimento' },
-]
-
-const STATUS_OPCOES: { value: StatusObjetivo | ''; label: string }[] = [
-  { value: '',             label: 'Qualquer status' },
-  { value: 'EM_PROGRESSO', label: 'Em progresso'    },
-  { value: 'ATINGIDO',     label: 'Atingido'         },
-  { value: 'CANCELADO',    label: 'Cancelado'        },
-]
-
-// Ordem e identidade visual dos grupos por tipo (mesmas cores do CardObjetivo)
-const TIPO_GRUPOS: { tipo: TipoObjetivo; label: string; cor: string }[] = [
-  { tipo: 'SONHO',       label: '💭 Sonhos',      cor: '#7F77DD' },
-  { tipo: 'OBJETIVO',    label: '🎯 Objetivos',   cor: '#4da6ff' },
-  { tipo: 'PROJETO',     label: '📦 Projetos',    cor: '#f0b429' },
-  { tipo: 'CRESCIMENTO', label: '📈 Crescimento', cor: '#00c896' },
+const TEMAS: { tipo: TipoObjetivo; emoji: string; label: string }[] = [
+  { tipo: 'SONHO',       emoji: '💭', label: 'Sonhos'      },
+  { tipo: 'OBJETIVO',    emoji: '🎯', label: 'Objetivos'   },
+  { tipo: 'PROJETO',     emoji: '📦', label: 'Projetos'    },
+  { tipo: 'CRESCIMENTO', emoji: '📈', label: 'Crescimento' },
 ]
 
 export default function ObjetivosPage() {
@@ -113,31 +98,12 @@ export default function ObjetivosPage() {
       </div>
 
       {/* Filtros */}
-      <div className="flex flex-wrap items-center gap-2 mb-5">
-        {/* Tabs de tipo */}
-        <div className="flex gap-1 bg-[#1a1f2e] rounded-lg p-1 border border-white/5">
-          {TIPO_TABS.map(t => (
-            <button key={t.value} onClick={() => setTipoFiltro(t.value)}
-              className={`px-3 py-1.5 rounded-md text-[13px] font-medium transition-all ${
-                tipoFiltro === t.value
-                  ? 'bg-av-green/15 text-av-green border border-av-green/30'
-                  : 'text-white/50 hover:text-white/80'
-              }`}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Filtro de status */}
-        <select value={statusFiltro} onChange={e => setStatusFiltro(e.target.value as StatusObjetivo | '')}
-          className="bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-2 text-[13px]
-            outline-none transition-colors hover:border-white/25"
-          style={{ color: statusFiltro ? '#e8eaf0' : '#8b92a8', colorScheme: 'dark' }}>
-          {STATUS_OPCOES.map(s => (
-            <option key={s.value} value={s.value}>{s.label}</option>
-          ))}
-        </select>
-      </div>
+      <FiltrosObjetivos
+        tipoFiltro={tipoFiltro}
+        statusFiltro={statusFiltro}
+        onTipoChange={setTipoFiltro}
+        onStatusChange={setStatusFiltro}
+      />
 
       {/* Conteúdo */}
       {loading ? (
@@ -160,23 +126,30 @@ export default function ObjetivosPage() {
             Criar primeiro objetivo
           </button>
         </div>
+      ) : tipoFiltro !== 'TODOS' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {objetivos.map(o => (
+            <CardObjetivo key={o.id} objetivo={o}
+              onEditar={abrirEditar}
+              onExcluir={setExcluindo} />
+          ))}
+        </div>
       ) : (
-        <div className="flex flex-col gap-7">
-          {TIPO_GRUPOS.map(({ tipo, label, cor }) => {
-            const grupo = objetivos.filter(o => o.tipo === tipo)
-            if (grupo.length === 0) return null
+        <div className="flex flex-col gap-8">
+          {TEMAS.map(tema => {
+            const lista = objetivos.filter(o => o.tipo === tema.tipo)
+            if (lista.length === 0) return null
             return (
-              <section key={tipo}>
+              <section key={tema.tipo}>
                 <div className="flex items-center gap-2 mb-3">
-                  <h2 className="text-[15px] font-semibold" style={{ color: cor }}>{label}</h2>
-                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-full"
-                    style={{ background: `${cor}22`, color: cor }}>
-                    {grupo.length}
+                  <span className="text-[18px]">{tema.emoji}</span>
+                  <h2 className="text-[15px] font-semibold text-white/80">{tema.label}</h2>
+                  <span className="text-[12px] px-1.5 py-0.5 rounded-full bg-white/5 text-white/40">
+                    {lista.length}
                   </span>
-                  <div className="flex-1 h-px" style={{ background: `${cor}22` }} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {grupo.map(o => (
+                  {lista.map(o => (
                     <CardObjetivo key={o.id} objetivo={o}
                       onEditar={abrirEditar}
                       onExcluir={setExcluindo} />
@@ -203,6 +176,7 @@ export default function ObjetivosPage() {
           mensagem="O objetivo será marcado como cancelado."
           onConfirmar={confirmarExclusao}
           onCancelar={() => setExcluindo(null)}
+          salvando={false}
         />
       )}
 
