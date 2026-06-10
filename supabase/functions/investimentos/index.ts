@@ -52,6 +52,7 @@ Deno.serve(async (req: Request) => {
       case "historico-mensal": return await rotaHistorico(c, req, m, userId);
       case "dashboard":       return m === "GET" ? await dashboard(c, url.searchParams) : erro("Método não permitido", 405);
       case "ranking":         return m === "GET" ? await ranking(c, url.searchParams) : erro("Método não permitido", 405);
+      case "busca-externa":   return m === "GET" ? await buscaExterna(url.searchParams) : erro("Método não permitido", 405);
       default:                return erro("Rota não encontrada", 404);
     }
   } catch (e) {
@@ -1074,4 +1075,139 @@ async function ranking(c: Db, params: URLSearchParams) {
   })).sort((x, y) => y.rentabilidade_pct - x.rentabilidade_pct);
 
   return json({ dados: { total_mercado: Number(totalMercado.toFixed(2)), ativos } });
+}
+
+// ============================================================
+// /investimentos/busca-externa — autocomplete de ativos
+//
+// Fontes (proxy server-side: evita CORS e mantém token fora do client):
+//   ACOES | ETF | FII | STOCKS  → brapi.dev /api/quote/list (B3 + BDRs)
+//   CRIPTOMOEDAS                → brapi.dev /api/v2/crypto (preço em BRL)
+//   TESOURO_DIRETO              → API pública do Tesouro Direto (B3)
+//   RENDA_FIXA                  → sem fonte pública (CDB/LCI/LCA/CRI/CRA
+//                                 são emissões privadas) → cadastro manual
+//
+// Token opcional da brapi via secret BRAPI_TOKEN (sem ele a brapi
+// aplica rate-limit do plano gratuito).
+// ============================================================
+
+interface ResultadoBusca {
+  ticker:      string;
+  nome:        string;
+  preco:       number | null;
+  moeda:       string;
+  // Extras preenchidos só pelo Tesouro Direto
+  emissor?:    string;
+  taxa?:       string;
+  vencimento?: string;       // YYYY-MM-DD
+  indexador?:  string;       // PREFIXADO | POS_FIXADO | HIBRIDO
+}
+
+const TD_URL = "https://www.tesourodireto.com.br/json/br/com/b3/tesourodireto/service/api/treasurybondsinfo.json";
+
+function brapiToken(): string {
+  const t = Deno.env.get("BRAPI_TOKEN") ?? "";
+  return t ? `&token=${encodeURIComponent(t)}` : "";
+}
+
+async function fetchJson(url: string): Promise<unknown> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!res.ok) throw new Error(`fonte externa respondeu ${res.status}`);
+  return await res.json();
+}
+
+function indexadorDoTesouro(nome: string): string {
+  if (/selic/i.test(nome)) return "POS_FIXADO";
+  if (/prefixado/i.test(nome)) return "PREFIXADO";
+  return "HIBRIDO"; // IPCA+, Renda+, Educa+
+}
+
+function taxaDoTesouro(nome: string, rate: number): string {
+  const pct = `${String(rate).replace(".", ",")}%`;
+  if (/selic/i.test(nome)) return `SELIC + ${pct}`;
+  if (/prefixado/i.test(nome)) return `${pct} a.a.`;
+  return `IPCA + ${pct}`;
+}
+
+async function buscaTesouro(q: string): Promise<ResultadoBusca[]> {
+  const data = await fetchJson(TD_URL) as {
+    response?: { TrsrBdTradgList?: { TrsrBd?: Record<string, unknown> }[] };
+  };
+  const lista = data.response?.TrsrBdTradgList ?? [];
+  const termo = q.toLowerCase();
+  const out: ResultadoBusca[] = [];
+  for (const item of lista) {
+    const bd = item.TrsrBd;
+    if (!bd) continue;
+    const nome  = String(bd.nm ?? "");
+    const preco = Number(bd.untrInvstmtVal ?? 0);
+    if (preco <= 0) continue;                       // só títulos disponíveis para compra
+    if (!nome.toLowerCase().includes(termo)) continue;
+    const rate = Number(bd.anulInvstmtRate ?? 0);
+    out.push({
+      ticker:     nome.replace(/tesouro\s*/i, "").replace(/[^A-Za-z0-9+]/g, "").toUpperCase().slice(0, 20),
+      nome,
+      preco,
+      moeda:      "BRL",
+      emissor:    "Governo Federal",
+      taxa:       taxaDoTesouro(nome, rate),
+      vencimento: String(bd.mtrtyDt ?? "").slice(0, 10) || undefined,
+      indexador:  indexadorDoTesouro(nome),
+    });
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+async function buscaCripto(q: string): Promise<ResultadoBusca[]> {
+  const disp = await fetchJson(
+    `https://brapi.dev/api/v2/crypto/available?search=${encodeURIComponent(q)}${brapiToken()}`,
+  ) as { coins?: string[] };
+  const coins = (disp.coins ?? []).slice(0, 8);
+  if (coins.length === 0) return [];
+  const cot = await fetchJson(
+    `https://brapi.dev/api/v2/crypto?coin=${encodeURIComponent(coins.join(","))}&currency=BRL${brapiToken()}`,
+  ) as { coins?: { coin?: string; coinName?: string; regularMarketPrice?: number }[] };
+  return (cot.coins ?? []).map((c) => ({
+    ticker: String(c.coin ?? "").toUpperCase().slice(0, 20),
+    nome:   String(c.coinName ?? c.coin ?? ""),
+    preco:  c.regularMarketPrice != null ? Number(c.regularMarketPrice) : null,
+    moeda:  "BRL",
+  }));
+}
+
+async function buscaB3(q: string): Promise<ResultadoBusca[]> {
+  const data = await fetchJson(
+    `https://brapi.dev/api/quote/list?search=${encodeURIComponent(q)}&limit=10${brapiToken()}`,
+  ) as { stocks?: { stock?: string; name?: string; close?: number }[] };
+  return (data.stocks ?? []).map((s) => ({
+    ticker: String(s.stock ?? "").toUpperCase().slice(0, 20),
+    nome:   String(s.name ?? s.stock ?? ""),
+    preco:  s.close != null ? Number(s.close) : null,
+    moeda:  "BRL",
+  }));
+}
+
+async function buscaExterna(params: URLSearchParams) {
+  const tipo = params.get("tipo") ?? "";
+  const q    = (params.get("q") ?? "").trim();
+  logRequest("GET", "/investimentos/busca-externa", { tipo, q });
+
+  if (!TIPOS_ATIVO.includes(tipo)) return erro(`tipo inválido: ${TIPOS_ATIVO.join(" | ")}`);
+  if (q.length < 2) return erro("q deve ter pelo menos 2 caracteres");
+
+  try {
+    // RENDA_FIXA usa a busca da B3 também — cobre papéis listados
+    // (debêntures etc.); CDB/LCI/LCA são emissões privadas e podem não
+    // aparecer, por isso o frontend mantém o cadastro manual como saída.
+    let resultados: ResultadoBusca[];
+    if (tipo === "TESOURO_DIRETO")    resultados = await buscaTesouro(q);
+    else if (tipo === "CRIPTOMOEDAS") resultados = await buscaCripto(q);
+    else                              resultados = await buscaB3(q);
+    logSuccess("Busca externa", { tipo, q, encontrados: resultados.length });
+    return json({ dados: resultados });
+  } catch (e) {
+    logError("Busca externa", e);
+    return erro(`Não foi possível consultar a fonte externa: ${(e as Error).message}`, 502);
+  }
 }

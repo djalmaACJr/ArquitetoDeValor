@@ -112,3 +112,34 @@ export function useInvestimentoAtivo(id: string | null) {
     error: error ? (error as Error).message : null,
   }
 }
+
+// ── Busca externa de ticker (brapi / Tesouro Direto) ──────────
+// Vale para todos os tipos; para RENDA_FIXA cobre só papéis listados
+// na B3 (CDB/LCI/LCA são privados) — o formulário oferece fallback manual.
+
+export function useBuscaAtivoExterno(tipo: TipoAtivoInvestimento, q: string) {
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
+  const termo = q.trim()
+
+  const { data, isFetching: buscando, error } = useQuery({
+    queryKey: ['inv-busca-externa', uid, tipo, termo],
+    queryFn:  async () => {
+      const res = await apiFetch<import('../types').ResultadoBuscaAtivo[]>(
+        `/investimentos/busca-externa?tipo=${tipo}&q=${encodeURIComponent(termo)}`,
+      )
+      if (!res.ok) throw new Error(res.erro ?? 'Erro na busca')
+      return res.dados ?? []
+    },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+    enabled: !!uid && termo.length >= 2,
+  })
+
+  return {
+    resultados: data ?? [],
+    buscando,
+    erroBusca: error ? (error as Error).message : null,
+  }
+}

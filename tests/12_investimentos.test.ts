@@ -171,6 +171,14 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     await api(`/investimentos/ativos/${data.dados.id}`, "DELETE");
   });
 
+  test("CA-INV20 — GET /investimentos/busca-externa valida tipo e tamanho mínimo da query", async () => {
+    const { status: s1 } = await api("/investimentos/busca-externa?tipo=BITCOIN&q=petr");
+    expect(s1).toBe(400); // tipo inválido
+
+    const { status: s2 } = await api("/investimentos/busca-externa?tipo=ACOES&q=p");
+    expect(s2).toBe(400); // q < 2 caracteres
+  });
+
   // ── Posições ────────────────────────────────────────────────
 
   test("CA-INV06 — POST /investimentos/posicoes exige conta válida", async () => {

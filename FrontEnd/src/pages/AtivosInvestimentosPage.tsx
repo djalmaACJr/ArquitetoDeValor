@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { Plus, Pencil, Trash2, Layers, ArrowLeft, LineChart } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Pencil, Trash2, Layers, ArrowLeft, LineChart, Search, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
-  useInvestimentosAtivos, type CriarAtivoInput, type EditarAtivoInput,
+  useInvestimentosAtivos, useBuscaAtivoExterno,
+  type CriarAtivoInput, type EditarAtivoInput,
 } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes, type CriarPosicaoInput } from '../hooks/useInvestimentosPosicoes'
 import { useInvestimentosHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
@@ -20,6 +21,7 @@ import {
 } from '../lib/constants'
 import type {
   InvestimentoAtivo, TipoAtivoInvestimento, SubtipoRF, IndexadorRF, CategoriaFII,
+  ResultadoBuscaAtivo,
 } from '../types'
 
 const MUTED = '#8b92a8'
@@ -44,12 +46,30 @@ export default function AtivosInvestimentosPage() {
   const [posicoesDe, setPosicoesDe] = useState<InvestimentoAtivo | null>(null)
   const [historicoDe, setHistoricoDe] = useState<InvestimentoAtivo | null>(null)
 
+  // Busca externa (ticker → nome/preço/características)
+  const [busca,       setBusca]       = useState('')
+  const [buscaDeb,    setBuscaDeb]    = useState('')
+  const [selecionado, setSelecionado] = useState(false)  // nome veio da lista
+  const [manualLivre, setManualLivre] = useState(false)  // fallback de cadastro manual
+  const [precoSel,    setPrecoSel]    = useState<number | null>(null)
+
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaDeb(busca), 400)
+    return () => clearTimeout(t)
+  }, [busca])
+
+  const { resultados, buscando, erroBusca } = useBuscaAtivoExterno(form.tipo_ativo, drawer ? buscaDeb : '')
+
   const filtros = tipoFiltro ? { tipo: tipoFiltro } : {}
   const { ativos, loading, error, criar, editar, excluir } = useInvestimentosAtivos(filtros)
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
-  function abrirNovo() { setEditando(null); setForm(FORM_VAZIO); setDrawer(true) }
+  function resetBusca() {
+    setBusca(''); setBuscaDeb(''); setSelecionado(false); setManualLivre(false); setPrecoSel(null)
+  }
+
+  function abrirNovo() { setEditando(null); setForm(FORM_VAZIO); resetBusca(); setDrawer(true) }
   function abrirEditar(a: InvestimentoAtivo) {
     setEditando(a)
     setForm({
@@ -60,21 +80,43 @@ export default function AtivosInvestimentosPage() {
       rf_garantia_fgc: a.rf_garantia_fgc, rf_isento_ir: a.rf_isento_ir,
       fii_categoria: a.fii_categoria,
     })
+    resetBusca()
+    setSelecionado(true)   // já tem nome definido — não exige nova seleção
     setDrawer(true)
   }
 
+  // Resultado escolhido na lista: preenche ticker, nome e características
+  function selecionarResultado(r: ResultadoBuscaAtivo) {
+    setForm({
+      ...form,
+      ticker: r.ticker,
+      nome:   r.nome,
+      moeda:  r.moeda || form.moeda,
+      ...(r.emissor    ? { rf_emissor: r.emissor } : {}),
+      ...(r.taxa       ? { rf_taxa: r.taxa } : {}),
+      ...(r.vencimento ? { rf_vencimento: r.vencimento } : {}),
+      ...(r.indexador  ? { rf_indexador: r.indexador } : {}),
+    })
+    setPrecoSel(r.preco)
+    setSelecionado(true)
+    setBusca(''); setBuscaDeb('')
+  }
+
   // Troca de tipo limpa/pré-preenche as características específicas
+  // e zera a busca/seleção (a fonte de dados muda com o tipo)
   function mudarTipo(tipo: TipoAtivoInvestimento) {
+    if (!editando) { resetBusca() }
+    const limpaIdent = editando ? {} : { ticker: '', nome: '' }
     if (tipo === 'TESOURO_DIRETO') {
       const info = SUBTIPO_RF_INFO.TESOURO
-      setForm({ ...form, tipo_ativo: tipo, fii_categoria: null,
+      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null,
         rf_subtipo: 'TESOURO', rf_emissor: info.emissor,
         rf_garantia_fgc: info.fgc, rf_isento_ir: info.isentoIR })
     } else if (tipo === 'RENDA_FIXA') {
-      setForm({ ...form, tipo_ativo: tipo, fii_categoria: null,
+      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null,
         rf_subtipo: form.rf_subtipo === 'TESOURO' ? null : form.rf_subtipo })
     } else {
-      setForm({ ...form, tipo_ativo: tipo,
+      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo,
         rf_subtipo: null, rf_indexador: null, rf_taxa: null, rf_emissor: null,
         rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
         fii_categoria: tipo === 'FII' ? form.fii_categoria : null })
@@ -91,6 +133,10 @@ export default function AtivosInvestimentosPage() {
   }
 
   async function salvar() {
+    if (!editando && !selecionado && !manualLivre) {
+      showToast('Busque e selecione o ativo na lista — ou ative o cadastro manual')
+      return
+    }
     if (!form.ticker.trim() || !form.nome.trim()) { showToast('Ticker e nome são obrigatórios'); return }
     setSalvando(true)
     const payload: CriarAtivoInput | EditarAtivoInput = {
@@ -225,47 +271,141 @@ export default function AtivosInvestimentosPage() {
         titulo={editando ? 'Editar ativo' : 'Novo ativo'}
         subtitulo={editando ? editando.ticker : 'Cadastre um ativo da sua carteira'}
         rodape={<><BtnCancelar onClick={() => setDrawer(false)} /><BtnSalvar editando={!!editando} onClick={salvar} salvando={salvando} /></>}>
-        <Field label="Ticker">
-          <Input value={form.ticker} onChange={(e) => setForm({ ...form, ticker: e.target.value })} placeholder="Ex.: VALE3" maxLength={20} />
-        </Field>
-        <Field label="Nome">
-          <Input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Ex.: Vale S.A." maxLength={120} />
-        </Field>
+        {/* 1) Tipo primeiro — define a fonte da busca */}
         <Field label="Tipo de ativo">
           <SelectDark value={form.tipo_ativo} onChange={(e) => mudarTipo(e.target.value as TipoAtivoInvestimento)}>
             {TIPOS_ATIVO_INV.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
           </SelectDark>
         </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Moeda">
-            <Input value={form.moeda} onChange={(e) => setForm({ ...form, moeda: e.target.value.toUpperCase() })} maxLength={3} placeholder="BRL" />
+
+        {/* 2) Subtipo / categoria — refina a busca */}
+        {form.tipo_ativo === 'RENDA_FIXA' && (
+          <Field label="Tipo do título">
+            <SelectDark value={form.rf_subtipo ?? ''} onChange={(e) => mudarSubtipoRF(e.target.value as SubtipoRF | '')}>
+              <option value="">Selecione...</option>
+              {subtiposParaTipo('RENDA_FIXA').map((s) => (
+                <option key={s} value={s}>{SUBTIPO_RF_INFO[s].label}</option>
+              ))}
+            </SelectDark>
           </Field>
+        )}
+        {form.tipo_ativo === 'FII' && (
+          <Field label="Categoria do fundo">
+            <SelectDark value={form.fii_categoria ?? ''}
+              onChange={(e) => setForm({ ...form, fii_categoria: (e.target.value || null) as CategoriaFII | null })}>
+              <option value="">Selecione...</option>
+              {CATEGORIAS_FII.map((c) => <option key={c} value={c}>{FII_CATEGORIA_INFO[c].label}</option>)}
+            </SelectDark>
+            {form.fii_categoria && (
+              <div className="text-[12px] space-y-0.5 mt-1" style={{ color: MUTED }}>
+                <p><span className="text-white/70">Compra:</span> {FII_CATEGORIA_INFO[form.fii_categoria].compra}</p>
+                <p><span className="text-white/70">Fonte de lucro:</span> {FII_CATEGORIA_INFO[form.fii_categoria].fonteLucro}</p>
+                <p><span className="text-white/70">Risco:</span> {FII_CATEGORIA_INFO[form.fii_categoria].risco} ·{' '}
+                  <span className="text-white/70">Vantagem:</span> {FII_CATEGORIA_INFO[form.fii_categoria].vantagem}</p>
+              </div>
+            )}
+          </Field>
+        )}
+
+        {/* 3) Busca na internet — ticker, nome e preço vêm da lista */}
+        {!editando && (
+          <div className="rounded-lg border border-white/10 p-3 space-y-2">
+            <Field label="Buscar ativo (ticker ou nome)">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: MUTED }} />
+                <Input value={busca} onChange={(e) => { setBusca(e.target.value); setSelecionado(false) }}
+                  placeholder={form.tipo_ativo === 'TESOURO_DIRETO' ? 'Ex.: IPCA 2029, Selic...' : 'Ex.: PETR, Vale, BTC...'}
+                  className="!pl-8" />
+                {buscando && <RefreshCw size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin" style={{ color: MUTED }} />}
+              </div>
+            </Field>
+
+            {/* Resultados */}
+            {buscaDeb.length >= 2 && !buscando && !selecionado && (
+              resultados.length === 0 && !erroBusca ? (
+                <p className="text-[12px]" style={{ color: MUTED }}>Nada encontrado para "{buscaDeb}".</p>
+              ) : (
+                <div className="max-h-52 overflow-y-auto space-y-1">
+                  {resultados.map((r) => (
+                    <button key={`${r.ticker}-${r.nome}`} type="button" onClick={() => selecionarResultado(r)}
+                      className="w-full text-left px-2.5 py-1.5 rounded-md border border-white/10 hover:border-blue-400/50 hover:bg-blue-500/10 flex items-center justify-between gap-2">
+                      <span className="min-w-0">
+                        <span className="text-white text-[13px] font-semibold">{r.ticker}</span>
+                        <span className="text-[12px] ml-2 truncate" style={{ color: MUTED }}>{r.nome}</span>
+                      </span>
+                      {r.preco != null && (
+                        <span className="text-[12px] shrink-0" style={{ color: '#00c896' }}>{formatBRL(r.preco)}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+
+            {erroBusca && (
+              <p className="text-[12px]" style={{ color: '#ffb74d' }}>
+                {erroBusca} — você pode cadastrar manualmente abaixo.
+              </p>
+            )}
+
+            {/* Selecionado */}
+            {selecionado && form.ticker && (
+              <div className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-white text-[13px] font-semibold">{form.ticker}
+                    {precoSel != null && <span className="ml-2 font-normal" style={{ color: '#00c896' }}>{formatBRL(precoSel)}</span>}
+                  </p>
+                  <p className="text-[12px] truncate" style={{ color: MUTED }}>{form.nome}</p>
+                </div>
+                <button type="button" onClick={() => { setSelecionado(false); setForm({ ...form, ticker: '', nome: '' }); setPrecoSel(null) }}
+                  className="text-[12px] shrink-0 underline" style={{ color: MUTED }}>trocar</button>
+              </div>
+            )}
+
+            {!selecionado && (
+              <label className="flex items-center gap-2 text-[12px] cursor-pointer" style={{ color: MUTED }}>
+                <input type="checkbox" checked={manualLivre} onChange={(e) => setManualLivre(e.target.checked)} />
+                Não encontrei — cadastrar manualmente
+              </label>
+            )}
+          </div>
+        )}
+
+        {/* 4) Identificação — preenchida pela busca (editável só no manual) */}
+        {(editando || manualLivre || selecionado) && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Ticker">
+                <Input value={form.ticker} onChange={(e) => setForm({ ...form, ticker: e.target.value })}
+                  placeholder="Ex.: VALE3" maxLength={20} disabled={!editando && !manualLivre} />
+              </Field>
+              <Field label="Moeda">
+                <Input value={form.moeda} onChange={(e) => setForm({ ...form, moeda: e.target.value.toUpperCase() })} maxLength={3} placeholder="BRL" />
+              </Field>
+            </div>
+            <Field label="Nome">
+              <Input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })}
+                placeholder="Ex.: Vale S.A." maxLength={120} disabled={!editando && !manualLivre} />
+            </Field>
+          </>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
           <Field label="Nota (0–10)">
             <Input type="number" min={0} max={10} step={0.5}
               value={form.nota_usuario ?? ''}
               onChange={(e) => setForm({ ...form, nota_usuario: e.target.value === '' ? null : Number(e.target.value) })}
               placeholder="—" />
           </Field>
+          <Field label="Descrição">
+            <Input value={form.descricao ?? ''} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Opcional" />
+          </Field>
         </div>
-        <Field label="Descrição">
-          <Input value={form.descricao ?? ''} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Opcional" />
-        </Field>
 
         {/* Características de renda fixa / Tesouro Direto */}
         {ehRendaFixa(form.tipo_ativo) && (
           <div className="rounded-lg border border-white/10 p-3 space-y-3">
             <p className="text-[13px] font-semibold text-white">Características do título</p>
-
-            {form.tipo_ativo === 'RENDA_FIXA' && (
-              <Field label="Tipo do título">
-                <SelectDark value={form.rf_subtipo ?? ''} onChange={(e) => mudarSubtipoRF(e.target.value as SubtipoRF | '')}>
-                  <option value="">Selecione...</option>
-                  {subtiposParaTipo('RENDA_FIXA').map((s) => (
-                    <option key={s} value={s}>{SUBTIPO_RF_INFO[s].label}</option>
-                  ))}
-                </SelectDark>
-              </Field>
-            )}
 
             <Field label="Forma de rentabilidade">
               <SelectDark value={form.rf_indexador ?? ''}
@@ -321,26 +461,6 @@ export default function AtivosInvestimentosPage() {
           </div>
         )}
 
-        {/* Categoria do FII */}
-        {form.tipo_ativo === 'FII' && (
-          <div className="rounded-lg border border-white/10 p-3 space-y-3">
-            <Field label="Categoria do fundo">
-              <SelectDark value={form.fii_categoria ?? ''}
-                onChange={(e) => setForm({ ...form, fii_categoria: (e.target.value || null) as CategoriaFII | null })}>
-                <option value="">Selecione...</option>
-                {CATEGORIAS_FII.map((c) => <option key={c} value={c}>{FII_CATEGORIA_INFO[c].label}</option>)}
-              </SelectDark>
-            </Field>
-            {form.fii_categoria && (
-              <div className="text-[12px] space-y-1" style={{ color: MUTED }}>
-                <p><span className="text-white/70">Compra:</span> {FII_CATEGORIA_INFO[form.fii_categoria].compra}</p>
-                <p><span className="text-white/70">Fonte de lucro:</span> {FII_CATEGORIA_INFO[form.fii_categoria].fonteLucro}</p>
-                <p><span className="text-white/70">Risco:</span> {FII_CATEGORIA_INFO[form.fii_categoria].risco}</p>
-                <p><span className="text-white/70">Vantagem:</span> {FII_CATEGORIA_INFO[form.fii_categoria].vantagem}</p>
-              </div>
-            )}
-          </div>
-        )}
       </Drawer>
 
       {/* Drawer posições */}

@@ -385,6 +385,19 @@ export interface InvestimentoDashboard {
   tipos:            InvestimentoDashboardTipo[]
 }
 
+// Resultado de GET /investimentos/busca-externa (autocomplete de ticker)
+export interface ResultadoBuscaAtivo {
+  ticker: string
+  nome:   string
+  preco:  number | null
+  moeda:  string
+  // Preenchidos apenas pelo Tesouro Direto
+  emissor?:    string
+  taxa?:       string
+  vencimento?: string
+  indexador?:  IndexadorRF
+}
+
 // Linha por ativo, devolvida por GET /investimentos/ranking
 export interface InvestimentoRankingAtivo {
   ativo_id:           string
