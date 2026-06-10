@@ -1,7 +1,14 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { TrendingUp, TrendingDown, Wallet, Coins, PieChart, Percent, Trophy } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { Line, Bar, Doughnut } from 'react-chartjs-2'
+import {
+  Chart as ChartJS, ArcElement, Tooltip, Legend,
+  CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement,
+} from 'chart.js'
 import { useInvestimentosDashboard, useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
+import { useInvestimentosHistorico } from '../hooks/useInvestimentosHistorico'
+import { useDividendos } from '../hooks/useDividendos'
 import { useContas } from '../hooks/useContas'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { SelectDark } from '../components/ui/shared'
@@ -9,7 +16,24 @@ import { formatBRL } from '../lib/utils'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR } from '../lib/constants'
 import type { InvestimentoDashboardTipo, InvestimentoRankingAtivo } from '../types'
 
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement)
+
 const MUTED = '#8b92a8'
+
+const MESES_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+function fmtMes(anoMes: string): string {
+  const [ano, m] = anoMes.split('-')
+  return `${MESES_PT[parseInt(m) - 1]}/${ano.slice(2)}`
+}
+
+const OPCOES_GRAFICO = {
+  responsive: true,
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { ticks: { color: MUTED }, grid: { color: 'rgba(255,255,255,0.05)' } },
+    y: { ticks: { color: MUTED }, grid: { color: 'rgba(255,255,255,0.05)' } },
+  },
+} as const
 
 function corValor(v: number): string {
   if (v > 0) return '#00c896'
@@ -74,6 +98,100 @@ function LinhaTipo({ t }: { t: InvestimentoDashboardTipo }) {
         </p>
       )}
     </div>
+  )
+}
+
+// ── Gráficos da carteira ──────────────────────────────────────
+
+function SecaoGraficos({ contaId, tipos }: { contaId: string | null; tipos: InvestimentoDashboardTipo[] }) {
+  const { historico }  = useInvestimentosHistorico(contaId ? { conta_id: contaId } : {})
+  const { dividendos } = useDividendos()
+
+  // Evolução da carteira: soma dos snapshots por mês
+  const evolucao = useMemo(() => {
+    const porMes = new Map<string, number>()
+    for (const h of historico) porMes.set(h.mes_ano, (porMes.get(h.mes_ano) ?? 0) + Number(h.valor_mercado))
+    return [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [historico])
+
+  // Dividendos por mês (carteira inteira — endpoint não filtra por conta)
+  const divPorMes = useMemo(() => {
+    const porMes = new Map<string, number>()
+    for (const d of dividendos) {
+      const mes = d.data_pagamento.slice(0, 7)
+      porMes.set(mes, (porMes.get(mes) ?? 0) + Number(d.valor))
+    }
+    return [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-12)
+  }, [dividendos])
+
+  const temAlgo = evolucao.length >= 2 || divPorMes.length > 0 || tipos.length > 1
+  if (!temAlgo) return null
+
+  return (
+    <>
+      <h2 className="text-[15px] font-semibold text-white mt-6 mb-3">Gráficos</h2>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        {evolucao.length >= 2 && (
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 lg:col-span-2">
+            <h3 className="text-[13px] mb-3" style={{ color: MUTED }}>Evolução da carteira</h3>
+            <Line
+              data={{
+                labels: evolucao.map(([mes]) => fmtMes(mes)),
+                datasets: [{
+                  label: 'Valor de mercado',
+                  data: evolucao.map(([, v]) => v),
+                  borderColor: '#3b82f6',
+                  backgroundColor: '#3b82f622',
+                  fill: true,
+                  tension: 0.3,
+                  pointRadius: evolucao.length <= 12 ? 4 : 2,
+                  pointBackgroundColor: '#3b82f6',
+                }],
+              }}
+              options={OPCOES_GRAFICO}
+            />
+          </section>
+        )}
+
+        {tipos.length > 0 && (
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <h3 className="text-[13px] mb-3" style={{ color: MUTED }}>Composição por tipo</h3>
+            <Doughnut
+              data={{
+                labels: tipos.map((t) => TIPO_ATIVO_LABEL[t.tipo_ativo]),
+                datasets: [{
+                  data: tipos.map((t) => t.valor_mercado),
+                  backgroundColor: tipos.map((t) => TIPO_ATIVO_COR[t.tipo_ativo]),
+                  borderWidth: 0,
+                }],
+              }}
+              options={{
+                responsive: true,
+                plugins: { legend: { position: 'bottom', labels: { color: MUTED, boxWidth: 10, font: { size: 11 } } } },
+              }}
+            />
+          </section>
+        )}
+
+        {divPorMes.length > 0 && (
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 lg:col-span-3">
+            <h3 className="text-[13px] mb-3" style={{ color: MUTED }}>Dividendos por mês</h3>
+            <Bar
+              data={{
+                labels: divPorMes.map(([mes]) => fmtMes(mes)),
+                datasets: [{
+                  label: 'Dividendos',
+                  data: divPorMes.map(([, v]) => v),
+                  backgroundColor: '#00c896aa',
+                  borderRadius: 4,
+                }],
+              }}
+              options={{ ...OPCOES_GRAFICO, maintainAspectRatio: true, aspectRatio: 4 }}
+            />
+          </section>
+        )}
+      </div>
+    </>
   )
 }
 
@@ -225,6 +343,8 @@ export default function InvestimentosPage() {
           </div>
 
           <SecaoRanking contaId={contaId || null} />
+
+          <SecaoGraficos contaId={contaId || null} tipos={tipos} />
         </>
       )}
     </div>

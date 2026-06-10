@@ -73,3 +73,28 @@ export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
     excluir,
   }
 }
+
+// ── Detalhe de um ativo (GET /investimentos/ativos/:id) ───────
+
+export function useInvestimentoAtivo(id: string | null) {
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
+
+  const { data, isLoading: loading, error } = useQuery({
+    queryKey: qk.invAtivo(uid, id ?? ''),
+    queryFn:  async () => {
+      const res = await apiFetch<InvestimentoAtivo>(`/investimentos/ativos/${id}`)
+      if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar ativo')
+      return res.dados
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    enabled: !!uid && !!id,
+  })
+
+  return {
+    ativo: data ?? null,
+    loading,
+    error: error ? (error as Error).message : null,
+  }
+}

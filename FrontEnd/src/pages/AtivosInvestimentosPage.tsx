@@ -127,7 +127,11 @@ export default function AtivosInvestimentosPage() {
             <tbody>
               {ativos.map((a) => (
                 <tr key={a.id} className="border-t border-white/5">
-                  <td className="px-4 py-2.5 font-semibold text-white">{a.ticker}</td>
+                  <td className="px-4 py-2.5">
+                    <Link to={`/investimentos/ativos/${a.id}`} className="font-semibold text-white hover:underline">
+                      {a.ticker}
+                    </Link>
+                  </td>
                   <td className="px-4 py-2.5 text-white/80">{a.nome}</td>
                   <td className="px-4 py-2.5">
                     <span className="inline-flex items-center gap-1.5 text-[12px] px-2 py-0.5 rounded-full"
