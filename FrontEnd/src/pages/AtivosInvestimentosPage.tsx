@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Plus, Pencil, Trash2, Layers, ArrowLeft } from 'lucide-react'
+import { Plus, Pencil, Trash2, Layers, ArrowLeft, LineChart } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   useInvestimentosAtivos, type CriarAtivoInput, type EditarAtivoInput,
 } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes, type CriarPosicaoInput } from '../hooks/useInvestimentosPosicoes'
+import { useInvestimentosHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
 import { useContas } from '../hooks/useContas'
 import {
   Drawer, Field, Input, SelectDark, BtnSalvar, BtnCancelar, Toast, ModalExcluir,
@@ -29,6 +30,7 @@ export default function AtivosInvestimentosPage() {
   const [excluindo,  setExcluindo]  = useState<InvestimentoAtivo | null>(null)
   const [toast,      setToast]      = useState<string | null>(null)
   const [posicoesDe, setPosicoesDe] = useState<InvestimentoAtivo | null>(null)
+  const [historicoDe, setHistoricoDe] = useState<InvestimentoAtivo | null>(null)
 
   const filtros = tipoFiltro ? { tipo: tipoFiltro } : {}
   const { ativos, loading, error, criar, editar, excluir } = useInvestimentosAtivos(filtros)
@@ -140,6 +142,10 @@ export default function AtivosInvestimentosPage() {
                         className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
                         <Layers size={13} />
                       </button>
+                      <button onClick={() => setHistoricoDe(a)} title="Valor de mercado"
+                        className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
+                        <LineChart size={13} />
+                      </button>
                       <button onClick={() => abrirEditar(a)} title="Editar"
                         className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
                         <Pencil size={13} />
@@ -192,6 +198,11 @@ export default function AtivosInvestimentosPage() {
       {/* Drawer posições */}
       {posicoesDe && (
         <DrawerPosicoes ativo={posicoesDe} onClose={() => setPosicoesDe(null)} onToast={showToast} />
+      )}
+
+      {/* Drawer histórico mensal de valor de mercado */}
+      {historicoDe && (
+        <DrawerHistorico ativo={historicoDe} onClose={() => setHistoricoDe(null)} onToast={showToast} />
       )}
 
       {excluindo && (
@@ -280,6 +291,104 @@ function DrawerPosicoes({ ativo, onClose, onToast }: {
                 </p>
               </div>
               <button onClick={() => remover(p.id)} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Drawer>
+  )
+}
+
+// ── Drawer de histórico mensal (valor de mercado) ───────────────
+
+const mesAtual = () => new Date().toISOString().slice(0, 7)
+const HIST_VAZIO = { conta_id: '', mes_ano: mesAtual(), valor_mercado: '', quantidade: '' }
+
+function DrawerHistorico({ ativo, onClose, onToast }: {
+  ativo: InvestimentoAtivo; onClose: () => void; onToast: (m: string) => void
+}) {
+  const { historico, loading, registrar, excluir } = useInvestimentosHistorico({ ativo_id: ativo.id })
+  const { posicoes } = useInvestimentosPosicoes({ ativo_id: ativo.id, status: 'ATIVA' })
+  const [form, setForm] = useState(HIST_VAZIO)
+  const [salvando, setSalvando] = useState(false)
+
+  // Contas onde o ativo tem posição ativa (destino natural do snapshot)
+  const contasDoAtivo = [...new Map(posicoes.map((p) => [p.conta_id, p.contas?.nome ?? '—'])).entries()]
+
+  async function salvar() {
+    if (!form.conta_id) { onToast('Selecione a conta'); return }
+    const valor = Number(form.valor_mercado)
+    if (!(valor >= 0)) { onToast('Valor de mercado inválido'); return }
+    setSalvando(true)
+    const payload: RegistrarHistoricoInput = {
+      ativo_id: ativo.id, conta_id: form.conta_id, mes_ano: form.mes_ano, valor_mercado: valor,
+      ...(form.quantidade !== '' ? { quantidade: Number(form.quantidade) } : {}),
+    }
+    const res = await registrar(payload)
+    setSalvando(false)
+    if (res.ok) { setForm({ ...HIST_VAZIO, conta_id: form.conta_id }); onToast('Valor registrado!') }
+    else onToast(res.erro ?? 'Erro ao registrar valor')
+  }
+
+  async function remover(id: string) {
+    const res = await excluir(id)
+    onToast(res.ok ? 'Registro removido.' : (res.erro ?? 'Erro ao remover'))
+  }
+
+  return (
+    <Drawer open onClose={onClose} titulo={`Valor de mercado · ${ativo.ticker}`} subtitulo={ativo.nome}>
+      <div className="rounded-lg border border-white/10 p-3 space-y-3">
+        <Field label="Conta">
+          <SelectDark value={form.conta_id} onChange={(e) => setForm({ ...form, conta_id: e.target.value })}>
+            <option value="">Selecione...</option>
+            {contasDoAtivo.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
+          </SelectDark>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Mês">
+            <Input type="month" value={form.mes_ano} onChange={(e) => setForm({ ...form, mes_ano: e.target.value })} />
+          </Field>
+          <Field label="Valor de mercado">
+            <Input type="number" min={0} step="any" value={form.valor_mercado}
+              onChange={(e) => setForm({ ...form, valor_mercado: e.target.value })} placeholder="0,00" />
+          </Field>
+        </div>
+        <Field label="Quantidade (opcional — usa as posições se vazio)">
+          <Input type="number" min={0} step="any" value={form.quantidade}
+            onChange={(e) => setForm({ ...form, quantidade: e.target.value })} placeholder="Automática" />
+        </Field>
+        <button onClick={salvar} disabled={salvando}
+          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-semibold text-white disabled:opacity-50"
+          style={{ background: '#3b82f6' }}>
+          <Plus size={14} /> Registrar valor do mês
+        </button>
+      </div>
+
+      {loading ? (
+        <p className="text-[13px]" style={{ color: MUTED }}>Carregando...</p>
+      ) : historico.length === 0 ? (
+        <p className="text-[13px] text-center py-4" style={{ color: MUTED }}>
+          Nenhum valor registrado. Sem snapshots, o dashboard usa o valor de custo.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {historico.map((h) => (
+            <div key={h.id} className="rounded-lg border border-white/10 p-3 flex items-center justify-between gap-2">
+              <div>
+                <p className="text-white text-[14px] font-medium">
+                  {h.mes_ano} · {formatBRL(h.valor_mercado)}
+                </p>
+                <p className="text-[12px]" style={{ color: MUTED }}>
+                  {h.quantidade} un. ·{' '}
+                  <span style={{ color: h.variacao_percentual >= 0 ? '#00c896' : '#ff5c7a' }}>
+                    {h.variacao_percentual >= 0 ? '+' : ''}{h.variacao_percentual.toFixed(2)}%
+                    {' '}({formatBRL(h.rentabilidade_mes)})
+                  </span>
+                </p>
+              </div>
+              <button onClick={() => remover(h.id)} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
                 <Trash2 size={13} />
               </button>
             </div>

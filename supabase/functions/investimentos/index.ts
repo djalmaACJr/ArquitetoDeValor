@@ -44,6 +44,7 @@ Deno.serve(async (req: Request) => {
       case "operacoes":       return await rotaOperacoes(c, req, m, userId);
       case "dividendos":      return await rotaDividendos(c, req, m, userId);
       case "tipos-dividendo": return await rotaTiposDividendo(c, req, m, userId);
+      case "historico-mensal": return await rotaHistorico(c, req, m, userId);
       case "dashboard":       return m === "GET" ? await dashboard(c, url.searchParams) : erro("Método não permitido", 405);
       default:                return erro("Rota não encontrada", 404);
     }
@@ -575,6 +576,149 @@ async function rotaTiposDividendo(c: Db, req: Request, m: string, userId: string
     const { error } = await c.from("inv_tipos_dividendo").delete().eq("id", id);
     if (error) { logError("Excluir tipo-dividendo", error); return erro(error.message); }
     return json({ mensagem: "Tipo de dividendo excluído com sucesso" });
+  }
+
+  return erro("Rota não encontrada", 404);
+}
+
+// ============================================================
+// /investimentos/historico-mensal — snapshot de valor por mês
+// POST faz upsert por (ativo_id, conta_id, mes_ano) e calcula
+// variacao_percentual e rentabilidade_mes contra o mês anterior,
+// descontando aportes/resgates (mudança de quantidade avaliada ao
+// preco_medio informado). Backfill recalcula o snapshot seguinte.
+// ============================================================
+
+const RE_MES_ANO = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+interface SnapshotMes {
+  id?: string;
+  mes_ano: string;
+  valor_mercado: number;
+  quantidade: number;
+}
+
+function calcularDesempenho(
+  valorMercado: number, quantidade: number, precoMedio: number, prev: SnapshotMes | null,
+): { variacao_percentual: number; rentabilidade_mes: number } {
+  if (!prev || prev.valor_mercado <= 0) return { variacao_percentual: 0, rentabilidade_mes: 0 };
+  const fluxo  = (quantidade - prev.quantidade) * precoMedio;
+  const rentab = valorMercado - prev.valor_mercado - fluxo;
+  return {
+    variacao_percentual: Number(((rentab / prev.valor_mercado) * 100).toFixed(4)),
+    rentabilidade_mes:   Number(rentab.toFixed(2)),
+  };
+}
+
+async function snapshotVizinho(
+  c: Db, ativoId: string, contaId: string, mesAno: string, direcao: "anterior" | "seguinte",
+): Promise<(SnapshotMes & { id: string; preco_medio: number }) | null> {
+  let q = c.from("inv_historico_mensal")
+    .select("id, mes_ano, valor_mercado, quantidade, preco_medio")
+    .eq("ativo_id", ativoId).eq("conta_id", contaId);
+  q = direcao === "anterior"
+    ? q.lt("mes_ano", mesAno).order("mes_ano", { ascending: false })
+    : q.gt("mes_ano", mesAno).order("mes_ano", { ascending: true });
+  const { data } = await q.limit(1).maybeSingle();
+  return data as (SnapshotMes & { id: string; preco_medio: number }) | null;
+}
+
+// Após upsert/delete, o snapshot do mês seguinte (se houver) fica com a
+// variação desatualizada — recalcula contra o novo "mês anterior" dele.
+async function recalcularSeguinte(c: Db, ativoId: string, contaId: string, mesAno: string) {
+  const seguinte = await snapshotVizinho(c, ativoId, contaId, mesAno, "seguinte");
+  if (!seguinte) return;
+  const prevDoSeguinte = await snapshotVizinho(c, ativoId, contaId, seguinte.mes_ano, "anterior");
+  const desempenho = calcularDesempenho(
+    Number(seguinte.valor_mercado), Number(seguinte.quantidade), Number(seguinte.preco_medio), prevDoSeguinte,
+  );
+  await c.from("inv_historico_mensal").update(desempenho).eq("id", seguinte.id);
+}
+
+async function rotaHistorico(c: Db, req: Request, m: string, userId: string) {
+  const id = extrairId(req, "historico-mensal");
+
+  if (m === "GET" && !id) {
+    const params = new URL(req.url).searchParams;
+    logRequest("GET", "/investimentos/historico-mensal", { params: Object.fromEntries(params) });
+    let q = c.from("inv_historico_mensal")
+      .select("*, inv_ativos(ticker, nome, tipo_ativo)")
+      .order("mes_ano", { ascending: false });
+    const ativoId = params.get("ativo_id");
+    const contaId = params.get("conta_id");
+    const mesAno  = params.get("mes_ano");
+    const de      = params.get("de");
+    const ate     = params.get("ate");
+    if (ativoId) q = q.eq("ativo_id", ativoId);
+    if (contaId) q = q.eq("conta_id", contaId);
+    if (mesAno && RE_MES_ANO.test(mesAno)) q = q.eq("mes_ano", mesAno);
+    if (de  && RE_MES_ANO.test(de))  q = q.gte("mes_ano", de);
+    if (ate && RE_MES_ANO.test(ate)) q = q.lte("mes_ano", ate);
+    const { data, error } = await q;
+    if (error) { logError("Listar historico", error); return erro(error.message); }
+    return json({ dados: data });
+  }
+
+  if (m === "POST" && !id) {
+    const body = await req.json();
+    logRequest("POST", "/investimentos/historico-mensal", body);
+
+    if (!body.ativo_id || !body.conta_id || !body.mes_ano || body.valor_mercado == null) {
+      return erro("Campos obrigatórios: ativo_id, conta_id, mes_ano, valor_mercado");
+    }
+    const mesAno = String(body.mes_ano);
+    if (!RE_MES_ANO.test(mesAno)) return erro("mes_ano deve estar no formato YYYY-MM");
+    const valorMercado = Number(body.valor_mercado);
+    if (!Number.isFinite(valorMercado) || valorMercado < 0) return erro("valor_mercado deve ser >= 0");
+    if (!(await ativoExiste(c, body.ativo_id))) return erro("Ativo não encontrado", 404);
+    if (!(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
+
+    // quantidade/preco_medio omitidos → derivados das posições ATIVAS do ativo+conta
+    let quantidade = body.quantidade != null ? Number(body.quantidade) : null;
+    let precoMedio = body.preco_medio != null ? Number(body.preco_medio) : null;
+    if (quantidade == null || precoMedio == null) {
+      const { data: pos } = await c.from("inv_posicoes")
+        .select("quantidade, valor_custo")
+        .eq("ativo_id", body.ativo_id).eq("conta_id", body.conta_id).eq("status", "ATIVA");
+      const qtdTotal   = (pos ?? []).reduce((s, p) => s + Number(p.quantidade), 0);
+      const custoTotal = (pos ?? []).reduce((s, p) => s + Number(p.valor_custo), 0);
+      if (quantidade == null) quantidade = qtdTotal;
+      if (precoMedio == null) precoMedio = qtdTotal > 0 ? custoTotal / qtdTotal : 0;
+    }
+    if (!Number.isFinite(quantidade) || quantidade < 0) return erro("quantidade deve ser >= 0");
+    if (!Number.isFinite(precoMedio) || precoMedio < 0) return erro("preco_medio deve ser >= 0");
+
+    const prev = await snapshotVizinho(c, String(body.ativo_id), String(body.conta_id), mesAno, "anterior");
+    const desempenho = calcularDesempenho(valorMercado, quantidade, precoMedio, prev);
+
+    const { data, error } = await c.from("inv_historico_mensal").upsert({
+      user_id:       userId,
+      ativo_id:      body.ativo_id,
+      conta_id:      body.conta_id,
+      mes_ano:       mesAno,
+      valor_mercado: valorMercado,
+      quantidade,
+      preco_medio:   precoMedio,
+      ...desempenho,
+    }, { onConflict: "ativo_id,conta_id,mes_ano" }).select().single();
+    if (error) { logError("Upsert historico", error); return erro(error.message); }
+
+    await recalcularSeguinte(c, String(body.ativo_id), String(body.conta_id), mesAno);
+    logSuccess("Histórico mensal registrado", { id: data.id, mes_ano: mesAno });
+    return json({ dados: data }, 201);
+  }
+
+  if (m === "DELETE" && id) {
+    logRequest("DELETE", `/investimentos/historico-mensal/${id}`);
+    const { data: snap } = await c.from("inv_historico_mensal")
+      .select("id, ativo_id, conta_id, mes_ano").eq("id", id).maybeSingle();
+    if (!snap) return erro("Registro não encontrado", 404);
+
+    const { error } = await c.from("inv_historico_mensal").delete().eq("id", id);
+    if (error) { logError("Excluir historico", error); return erro(error.message); }
+
+    await recalcularSeguinte(c, String(snap.ativo_id), String(snap.conta_id), String(snap.mes_ano));
+    return json({ mensagem: "Registro excluído com sucesso" });
   }
 
   return erro("Rota não encontrada", 404);

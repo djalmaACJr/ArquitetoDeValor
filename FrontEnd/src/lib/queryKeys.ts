@@ -61,5 +61,6 @@ export const qk = {
   invDividendos: (uid: Uid, f?: unknown) => ['inv-dividendos', uid, f ?? null] as const,
   invTiposDividendo: (uid: Uid)          => ['inv-tipos-dividendo', uid]       as const,
   invAlocacoes:  (uid: Uid)              => ['inv-alocacoes', uid]             as const,
+  invHistorico:  (uid: Uid, f?: unknown) => ['inv-historico', uid, f ?? null]  as const,
   invDashboard:  (uid: Uid, contaId?: string | null) => ['inv-dashboard', uid, contaId ?? null] as const,
 }

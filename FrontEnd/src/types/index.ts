@@ -342,6 +342,8 @@ export interface InvestimentoHistoricoMensal {
   variacao_percentual: number
   rentabilidade_mes:   number
   created_at:          string
+  // Join devolvido por GET /investimentos/historico-mensal
+  inv_ativos?:         { ticker: string; nome: string; tipo_ativo: TipoAtivoInvestimento } | null
 }
 
 // Linha agregada por tipo de ativo, devolvida por GET /investimentos/dashboard
