@@ -2,7 +2,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
-import type { InvestimentoAtivo, QuestionarioRespostas, TipoAtivoInvestimento } from '../types'
+import type {
+  InvestimentoAtivo, QuestionarioRespostas, TipoAtivoInvestimento,
+  SubtipoRF, IndexadorRF, CategoriaFII,
+} from '../types'
 
 interface OpResult<T = void> { ok: boolean; dados: T | null; erro: string | null }
 
@@ -15,6 +18,16 @@ export interface CriarAtivoInput {
   nota_usuario?: number | null
   questionario_respostas?: QuestionarioRespostas | null
   ativo_pai?:    string | null
+  // Renda fixa / Tesouro Direto
+  rf_subtipo?:      SubtipoRF | null
+  rf_indexador?:    IndexadorRF | null
+  rf_taxa?:         string | null
+  rf_emissor?:      string | null
+  rf_vencimento?:   string | null
+  rf_garantia_fgc?: boolean | null
+  rf_isento_ir?:    boolean | null
+  // FII
+  fii_categoria?:   CategoriaFII | null
 }
 
 export type EditarAtivoInput = Partial<CriarAtivoInput>

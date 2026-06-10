@@ -21,6 +21,11 @@ const TIPOS_ATIVO = [
 ];
 const STATUS_POSICAO = ["ATIVA", "ENCERRADA"];
 const TIPOS_OPERACAO = ["COMPRA", "VENDA", "APORTE", "RESGATE", "DIVIDENDO"];
+// Renda fixa / Tesouro Direto
+const SUBTIPOS_RF    = ["TESOURO", "CDB", "LCI", "LCA", "CRI", "CRA", "DEBENTURE", "OUTRO"];
+const INDEXADORES_RF = ["PREFIXADO", "POS_FIXADO", "HIBRIDO"];
+// Fundos imobiliários
+const CATEGORIAS_FII = ["TIJOLO", "PAPEL", "FOF", "DESENVOLVIMENTO", "OUTRO"];
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return corsPreFlight();
@@ -113,6 +118,8 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
     if (erroNota) return erro(erroNota);
     const erroResp = validarRespostas(body.questionario_respostas);
     if (erroResp) return erro(erroResp);
+    const erroRF = validarCamposRF(body);
+    if (erroRF) return erro(erroRF);
 
     if (body.ativo_pai && !(await ativoExiste(c, body.ativo_pai))) {
       return erro("ativo_pai não encontrado", 404);
@@ -128,6 +135,14 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
       nota_usuario: body.nota_usuario ?? null,
       questionario_respostas: body.questionario_respostas ?? null,
       ativo_pai:    body.ativo_pai ?? null,
+      rf_subtipo:      body.rf_subtipo ?? null,
+      rf_indexador:    body.rf_indexador ?? null,
+      rf_taxa:         body.rf_taxa ?? null,
+      rf_emissor:      body.rf_emissor ?? null,
+      rf_vencimento:   body.rf_vencimento ?? null,
+      rf_garantia_fgc: body.rf_garantia_fgc ?? null,
+      rf_isento_ir:    body.rf_isento_ir ?? null,
+      fii_categoria:   body.fii_categoria ?? null,
     }).select().single();
 
     if (error) {
@@ -152,12 +167,16 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
     if (erroNota) return erro(erroNota);
     const erroResp = validarRespostas(body.questionario_respostas);
     if (erroResp) return erro(erroResp);
+    const erroRF = validarCamposRF(body);
+    if (erroRF) return erro(erroRF);
     if (body.ativo_pai && (body.ativo_pai === id)) return erro("ativo_pai não pode ser o próprio ativo");
     if (body.ativo_pai && !(await ativoExiste(c, body.ativo_pai))) return erro("ativo_pai não encontrado", 404);
 
     const campos = camposParaAtualizar(body, [
       "ticker", "nome", "tipo_ativo", "moeda", "descricao", "nota_usuario",
       "questionario_respostas", "ativo_pai",
+      "rf_subtipo", "rf_indexador", "rf_taxa", "rf_emissor",
+      "rf_vencimento", "rf_garantia_fgc", "rf_isento_ir", "fii_categoria",
     ]);
     if (typeof campos.ticker === "string") campos.ticker = campos.ticker.trim().toUpperCase();
 
@@ -204,6 +223,30 @@ function validarRespostas(respostas: unknown): string | null {
     if (!k || !Number.isInteger(n) || n < 0 || n > 4) {
       return "questionario_respostas: cada resposta deve ser um índice inteiro entre 0 e 4";
     }
+  }
+  return null;
+}
+
+// Características de renda fixa (rf_*) — válidas para RENDA_FIXA/TESOURO_DIRETO
+// — e categoria de FII (fii_categoria) — válida para tipo FII.
+function validarCamposRF(body: Record<string, unknown>): string | null {
+  if (body.rf_subtipo != null && !SUBTIPOS_RF.includes(String(body.rf_subtipo))) {
+    return `rf_subtipo inválido: ${SUBTIPOS_RF.join(" | ")}`;
+  }
+  if (body.rf_indexador != null && !INDEXADORES_RF.includes(String(body.rf_indexador))) {
+    return `rf_indexador inválido: ${INDEXADORES_RF.join(" | ")}`;
+  }
+  if (body.rf_taxa != null && String(body.rf_taxa).length > 40) {
+    return "rf_taxa deve ter no máximo 40 caracteres";
+  }
+  if (body.rf_emissor != null && String(body.rf_emissor).length > 80) {
+    return "rf_emissor deve ter no máximo 80 caracteres";
+  }
+  if (body.rf_vencimento != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(body.rf_vencimento))) {
+    return "rf_vencimento deve estar no formato YYYY-MM-DD";
+  }
+  if (body.fii_categoria != null && !CATEGORIAS_FII.includes(String(body.fii_categoria))) {
+    return `fii_categoria inválida: ${CATEGORIAS_FII.join(" | ")}`;
   }
   return null;
 }

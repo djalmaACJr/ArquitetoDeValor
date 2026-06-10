@@ -134,6 +134,43 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect(Number(data.dados.nota_usuario)).toBe(9);
   });
 
+  test("CA-INV19 — características de renda fixa e categoria de FII são validadas e persistidas", async () => {
+    // rf_indexador inválido → 400
+    const { status: sErr } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINV8", nome: "RF inválida", tipo_ativo: "RENDA_FIXA", rf_indexador: "FLUTUANTE",
+    });
+    expect(sErr).toBe(400);
+
+    // fii_categoria inválida → 400
+    const { status: sErr2 } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINV8", nome: "FII inválido", tipo_ativo: "FII", fii_categoria: "HIBRIDO",
+    });
+    expect(sErr2).toBe(400);
+
+    // CDB pós-fixado com FGC e tabela regressiva (características da tabela de referência)
+    const { status, data } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINV8", nome: "Jest CDB 110% CDI", tipo_ativo: "RENDA_FIXA",
+      rf_subtipo: "CDB", rf_indexador: "POS_FIXADO", rf_taxa: "110% CDI",
+      rf_emissor: "Banco Jest", rf_vencimento: "2028-01-15",
+      rf_garantia_fgc: true, rf_isento_ir: false,
+    });
+    expect(status).toBe(201);
+    expect(data.dados.rf_subtipo).toBe("CDB");
+    expect(data.dados.rf_indexador).toBe("POS_FIXADO");
+    expect(data.dados.rf_garantia_fgc).toBe(true);
+    expect(data.dados.rf_isento_ir).toBe(false);
+
+    // PUT muda para LCI isenta de IR
+    const { status: sPut, data: dPut } = await api(`/investimentos/ativos/${data.dados.id}`, "PUT", {
+      rf_subtipo: "LCI", rf_isento_ir: true,
+    });
+    expect(sPut).toBe(200);
+    expect(dPut.dados.rf_subtipo).toBe("LCI");
+    expect(dPut.dados.rf_isento_ir).toBe(true);
+
+    await api(`/investimentos/ativos/${data.dados.id}`, "DELETE");
+  });
+
   // ── Posições ────────────────────────────────────────────────
 
   test("CA-INV06 — POST /investimentos/posicoes exige conta válida", async () => {

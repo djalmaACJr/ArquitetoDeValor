@@ -3,9 +3,11 @@
 // Enums centralizados em lib/constants.ts — importados e re-exportados aqui
 // para preservar `import type { TipoConta } from '../types'` existentes.
 import type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia,
-  TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento } from '../lib/constants'
+  TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento,
+  SubtipoRF, IndexadorRF, CategoriaFII } from '../lib/constants'
 export type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia,
-  TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento }
+  TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento,
+  SubtipoRF, IndexadorRF, CategoriaFII }
 
 export interface CartaoVirtual {
   id:      string   // uuid local, gerado no front via crypto.randomUUID()
@@ -263,6 +265,16 @@ export interface InvestimentoAtivo {
   nota_usuario: number | null
   questionario_respostas: QuestionarioRespostas | null
   ativo_pai:    string | null
+  // Características de renda fixa (só RENDA_FIXA / TESOURO_DIRETO)
+  rf_subtipo:      SubtipoRF | null
+  rf_indexador:    IndexadorRF | null
+  rf_taxa:         string | null
+  rf_emissor:      string | null
+  rf_vencimento:   string | null
+  rf_garantia_fgc: boolean | null
+  rf_isento_ir:    boolean | null
+  // Categoria do FII (só tipo_ativo = FII)
+  fii_categoria:   CategoriaFII | null
   created_at:   string
   updated_at:   string
 }

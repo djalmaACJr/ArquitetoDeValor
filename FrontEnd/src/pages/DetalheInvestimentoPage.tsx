@@ -15,7 +15,10 @@ import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
 import { Drawer, BtnSalvar, BtnCancelar, Toast } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL, formatData } from '../lib/utils'
-import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR } from '../lib/constants'
+import {
+  TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
+  INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO, SUBTIPO_RF_INFO, FII_CATEGORIA_INFO,
+} from '../lib/constants'
 import {
   perguntasParaTipo, calcularNotaQuestionario, recomendacaoCompra,
 } from '../lib/questionarioAtivos'
@@ -177,6 +180,9 @@ export default function DetalheInvestimentoPage() {
         <CardMini icone={<Coins size={14} />} titulo="Dividendos" valor={formatBRL(resumo.dividendos)} cor="#00c896" />
       </div>
 
+      {/* Características do título (renda fixa / Tesouro) e do FII */}
+      <CaracteristicasAtivo ativo={ativo} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Evolução do valor de mercado */}
         <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
@@ -322,6 +328,72 @@ export default function DetalheInvestimentoPage() {
           onClose={() => setEditandoNota(false)} onToast={showToast} />
       )}
     </div>
+  )
+}
+
+// ── Características do título (RF/Tesouro) ou do FII ──────────
+
+function ItemCaracteristica({ rotulo, valor, cor }: { rotulo: string; valor: string; cor?: string }) {
+  return (
+    <div>
+      <p className="text-[12px]" style={{ color: MUTED }}>{rotulo}</p>
+      <p className="text-[13px] font-medium" style={{ color: cor ?? '#fff' }}>{valor}</p>
+    </div>
+  )
+}
+
+function CaracteristicasAtivo({ ativo }: { ativo: InvestimentoAtivo }) {
+  const ehRF  = ativo.tipo_ativo === 'RENDA_FIXA' || ativo.tipo_ativo === 'TESOURO_DIRETO'
+  const ehFII = ativo.tipo_ativo === 'FII'
+  if (!ehRF && !ehFII) return null
+
+  if (ehFII) {
+    if (!ativo.fii_categoria) return null
+    const info = FII_CATEGORIA_INFO[ativo.fii_categoria]
+    return (
+      <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-4">
+        <h2 className="text-[14px] font-semibold text-white/80 mb-3">
+          Categoria do fundo: <span style={{ color: TIPO_ATIVO_COR.FII }}>{info.label}</span>
+        </h2>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <ItemCaracteristica rotulo="O que compra" valor={info.compra} />
+          <ItemCaracteristica rotulo="Fonte de lucro" valor={info.fonteLucro} />
+          <ItemCaracteristica rotulo="Nível de risco" valor={info.risco}
+            cor={info.risco.startsWith('Alto') ? '#ff5c7a' : info.risco.startsWith('Baixo') ? '#00c896' : '#f0b429'} />
+          <ItemCaracteristica rotulo="Principal vantagem" valor={info.vantagem} />
+        </div>
+      </section>
+    )
+  }
+
+  const temAlgo = ativo.rf_subtipo || ativo.rf_indexador || ativo.rf_taxa || ativo.rf_vencimento || ativo.rf_emissor
+  if (!temAlgo) return null
+  return (
+    <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-4">
+      <h2 className="text-[14px] font-semibold text-white/80 mb-3">Características do título</h2>
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        {ativo.rf_subtipo && (
+          <ItemCaracteristica rotulo="Tipo" valor={SUBTIPO_RF_INFO[ativo.rf_subtipo].label} />
+        )}
+        {ativo.rf_indexador && (
+          <ItemCaracteristica rotulo="Rentabilidade"
+            valor={`${INDEXADOR_RF_LABEL[ativo.rf_indexador]}${ativo.rf_taxa ? ` · ${ativo.rf_taxa}` : ''}`} />
+        )}
+        {ativo.rf_emissor && <ItemCaracteristica rotulo="Emissor" valor={ativo.rf_emissor} />}
+        {ativo.rf_vencimento && <ItemCaracteristica rotulo="Vencimento" valor={formatData(ativo.rf_vencimento)} />}
+        <ItemCaracteristica rotulo="Garantia do FGC"
+          valor={ativo.rf_garantia_fgc ? 'Sim (até R$ 250 mil)' : ativo.rf_subtipo === 'TESOURO' ? 'Não (garantia soberana)' : 'Não'}
+          cor={ativo.rf_garantia_fgc || ativo.rf_subtipo === 'TESOURO' ? '#00c896' : '#f0b429'} />
+        <ItemCaracteristica rotulo="Imposto de Renda"
+          valor={ativo.rf_isento_ir ? 'Isento' : (ativo.rf_subtipo ? SUBTIPO_RF_INFO[ativo.rf_subtipo].obsIR : 'Tabela regressiva')}
+          cor={ativo.rf_isento_ir ? '#00c896' : undefined} />
+      </div>
+      {ativo.rf_indexador && (
+        <p className="text-[12px] mt-3" style={{ color: MUTED }}>
+          {INDEXADOR_RF_DESCRICAO[ativo.rf_indexador]}
+        </p>
+      )}
+    </section>
   )
 }
 
