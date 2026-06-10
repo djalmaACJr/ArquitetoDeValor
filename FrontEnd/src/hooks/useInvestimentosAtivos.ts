@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
-import type { InvestimentoAtivo, TipoAtivoInvestimento } from '../types'
+import type { InvestimentoAtivo, QuestionarioRespostas, TipoAtivoInvestimento } from '../types'
 
 interface OpResult<T = void> { ok: boolean; dados: T | null; erro: string | null }
 
@@ -13,6 +13,7 @@ export interface CriarAtivoInput {
   moeda?:        string
   descricao?:    string | null
   nota_usuario?: number | null
+  questionario_respostas?: QuestionarioRespostas | null
   ativo_pai?:    string | null
 }
 

@@ -11,10 +11,15 @@ import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useInvestimentosHistorico } from '../hooks/useInvestimentosHistorico'
 import { useDividendos } from '../hooks/useDividendos'
 import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
-import { Drawer, Field, Input, BtnSalvar, BtnCancelar, Toast } from '../components/ui/shared'
+import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
+import { Drawer, BtnSalvar, BtnCancelar, Toast } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL, formatData } from '../lib/utils'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR } from '../lib/constants'
+import {
+  perguntasParaTipo, calcularNotaQuestionario, recomendacaoCompra,
+} from '../lib/questionarioAtivos'
+import type { InvestimentoAtivo, QuestionarioRespostas } from '../types'
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement)
 
@@ -52,6 +57,7 @@ export default function DetalheInvestimentoPage() {
   const { historico } = useInvestimentosHistorico(ativoId ? { ativo_id: ativoId } : {})
   const { dividendos } = useDividendos(ativoId ? { ativo_id: ativoId } : {})
   const { operacoes } = useInvestimentosOperacoes()
+  const { dashboard } = useInvestimentosDashboard()
 
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 3000) }
 
@@ -111,6 +117,14 @@ export default function DetalheInvestimentoPage() {
 
   const cor = TIPO_ATIVO_COR[ativo.tipo_ativo]
 
+  // Recomendação de compra: nota do usuário × desvio da alocação ideal do tipo
+  const tipoDash = dashboard?.tipos.find((t) => t.tipo_ativo === ativo.tipo_ativo)
+  const recomendacao = recomendacaoCompra(
+    ativo.nota_usuario,
+    tipoDash && tipoDash.percentual_ideal > 0 ? tipoDash.desvio_pct : null,
+  )
+  const COR_RECOMENDACAO = { COMPRAR: '#00c896', NEUTRO: '#8b92a8', AGUARDAR: '#ffb74d' } as const
+
   return (
     <div className="p-4 md:p-6 max-w-6xl mx-auto">
       {/* Header */}
@@ -130,13 +144,26 @@ export default function DetalheInvestimentoPage() {
             <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>{ativo.nome}</p>
           </div>
         </div>
-        <button onClick={() => setEditandoNota(true)}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
-          <Star size={14} style={{ color: '#f0b429' }} />
-          Nota: {ativo.nota_usuario ?? '—'}
-          <Pencil size={12} style={{ color: MUTED }} />
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {recomendacao && (
+            <span title={recomendacao.motivo}
+              className="inline-flex items-center text-[12px] px-2.5 py-1 rounded-full font-medium"
+              style={{ background: `${COR_RECOMENDACAO[recomendacao.recomendacao]}22`, color: COR_RECOMENDACAO[recomendacao.recomendacao] }}>
+              {recomendacao.recomendacao === 'COMPRAR' ? 'Comprar' : recomendacao.recomendacao === 'AGUARDAR' ? 'Aguardar' : 'Neutro'}
+            </span>
+          )}
+          <button onClick={() => setEditandoNota(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
+            <Star size={14} style={{ color: '#f0b429' }} />
+            Nota: {ativo.nota_usuario ?? '—'}
+            <Pencil size={12} style={{ color: MUTED }} />
+          </button>
+        </div>
       </div>
+
+      {recomendacao && (
+        <p className="text-[12px] -mt-2 mb-4 text-right" style={{ color: MUTED }}>{recomendacao.motivo}</p>
+      )}
 
       <Toast msg={toast} />
 
@@ -291,7 +318,7 @@ export default function DetalheInvestimentoPage() {
       </div>
 
       {editandoNota && (
-        <DrawerNota ativoId={ativo.id} notaAtual={ativo.nota_usuario}
+        <DrawerQuestionario ativo={ativo}
           onClose={() => setEditandoNota(false)} onToast={showToast} />
       )}
     </div>
@@ -309,35 +336,62 @@ function CardMini({ icone, titulo, valor, cor }: {
   )
 }
 
-// ── Drawer: editar nota do usuário ─────────────────────────────
+// ── Drawer: questionário de avaliação (deriva a nota) ───────────
 
-function DrawerNota({ ativoId, notaAtual, onClose, onToast }: {
-  ativoId: string; notaAtual: number | null; onClose: () => void; onToast: (m: string) => void
+function DrawerQuestionario({ ativo, onClose, onToast }: {
+  ativo: InvestimentoAtivo; onClose: () => void; onToast: (m: string) => void
 }) {
   const { editar } = useInvestimentosAtivos()
-  const [nota, setNota] = useState(notaAtual != null ? String(notaAtual) : '')
+  const perguntas = perguntasParaTipo(ativo.tipo_ativo)
+  const [respostas, setRespostas] = useState<QuestionarioRespostas>(ativo.questionario_respostas ?? {})
   const [salvando, setSalvando] = useState(false)
 
+  const nota = calcularNotaQuestionario(ativo.tipo_ativo, respostas)
+  const respondidas = perguntas.filter((p) => respostas[p.id] != null).length
+
   async function salvar() {
-    const n = nota === '' ? null : Number(nota)
-    if (n !== null && (!(n >= 0) || n > 10)) { onToast('Nota deve estar entre 0 e 10'); return }
+    if (nota == null) { onToast('Responda pelo menos uma pergunta'); return }
     setSalvando(true)
-    const res = await editar(ativoId, { nota_usuario: n })
+    const res = await editar(ativo.id, { nota_usuario: nota, questionario_respostas: respostas })
     setSalvando(false)
-    if (res.ok) { onToast('Nota atualizada.'); onClose() }
-    else onToast(res.erro ?? 'Erro ao salvar nota')
+    if (res.ok) { onToast(`Avaliação salva — nota ${nota}.`); onClose() }
+    else onToast(res.erro ?? 'Erro ao salvar avaliação')
   }
 
   return (
-    <Drawer open onClose={onClose} titulo="Nota do ativo" subtitulo="Sua avaliação pessoal (0 a 10)"
-      rodape={<><BtnCancelar onClick={onClose} /><BtnSalvar editando onClick={salvar} salvando={salvando} /></>}>
-      <Field label="Nota (0–10)">
-        <Input type="number" min={0} max={10} step={0.5} value={nota}
-          onChange={(e) => setNota(e.target.value)} placeholder="—" />
-      </Field>
-      <p className="text-[12px]" style={{ color: MUTED }}>
-        Deixe em branco para remover a nota. Em breve a nota poderá ser calculada pelo questionário de avaliação.
-      </p>
+    <Drawer open onClose={onClose} titulo={`Avaliar · ${ativo.ticker}`}
+      subtitulo={`Questionário de ${TIPO_ATIVO_LABEL[ativo.tipo_ativo]} — a nota é derivada das respostas`}
+      rodape={<><BtnCancelar onClick={onClose} /><BtnSalvar editando onClick={salvar} salvando={salvando} labelSalvar="Salvar avaliação" /></>}>
+
+      {/* Nota ao vivo */}
+      <div className="rounded-lg border border-white/10 p-3 flex items-center justify-between">
+        <span className="text-[13px]" style={{ color: MUTED }}>
+          {respondidas}/{perguntas.length} respondidas
+        </span>
+        <span className="text-[18px] font-bold" style={{ color: nota != null && nota >= 7 ? '#00c896' : nota != null && nota < 5 ? '#ff5c7a' : '#f0b429' }}>
+          {nota != null ? `Nota ${nota}` : 'Sem nota'}
+        </span>
+      </div>
+
+      {perguntas.map((p) => (
+        <div key={p.id} className="space-y-1.5">
+          <p className="text-[13px] font-medium text-white">{p.texto}</p>
+          <div className="space-y-1">
+            {p.opcoes.map((opcao, idx) => {
+              const ativa = respostas[p.id] === idx
+              return (
+                <button key={idx} type="button"
+                  onClick={() => setRespostas({ ...respostas, [p.id]: idx })}
+                  className={`w-full text-left px-3 py-1.5 rounded-md border text-[13px] transition-colors ${
+                    ativa ? 'border-blue-400/60 bg-blue-500/15 text-white' : 'border-white/10 text-white/70 hover:border-white/25'
+                  }`}>
+                  {opcao}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
     </Drawer>
   )
 }

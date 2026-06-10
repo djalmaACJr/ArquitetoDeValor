@@ -249,6 +249,9 @@ export interface Objetivo {
 }
 
 // ── Investimentos ─────────────────────────────────────────────
+// Respostas do questionário de avaliação ({pergunta_id: indice 0..4})
+export type QuestionarioRespostas = Record<string, number>
+
 export interface InvestimentoAtivo {
   id:           string
   user_id:      string
@@ -258,6 +261,7 @@ export interface InvestimentoAtivo {
   moeda:        string
   descricao:    string | null
   nota_usuario: number | null
+  questionario_respostas: QuestionarioRespostas | null
   ativo_pai:    string | null
   created_at:   string
   updated_at:   string

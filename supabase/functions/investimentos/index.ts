@@ -111,6 +111,8 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
 
     const erroNota = validarNota(body.nota_usuario);
     if (erroNota) return erro(erroNota);
+    const erroResp = validarRespostas(body.questionario_respostas);
+    if (erroResp) return erro(erroResp);
 
     if (body.ativo_pai && !(await ativoExiste(c, body.ativo_pai))) {
       return erro("ativo_pai não encontrado", 404);
@@ -124,6 +126,7 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
       moeda:        body.moeda ? String(body.moeda).toUpperCase().slice(0, 3) : "BRL",
       descricao:    body.descricao ?? null,
       nota_usuario: body.nota_usuario ?? null,
+      questionario_respostas: body.questionario_respostas ?? null,
       ativo_pai:    body.ativo_pai ?? null,
     }).select().single();
 
@@ -147,11 +150,14 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
     }
     const erroNota = validarNota(body.nota_usuario);
     if (erroNota) return erro(erroNota);
+    const erroResp = validarRespostas(body.questionario_respostas);
+    if (erroResp) return erro(erroResp);
     if (body.ativo_pai && (body.ativo_pai === id)) return erro("ativo_pai não pode ser o próprio ativo");
     if (body.ativo_pai && !(await ativoExiste(c, body.ativo_pai))) return erro("ativo_pai não encontrado", 404);
 
     const campos = camposParaAtualizar(body, [
-      "ticker", "nome", "tipo_ativo", "moeda", "descricao", "nota_usuario", "ativo_pai",
+      "ticker", "nome", "tipo_ativo", "moeda", "descricao", "nota_usuario",
+      "questionario_respostas", "ativo_pai",
     ]);
     if (typeof campos.ticker === "string") campos.ticker = campos.ticker.trim().toUpperCase();
 
@@ -184,6 +190,21 @@ function validarNota(nota: unknown): string | null {
   if (nota == null) return null;
   const n = Number(nota);
   if (!Number.isFinite(n) || n < 0 || n > 10) return "nota_usuario deve estar entre 0 e 10";
+  return null;
+}
+
+// Respostas do questionário: objeto { pergunta_id: indice 0..4 }
+function validarRespostas(respostas: unknown): string | null {
+  if (respostas == null) return null;
+  if (typeof respostas !== "object" || Array.isArray(respostas)) {
+    return "questionario_respostas deve ser um objeto { pergunta: indice }";
+  }
+  for (const [k, v] of Object.entries(respostas as Record<string, unknown>)) {
+    const n = Number(v);
+    if (!k || !Number.isInteger(n) || n < 0 || n > 4) {
+      return "questionario_respostas: cada resposta deve ser um índice inteiro entre 0 e 4";
+    }
+  }
   return null;
 }
 
