@@ -39,6 +39,26 @@ export type TipoObjetivo = typeof TIPOS_OBJETIVO[number]
 export const STATUS_OBJETIVO = ['EM_PROGRESSO', 'ATINGIDO', 'CANCELADO'] as const
 export type StatusObjetivo = typeof STATUS_OBJETIVO[number]
 
+// Rótulos de APRESENTAÇÃO dos tipos de objetivo. Os valores internos
+// (banco/API) permanecem SONHO/OBJETIVO/PROJETO/CRESCIMENTO — só muda
+// a exibição, mesmo padrão do mascote "sabio" → "Conselheiro".
+//   SONHO       → Patrimônio       (meta de acúmulo de saldo em contas)
+//   OBJETIVO    → Renda Recorrente (receitas por categoria ao longo do tempo)
+//   CRESCIMENTO → Evolução Anual   (comparações YoY de receitas)
+export const TIPO_OBJETIVO_LABEL: Record<TipoObjetivo, string> = {
+  SONHO:       'Patrimônio',
+  OBJETIVO:    'Renda Recorrente',
+  PROJETO:     'Projeto',
+  CRESCIMENTO: 'Evolução Anual',
+}
+
+export const TIPO_OBJETIVO_EMOJI: Record<TipoObjetivo, string> = {
+  SONHO:       '💰',
+  OBJETIVO:    '🎯',
+  PROJETO:     '📦',
+  CRESCIMENTO: '📈',
+}
+
 // ── Investimentos ─────────────────────────────────────────────
 export const TIPOS_ATIVO_INV = [
   'ACOES', 'ETF', 'FII', 'STOCKS',

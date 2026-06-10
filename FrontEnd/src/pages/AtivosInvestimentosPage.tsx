@@ -520,7 +520,7 @@ function DrawerPosicoes({ ativo, onClose, onToast }: {
         <Field label="Conta">
           <SelectDark value={form.conta_id} onChange={(e) => setForm({ ...form, conta_id: e.target.value })}>
             <option value="">Selecione...</option>
-            {contas.map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
+            {contas.filter((c) => c.ativa).map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
           </SelectDark>
         </Field>
         <div className="grid grid-cols-2 gap-3">

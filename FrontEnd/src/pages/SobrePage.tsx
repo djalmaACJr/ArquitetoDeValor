@@ -48,7 +48,7 @@ const RECURSOS: Recurso[] = [
   { icon: <CreditCard size={18} />,      titulo: 'Contas',     texto: 'Corrente, remuneração, cartão, investimento e carteira — com saldo calculado automaticamente.' },
   { icon: <ArrowLeftRight size={18} />,  titulo: 'Transferências', texto: 'Movimentos entre suas contas como par débito + crédito, sempre consistentes.' },
   { icon: <Tag size={18} />,             titulo: 'Categorias', texto: 'Organização hierárquica (pai → subcategoria) e reclassificação em massa.' },
-  { icon: <Target size={18} />,          titulo: 'Objetivos',  texto: 'Sonhos, metas de renda e crescimento — com progresso e estimativas mês a mês.' },
+  { icon: <Target size={18} />,          titulo: 'Objetivos',  texto: 'Patrimônio, renda recorrente e evolução anual — com progresso e estimativas mês a mês.' },
   { icon: <FileText size={18} />,        titulo: 'Relatórios', texto: 'Receitas e despesas por categoria em qualquer período, com análise de Pareto.' },
   { icon: <GitCompare size={18} />,      titulo: 'Comparativo', texto: 'Dois períodos lado a lado, com variações, tendência e insights automáticos.' },
   { icon: <Repeat2 size={18} />,         titulo: 'Gastos recorrentes', texto: 'Detecção automática de assinaturas e mensalidades, com alertas de reajuste.' },
@@ -112,13 +112,13 @@ export default function SobrePage() {
         </div>
       </section>
 
-      {/* Mascotes & IA */}
+      {/* Mentores & IA */}
       <section className="bg-[#1a1f2e] rounded-xl p-5 border border-white/5">
         <h2 className="text-[15px] font-semibold text-white/80 mb-3 flex items-center gap-2">
-          <Bot size={16} className="text-av-blue" /> Mascotes & Assistente de IA
+          <Bot size={16} className="text-av-blue" /> Mentores & Assistente de IA
         </h2>
         <p className="text-[14px] leading-relaxed mb-3" style={{ color: '#8b92a8' }}>
-          Escolha um mascote para te acompanhar — Arquiteta, Gato, Raposa ou Conselheiro — e dê um apelido a ele.
+          Escolha um mentor para te acompanhar — Arquiteta, Gato, Raposa ou Conselheiro — e dê um apelido a ele.
           Além de guiar os tutoriais de cada página, ele vira um chat com IA: conecte suas próprias credenciais
           (Claude, GPT, Gemini, DeepSeek e outros) e pergunte sobre o que está vendo na tela.
         </p>
@@ -181,9 +181,9 @@ export default function SobrePage() {
           </p>
           <ul className="flex flex-col gap-2 mb-3">
             {[
-              { t: '💭 Sonho',       d: 'meta de saldo acumulado em uma ou mais contas, com estimativa de quanto crescer por mês para chegar lá.' },
-              { t: '🎯 Objetivo',    d: 'receita recorrente por categoria, com média por período, evolução mensal e % por categoria.' },
-              { t: '📈 Crescimento', d: 'percentual de aumento das receitas ano a ano, comparando cada ano com o ano base.' },
+              { t: '💰 Patrimônio',       d: 'meta de saldo acumulado em uma ou mais contas, com estimativa de quanto crescer por mês para chegar lá.' },
+              { t: '🎯 Renda Recorrente', d: 'receita recorrente por categoria, com média por período, evolução mensal e % por categoria.' },
+              { t: '📈 Evolução Anual',   d: 'percentual de aumento das receitas ano a ano, comparando cada ano com o ano base (YoY).' },
             ].map(x => (
               <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
                 <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

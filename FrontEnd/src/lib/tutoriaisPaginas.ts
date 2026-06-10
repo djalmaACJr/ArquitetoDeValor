@@ -526,13 +526,13 @@ export const TUTORIAL_ASSINATURAS: PassoTutorial[] = [
 export const TUTORIAL_OBJETIVOS: PassoTutorial[] = [
   {
     titulo: 'Bem-vindo aos Objetivos',
-    texto: 'Aqui você acompanha suas metas financeiras de longo prazo. Há três tipos:\n• 💭 Sonho — meta de saldo acumulado numa ou mais contas.\n• 🎯 Objetivo — receita recorrente por categoria.\n• 📈 Crescimento — % de aumento das receitas ano a ano.',
+    texto: 'Aqui você acompanha suas metas financeiras de longo prazo. Há três tipos:\n• 💰 Patrimônio — meta de saldo acumulado numa ou mais contas.\n• 🎯 Renda Recorrente — receita recorrente por categoria.\n• 📈 Evolução Anual — % de aumento das receitas ano a ano (YoY).',
     seletor: '',
     flutuante: true,
   },
   {
     titulo: 'Filtrar por tipo e status',
-    texto: 'Use as abas para ver só Sonhos, Objetivos ou Crescimento. Em "Todos", os objetivos aparecem agrupados por tipo. O seletor de status filtra entre Em progresso, Atingido e Cancelado.',
+    texto: 'Use as abas para ver só Patrimônio, Renda Recorrente ou Evolução Anual. Em "Todos", os objetivos aparecem agrupados por tipo. O seletor de status filtra entre Em progresso, Atingido e Cancelado.',
     seletor: '[data-tutorial="objetivos-filtros"]',
   },
   {
@@ -559,7 +559,7 @@ export const TUTORIAL_OBJETIVOS: PassoTutorial[] = [
   },
   {
     titulo: 'Tipo do objetivo',
-    texto: 'Escolha o tipo conforme o que você quer acompanhar. Os campos abaixo mudam de acordo: Sonho pede contas, Objetivo e Crescimento pedem categorias de receita.',
+    texto: 'Escolha o tipo conforme o que você quer acompanhar. Os campos abaixo mudam de acordo: Patrimônio pede contas, Renda Recorrente e Evolução Anual pedem categorias de receita.',
     seletor: '[data-tutorial="objetivo-tipo"]',
     posicao: 'esquerda',
     grupo: 'drawer-objetivo',
@@ -573,21 +573,21 @@ export const TUTORIAL_OBJETIVOS: PassoTutorial[] = [
   },
   {
     titulo: 'Meta',
-    texto: 'Define o alvo. Para Sonho e Objetivo é um valor em R$; para Crescimento é a porcentagem de aumento esperada sobre o ano base.',
+    texto: 'Define o alvo. Para Patrimônio e Renda Recorrente é um valor em R$; para Evolução Anual é a porcentagem de aumento esperada sobre o ano base.',
     seletor: '[data-tutorial="objetivo-meta"]',
     posicao: 'esquerda',
     grupo: 'drawer-objetivo',
   },
   {
     titulo: 'Período',
-    texto: 'Início e término do objetivo. O prazo é usado para calcular quanto falta por mês (Sonho) e para comparar ano a ano (Crescimento).',
+    texto: 'Início e término do objetivo. O prazo é usado para calcular quanto falta por mês (Patrimônio) e para comparar ano a ano (Evolução Anual).',
     seletor: '[data-tutorial="objetivo-periodo"]',
     posicao: 'esquerda',
     grupo: 'drawer-objetivo',
   },
   {
     titulo: 'O que monitorar',
-    texto: 'Aqui você vincula o objetivo aos seus dados:\n• Sonho — as contas cujo saldo soma para a meta.\n• Objetivo / Crescimento — as categorias de receita acompanhadas.',
+    texto: 'Aqui você vincula o objetivo aos seus dados:\n• Patrimônio — as contas cujo saldo soma para a meta.\n• Renda Recorrente / Evolução Anual — as categorias de receita acompanhadas.',
     seletor: '[data-tutorial="objetivo-alvo"]',
     posicao: 'esquerda',
     grupo: 'drawer-objetivo',

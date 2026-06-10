@@ -12,11 +12,11 @@ import type { Objetivo, TipoObjetivo, StatusObjetivo } from '../types'
 import type { CriarObjetivoInput, EditarObjetivoInput } from '../hooks/useObjetivos'
 
 const TEMAS: { tipo: TipoObjetivo; emoji: string; label: string }[] = [
-  { tipo: 'SONHO',       emoji: '💭', label: 'Sonhos'      },
-  { tipo: 'OBJETIVO',    emoji: '🎯', label: 'Objetivos'   },
+  { tipo: 'SONHO',       emoji: '💰', label: 'Patrimônio'       },
+  { tipo: 'OBJETIVO',    emoji: '🎯', label: 'Renda Recorrente' },
   // PROJETO oculto por hora — desenvolvimento futuro.
   // { tipo: 'PROJETO',     emoji: '📦', label: 'Projetos'    },
-  { tipo: 'CRESCIMENTO', emoji: '📈', label: 'Crescimento' },
+  { tipo: 'CRESCIMENTO', emoji: '📈', label: 'Evolução Anual'   },
 ]
 
 export default function ObjetivosPage() {
@@ -79,7 +79,7 @@ export default function ObjetivosPage() {
         <div>
           <h1 className="text-[22px] font-bold text-white">Objetivos Financeiros</h1>
           <p className="text-[14px] mt-0.5" style={{ color: '#8b92a8' }}>
-            Sonhos, metas recorrentes e orçamentos de projeto
+            Patrimônio, renda recorrente e evolução anual
           </p>
         </div>
         <div className="flex items-center gap-2">

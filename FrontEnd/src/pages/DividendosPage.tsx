@@ -200,7 +200,7 @@ function DrawerNovoDividendo({ onClose, onToast }: { onClose: () => void; onToas
       <Field label="Conta de recebimento">
         <SelectDark value={contaId} onChange={(e) => setContaId(e.target.value)}>
           <option value="">Selecione...</option>
-          {contas.map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
+          {contas.filter((c) => c.ativa).map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
         </SelectDark>
       </Field>
       <div className="grid grid-cols-2 gap-3">

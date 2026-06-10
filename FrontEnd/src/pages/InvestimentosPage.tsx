@@ -462,8 +462,8 @@ export default function InvestimentosPage() {
   const { ranking } = useInvestimentosRanking(contaId || null)
   const { dividendos } = useDividendos()
   const { contas } = useContas()
-  // Só contas de investimento são relevantes na carteira
-  const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO')
+  // Só contas de investimento ATIVAS são relevantes na carteira
+  const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa)
 
   // Proventos recebidos nos últimos 12 meses
   const proventos12m = useMemo(() => {

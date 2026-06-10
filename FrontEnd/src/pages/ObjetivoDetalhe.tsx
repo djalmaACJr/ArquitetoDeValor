@@ -1863,7 +1863,7 @@ export default function ObjetivoDetalhe() {
     SONHO: '#7F77DD', OBJETIVO: '#4da6ff', PROJETO: '#f0b429', CRESCIMENTO: '#00c896',
   }
   const tipoLabel: Record<string, string> = {
-    SONHO: '💭 Sonho', OBJETIVO: '🎯 Objetivo', PROJETO: '📦 Projeto', CRESCIMENTO: '📈 Crescimento',
+    SONHO: '💰 Patrimônio', OBJETIVO: '🎯 Renda Recorrente', PROJETO: '📦 Projeto', CRESCIMENTO: '📈 Evolução Anual',
   }
   const cor = tipoCor[objetivo.tipo] ?? '#4da6ff'
 

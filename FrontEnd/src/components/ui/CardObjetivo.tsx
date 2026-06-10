@@ -4,10 +4,10 @@ import { formatBRL, formatData } from '../../lib/utils'
 import type { Objetivo } from '../../types'
 
 const TIPO_LABEL: Record<string, string> = {
-  SONHO:        'Sonho',
-  OBJETIVO:     'Objetivo',
+  SONHO:        'Patrimônio',
+  OBJETIVO:     'Renda Recorrente',
   PROJETO:      'Projeto',
-  CRESCIMENTO:  'Crescimento',
+  CRESCIMENTO:  'Evolução Anual',
 }
 const TIPO_COR: Record<string, string> = {
   SONHO:        '#7F77DD',

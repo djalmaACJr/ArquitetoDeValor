@@ -34,11 +34,11 @@ const VAZIO: FormState = {
 }
 
 const TIPO_OPCOES: { value: TipoObjetivo; label: string; desc: string }[] = [
-  { value: 'SONHO',       label: '💭 Sonho',       desc: 'Meta de saldo numa conta'          },
-  { value: 'OBJETIVO',    label: '🎯 Objetivo',    desc: 'Receita recorrente por categoria'  },
+  { value: 'SONHO',       label: '💰 Patrimônio',       desc: 'Meta de acúmulo de saldo em contas' },
+  { value: 'OBJETIVO',    label: '🎯 Renda Recorrente', desc: 'Receita recorrente por categoria'   },
   // PROJETO oculto por hora — desenvolvimento futuro.
   // { value: 'PROJETO',     label: '📦 Projeto',     desc: 'Orçamento de despesas'             },
-  { value: 'CRESCIMENTO', label: '📈 Crescimento', desc: '% de crescimento de receitas'      },
+  { value: 'CRESCIMENTO', label: '📈 Evolução Anual',   desc: '% de aumento das receitas ano a ano (YoY)' },
 ]
 
 function de(o: Objetivo): FormState {
@@ -131,7 +131,7 @@ export function DrawerObjetivo({
     if (!form.data_fim)          return setErro('Data de término é obrigatória')
     if (form.data_fim < form.data_inicio) return setErro('Data de término deve ser após a de início')
     if (form.tipo === 'SONHO' && form.contas_sonho.length === 0)
-      return setErro('Selecione ao menos uma conta para o Sonho')
+      return setErro('Selecione ao menos uma conta para o Patrimônio')
     if ((form.tipo === 'OBJETIVO' || form.tipo === 'CRESCIMENTO') && form.categorias_objetivo.length === 0)
       return setErro('Selecione ao menos uma categoria')
     if (form.tipo === 'PROJETO' && form.contas_projeto.length === 0)
@@ -195,14 +195,14 @@ export function DrawerObjetivo({
       {/* Nome */}
       <Field label="Nome" data-tutorial="objetivo-nome">
         <input value={form.nome} onChange={e => set('nome', e.target.value)} maxLength={100}
-          placeholder={form.tipo === 'CRESCIMENTO' ? 'Ex.: Crescimento de renda em 10%' : 'Ex.: Fundo de emergência'}
+          placeholder={form.tipo === 'CRESCIMENTO' ? 'Ex.: Evoluir a renda em 10% a.a.' : 'Ex.: Fundo de emergência'}
           className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[15px]
             outline-none focus:border-av-green transition-colors"
           style={{ color: '#e8eaf0' }} />
       </Field>
 
       {/* Valor meta — R$ para os demais, % para CRESCIMENTO */}
-      <Field label={form.tipo === 'CRESCIMENTO' ? 'Meta de crescimento (%)' : 'Valor da meta (R$)'} data-tutorial="objetivo-meta">
+      <Field label={form.tipo === 'CRESCIMENTO' ? 'Meta de evolução anual (%)' : 'Valor da meta (R$)'} data-tutorial="objetivo-meta">
         <div className="relative">
           <input value={form.valor_meta} onChange={e => set('valor_meta', e.target.value)}
             type="number"

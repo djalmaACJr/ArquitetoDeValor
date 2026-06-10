@@ -2,11 +2,11 @@ import type { TipoObjetivo, StatusObjetivo } from '../../types'
 
 const TIPO_TABS: { value: TipoObjetivo | 'TODOS'; label: string }[] = [
   { value: 'TODOS',       label: 'Todos'         },
-  { value: 'SONHO',       label: '💭 Sonhos'      },
-  { value: 'OBJETIVO',    label: '🎯 Objetivos'   },
+  { value: 'SONHO',       label: '💰 Patrimônio'       },
+  { value: 'OBJETIVO',    label: '🎯 Renda Recorrente' },
   // PROJETO oculto por hora — desenvolvimento futuro.
   // { value: 'PROJETO',     label: '📦 Projetos'    },
-  { value: 'CRESCIMENTO', label: '📈 Crescimento' },
+  { value: 'CRESCIMENTO', label: '📈 Evolução Anual'   },
 ]
 
 const STATUS_OPCOES: { value: StatusObjetivo | ''; label: string }[] = [
