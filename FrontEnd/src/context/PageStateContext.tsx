@@ -4,6 +4,7 @@
 
 import { createContext, useContext, useState, useCallback } from 'react'
 import { mesAtual } from '../lib/utils'
+import { consumirFiltrosPosExpiracao } from '../lib/retornoPosExpiracao'
 
 // ── Estado por página ────────────────────────────────────────
 interface LancamentosState {
@@ -86,10 +87,28 @@ export function usePageState() {
   return ctx
 }
 
-export function PageStateProvider({ children }: { children: React.ReactNode }) {
-  const [lancamentos, setLancamentosState] = useState<LancamentosState>(LANCAMENTOS_INICIAL)
-  const [dashboard,   setDashboardState]   = useState<DashboardState>(DASHBOARD_INICIAL)
-  const [relatorios,  setRelatoriosState]  = useState<RelatoriosState>(RELATORIOS_INICIAL)
+interface SnapshotFiltros {
+  lancamentos?: Partial<LancamentosState>
+  dashboard?:   Partial<DashboardState>
+  relatorios?:  Partial<RelatoriosState>
+}
+
+export function PageStateProvider({ children, userId = null }: {
+  children: React.ReactNode
+  userId?:  string | null
+}) {
+  // Logout por inatividade salva os filtros em sessionStorage (ver
+  // useAutoLogout + lib/retornoPosExpiracao). Se o snapshot pertencer a
+  // este usuário, hidrata o estado inicial — consome uma única vez no
+  // mount (o provider é remontado via key quando o usuário muda).
+  const [restauro] = useState<SnapshotFiltros | null>(() => consumirFiltrosPosExpiracao<SnapshotFiltros>(userId))
+
+  const [lancamentos, setLancamentosState] = useState<LancamentosState>(
+    () => ({ ...LANCAMENTOS_INICIAL, ...(restauro?.lancamentos ?? {}) }))
+  const [dashboard,   setDashboardState]   = useState<DashboardState>(
+    () => ({ ...DASHBOARD_INICIAL, ...(restauro?.dashboard ?? {}) }))
+  const [relatorios,  setRelatoriosState]  = useState<RelatoriosState>(
+    () => ({ ...RELATORIOS_INICIAL, ...(restauro?.relatorios ?? {}) }))
 
   const setLancamentos = useCallback((s: Partial<LancamentosState>) =>
     setLancamentosState(prev => ({ ...prev, ...s })), [])

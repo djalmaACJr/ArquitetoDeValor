@@ -19,8 +19,11 @@
 //     scroll. `capture: false` (default) pois não precisamos interceptar.
 
 import { useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useAuth } from './useAuth'
+import { usePageState } from '../context/PageStateContext'
+import { salvarRetornoPosExpiracao } from '../lib/retornoPosExpiracao'
 
 const EVENTOS_INTERACAO = [
   'mousemove',
@@ -35,10 +38,36 @@ const INTERVALO_CHECK_MS = 60_000 // confere a cada 1 min
 
 export function useAutoLogout(timeoutMinutos: number = 15): void {
   const navigate = useNavigate()
+  const location = useLocation()
+  const { session } = useAuth()
+  const { lancamentos, dashboard, relatorios } = usePageState()
+
   // Date.now() é impura — não pode rodar durante o render. Inicializa
   // como 0 e o useEffect abaixo seta o timestamp real ao montar.
   const lastActivityRef = useRef<number>(0)
   const expiradoRef = useRef<boolean>(false)
+
+  // Snapshot "sempre atual" de rota/filtros/usuário em ref — o timer lê
+  // daqui na hora da expiração sem precisar reiniciar o efeito a cada
+  // navegação ou mudança de filtro.
+  const snapshotRef = useRef<{ userId: string | null; rota: string; filtros: unknown }>({
+    userId: null, rota: '/', filtros: null,
+  })
+  // Sem array de deps: roda após todo commit, mantendo o snapshot fresco
+  // (regra react-hooks/refs proíbe escrever em ref durante o render).
+  useEffect(() => {
+    snapshotRef.current = {
+      userId: session?.user?.id ?? null,
+      rota:   location.pathname + location.search,
+      filtros: {
+        lancamentos,
+        dashboard,
+        // Relatórios: guarda só os filtros — a lista de lançamentos buscada
+        // pode ser grande (quota do sessionStorage) e é refeita sob demanda.
+        relatorios: { ...relatorios, lancamentos: [], buscado: false },
+      },
+    }
+  })
 
   useEffect(() => {
     if (timeoutMinutos <= 0) return // 0 desliga o auto-logout
@@ -63,6 +92,14 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
 
       // Evita dispara múltiplas vezes em sequência
       expiradoRef.current = true
+
+      // Guarda rota + filtros para retomar após o próximo login do
+      // mesmo usuário nesta aba (LoginPage e PageStateProvider consomem).
+      const snap = snapshotRef.current
+      if (snap.userId) {
+        salvarRetornoPosExpiracao(snap.userId, snap.rota, snap.filtros)
+      }
+
       try {
         await supabase.auth.signOut()
       } catch {

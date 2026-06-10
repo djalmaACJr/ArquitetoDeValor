@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
+import { consumirRotaPosExpiracao } from '../lib/retornoPosExpiracao'
 
 const LogoSVG = () => (
   <svg width="48" height="48" viewBox="210 30 260 260">
@@ -65,7 +66,11 @@ export default function LoginPage() {
     const { error: err } = await signIn(email, password)
     setLoading(false)
     if (err) { setError('Email ou senha inválidos.'); return }
-    navigate('/')
+    // Logout por inatividade guarda a rota em que o usuário estava —
+    // se o snapshot for deste mesmo usuário, retoma de onde parou.
+    const { data } = await supabase.auth.getSession()
+    const rotaSalva = consumirRotaPosExpiracao(data.session?.user?.id ?? null)
+    navigate(rotaSalva ?? '/')
   }
 
   const handleEsqueci = async (e: FormEvent) => {

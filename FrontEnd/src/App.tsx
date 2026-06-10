@@ -59,7 +59,7 @@ export default function App() {
   const userId = session?.user?.id ?? null
   return (
     <BrowserRouter>
-      <PageStateProvider key={userId ?? 'anon'}>
+      <PageStateProvider key={userId ?? 'anon'} userId={userId}>
         <ContextoIAProvider>
         <Suspense fallback={<FallbackPagina/>}>
         <Routes>
