@@ -1,13 +1,13 @@
 import { useState } from 'react'
-import { TrendingUp, TrendingDown, Wallet, Coins, PieChart } from 'lucide-react'
+import { TrendingUp, TrendingDown, Wallet, Coins, PieChart, Percent, Trophy } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
+import { useInvestimentosDashboard, useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
 import { useContas } from '../hooks/useContas'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { SelectDark } from '../components/ui/shared'
 import { formatBRL } from '../lib/utils'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR } from '../lib/constants'
-import type { InvestimentoDashboardTipo } from '../types'
+import type { InvestimentoDashboardTipo, InvestimentoRankingAtivo } from '../types'
 
 const MUTED = '#8b92a8'
 
@@ -74,6 +74,64 @@ function LinhaTipo({ t }: { t: InvestimentoDashboardTipo }) {
         </p>
       )}
     </div>
+  )
+}
+
+// ── Destaques da carteira (ranking por ativo) ─────────────────
+
+function CardRanking({ titulo, icone, itens, metrica }: {
+  titulo: string; icone: React.ReactNode; itens: InvestimentoRankingAtivo[]
+  metrica: (a: InvestimentoRankingAtivo) => { texto: string; cor: string }
+}) {
+  if (itens.length === 0) return null
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="flex items-center gap-2 text-[13px] mb-2.5" style={{ color: MUTED }}>
+        {icone}{titulo}
+      </div>
+      <div className="space-y-2">
+        {itens.map((a) => {
+          const m = metrica(a)
+          return (
+            <div key={a.ativo_id} className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: TIPO_ATIVO_COR[a.tipo_ativo] }} />
+                <span className="text-white text-[13px] font-semibold">{a.ticker}</span>
+                <span className="text-[12px] truncate" style={{ color: MUTED }}>{a.nome}</span>
+              </div>
+              <span className="text-[13px] font-medium shrink-0" style={{ color: m.cor }}>{m.texto}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function SecaoRanking({ contaId }: { contaId: string | null }) {
+  const { ranking, loading } = useInvestimentosRanking(contaId)
+  const ativos = ranking?.ativos ?? []
+  if (loading || ativos.length === 0) return null
+
+  const emAlta     = ativos.filter((a) => a.rentabilidade_pct > 0).slice(0, 3)
+  const emBaixa    = ativos.filter((a) => a.rentabilidade_pct < 0).sort((x, y) => x.rentabilidade_pct - y.rentabilidade_pct).slice(0, 3)
+  const maiorYield = [...ativos].filter((a) => a.dividend_yield_pct > 0).sort((x, y) => y.dividend_yield_pct - x.dividend_yield_pct).slice(0, 3)
+  const maiorPeso  = [...ativos].sort((x, y) => y.participacao_pct - x.participacao_pct).slice(0, 3)
+
+  return (
+    <>
+      <h2 className="text-[15px] font-semibold text-white mt-6 mb-3">Destaques da carteira</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <CardRanking titulo="Em alta" icone={<TrendingUp size={14} />} itens={emAlta}
+          metrica={(a) => ({ texto: `+${a.rentabilidade_pct}%`, cor: '#00c896' })} />
+        <CardRanking titulo="Em prejuízo" icone={<TrendingDown size={14} />} itens={emBaixa}
+          metrica={(a) => ({ texto: `${a.rentabilidade_pct}%`, cor: '#ff5c7a' })} />
+        <CardRanking titulo="Maior dividend yield (12m)" icone={<Percent size={14} />} itens={maiorYield}
+          metrica={(a) => ({ texto: `${a.dividend_yield_pct}%`, cor: '#00c896' })} />
+        <CardRanking titulo="Maior participação" icone={<Trophy size={14} />} itens={maiorPeso}
+          metrica={(a) => ({ texto: `${a.participacao_pct}%`, cor: '#fff' })} />
+      </div>
+    </>
   )
 }
 
@@ -165,6 +223,8 @@ export default function InvestimentosPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {tipos.map((t) => <LinhaTipo key={t.tipo_ativo} t={t} />)}
           </div>
+
+          <SecaoRanking contaId={contaId || null} />
         </>
       )}
     </div>

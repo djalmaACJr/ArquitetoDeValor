@@ -54,6 +54,7 @@ export function useInvestimentosHistorico(filtros: FiltrosHistorico = {}) {
   const invalidar = async () => {
     await qc.invalidateQueries({ queryKey: ['inv-historico', uid] })
     await qc.invalidateQueries({ queryKey: ['inv-dashboard', uid] })
+    await qc.invalidateQueries({ queryKey: ['inv-ranking', uid] })
   }
 
   const registrar = async (payload: RegistrarHistoricoInput): Promise<OpResult<InvestimentoHistoricoMensal>> => {

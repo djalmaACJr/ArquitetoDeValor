@@ -60,6 +60,7 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
   const invalidar = async () => {
     await qc.invalidateQueries({ queryKey: ['inv-dividendos', uid] })
     await qc.invalidateQueries({ queryKey: ['inv-dashboard', uid] })
+    await qc.invalidateQueries({ queryKey: ['inv-ranking', uid] })
     await qc.invalidateQueries({ queryKey: ['transacoes-mes', uid] })
   }
 

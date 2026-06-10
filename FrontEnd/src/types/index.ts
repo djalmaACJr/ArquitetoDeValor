@@ -369,6 +369,26 @@ export interface InvestimentoDashboard {
   tipos:            InvestimentoDashboardTipo[]
 }
 
+// Linha por ativo, devolvida por GET /investimentos/ranking
+export interface InvestimentoRankingAtivo {
+  ativo_id:           string
+  ticker:             string
+  nome:               string
+  tipo_ativo:         TipoAtivoInvestimento
+  valor_custo:        number
+  valor_mercado:      number
+  ganho_perda:        number
+  rentabilidade_pct:  number
+  dividendos_12m:     number
+  dividend_yield_pct: number
+  participacao_pct:   number
+}
+
+export interface InvestimentoRanking {
+  total_mercado: number
+  ativos:        InvestimentoRankingAtivo[]
+}
+
 // Transação candidata para vincular manualmente em importação de fatura
 export interface TxCandidata {
   id:           string

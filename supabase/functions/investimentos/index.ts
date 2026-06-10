@@ -46,6 +46,7 @@ Deno.serve(async (req: Request) => {
       case "tipos-dividendo": return await rotaTiposDividendo(c, req, m, userId);
       case "historico-mensal": return await rotaHistorico(c, req, m, userId);
       case "dashboard":       return m === "GET" ? await dashboard(c, url.searchParams) : erro("Método não permitido", 405);
+      case "ranking":         return m === "GET" ? await ranking(c, url.searchParams) : erro("Método não permitido", 405);
       default:                return erro("Rota não encontrada", 404);
     }
   } catch (e) {
@@ -857,14 +858,22 @@ async function dashboard(c: Db, params: URLSearchParams) {
     return porTipo.get(tipo)!;
   };
 
+  // Agrupa posições por ativo+conta antes de aplicar o snapshot — o
+  // snapshot mensal cobre TODAS as posições do par; somar por posição
+  // contaria o mesmo valor de mercado mais de uma vez.
+  const porAtivoConta = new Map<string, { tipo: string; custo: number }>();
   for (const p of posRes.data ?? []) {
     const tipo = (p.inv_ativos as { tipo_ativo?: string } | null)?.tipo_ativo;
     if (!tipo) continue;
-    const agg = garante(tipo);
-    const custo = Number(p.valor_custo) || 0;
-    const mercado = ultimoMercado.get(`${p.ativo_id}|${p.conta_id}`) ?? custo;
-    agg.valor_custo   += custo;
-    agg.valor_mercado += mercado;
+    const k = `${p.ativo_id}|${p.conta_id}`;
+    const atual = porAtivoConta.get(k) ?? { tipo, custo: 0 };
+    atual.custo += Number(p.valor_custo) || 0;
+    porAtivoConta.set(k, atual);
+  }
+  for (const [k, ac] of porAtivoConta) {
+    const agg = garante(ac.tipo);
+    agg.valor_custo   += ac.custo;
+    agg.valor_mercado += ultimoMercado.get(k) ?? ac.custo;
   }
 
   for (const d of divRes.data ?? []) {
@@ -904,4 +913,101 @@ async function dashboard(c: Db, params: URLSearchParams) {
       tipos,
     },
   });
+}
+
+// ============================================================
+// /investimentos/ranking — métricas por ATIVO para classificação
+// de performance: em alta / em prejuízo, dividend yield (12 meses)
+// e participação na carteira. Devolve a lista completa ordenada
+// por rentabilidade; o frontend fatia os destaques.
+// ============================================================
+
+async function ranking(c: Db, params: URLSearchParams) {
+  logRequest("GET", "/investimentos/ranking", { params: Object.fromEntries(params) });
+  const contaFiltro = params.get("conta_id");
+  const tipoFiltro  = params.get("tipo_ativo");
+
+  const corte12m = new Date();
+  corte12m.setMonth(corte12m.getMonth() - 12);
+  const corteISO = corte12m.toISOString().split("T")[0];
+
+  const [posRes, histRes, divRes] = await Promise.all([
+    (() => {
+      let q = c.from("inv_posicoes")
+        .select("ativo_id, conta_id, quantidade, valor_custo, inv_ativos(ticker, nome, tipo_ativo)")
+        .eq("status", "ATIVA");
+      if (contaFiltro) q = q.eq("conta_id", contaFiltro);
+      return q;
+    })(),
+    c.from("inv_historico_mensal").select("ativo_id, conta_id, mes_ano, valor_mercado"),
+    c.from("inv_dividendos").select("ativo_id, valor").gte("data_pagamento", corteISO),
+  ]);
+
+  if (posRes.error)  { logError("Ranking posicoes", posRes.error);   return erro(posRes.error.message); }
+  if (histRes.error) { logError("Ranking historico", histRes.error); return erro(histRes.error.message); }
+  if (divRes.error)  { logError("Ranking dividendos", divRes.error); return erro(divRes.error.message); }
+
+  // Último valor_mercado por ativo+conta
+  const ultimoMercado = new Map<string, number>();
+  const ultimoMes     = new Map<string, string>();
+  for (const h of histRes.data ?? []) {
+    const k   = `${h.ativo_id}|${h.conta_id}`;
+    const mes = String(h.mes_ano);
+    if (!ultimoMes.has(k) || mes > ultimoMes.get(k)!) {
+      ultimoMes.set(k, mes);
+      ultimoMercado.set(k, Number(h.valor_mercado));
+    }
+  }
+
+  type AggAtivo = {
+    ativo_id: string; ticker: string; nome: string; tipo_ativo: string;
+    valor_custo: number; valor_mercado: number; dividendos_12m: number;
+  };
+  const porAtivo = new Map<string, AggAtivo>();
+
+  // Custo agrupado por ativo+conta (snapshot cobre o par inteiro)
+  const custoPorPar = new Map<string, { ativo: AggAtivo; custo: number }>();
+  for (const p of posRes.data ?? []) {
+    const meta = p.inv_ativos as { ticker?: string; nome?: string; tipo_ativo?: string } | null;
+    if (!meta?.tipo_ativo) continue;
+    if (tipoFiltro && meta.tipo_ativo !== tipoFiltro) continue;
+    const aid = String(p.ativo_id);
+    if (!porAtivo.has(aid)) {
+      porAtivo.set(aid, {
+        ativo_id: aid, ticker: meta.ticker ?? "", nome: meta.nome ?? "",
+        tipo_ativo: meta.tipo_ativo, valor_custo: 0, valor_mercado: 0, dividendos_12m: 0,
+      });
+    }
+    const k = `${aid}|${p.conta_id}`;
+    const par = custoPorPar.get(k) ?? { ativo: porAtivo.get(aid)!, custo: 0 };
+    par.custo += Number(p.valor_custo) || 0;
+    custoPorPar.set(k, par);
+  }
+  for (const [k, par] of custoPorPar) {
+    par.ativo.valor_custo   += par.custo;
+    par.ativo.valor_mercado += ultimoMercado.get(k) ?? par.custo;
+  }
+
+  for (const d of divRes.data ?? []) {
+    const agg = porAtivo.get(String(d.ativo_id));
+    if (agg) agg.dividendos_12m += Number(d.valor) || 0;
+  }
+
+  const totalMercado = [...porAtivo.values()].reduce((s, a) => s + a.valor_mercado, 0);
+
+  const ativos = [...porAtivo.values()].map((a) => ({
+    ativo_id:           a.ativo_id,
+    ticker:             a.ticker,
+    nome:               a.nome,
+    tipo_ativo:         a.tipo_ativo,
+    valor_custo:        Number(a.valor_custo.toFixed(2)),
+    valor_mercado:      Number(a.valor_mercado.toFixed(2)),
+    ganho_perda:        Number((a.valor_mercado - a.valor_custo).toFixed(2)),
+    rentabilidade_pct:  a.valor_custo > 0 ? Number((((a.valor_mercado - a.valor_custo) / a.valor_custo) * 100).toFixed(2)) : 0,
+    dividendos_12m:     Number(a.dividendos_12m.toFixed(2)),
+    dividend_yield_pct: a.valor_mercado > 0 ? Number(((a.dividendos_12m / a.valor_mercado) * 100).toFixed(2)) : 0,
+    participacao_pct:   totalMercado > 0 ? Number(((a.valor_mercado / totalMercado) * 100).toFixed(2)) : 0,
+  })).sort((x, y) => y.rentabilidade_pct - x.rentabilidade_pct);
+
+  return json({ dados: { total_mercado: Number(totalMercado.toFixed(2)), ativos } });
 }

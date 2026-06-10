@@ -51,6 +51,7 @@ export function useInvestimentosPosicoes(filtros: FiltrosPosicoes = {}) {
   const invalidar = async () => {
     await qc.invalidateQueries({ queryKey: ['inv-posicoes', uid] })
     await qc.invalidateQueries({ queryKey: ['inv-dashboard', uid] })
+    await qc.invalidateQueries({ queryKey: ['inv-ranking', uid] })
   }
 
   const criar = async (payload: CriarPosicaoInput): Promise<OpResult<InvestimentoPosicao>> => {

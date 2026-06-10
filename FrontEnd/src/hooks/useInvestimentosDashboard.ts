@@ -2,7 +2,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
-import type { InvestimentoDashboard, InvestimentoAlocacaoTipo, TipoAtivoInvestimento } from '../types'
+import type {
+  InvestimentoDashboard, InvestimentoAlocacaoTipo, InvestimentoRanking, TipoAtivoInvestimento,
+} from '../types'
 
 interface OpResult<T = void> { ok: boolean; dados: T | null; erro: string | null }
 
@@ -29,6 +31,36 @@ export function useInvestimentosDashboard(contaId?: string | null) {
 
   return {
     dashboard: data ?? null,
+    loading,
+    error: error ? (error as Error).message : null,
+  }
+}
+
+// ── Ranking por ativo (em alta/prejuízo, yield, participação) ─
+
+async function fetchRanking(contaId?: string | null): Promise<InvestimentoRanking> {
+  const params = new URLSearchParams()
+  if (contaId) params.set('conta_id', contaId)
+  const qs  = params.toString()
+  const res = await apiFetch<InvestimentoRanking>(`/investimentos/ranking${qs ? `?${qs}` : ''}`)
+  if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar ranking')
+  return res.dados ?? { total_mercado: 0, ativos: [] }
+}
+
+export function useInvestimentosRanking(contaId?: string | null) {
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
+
+  const { data, isLoading: loading, error } = useQuery({
+    queryKey: qk.invRanking(uid, contaId),
+    queryFn:  () => fetchRanking(contaId),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    enabled: !!uid,
+  })
+
+  return {
+    ranking: data ?? null,
     loading,
     error: error ? (error as Error).message : null,
   }
