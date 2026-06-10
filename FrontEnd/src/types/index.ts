@@ -319,6 +319,8 @@ export interface InvestimentoDividendo {
   created_at:           string
   inv_ativos?:          { ticker: string; nome: string } | null
   inv_tipos_dividendo?: { nome: string } | null
+  // Status da transação vinculada no extrato (PROJECAO = aguardando confirmação)
+  transacoes?:          { status: StatusTransacao } | null
 }
 
 export interface InvestimentoAlocacaoTipo {

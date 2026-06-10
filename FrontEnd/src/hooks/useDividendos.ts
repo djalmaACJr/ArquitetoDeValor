@@ -16,6 +16,18 @@ export interface CriarDividendoInput {
   descricao?:        string | null
 }
 
+export interface EditarDividendoInput {
+  valor?:          number
+  data_pagamento?: string
+  descricao?:      string | null
+  conta_id?:       string
+}
+
+export interface ConfirmarDividendoInput {
+  valor?:          number
+  data_pagamento?: string
+}
+
 export interface FiltrosDividendos {
   ativo_id?:   string
   tipo_ativo?: TipoAtivoInvestimento
@@ -57,6 +69,19 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
+  const editar = async (id: string, payload: EditarDividendoInput): Promise<OpResult<InvestimentoDividendo>> => {
+    const res = await apiMutate<InvestimentoDividendo>(`/investimentos/dividendos/${id}`, 'PUT', payload)
+    if (res.ok) await invalidar()
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
+  // Reconcilia projeção: transação do extrato vira PAGO com valor/data reais
+  const confirmar = async (id: string, payload: ConfirmarDividendoInput = {}): Promise<OpResult<InvestimentoDividendo>> => {
+    const res = await apiMutate<InvestimentoDividendo>(`/investimentos/dividendos/${id}/confirmar`, 'POST', payload)
+    if (res.ok) await invalidar()
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   const excluir = async (id: string): Promise<OpResult> => {
     const res = await apiMutate(`/investimentos/dividendos/${id}`, 'DELETE')
     if (res.ok) await invalidar()
@@ -68,6 +93,8 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     loading,
     error: error ? (error as Error).message : null,
     criar,
+    editar,
+    confirmar,
     excluir,
   }
 }

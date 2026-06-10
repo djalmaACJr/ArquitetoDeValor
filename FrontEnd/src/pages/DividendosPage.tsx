@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Trash2, Settings, ArrowLeft, Coins, Link2 } from 'lucide-react'
+import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useDividendos, type CriarDividendoInput } from '../hooks/useDividendos'
 import { useTiposDividendo } from '../hooks/useTiposDividendo'
@@ -20,6 +20,7 @@ export default function DividendosPage() {
   const [drawerNovo,   setDrawerNovo]   = useState(false)
   const [drawerConfig, setDrawerConfig] = useState(false)
   const [excluindo,    setExcluindo]    = useState<InvestimentoDividendo | null>(null)
+  const [confirmando,  setConfirmando]  = useState<InvestimentoDividendo | null>(null)
   const [salvando,     setSalvando]     = useState(false)
   const [toast,        setToast]        = useState<string | null>(null)
 
@@ -96,14 +97,26 @@ export default function DividendosPage() {
                   <td className="px-4 py-2.5 text-white/80">{formatData(d.data_pagamento)}</td>
                   <td className="px-4 py-2.5 text-right font-medium" style={{ color: '#00c896' }}>{formatBRL(d.valor)}</td>
                   <td className="px-4 py-2.5 text-center">
-                    {d.transacao_extrato_id
-                      ? <Link2 size={14} className="inline" style={{ color: '#00c896' }} />
-                      : <span className="text-[12px]" style={{ color: MUTED }}>—</span>}
+                    {d.transacoes?.status === 'PROJECAO' ? (
+                      <span className="text-[12px] px-2 py-0.5 rounded-full" style={{ background: '#ffb74d22', color: '#ffb74d' }}>Projetado</span>
+                    ) : d.transacao_extrato_id ? (
+                      <span className="text-[12px] px-2 py-0.5 rounded-full" style={{ background: '#00c89622', color: '#00c896' }}>Pago</span>
+                    ) : (
+                      <span className="text-[12px]" style={{ color: MUTED }}>—</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-right">
-                    <button onClick={() => setExcluindo(d)} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
-                      <Trash2 size={13} />
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      {d.transacoes?.status === 'PROJECAO' && (
+                        <button onClick={() => setConfirmando(d)} title="Confirmar recebimento"
+                          className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-emerald-400/40" style={{ color: '#00c896' }}>
+                          <CheckCircle2 size={13} />
+                        </button>
+                      )}
+                      <button onClick={() => setExcluindo(d)} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -114,6 +127,7 @@ export default function DividendosPage() {
 
       {drawerNovo   && <DrawerNovoDividendo onClose={() => setDrawerNovo(false)} onToast={showToast} />}
       {drawerConfig && <DrawerConfigTipos   onClose={() => setDrawerConfig(false)} onToast={showToast} />}
+      {confirmando  && <DrawerConfirmar dividendo={confirmando} onClose={() => setConfirmando(null)} onToast={showToast} />}
 
       {excluindo && (
         <ModalExcluir nome={`${excluindo.inv_ativos?.ticker ?? 'Dividendo'} · ${formatBRL(excluindo.valor)}`}
@@ -203,6 +217,46 @@ function DrawerNovoDividendo({ onClose, onToast }: { onClose: () => void; onToas
       <Field label="Descrição (opcional)">
         <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Observação" />
       </Field>
+    </Drawer>
+  )
+}
+
+// ── Drawer: confirmar dividendo projetado ───────────────────────
+
+function DrawerConfirmar({ dividendo, onClose, onToast }: {
+  dividendo: InvestimentoDividendo; onClose: () => void; onToast: (m: string) => void
+}) {
+  const { confirmar } = useDividendos()
+  const [valor,    setValor]    = useState(String(dividendo.valor))
+  const [data,     setData]     = useState(hojeLocal())
+  const [salvando, setSalvando] = useState(false)
+
+  async function salvar() {
+    const v = Number(valor)
+    if (!(v > 0)) { onToast('Informe o valor recebido'); return }
+    setSalvando(true)
+    const res = await confirmar(dividendo.id, { valor: v, data_pagamento: data })
+    setSalvando(false)
+    if (res.ok) { onToast('Recebimento confirmado — extrato atualizado.'); onClose() }
+    else onToast(res.erro ?? 'Erro ao confirmar')
+  }
+
+  return (
+    <Drawer open onClose={onClose} titulo={`Confirmar · ${dividendo.inv_ativos?.ticker ?? 'Dividendo'}`}
+      subtitulo="A projeção do extrato vira receita paga"
+      rodape={<><BtnCancelar onClick={onClose} /><BtnSalvar editando={false} onClick={salvar} salvando={salvando} labelSalvar="Confirmar" /></>}>
+      <p className="text-[13px]" style={{ color: MUTED }}>
+        Projetado: {formatBRL(dividendo.valor)} para {formatData(dividendo.data_pagamento)}.
+        Ajuste abaixo com o valor e a data reais do recebimento.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Valor recebido">
+          <Input type="number" min={0} step="any" value={valor} onChange={(e) => setValor(e.target.value)} />
+        </Field>
+        <Field label="Data do recebimento">
+          <Input type="date" value={data} onChange={(e) => setData(e.target.value)} />
+        </Field>
+      </div>
     </Drawer>
   )
 }

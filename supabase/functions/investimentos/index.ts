@@ -8,7 +8,7 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import {
-  json, erro, db, autenticar, extrairId,
+  json, erro, db, autenticar, extrairId, extrairAcao,
   verificarExistencia, camposParaAtualizar, corsPreFlight,
 } from "../_shared/utils.ts";
 import { logError, logRequest, logResponse, logSuccess } from "../_shared/logger.ts";
@@ -388,13 +388,97 @@ async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
 // ============================================================
 
 async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
-  const id = extrairId(req, "dividendos");
+  const id   = extrairId(req, "dividendos");
+  const acao = extrairAcao(req, "dividendos");
+
+  // POST /dividendos/:id/confirmar — reconcilia projeção: PROJECAO → PAGO
+  // com valor/data reais. Mantém valor_projetado original na transação.
+  if (m === "POST" && id && acao === "confirmar") {
+    const body = await req.json().catch(() => ({}));
+    logRequest("POST", `/investimentos/dividendos/${id}/confirmar`, body);
+
+    const { data: div } = await c.from("inv_dividendos")
+      .select("id, valor, data_pagamento, transacao_extrato_id").eq("id", id).maybeSingle();
+    if (!div) return erro("Dividendo não encontrado", 404);
+    if (!div.transacao_extrato_id) return erro("Dividendo sem transação vinculada no extrato", 409);
+
+    const { data: tx } = await c.from("transacoes")
+      .select("id, status").eq("id", div.transacao_extrato_id).maybeSingle();
+    if (!tx) return erro("Transação do extrato não encontrada", 404);
+    if (tx.status === "PAGO") return erro("Dividendo já confirmado", 409);
+
+    const valor = body.valor != null ? Number(body.valor) : Number(div.valor);
+    if (!Number.isFinite(valor) || valor <= 0) return erro("valor deve ser > 0");
+    const dataPag = body.data_pagamento ? String(body.data_pagamento) : String(div.data_pagamento);
+
+    const { error: errTx } = await c.from("transacoes")
+      .update({ status: "PAGO", valor, data: dataPag })
+      .eq("id", tx.id);
+    if (errTx) { logError("Confirmar transação de dividendo", errTx); return erro(errTx.message); }
+
+    const { data: divFinal, error: errDiv } = await c.from("inv_dividendos")
+      .update({ valor, data_pagamento: dataPag })
+      .eq("id", id)
+      .select("*, inv_ativos(ticker, nome), inv_tipos_dividendo(nome), transacoes(status)")
+      .single();
+    if (errDiv) { logError("Confirmar dividendo", errDiv); return erro(errDiv.message); }
+
+    logSuccess("Dividendo confirmado", { id, valor, data: dataPag });
+    return json({ dados: divFinal });
+  }
+
+  // PUT /dividendos/:id — edita valor/data/conta/descrição e sincroniza
+  // a transação vinculada no extrato (sem mudar o status dela).
+  if (m === "PUT" && id && !acao) {
+    const body = await req.json();
+    logRequest("PUT", `/investimentos/dividendos/${id}`, body);
+
+    const { data: div } = await c.from("inv_dividendos")
+      .select("id, transacao_extrato_id").eq("id", id).maybeSingle();
+    if (!div) return erro("Dividendo não encontrado", 404);
+
+    if (body.valor != null) {
+      const v = Number(body.valor);
+      if (!Number.isFinite(v) || v <= 0) return erro("valor deve ser > 0");
+    }
+    if (body.conta_id && !(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
+
+    const campos = camposParaAtualizar(body, ["valor", "data_pagamento", "descricao", "conta_id"]);
+    if (Object.keys(campos).length === 0) return erro("Nenhum campo para atualizar");
+
+    const { data: divFinal, error } = await c.from("inv_dividendos")
+      .update(campos).eq("id", id)
+      .select("*, inv_ativos(ticker, nome), inv_tipos_dividendo(nome), transacoes(status)")
+      .single();
+    if (error) { logError("Editar dividendo", error); return erro(error.message); }
+
+    // Sincroniza a transação do extrato (valor / data / conta)
+    if (div.transacao_extrato_id) {
+      const txCampos: Record<string, unknown> = {};
+      if (campos.valor          !== undefined) txCampos.valor    = campos.valor;
+      if (campos.data_pagamento !== undefined) txCampos.data     = campos.data_pagamento;
+      if (campos.conta_id       !== undefined) txCampos.conta_id = campos.conta_id;
+      if (Object.keys(txCampos).length > 0) {
+        // Em projeções o valor projetado acompanha o valor editado
+        const { data: tx } = await c.from("transacoes")
+          .select("status").eq("id", div.transacao_extrato_id).maybeSingle();
+        if (tx?.status === "PROJECAO" && txCampos.valor !== undefined) {
+          txCampos.valor_projetado = txCampos.valor;
+        }
+        const { error: errTx } = await c.from("transacoes")
+          .update(txCampos).eq("id", div.transacao_extrato_id);
+        if (errTx) logError("Sincronizar transação de dividendo", errTx);
+      }
+    }
+
+    return json({ dados: divFinal });
+  }
 
   if (m === "GET" && !id) {
     const params = new URL(req.url).searchParams;
     logRequest("GET", "/investimentos/dividendos", { params: Object.fromEntries(params) });
     let q = c.from("inv_dividendos")
-      .select("*, inv_ativos(ticker, nome), inv_tipos_dividendo(nome)")
+      .select("*, inv_ativos(ticker, nome), inv_tipos_dividendo(nome), transacoes(status)")
       .order("data_pagamento", { ascending: false });
     const ativoId = params.get("ativo_id");
     const tipo    = params.get("tipo_ativo");
@@ -475,7 +559,7 @@ async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
     const { data: divFinal } = await c.from("inv_dividendos")
       .update({ transacao_extrato_id: tx.id })
       .eq("id", div.id)
-      .select("*, inv_ativos(ticker, nome), inv_tipos_dividendo(nome)")
+      .select("*, inv_ativos(ticker, nome), inv_tipos_dividendo(nome), transacoes(status)")
       .single();
 
     logSuccess("Dividendo criado e lançado no extrato", { id: div.id, tx: tx.id, status });
