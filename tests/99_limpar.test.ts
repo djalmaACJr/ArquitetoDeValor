@@ -2,7 +2,7 @@
 // Arquiteto de Valor — Testes automatizados
 // tests/limpar.test.ts
 //
-// Cobre critérios de aceite: CA-LIM01 a CA-LIM11
+// Cobre critérios de aceite: CA-LIM01 a CA-LIM12
 // ============================================================
 import { api, apiSemAuth } from "./setup";
 
@@ -70,7 +70,7 @@ async function limparLembretesJest(): Promise<void> {
   }
 }
 
-describe("Limpar — CA-LIM01 a CA-LIM11", () => {
+describe("Limpar — CA-LIM01 a CA-LIM12", () => {
 
   // Setup: cria dados para os testes de limpeza pontual (não usa limparTudo ainda)
   beforeAll(async () => {
@@ -165,12 +165,62 @@ describe("Limpar — CA-LIM01 a CA-LIM11", () => {
     expect(await contaExiste(contaId)).toBe(false)
   })
 
+  // ── CA-LIM12 ─────────────────────────────────────────────────
+  test("CA-LIM12 — DELETE /limpar?entidade=investimentos exclui ativos/posições e transações de dividendos", async () => {
+    // Monta cenário mínimo do módulo: conta → ativo → posição → dividendo (gera tx no extrato)
+    const cId   = await criarContaTeste(" Inv")
+    const catId = await criarCategoriaTeste("Inv")
+
+    const { data: tipoDiv } = await api("/investimentos/tipos-dividendo", "POST", {
+      nome: "Jest Limpar Div", categoria_id: catId,
+    }) as { data: { dados: Record<string, unknown> } }
+
+    const { data: ativo } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTLIMP1", nome: "Jest Limpar Ativo", tipo_ativo: "ACOES",
+    }) as { data: { dados: Record<string, unknown> } }
+    const ativoId = ativo.dados.id as string
+
+    await api("/investimentos/posicoes", "POST", {
+      ativo_id: ativoId, conta_id: cId, quantidade: 5, preco_custo: 10,
+      data_compra: new Date().toISOString().split("T")[0],
+    })
+
+    const { data: div } = await api("/investimentos/dividendos", "POST", {
+      ativo_id: ativoId, conta_id: cId, valor: 7,
+      data_pagamento: new Date().toISOString().split("T")[0],
+      tipo_ativo: "ACOES", tipo_dividendo_id: tipoDiv.dados.id,
+    }) as { data: { dados: Record<string, unknown> } }
+    const txDivId = div.dados.transacao_extrato_id as string
+    expect(txDivId).toBeTruthy()
+
+    const { status, data } = await api("/limpar?entidade=investimentos", "DELETE") as {
+      status: number; data: Record<string, unknown>
+    }
+    expect(status).toBe(200)
+    expect(data).toHaveProperty("ok", true)
+    expect((data as { excluidos: number }).excluidos).toBeGreaterThanOrEqual(3)
+
+    // Ativo sumiu e a transação do dividendo também saiu do extrato
+    const { status: sAtv } = await api(`/investimentos/ativos/${ativoId}`)
+    expect(sAtv).toBe(404)
+    expect(await transacaoExiste(txDivId)).toBe(false)
+  })
+
   // ── CA-LIM08 ─────────────────────────────────────────────────
   test("CA-LIM08 — DELETE /limpar (sem entidade) limpa tudo em ordem e retorna logs", async () => {
-    // Recriar dados para o teste de limpeza total
+    // Recriar dados para o teste de limpeza total — inclui posição de
+    // investimento para validar que `tudo` não trava na FK RESTRICT de contas
     const cId   = await criarContaTeste(" Total")
     const catId = await criarCategoriaTeste(" Total")
     const txId  = await criarTransacaoTeste(cId, catId)
+
+    const { data: ativo } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTLIMP2", nome: "Jest Limpar Total", tipo_ativo: "FII",
+    }) as { data: { dados: Record<string, unknown> } }
+    await api("/investimentos/posicoes", "POST", {
+      ativo_id: ativo.dados.id, conta_id: cId, quantidade: 1, preco_custo: 100,
+      data_compra: new Date().toISOString().split("T")[0],
+    })
 
     const { status, data } = await api("/limpar", "DELETE") as {
       status: number; data: Record<string, unknown>
@@ -184,11 +234,13 @@ describe("Limpar — CA-LIM01 a CA-LIM11", () => {
 
     // Deve ter log para cada entidade na ordem correta
     const entidades = logs.map(l => l.entidade)
+    expect(entidades).toContain("investimentos")
     expect(entidades).toContain("transacoes")
     expect(entidades).toContain("categorias")
     expect(entidades).toContain("contas")
 
-    // índice de transacoes deve vir antes de categorias e contas
+    // investimentos antes de contas (FK RESTRICT) e transacoes antes de categorias/contas
+    expect(entidades.indexOf("investimentos")).toBeLessThan(entidades.indexOf("contas"))
     expect(entidades.indexOf("transacoes")).toBeLessThan(entidades.indexOf("categorias"))
     expect(entidades.indexOf("categorias")).toBeLessThan(entidades.indexOf("contas"))
 
@@ -196,6 +248,9 @@ describe("Limpar — CA-LIM01 a CA-LIM11", () => {
     expect(await transacaoExiste(txId)).toBe(false)
     expect(await categoriaExiste(catId)).toBe(false)
     expect(await contaExiste(cId)).toBe(false)
+
+    const { status: sAtv } = await api(`/investimentos/ativos/${ativo.dados.id}`)
+    expect(sAtv).toBe(404)
   })
 
   // ── CA-LIM09 ─────────────────────────────────────────────────

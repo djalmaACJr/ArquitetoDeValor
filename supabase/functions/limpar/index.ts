@@ -37,11 +37,12 @@ Deno.serve(async (req: Request) => {
   const c = db(req);
 
   try {
-    if (!entidade)                 return await limparTudo(c, userId);
-    if (entidade === "transacoes") return await limparTransacoes(c, userId);
-    if (entidade === "categorias") return await limparCategorias(c, userId);
-    if (entidade === "contas")     return await limparContas(c, userId);
-    return erro("entidade inválida: use transacoes | categorias | contas", 422);
+    if (!entidade)                      return await limparTudo(c, userId);
+    if (entidade === "transacoes")      return await limparTransacoes(c, userId);
+    if (entidade === "categorias")      return await limparCategorias(c, userId);
+    if (entidade === "contas")          return await limparContas(c, userId);
+    if (entidade === "investimentos")   return await limparInvestimentos(c, userId);
+    return erro("entidade inválida: use transacoes | categorias | contas | investimentos", 422);
   } catch (e) {
     logError("[limpar] Erro inesperado", e);
     return erro("Erro interno", 500);
@@ -127,6 +128,53 @@ async function limparContas(c: ReturnType<typeof db>, userId: string) {
   return json({ ok: true, excluidos: count ?? 0, entidade: "contas" });
 }
 
+// Limpa o módulo de investimentos (filhos → pais). Dividendos com
+// transação vinculada no extrato também removem essas transações,
+// espelhando o comportamento do DELETE /investimentos/dividendos/:id.
+// Retorna o total de registros excluídos por tabela.
+async function excluirDadosInvestimentos(
+  c: ReturnType<typeof db>, userId: string,
+): Promise<{ entidade: string; excluidos: number }[]> {
+  const logs: { entidade: string; excluidos: number }[] = [];
+
+  // Transações de extrato vinculadas a dividendos (apaga antes dos dividendos)
+  const { data: divs } = await c.from("inv_dividendos")
+    .select("transacao_extrato_id").eq("user_id", userId)
+    .not("transacao_extrato_id", "is", null);
+  const txIds = (divs ?? []).map((d: { transacao_extrato_id: string }) => d.transacao_extrato_id);
+
+  const tabelas = [
+    "inv_historico_mensal", "inv_dividendos", "inv_operacoes",
+    "inv_posicoes", "inv_alocacoes_tipo", "inv_ativos", "inv_tipos_dividendo",
+  ];
+  for (const t of tabelas) {
+    const { count, error } = await c.from(t).delete({ count: "exact" }).eq("user_id", userId);
+    if (error) throw new Error(`${t}: ${error.message}`);
+    logs.push({ entidade: t, excluidos: count ?? 0 });
+  }
+
+  if (txIds.length > 0) {
+    const { count, error } = await c.from("transacoes")
+      .delete({ count: "exact" }).in("id", txIds).eq("user_id", userId);
+    if (error) throw new Error(`transacoes (dividendos): ${error.message}`);
+    logs.push({ entidade: "transacoes_dividendos", excluidos: count ?? 0 });
+  }
+  return logs;
+}
+
+async function limparInvestimentos(c: ReturnType<typeof db>, userId: string) {
+  logInfo("[limpar] Iniciando limpeza de investimentos", { userId });
+  try {
+    const logs = await excluirDadosInvestimentos(c, userId);
+    const total = logs.reduce((s, l) => s + l.excluidos, 0);
+    logSuccess("[limpar] investimentos", { logs });
+    return json({ ok: true, excluidos: total, entidade: "investimentos", logs });
+  } catch (e) {
+    logError("[limpar] investimentos", JSON.stringify(e));
+    return erro((e as Error).message ?? "Erro ao limpar investimentos");
+  }
+}
+
 async function limparTudo(c: ReturnType<typeof db>, userId: string) {
   logInfo("[limpar] Iniciando limpeza total", { userId });
   const logs: { entidade: string; excluidos: number }[] = [];
@@ -138,6 +186,16 @@ async function limparTudo(c: ReturnType<typeof db>, userId: string) {
   } catch (e) {
     logError("[limpar] tudo — reativar contas", JSON.stringify(e));
     return erro((e as Error).message ?? "Erro ao reativar contas");
+  }
+
+  // 0. Investimentos — antes das contas (inv_posicoes referencia contas
+  //    com ON DELETE RESTRICT; sem isso o passo 3 falha)
+  try {
+    const logsInv = await excluirDadosInvestimentos(c, userId);
+    logs.push({ entidade: "investimentos", excluidos: logsInv.reduce((s, l) => s + l.excluidos, 0) });
+  } catch (e) {
+    logError("[limpar] tudo — investimentos", JSON.stringify(e));
+    return erro((e as Error).message ?? "Erro ao limpar investimentos");
   }
 
   // 1. Transações — desvincular transferências antes de deletar
