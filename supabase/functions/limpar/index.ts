@@ -128,27 +128,19 @@ async function limparContas(c: ReturnType<typeof db>, userId: string) {
   return json({ ok: true, excluidos: count ?? 0, entidade: "contas" });
 }
 
-// Limpa o módulo de investimentos (filhos → pais). Dividendos com
-// transação vinculada no extrato também removem essas transações,
-// espelhando o comportamento do DELETE /investimentos/dividendos/:id.
+// Limpa o módulo de investimentos (filhos → pais). NÃO toca no EXTRATO:
+// as transações de proventos (lançadas ou associadas) permanecem como
+// receitas normais — `inv_dividendos.transacao_extrato_id` tem ON DELETE
+// SET NULL, então apagar os dividendos não remove nem altera as transações.
+// Também NÃO apaga configuração reutilizável (inv_tipos_dividendo /
+// inv_alocacoes_tipo), seeds/ajustes recriados só no cadastro.
+// (A exclusão de CONTA, via fn_excluir_dados_usuario, sim remove tudo.)
 // Retorna o total de registros excluídos por tabela.
 async function excluirDadosInvestimentos(
   c: ReturnType<typeof db>, userId: string,
 ): Promise<{ entidade: string; excluidos: number }[]> {
   const logs: { entidade: string; excluidos: number }[] = [];
 
-  // Transações de extrato vinculadas a dividendos (apaga antes dos dividendos)
-  const { data: divs } = await c.from("inv_dividendos")
-    .select("transacao_extrato_id").eq("user_id", userId)
-    .not("transacao_extrato_id", "is", null);
-  const txIds = (divs ?? []).map((d: { transacao_extrato_id: string }) => d.transacao_extrato_id);
-
-  // Apaga apenas os DADOS de carteira (filhos → pais). NÃO apaga
-  // configuração reutilizável: inv_tipos_dividendo (tipos + mapeamento de
-  // categoria) e inv_alocacoes_tipo (alocação-alvo) são seeds/ajustes do
-  // usuário, recriados só no cadastro — perdê-los numa limpeza de dados
-  // obrigaria a reconfigurar tudo. (A exclusão de CONTA, via
-  // fn_excluir_dados_usuario, sim remove essas tabelas.)
   const tabelas = [
     "inv_historico_mensal", "inv_dividendos", "inv_operacoes",
     "inv_posicoes", "inv_ativos",
@@ -157,13 +149,6 @@ async function excluirDadosInvestimentos(
     const { count, error } = await c.from(t).delete({ count: "exact" }).eq("user_id", userId);
     if (error) throw new Error(`${t}: ${error.message}`);
     logs.push({ entidade: t, excluidos: count ?? 0 });
-  }
-
-  if (txIds.length > 0) {
-    const { count, error } = await c.from("transacoes")
-      .delete({ count: "exact" }).in("id", txIds).eq("user_id", userId);
-    if (error) throw new Error(`transacoes (dividendos): ${error.message}`);
-    logs.push({ entidade: "transacoes_dividendos", excluidos: count ?? 0 });
   }
   return logs;
 }

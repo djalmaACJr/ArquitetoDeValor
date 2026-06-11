@@ -200,10 +200,14 @@ describe("Limpar — CA-LIM01 a CA-LIM12", () => {
     expect(data).toHaveProperty("ok", true)
     expect((data as { excluidos: number }).excluidos).toBeGreaterThanOrEqual(3)
 
-    // Ativo sumiu e a transação do dividendo também saiu do extrato
+    // Ativo sumiu, MAS a transação do dividendo PERMANECE no extrato
+    // (limpeza de investimentos não toca em lançamentos do extrato).
     const { status: sAtv } = await api(`/investimentos/ativos/${ativoId}`)
     expect(sAtv).toBe(404)
-    expect(await transacaoExiste(txDivId)).toBe(false)
+    expect(await transacaoExiste(txDivId)).toBe(true)
+
+    // Limpa o lançamento que sobrou no extrato (idempotência da suíte)
+    await api(`/transacoes/${txDivId}`, "DELETE")
 
     // Configuração é PRESERVADA: o tipo de provento (e seu mapeamento de
     // categoria) NÃO é apagado por uma limpeza de dados.
