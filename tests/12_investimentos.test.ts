@@ -374,3 +374,145 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect(sAtv).toBe(200);
   });
 });
+
+// ============================================================
+// Importação em lote — POST /investimentos/importar
+// CA-INV-IMP01 a CA-INV-IMP05
+// ============================================================
+describe("Investimentos — importação em lote (CA-INV-IMP)", () => {
+  const TICKER_IMP = "JESTINVIMP";
+  let contaImpId: string;
+  let categoriaImpId: string;
+
+  const ontem = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split("T")[0]; })();
+
+  async function limparImp(): Promise<void> {
+    const { data: divs } = await api("/investimentos/dividendos");
+    for (const d of (divs?.dados ?? []).filter((d: any) => d.inv_ativos?.ticker === TICKER_IMP)) {
+      await api(`/investimentos/dividendos/${d.id}`, "DELETE");
+    }
+    const { data: ativos } = await api("/investimentos/ativos");
+    for (const a of (ativos?.dados ?? []).filter((a: any) => a.ticker === TICKER_IMP)) {
+      const { data: hist } = await api(`/investimentos/historico-mensal?ativo_id=${a.id}`);
+      for (const h of hist?.dados ?? []) await api(`/investimentos/historico-mensal/${h.id}`, "DELETE");
+      const { data: pos } = await api(`/investimentos/posicoes?ativo_id=${a.id}`);
+      for (const p of pos?.dados ?? []) await api(`/investimentos/posicoes/${p.id}`, "DELETE");
+      await api(`/investimentos/ativos/${a.id}`, "DELETE");
+    }
+    const { data: tipos } = await api("/investimentos/tipos-dividendo");
+    for (const t of (tipos?.dados ?? []).filter((t: any) => (t.nome as string) === "Jest Imp Provento")) {
+      await api(`/investimentos/tipos-dividendo/${t.id}`, "DELETE");
+    }
+  }
+
+  beforeAll(async () => {
+    const { data: contas } = await api("/contas") as { data: { dados: any[] } };
+    contaImpId = (contas.dados[0].conta_id ?? contas.dados[0].id) as string;
+    const { data: cats } = await api("/categorias?apenas_pai=true") as { data: { dados: any[] } };
+    categoriaImpId = cats.dados[0].id as string;
+    await limparImp();
+    await api("/investimentos/tipos-dividendo", "POST", {
+      nome: "Jest Imp Provento", categoria_id: categoriaImpId,
+    });
+  }, 30000);
+
+  afterAll(async () => { await limparImp(); }, 30000);
+
+  test("CA-INV-IMP01 — importa ativo + posição (custo do extrato) + operações", async () => {
+    const { status, data } = await api("/investimentos/importar", "POST", {
+      ativos: [{ ticker: TICKER_IMP, nome: "Jest Import Ação", tipo_ativo: "ACOES", moeda: "BRL" }],
+      // custo médio = (100*10 + 100*12) / 200 = 11
+      posicoes: [{ ticker: TICKER_IMP, conta_id: contaImpId, quantidade: 200, preco_custo: 11,
+        data_compra: ontem, valor_mercado: 2600, mes_ano: mesOffset(0) }],
+      operacoes: [
+        { ticker: TICKER_IMP, conta_id: contaImpId, tipo_operacao: "COMPRA", quantidade: 100, preco_unitario: 10, valor_total: 1000, data_operacao: ontem },
+        { ticker: TICKER_IMP, conta_id: contaImpId, tipo_operacao: "COMPRA", quantidade: 100, preco_unitario: 12, valor_total: 1200, data_operacao: ontem },
+      ],
+      dividendos: [],
+      gerar_extrato_proventos: false,
+    });
+    expect(status).toBe(201);
+    expect(data.dados.ativos_criados).toBeGreaterThanOrEqual(1);
+    expect(data.dados.posicoes).toBeGreaterThanOrEqual(1);
+    expect(data.dados.operacoes).toBe(2);
+
+    // Posição persistida com o custo enviado e valor de mercado no histórico
+    const { data: ativos } = await api("/investimentos/ativos");
+    const ativo = (ativos.dados as any[]).find(a => a.ticker === TICKER_IMP);
+    expect(ativo).toBeTruthy();
+    const { data: pos } = await api(`/investimentos/posicoes?ativo_id=${ativo.id}`);
+    expect(pos.dados.length).toBe(1);
+    expect(Number(pos.dados[0].preco_custo)).toBeCloseTo(11, 2);
+    expect(Number(pos.dados[0].quantidade)).toBe(200);
+  });
+
+  test("CA-INV-IMP02 — idempotência: reimportar não duplica operações", async () => {
+    const { data: ativos } = await api("/investimentos/ativos");
+    const ativo = (ativos.dados as any[]).find(a => a.ticker === TICKER_IMP);
+    const { data: pos } = await api(`/investimentos/posicoes?ativo_id=${ativo.id}`);
+    const posId = pos.dados[0].id;
+
+    const { status, data } = await api("/investimentos/importar", "POST", {
+      ativos: [{ ticker: TICKER_IMP, nome: "Jest Import Ação", tipo_ativo: "ACOES" }],
+      posicoes: [{ ticker: TICKER_IMP, conta_id: contaImpId, quantidade: 200, preco_custo: 11,
+        data_compra: ontem, valor_mercado: 2600, mes_ano: mesOffset(0) }],
+      operacoes: [
+        { ticker: TICKER_IMP, conta_id: contaImpId, tipo_operacao: "COMPRA", quantidade: 100, preco_unitario: 10, valor_total: 1000, data_operacao: ontem },
+        { ticker: TICKER_IMP, conta_id: contaImpId, tipo_operacao: "COMPRA", quantidade: 100, preco_unitario: 12, valor_total: 1200, data_operacao: ontem },
+      ],
+      dividendos: [],
+      gerar_extrato_proventos: false,
+    });
+    expect(status).toBe(201);
+    expect(data.dados.ativos_criados).toBe(0);
+    expect(data.dados.operacoes).toBe(0);   // dedup
+
+    const { data: ops } = await api(`/investimentos/operacoes?posicao_id=${posId}`);
+    expect(ops.dados.length).toBe(2);        // continua 2, não 4
+  });
+
+  test("CA-INV-IMP03 — provento sem extrato não cria transação", async () => {
+    const { status, data } = await api("/investimentos/importar", "POST", {
+      ativos: [{ ticker: TICKER_IMP, nome: "Jest Import Ação", tipo_ativo: "ACOES" }],
+      posicoes: [],
+      operacoes: [],
+      dividendos: [{ ticker: TICKER_IMP, conta_id: contaImpId, valor: 5.5, data_pagamento: ontem,
+        tipo_ativo: "ACOES", tipo_dividendo_nome: "Jest Imp Provento" }],
+      gerar_extrato_proventos: false,
+    });
+    expect(status).toBe(201);
+    expect(data.dados.dividendos).toBe(1);
+    expect(data.dados.dividendos_no_extrato).toBe(0);
+
+    const { data: divs } = await api("/investimentos/dividendos");
+    const div = (divs.dados as any[]).find(d => d.inv_ativos?.ticker === TICKER_IMP && Number(d.valor) === 5.5);
+    expect(div).toBeTruthy();
+    expect(div.transacao_extrato_id).toBeNull();
+  });
+
+  test("CA-INV-IMP04 — provento com extrato cria transação RECEITA", async () => {
+    const { status, data } = await api("/investimentos/importar", "POST", {
+      ativos: [{ ticker: TICKER_IMP, nome: "Jest Import Ação", tipo_ativo: "ACOES" }],
+      posicoes: [],
+      operacoes: [],
+      dividendos: [{ ticker: TICKER_IMP, conta_id: contaImpId, valor: 9.9, data_pagamento: ontem,
+        tipo_ativo: "ACOES", tipo_dividendo_nome: "Jest Imp Provento" }],
+      gerar_extrato_proventos: true,
+    });
+    expect(status).toBe(201);
+    expect(data.dados.dividendos).toBe(1);
+    expect(data.dados.dividendos_no_extrato).toBe(1);
+
+    const { data: divs } = await api("/investimentos/dividendos");
+    const div = (divs.dados as any[]).find(d => d.inv_ativos?.ticker === TICKER_IMP && Number(d.valor) === 9.9);
+    expect(div).toBeTruthy();
+    expect(div.transacao_extrato_id).toBeTruthy();
+  });
+
+  test("CA-INV-IMP05 — payload vazio retorna 400", async () => {
+    const { status } = await api("/investimentos/importar", "POST", {
+      ativos: [], posicoes: [], operacoes: [], dividendos: [],
+    });
+    expect(status).toBe(400);
+  });
+});

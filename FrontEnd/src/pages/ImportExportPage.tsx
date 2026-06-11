@@ -1,18 +1,30 @@
 // src/pages/ImportExportPage.tsx
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import {
   Trash2, Download, Upload, AlertTriangle, CheckCircle2,
   FileSpreadsheet, ChevronDown, ChevronUp, X, Loader2, RefreshCw,
-  DatabaseBackup, RotateCcw, Save,
+  DatabaseBackup, RotateCcw, Save, DollarSign,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, extrairLista } from '../lib/api'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { log as logDev } from '../lib/logger'
 import { mesAtual as mesAtualLocal, hojeLocal, dataParaYMD } from '../lib/utils'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
+import { useAuth } from '../hooks/useAuth'
+import { usePtax } from '../hooks/usePtax'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import type { Conta, CartaoVirtual } from '../types'
+import {
+  TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, type TipoAtivoInvestimento,
+} from '../lib/constants'
+import {
+  detectarTipoArquivo, parsePosicao, parseMovimentacao, parseStatusInvest,
+  tiposMovimentacao, calcularCustoMedio, quantidadeLiquida, rotuloInstituicao,
+  nomeProventoPadrao, derivarPosicoes, tipoPadraoTicker, acoesSubtipoPorTicker,
+  type PosicaoB3, type MovB3, type AcaoMov, type AtivoB3, type XlsxLike,
+} from '../lib/importB3'
 
 // ── Tipos internos ──────────────────────────────────────────────
 
@@ -253,11 +265,33 @@ function ModalConfirmacao({ titulo, mensagem, onConfirmar, onCancelar, corBtn = 
 // ══════════════════════════════════════════════════════════════════
 // SEÇÃO 1 — LIMPEZA
 // ══════════════════════════════════════════════════════════════════
+
+// Rótulos amigáveis para o log de limpeza (a API devolve nomes de tabela).
+const ROTULO_ENTIDADE: Record<string, string> = {
+  inv_historico_mensal:  'Histórico de investimentos',
+  inv_dividendos:        'Dividendos',
+  inv_operacoes:         'Operações',
+  inv_posicoes:          'Posições',
+  inv_ativos:            'Ativos',
+  inv_alocacoes_tipo:    'Alocações',
+  inv_tipos_dividendo:   'Tipos de provento',
+  transacoes_dividendos: 'Dividendos no extrato',
+  transacoes:            'Transações',
+  categorias:            'Categorias',
+  contas:                'Contas',
+  investimentos:         'Investimentos',
+}
+function linhaLimpeza(entidade: string, n: number): string {
+  const rotulo = ROTULO_ENTIDADE[entidade] ?? entidade
+  return `${rotulo}: ${n} ${n === 1 ? 'item removido' : 'itens removidos'}`
+}
+
 function SecaoLimpeza() {
+  const qc = useQueryClient()
   const [confirmando, setConfirmando] = useState(false)
   // 'transacoes' por padrão — é a opção menos destrutiva. "Limpar tudo"
   // apaga também contas e categorias, então exige opt-in explícito.
-  const [modo, setModo] = useState<'transacoes' | 'tudo'>('transacoes')
+  const [modo, setModo] = useState<'transacoes' | 'investimentos' | 'tudo'>('transacoes')
   const [loading, setLoading] = useState(false)
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro'; msg: string }[]>([])
 
@@ -268,10 +302,20 @@ function SecaoLimpeza() {
     const addLog = (tipo: 'ok' | 'erro', msg: string) =>
       setLog(l => [...l, { tipo, msg }])
 
+    const logarLogs = (res: Awaited<ReturnType<typeof apiMutate>>, fallbackEntidade: string) => {
+      const dados = res.dados as { logs?: { entidade: string; excluidos: number }[]; excluidos?: number } | null
+      if (Array.isArray(dados?.logs)) dados!.logs!.forEach(l => addLog('ok', linhaLimpeza(l.entidade, l.excluidos)))
+      else addLog('ok', linhaLimpeza(fallbackEntidade, dados?.excluidos ?? 0))
+    }
+
     try {
       if (modo === 'transacoes') {
         const res = await apiMutate('/limpar?entidade=transacoes', 'DELETE')
-        if (res.ok) addLog('ok', `Transações excluídas: ${(res.dados as { excluidos?: number } | null)?.excluidos ?? 0}`)
+        if (res.ok) addLog('ok', linhaLimpeza('transacoes', (res.dados as { excluidos?: number } | null)?.excluidos ?? 0))
+        else addLog('erro', `Erro: ${res.erro}`)
+      } else if (modo === 'investimentos') {
+        const res = await apiMutate('/limpar?entidade=investimentos', 'DELETE')
+        if (res.ok) logarLogs(res, 'investimentos')
         else addLog('erro', `Erro: ${res.erro}`)
       } else {
         const res = await apiMutate('/limpar', 'DELETE')
@@ -279,7 +323,7 @@ function SecaoLimpeza() {
           const dados = res.dados as { logs?: { entidade: string; excluidos: number }[] } | { entidade: string; excluidos: number }[]
           const logs = (dados && 'logs' in dados ? dados.logs : dados) as { entidade: string; excluidos: number }[]
           if (Array.isArray(logs)) {
-            logs.forEach(l => addLog('ok', `${l.entidade}: ${l.excluidos} excluídos`))
+            logs.forEach(l => addLog('ok', linhaLimpeza(l.entidade, l.excluidos)))
           } else {
             addLog('ok', 'Limpeza concluída')
           }
@@ -290,6 +334,15 @@ function SecaoLimpeza() {
     } catch (e) {
       addLog('erro', `Erro inesperado: ${(e as Error).message}`)
     } finally {
+      // Atualiza os caches afetados para a UI refletir a limpeza na hora.
+      if (modo !== 'transacoes') {
+        for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo']]) {
+          qc.invalidateQueries({ queryKey: k })
+        }
+      }
+      if (modo === 'tudo') {
+        for (const k of [['contas'], ['categorias'], ['dashboard-fase1']]) qc.invalidateQueries({ queryKey: k })
+      }
       setLoading(false)
     }
   }
@@ -301,18 +354,26 @@ function SecaoLimpeza() {
       descricao: 'Remove todos os lançamentos e transferências. Contas e categorias são mantidas.',
     },
     {
+      valor: 'investimentos' as const,
+      titulo: 'Somente investimentos',
+      descricao: 'Remove ativos, posições, operações, dividendos e histórico. Contas e transações do extrato são mantidas.',
+    },
+    {
       valor: 'tudo' as const,
       titulo: 'Limpar tudo',
-      descricao: 'Remove transações, categorias não protegidas e todas as contas.',
+      descricao: 'Remove transações, investimentos, categorias não protegidas e todas as contas.',
     },
   ]
+
+  // Rótulo curto do alvo, para botão e modal de confirmação.
+  const rotuloModo = modo === 'transacoes' ? 'transações' : modo === 'investimentos' ? 'investimentos' : 'tudo'
 
   return (
     <Section titulo="Limpar dados" subtitulo="Remove transações, categorias e contas do banco" icon={Trash2} cor="#ff6b4a" defaultOpen={false}>
       <div className="space-y-3">
 
         {/* Seleção do modo */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           {opcoes.map(op => (
             <button
               key={op.valor}
@@ -361,23 +422,25 @@ function SecaoLimpeza() {
         )}
 
         <Btn onClick={() => setConfirmando(true)} loading={loading} cor="#ff6b4a">
-          <Trash2 size={14} /> {modo === 'transacoes' ? 'Limpar transações' : 'Limpar tudo'}
+          <Trash2 size={14} /> Limpar {rotuloModo}
         </Btn>
       </div>
 
       {confirmando && (
         <ModalConfirmacao
-          titulo={modo === 'transacoes' ? 'Confirmar limpeza de transações' : 'Confirmar limpeza total'}
+          titulo={modo === 'tudo' ? 'Confirmar limpeza total' : `Confirmar limpeza de ${rotuloModo}`}
           mensagem={
             <span>
               {modo === 'transacoes'
                 ? 'Todos os lançamentos e transferências serão excluídos.'
-                : 'Transações, categorias e contas serão excluídos permanentemente.'}
+                : modo === 'investimentos'
+                  ? 'Ativos, posições, operações, dividendos e histórico de investimentos serão excluídos.'
+                  : 'Transações, investimentos, categorias e contas serão excluídos permanentemente.'}
               <br />
               <strong className="text-red-400">Esta ação não pode ser desfeita.</strong>
             </span>
           }
-          labelBtn={modo === 'transacoes' ? 'Sim, limpar transações' : 'Sim, limpar tudo'}
+          labelBtn={`Sim, limpar ${rotuloModo}`}
           onConfirmar={executarLimpeza}
           onCancelar={() => setConfirmando(false)}
         />
@@ -690,14 +753,623 @@ interface CategoriaImport {
   problema: string
 }
 
-type ModoImport = 'transacoes' | 'contas' | 'categorias'
+type ModoImport = 'transacoes' | 'contas' | 'categorias' | 'investimentos'
+
+// Seletor de modo de importação — compartilhado entre o fluxo padrão e o
+// de investimentos (que tem UI própria).
+function SeletorModoImport({ modo, setModo }: { modo: ModoImport; setModo: (m: ModoImport) => void }) {
+  const opts: { value: ModoImport; label: string }[] = [
+    { value: 'transacoes',    label: 'Transações' },
+    { value: 'contas',        label: 'Contas' },
+    { value: 'categorias',    label: 'Categorias' },
+    { value: 'investimentos', label: 'Investimentos' },
+  ]
+  return (
+    <div className="flex rounded-lg overflow-hidden border border-white/10 text-[16px] font-semibold">
+      {opts.map((op, i) => (
+        <button
+          key={op.value}
+          onClick={() => setModo(op.value)}
+          className="flex-1 px-3 py-2 transition-colors"
+          style={{
+            background: modo === op.value ? 'rgba(167,139,250,0.15)' : 'transparent',
+            color: modo === op.value ? '#a78bfa' : '#8b92a8',
+            borderRight: i < opts.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+          }}
+        >
+          {op.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Componente de importação de investimentos (B3) ──────────────
+interface ResultadoImportInv {
+  ativos_criados: number; posicoes: number; operacoes: number
+  dividendos: number; dividendos_no_extrato: number; historico: number
+  avisos: string[]
+}
+
+// Persistência do mapeamento "tipo de movimentação → ação" entre
+// importações (localStorage por usuário). Assim a próxima importação já
+// vem com as classificações que o usuário ajustou antes.
+const LS_MOV_MAP = 'av-import-mov-map'
+function carregarMapaMov(userId: string | null): Record<string, AcaoMov> {
+  try {
+    const raw = localStorage.getItem(`${LS_MOV_MAP}:${userId ?? 'anon'}`)
+    const obj = raw ? JSON.parse(raw) : {}
+    return obj && typeof obj === 'object' ? obj : {}
+  } catch { return {} }
+}
+function salvarMapaMov(userId: string | null, mapa: Record<string, AcaoMov>): void {
+  try { localStorage.setItem(`${LS_MOV_MAP}:${userId ?? 'anon'}`, JSON.stringify(mapa)) } catch { /* quota/SSR */ }
+}
+
+// Persistência da associação "instituição → conta" entre importações.
+// Guardada após uma importação bem-sucedida, normalizada para a conta
+// efetivamente usada/criada (evita recriar conta a cada importação).
+const LS_CONTA_MAP = 'av-import-conta-map'
+type ResolInst = { acao: 'criar' | 'mapear'; mapear_para?: string }
+function carregarMapaConta(userId: string | null): Record<string, ResolInst> {
+  try {
+    const raw = localStorage.getItem(`${LS_CONTA_MAP}:${userId ?? 'anon'}`)
+    const obj = raw ? JSON.parse(raw) : {}
+    return obj && typeof obj === 'object' ? obj : {}
+  } catch { return {} }
+}
+function salvarMapaConta(userId: string | null, mapa: Record<string, ResolInst>): void {
+  try { localStorage.setItem(`${LS_CONTA_MAP}:${userId ?? 'anon'}`, JSON.stringify(mapa)) } catch { /* quota/SSR */ }
+}
+
+const ACOES_MOV: { value: AcaoMov; label: string }[] = [
+  { value: 'COMPRA',   label: 'Compra' },
+  { value: 'VENDA',    label: 'Venda' },
+  { value: 'DIVIDENDO', label: 'Provento' },
+  { value: 'APORTE',   label: 'Aporte (qtd)' },
+  { value: 'RESGATE',  label: 'Resgate (qtd)' },
+  { value: 'IGNORAR',  label: 'Ignorar' },
+]
+
+function ImportInvestimentos({ contas }: { contas: Conta[] }) {
+  const qc = useQueryClient()
+  const { session } = useAuth()
+  const userId = session?.user?.id ?? null
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [etapa, setEtapa] = useState<'idle' | 'revisando' | 'importando' | 'concluido'>('idle')
+  const [carregando, setCarregando] = useState(false)
+  const [erroArq, setErroArq] = useState('')
+  const [posicoes, setPosicoes] = useState<PosicaoB3[]>([])
+  const [movsRaw, setMovsRaw] = useState<MovB3[]>([])
+  const [arq, setArq] = useState<{ posicao?: string; extrato?: string }>({})
+  const [mapaTipoMov, setMapaTipoMov] = useState<Record<string, AcaoMov>>({})
+  const [tipoOverride, setTipoOverride] = useState<Record<string, TipoAtivoInvestimento>>({})
+  const [resolucao, setResolucao] = useState<Record<string, { acao: 'criar' | 'mapear'; mapear_para?: string }>>({})
+  const [gerarExtrato, setGerarExtrato] = useState(false)
+  const [log, setLog] = useState<{ tipo: 'ok' | 'erro' | 'aviso'; msg: string }[]>([])
+  const [resultado, setResultado] = useState<ResultadoImportInv | null>(null)
+
+  const contasInvest = contas.filter(c => c.tipo === 'INVESTIMENTO' && c.ativa)
+
+  // Hidrata o mapeamento salvo quando o usuário é conhecido (sem
+  // sobrescrever ajustes feitos nesta sessão).
+  useEffect(() => {
+    setMapaTipoMov(prev => Object.keys(prev).length ? prev : carregarMapaMov(userId))
+  }, [userId])
+  // Persiste cada ajuste do mapeamento para a próxima importação.
+  useEffect(() => {
+    if (Object.keys(mapaTipoMov).length) salvarMapaMov(userId, mapaTipoMov)
+  }, [userId, mapaTipoMov])
+
+  // ── Leitura de arquivo (detecta posição vs movimentação) ──────
+  const lerArquivo = async (file: File) => {
+    setErroArq(''); setCarregando(true)
+    try {
+      // @ts-expect-error dynamic CDN import
+      const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs')
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true }) as XlsxLike
+      const tipo = detectarTipoArquivo(XLSX.utils, wb)
+      if (tipo === 'posicao') {
+        setPosicoes(parsePosicao(XLSX.utils, wb))
+        setArq(a => ({ ...a, posicao: file.name }))
+      } else if (tipo === 'movimentacao') {
+        setMovsRaw(parseMovimentacao(XLSX.utils, wb))
+        setArq(a => ({ ...a, extrato: file.name }))
+      } else if (tipo === 'statusinvest') {
+        setMovsRaw(parseStatusInvest(XLSX.utils, wb))
+        setArq(a => ({ ...a, extrato: `${file.name} (Status Invest)` }))
+      } else {
+        setErroArq('Arquivo não reconhecido. Use os relatórios da B3 (posição/movimentação) ou a carteira do Status Invest.')
+      }
+    } catch (e) {
+      setErroArq(`Erro ao ler arquivo: ${(e as Error).message}`)
+    } finally {
+      setCarregando(false)
+    }
+  }
+  const onArquivo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (files) for (const f of Array.from(files)) await lerArquivo(f)
+    e.target.value = ''
+  }
+
+  // Movs com ação efetiva (override por tipo de movimentação)
+  const movs = useMemo<MovB3[]>(() =>
+    movsRaw.map(m => {
+      const acao = mapaTipoMov[m.movimentacao] ?? m.acao
+      return { ...m, acao, tipoProvento: acao === 'DIVIDENDO' ? nomeProventoPadrao(m.movimentacao) : undefined }
+    }), [movsRaw, mapaTipoMov])
+
+  const tiposMov = useMemo(() => tiposMovimentacao(movsRaw), [movsRaw])
+  const custoMap = useMemo(() => calcularCustoMedio(movs), [movs])
+  const qtdLiq   = useMemo(() => quantidadeLiquida(movs), [movs])
+
+  // Posições efetivas: arquivo de posição (B3) quando houver; caso contrário
+  // (ex.: Status Invest, só operações) derivamos das compras/vendas.
+  const posicoesEfetivas = useMemo<PosicaoB3[]>(
+    () => posicoes.length > 0 ? posicoes : derivarPosicoes(movs, custoMap),
+    [posicoes, movs, custoMap],
+  )
+
+  // Ativos = união posição + extrato
+  const ativos = useMemo(() => {
+    const mapa = new Map<string, AtivoB3 & { temPosicao: boolean }>()
+    for (const p of posicoesEfetivas) {
+      mapa.set(p.ticker, {
+        ticker: p.ticker, nome: p.nome, tipo_ativo: p.tipo_ativo, moeda: p.moeda,
+        rf_subtipo: p.rf_subtipo, rf_indexador: p.rf_indexador, rf_emissor: p.rf_emissor,
+        rf_vencimento: p.rf_vencimento, fii_categoria: p.fii_categoria,
+        acoes_subtipo: p.acoes_subtipo ?? null, temPosicao: true,
+      })
+    }
+    for (const m of movs) {
+      if (mapa.has(m.ticker)) continue
+      mapa.set(m.ticker, {
+        ticker: m.ticker, nome: m.nome || m.ticker,
+        tipo_ativo: tipoPadraoTicker(m.ticker), moeda: 'BRL', temPosicao: false,
+        acoes_subtipo: m.acoesSubtipo ?? acoesSubtipoPorTicker(m.ticker),
+      })
+    }
+    return [...mapa.values()].sort((a, b) =>
+      a.temPosicao === b.temPosicao ? a.ticker.localeCompare(b.ticker) : a.temPosicao ? -1 : 1)
+  }, [posicoesEfetivas, movs])
+
+  const tipoDe = (ticker: string, fallback: TipoAtivoInvestimento) => tipoOverride[ticker] ?? fallback
+
+  // Grupos de instituição
+  const grupos = useMemo(() => {
+    const s = new Set<string>()
+    for (const p of posicoesEfetivas) s.add(rotuloInstituicao(p.instituicao))
+    for (const m of movs) s.add(rotuloInstituicao(m.instituicao))
+    return [...s].filter(Boolean).sort()
+  }, [posicoesEfetivas, movs])
+
+  // Default de resolução: usa a associação salva (instituição → conta) se a
+  // conta ainda existir; senão mapear (se há contas) ou criar.
+  useEffect(() => {
+    const salvos = carregarMapaConta(userId)
+    const idsValidos = new Set(contasInvest.map(c => c.conta_id))
+    setResolucao(prev => {
+      const next = { ...prev }
+      for (const g of grupos) {
+        if (next[g]) continue
+        const s = salvos[g]
+        if (s && s.mapear_para && idsValidos.has(s.mapear_para)) {
+          next[g] = { acao: 'mapear', mapear_para: s.mapear_para }
+        } else {
+          next[g] = { acao: contasInvest.length ? 'mapear' : 'criar' }
+        }
+      }
+      return next
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grupos, userId])
+
+  const pendencia  = grupos.some(g => resolucao[g]?.acao === 'mapear' && !resolucao[g]?.mapear_para)
+  const podeRevisar = posicoes.length > 0 || movs.length > 0
+  const totalOps = movs.filter(m => ['COMPRA', 'VENDA', 'APORTE', 'RESGATE'].includes(m.acao) && m.quantidade > 0).length
+  const totalDiv = movs.filter(m => m.acao === 'DIVIDENDO' && m.valor > 0).length
+
+  // ── Importação ────────────────────────────────────────────────
+  const importar = async () => {
+    setEtapa('importando'); setResultado(null)
+    const logs: { tipo: 'ok' | 'erro' | 'aviso'; msg: string }[] = []
+    const addLog = (tipo: 'ok' | 'erro' | 'aviso', msg: string) => { logs.push({ tipo, msg }); setLog([...logs]) }
+    try {
+      // 1) Resolver/criar contas por grupo de instituição
+      const contaDoGrupo: Record<string, string> = {}
+      for (const g of grupos) {
+        const r = resolucao[g]
+        if (!r) continue
+        if (r.acao === 'mapear' && r.mapear_para) {
+          contaDoGrupo[g] = r.mapear_para
+        } else if (r.acao === 'criar') {
+          const res = await apiComRetry('/contas', 'POST', { nome: `Investimentos ${g}`.slice(0, 60), tipo: 'INVESTIMENTO', saldo_inicial: 0 })
+          const cid = (res.dados as { conta_id?: string } | null)?.conta_id
+          if (res.ok && cid) { contaDoGrupo[g] = cid; addLog('ok', `Conta criada: Investimentos ${g}`) }
+          else addLog('erro', `Falha ao criar conta para ${g}: ${res.erro}`)
+        }
+      }
+      const contaDe = (inst: string) => contaDoGrupo[rotuloInstituicao(inst)]
+      const tipoAtivoDe = (ticker: string) => {
+        const a = ativos.find(x => x.ticker === ticker)
+        return tipoDe(ticker, a?.tipo_ativo ?? 'ACOES')
+      }
+
+      // 2) Ativos
+      const ativosPayload = ativos.map(a => {
+        const tipo = tipoDe(a.ticker, a.tipo_ativo)
+        return {
+          ticker: a.ticker, nome: a.nome, tipo_ativo: tipo, moeda: a.moeda || 'BRL',
+          rf_subtipo: a.rf_subtipo ?? null, rf_indexador: a.rf_indexador ?? null,
+          rf_emissor: a.rf_emissor ?? null, rf_vencimento: a.rf_vencimento ?? null,
+          fii_categoria: tipo === 'FII' ? (a.fii_categoria ?? 'OUTRO') : null,
+          acoes_subtipo: tipo === 'ACOES' ? (a.acoes_subtipo ?? null) : null,
+        }
+      })
+
+      const mesAno = mesAtualLocal()
+      // 3) Posições
+      const posicoesPayload = posicoesEfetivas.flatMap(p => {
+        const conta_id = contaDe(p.instituicao)
+        if (!conta_id) return []
+        const custo = custoMap.get(`${p.ticker}|${p.instituicao}`)
+        return [{
+          ticker: p.ticker, conta_id, quantidade: p.quantidade,
+          preco_custo: custo?.preco_custo ?? p.custo_fallback,
+          data_compra: custo?.data_compra || hojeLocal(),
+          valor_mercado: p.valor_mercado, mes_ano: mesAno,
+        }]
+      })
+
+      // 4) Operações
+      const operacoesPayload = movs.flatMap(m => {
+        if (!['COMPRA', 'VENDA', 'APORTE', 'RESGATE'].includes(m.acao) || !(m.quantidade > 0) || !m.data) return []
+        const conta_id = contaDe(m.instituicao)
+        if (!conta_id) return []
+        return [{
+          ticker: m.ticker, conta_id, tipo_operacao: m.acao, quantidade: m.quantidade,
+          preco_unitario: m.preco, valor_total: m.valor, data_operacao: m.data,
+        }]
+      })
+
+      // 5) Dividendos
+      const dividendosPayload = movs.flatMap(m => {
+        if (m.acao !== 'DIVIDENDO' || !(m.valor > 0) || !m.data) return []
+        const conta_id = contaDe(m.instituicao)
+        if (!conta_id) return []
+        return [{
+          ticker: m.ticker, conta_id, valor: m.valor, data_pagamento: m.data,
+          tipo_ativo: tipoAtivoDe(m.ticker),
+          tipo_dividendo_nome: m.tipoProvento ?? nomeProventoPadrao(m.movimentacao),
+        }]
+      })
+
+      addLog('ok', `Enviando ${ativosPayload.length} ativos · ${posicoesPayload.length} posições · ${operacoesPayload.length} operações · ${dividendosPayload.length} proventos…`)
+      const res = await apiMutate('/investimentos/importar', 'POST', {
+        ativos: ativosPayload, posicoes: posicoesPayload, operacoes: operacoesPayload,
+        dividendos: dividendosPayload, gerar_extrato_proventos: gerarExtrato,
+      })
+      if (!res.ok) { addLog('erro', `Falha na importação: ${res.erro}`); return }
+      const dados = res.dados as ResultadoImportInv
+      setResultado(dados)
+      for (const a of dados.avisos ?? []) addLog('aviso', a)
+      addLog('ok', 'Importação concluída!')
+
+      // Lembra a associação instituição → conta para as próximas
+      // importações (normalizada para a conta usada/criada — não recria).
+      const mapaConta = carregarMapaConta(userId)
+      for (const g of grupos) if (contaDoGrupo[g]) mapaConta[g] = { acao: 'mapear', mapear_para: contaDoGrupo[g] }
+      salvarMapaConta(userId, mapaConta)
+      for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo'], ['contas'], ['dashboard-fase1']]) {
+        qc.invalidateQueries({ queryKey: k })
+      }
+    } catch (e) {
+      addLog('erro', `Erro inesperado: ${(e as Error).message}`)
+    } finally {
+      setLog([...logs])
+      setEtapa('concluido')
+    }
+  }
+
+  const resetar = () => {
+    setEtapa('idle'); setPosicoes([]); setMovsRaw([]); setArq({})
+    // Mantém o mapeamento salvo (re-hidrata) para a próxima importação.
+    setMapaTipoMov(carregarMapaMov(userId)); setTipoOverride({}); setResolucao({})
+    setResultado(null); setLog([]); setErroArq('')
+  }
+
+  // ── Render ─────────────────────────────────────────────────────
+  if (etapa === 'idle') {
+    const Tile = ({ titulo, nome, cor }: { titulo: string; nome?: string; cor: string }) => (
+      <div className="flex-1 rounded-lg border p-3" style={{ borderColor: nome ? `${cor}50` : 'rgba(255,255,255,0.1)', background: nome ? `${cor}10` : 'transparent' }}>
+        <div className="flex items-center gap-2">
+          {nome ? <CheckCircle2 size={15} style={{ color: cor }} /> : <FileSpreadsheet size={15} className="text-gray-500" />}
+          <div>
+            <p className="text-[15px] font-semibold" style={{ color: nome ? cor : '#8b92a8' }}>{titulo}</p>
+            <p className="text-[13px] text-gray-400 truncate max-w-[180px]">{nome ?? 'não carregado'}</p>
+          </div>
+        </div>
+      </div>
+    )
+    return (
+      <div className="space-y-3">
+        <p className="text-[15px] text-gray-400">
+          Importe os relatórios da <strong>área do investidor da B3</strong> — a
+          <strong> posição</strong> (quantidade e valor de mercado) e a <strong>movimentação</strong>
+          {' '}(extrato: compras, vendas e proventos) — ou a <strong>carteira do Status Invest</strong>
+          {' '}(compras e vendas; as posições são derivadas das operações). Pode soltar mais de um — a ordem não importa.
+        </p>
+        <div className="flex gap-2">
+          <Tile titulo="Posição" nome={arq.posicao} cor="#3b82f6" />
+          <Tile titulo="Movimentação (extrato)" nome={arq.extrato} cor="#00c896" />
+        </div>
+        <div
+          className="rounded-xl p-6 text-center cursor-pointer transition-all"
+          style={{ border: '2px dashed #374151' }}
+          onClick={() => inputRef.current?.click()}
+          onDragOver={e => e.preventDefault()}
+          onDrop={async e => { e.preventDefault(); const fs = e.dataTransfer.files; if (fs) for (const f of Array.from(fs)) await lerArquivo(f) }}
+        >
+          {carregando
+            ? <Loader2 size={28} className="mx-auto mb-2 animate-spin text-av-green" />
+            : <FileSpreadsheet size={28} className="mx-auto mb-2 text-gray-500" />}
+          <p className="text-[16px] font-semibold text-gray-300 mb-1">Arraste os arquivos .xlsx ou clique para selecionar</p>
+          <p className="text-[14px] text-gray-400">posicao-*.xlsx e movimentacao-*.xlsx</p>
+          <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" multiple className="hidden" onChange={onArquivo} />
+        </div>
+        {erroArq && <p className="text-[15px] text-red-400">{erroArq}</p>}
+        <Btn onClick={() => setEtapa('revisando')} disabled={!podeRevisar || carregando} cor="#a78bfa">
+          Revisar importação
+        </Btn>
+      </div>
+    )
+  }
+
+  if (etapa === 'revisando') {
+    return (
+      <div className="space-y-4">
+        {/* Resumo */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Tag cor="#3b82f6">{ativos.length} ativos</Tag>
+          <Tag cor="#00c896">{posicoesEfetivas.length} posições</Tag>
+          <Tag cor="#a78bfa">{totalOps} operações</Tag>
+          <Tag cor="#f0b429">{totalDiv} proventos</Tag>
+        </div>
+
+        {/* 1) Instituições → contas */}
+        {grupos.length > 0 && (
+          <div>
+            <p className="text-[16px] font-semibold text-gray-700 dark:text-gray-300 mb-1">Instituições → contas de investimento</p>
+            <p className="text-[13px] text-gray-400 mb-2">A associação fica salva após importar e é reaplicada nas próximas importações.</p>
+            <div className="space-y-2">
+              {grupos.map(g => (
+                <div key={g} className="bg-blue-400/5 border border-blue-400/20 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[16px] font-semibold text-blue-400">{g}</span>
+                    <div className="flex gap-1">
+                      {(['criar', 'mapear'] as const).map(acao => (
+                        <button key={acao} onClick={() => setResolucao(r => ({ ...r, [g]: { ...r[g], acao } }))}
+                          className="px-2.5 py-1 rounded text-[15px] font-semibold transition-colors"
+                          style={{
+                            background: resolucao[g]?.acao === acao ? '#3b82f620' : 'transparent',
+                            color: resolucao[g]?.acao === acao ? '#3b82f6' : '#8b92a8',
+                            border: `1px solid ${resolucao[g]?.acao === acao ? '#3b82f640' : '#ffffff10'}`,
+                          }}>
+                          {acao === 'criar' ? 'Criar nova' : 'Usar existente'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {resolucao[g]?.acao === 'mapear' && (
+                    <select value={resolucao[g]?.mapear_para ?? ''}
+                      onChange={e => setResolucao(r => ({ ...r, [g]: { ...r[g], mapear_para: e.target.value } }))}
+                      className="w-full bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-1.5 text-[16px] text-gray-200">
+                      <option value="">Selecionar conta de investimento…</option>
+                      {contasInvest.map(c => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
+                    </select>
+                  )}
+                  {resolucao[g]?.acao === 'criar' && (
+                    <p className="text-[14px] text-gray-400">Será criada a conta <strong>Investimentos {g}</strong> (tipo INVESTIMENTO).</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 2) Tipos de movimentação */}
+        {tiposMov.length > 0 && (
+          <div>
+            <p className="text-[16px] font-semibold text-gray-700 dark:text-gray-300 mb-1">Tipos de movimentação detectados</p>
+            <p className="text-[13px] text-gray-400 mb-2">As escolhas ficam salvas e são reaplicadas automaticamente nas próximas importações.</p>
+            <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 max-h-[260px]">
+              <table className="w-full text-[15px]">
+                <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-2 py-2 text-left font-semibold text-gray-500">Movimentação</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-500">Linhas</th>
+                    <th className="px-2 py-2 text-left font-semibold text-gray-500">Tratar como</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tiposMov.map(t => (
+                    <tr key={t.tipo} className="border-t border-gray-700/50">
+                      <td className="px-2 py-1 text-gray-300">{t.tipo}</td>
+                      <td className="px-2 py-1 text-right text-gray-400">{t.total}</td>
+                      <td className="px-1 py-1">
+                        <select value={mapaTipoMov[t.tipo] ?? t.acao}
+                          onChange={e => setMapaTipoMov(m => ({ ...m, [t.tipo]: e.target.value as AcaoMov }))}
+                          className="bg-[#1a1f2e] border border-white/10 rounded px-2 py-0.5 text-[15px] text-gray-200 outline-none">
+                          {ACOES_MOV.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* 3) Ativos & posições */}
+        {posicoesEfetivas.length > 0 && (
+          <div>
+            <p className="text-[16px] font-semibold text-gray-700 dark:text-gray-300 mb-2">
+              Posições{posicoes.length === 0 && <span className="text-[13px] font-normal text-gray-400"> (derivadas das operações)</span>}
+            </p>
+            <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 max-h-[340px]">
+              <table className="w-full text-[15px]">
+                <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-2 py-2 text-left font-semibold text-gray-500">Ticker</th>
+                    <th className="px-2 py-2 text-left font-semibold text-gray-500">Tipo</th>
+                    <th className="px-2 py-2 text-left font-semibold text-gray-500">Instituição</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-500">Qtd</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-500" title="Custo médio das compras do extrato">Custo médio</th>
+                    <th className="px-2 py-2 text-right font-semibold text-gray-500">Valor mercado</th>
+                    <th className="px-2 py-2 text-center font-semibold text-gray-500" title="Qtd da posição × qtd líquida do extrato">Reconcil.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {posicoesEfetivas.map((p, i) => {
+                    const key = `${p.ticker}|${p.instituicao}`
+                    const custo = custoMap.get(key)
+                    const precoCusto = custo?.preco_custo ?? p.custo_fallback
+                    const liq = qtdLiq.get(key)
+                    const diff = liq != null ? liq - p.quantidade : null
+                    const ok = diff == null || Math.abs(diff) < 0.01
+                    return (
+                      <tr key={`${key}-${i}`} className="border-t border-gray-700/50">
+                        <td className="px-2 py-1 font-semibold text-gray-200">{p.ticker}</td>
+                        <td className="px-1 py-1">
+                          <select value={tipoDe(p.ticker, p.tipo_ativo)}
+                            onChange={e => setTipoOverride(o => ({ ...o, [p.ticker]: e.target.value as TipoAtivoInvestimento }))}
+                            className="bg-[#1a1f2e] border border-white/10 rounded px-1 py-0.5 text-[14px] text-gray-200 outline-none">
+                            {TIPOS_ATIVO_INV.map(t => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-2 py-1 text-gray-400 truncate max-w-[120px]" title={p.instituicao}>{rotuloInstituicao(p.instituicao)}</td>
+                        <td className="px-2 py-1 text-right text-gray-300">{p.quantidade}</td>
+                        <td className="px-2 py-1 text-right text-gray-300" title={custo ? 'média das compras' : 'estimado (sem compras no extrato)'}>
+                          {precoCusto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                          {!custo && <span className="text-amber-400 ml-1">*</span>}
+                        </td>
+                        <td className="px-2 py-1 text-right text-gray-300">{p.valor_mercado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                        <td className="px-2 py-1 text-center">
+                          {diff == null
+                            ? <span className="text-gray-500">—</span>
+                            : ok
+                              ? <CheckCircle2 size={14} className="inline text-green-400" />
+                              : <span className="text-amber-400 text-[13px]" title="quantidade do extrato difere da posição">{diff > 0 ? '+' : ''}{diff.toLocaleString('pt-BR')}</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[13px] text-gray-400 mt-1"><span className="text-amber-400">*</span> custo estimado (sem compras correspondentes no extrato). A quantidade final vem sempre da posição.</p>
+          </div>
+        )}
+
+        {/* Proventos no extrato */}
+        {totalDiv > 0 && (
+          <label className="flex items-start gap-2 p-3 rounded-lg border cursor-pointer"
+            style={{ borderColor: gerarExtrato ? '#00c89650' : 'rgba(255,255,255,0.1)', background: gerarExtrato ? '#00c89610' : 'transparent' }}>
+            <input type="checkbox" checked={gerarExtrato} onChange={e => setGerarExtrato(e.target.checked)} className="accent-av-green mt-0.5" />
+            <span>
+              <span className="text-[16px] font-semibold text-gray-200">Gerar lançamentos no extrato para os proventos</span>
+              <span className="block text-[14px] text-gray-400">Cada provento vira uma RECEITA no extrato, na categoria mapeada ao seu tipo (Investimentos › Tipos de provento). Tipos sem categoria são gravados só como dividendo.</span>
+            </span>
+          </label>
+        )}
+
+        {pendencia && (
+          <p className="text-[15px] text-amber-400 flex items-center gap-1"><AlertTriangle size={14} /> Selecione uma conta para cada instituição marcada como "Usar existente".</p>
+        )}
+
+        <div className="flex gap-2">
+          <Btn onClick={importar} disabled={pendencia || (posicoesEfetivas.length === 0 && totalOps === 0 && totalDiv === 0)} cor="#00c896">
+            <Upload size={14} /> Importar
+          </Btn>
+          <button onClick={() => setEtapa('idle')} className="px-4 py-2 rounded-lg text-[17px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            Voltar
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (etapa === 'importando') {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-[17px] font-semibold text-gray-300">
+          <Loader2 size={18} className="animate-spin text-av-green" /> Importando investimentos…
+        </div>
+        {log.length > 0 && (
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-1 max-h-[200px] overflow-auto">
+            {log.map((l, i) => (
+              <div key={i} className="flex items-center gap-2 text-[15px]"
+                style={{ color: l.tipo === 'ok' ? '#00c896' : l.tipo === 'aviso' ? '#f0b429' : '#f87171' }}>
+                {l.msg}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // concluido
+  return (
+    <div className="space-y-3">
+      {resultado && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {[
+            { label: 'Ativos criados', valor: resultado.ativos_criados, cor: '#3b82f6' },
+            { label: 'Posições', valor: resultado.posicoes, cor: '#00c896' },
+            { label: 'Operações', valor: resultado.operacoes, cor: '#a78bfa' },
+            { label: 'Proventos', valor: resultado.dividendos, cor: '#f0b429' },
+            { label: 'No extrato', valor: resultado.dividendos_no_extrato, cor: '#06b6d4' },
+            { label: 'Histórico', valor: resultado.historico, cor: '#10b981' },
+          ].map(c => (
+            <div key={c.label} className="rounded-lg p-3 text-center" style={{ background: `${c.cor}12`, border: `1px solid ${c.cor}30` }}>
+              <p className="text-[22px] font-bold" style={{ color: c.cor }}>{c.valor}</p>
+              <p className="text-[13px] text-gray-400">{c.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {log.length > 0 && (
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-1 max-h-[220px] overflow-auto">
+          {log.map((l, i) => (
+            <div key={i} className="flex items-start gap-2 text-[15px]">
+              {l.tipo === 'ok' ? <CheckCircle2 size={13} className="text-av-green flex-shrink-0 mt-0.5" />
+                : l.tipo === 'aviso' ? <AlertTriangle size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                : <X size={13} className="text-red-400 flex-shrink-0 mt-0.5" />}
+              <span style={{ color: l.tipo === 'ok' ? '#00c896' : l.tipo === 'aviso' ? '#f0b429' : '#f87171' }}>{l.msg}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <Btn onClick={resetar} cor="#a78bfa"><RefreshCw size={14} /> Nova importação</Btn>
+    </div>
+  )
+}
 
 function SecaoImport() {
   const { contas } = useContas()
   const { categorias } = useCategorias()
 
   const inputRef = useRef<HTMLInputElement>(null)
-  const [modo, setModo] = useState<ModoImport>('transacoes')
+  // Permite deep-link para um modo específico (ex.: /importexport?import=investimentos)
+  const [modo, setModo] = useState<ModoImport>(() => {
+    const p = new URLSearchParams(window.location.search).get('import')
+    return (['transacoes', 'contas', 'categorias', 'investimentos'] as const).includes(p as ModoImport)
+      ? (p as ModoImport) : 'transacoes'
+  })
   const [etapa, setEtapa] = useState<'idle' | 'analisando' | 'revisando' | 'importando' | 'concluido'>('idle')
   const [dragOver, setDragOver] = useState(false)
   const [grid, setGrid] = useState<LinhaGrid[]>([])
@@ -1344,6 +2016,19 @@ function SecaoImport() {
     contasDesconhecidas.some(n => resolucaoContas[n]?.acao === 'mapear' && !resolucaoContas[n]?.mapear_para) ||
     catsDesconhecidas.some(n => resolucaoCats[n]?.acao === 'mapear' && !resolucaoCats[n]?.mapear_para)
 
+  // Modo investimentos tem fluxo próprio (dois arquivos da B3, mapeamento de
+  // instituições e tipos de movimentação) — componente autocontido.
+  if (modo === 'investimentos') {
+    return (
+      <Section titulo="Importar investimentos" subtitulo="Extrato e posição exportados da B3" icon={Upload} cor="#a78bfa">
+        <div className="space-y-4">
+          <SeletorModoImport modo={modo} setModo={setModo} />
+          <ImportInvestimentos contas={contas} />
+        </div>
+      </Section>
+    )
+  }
+
   return (
     <Section titulo="Importar dados" subtitulo="Importa transações de CSV ou XLSX" icon={Upload} cor="#a78bfa">
       <div className="space-y-4">
@@ -1352,26 +2037,7 @@ function SecaoImport() {
         {etapa === 'idle' && (
           <div className="space-y-3">
             {/* Seletor de modo */}
-            <div className="flex rounded-lg overflow-hidden border border-white/10 text-[16px] font-semibold">
-              {([
-                { value: 'transacoes', label: 'Transações' },
-                { value: 'contas',     label: 'Contas'     },
-                { value: 'categorias', label: 'Categorias' },
-              ] as { value: ModoImport; label: string }[]).map((op, i) => (
-                <button
-                  key={op.value}
-                  onClick={() => setModo(op.value)}
-                  className="flex-1 px-3 py-2 transition-colors"
-                  style={{
-                    background: modo === op.value ? 'rgba(167,139,250,0.15)' : 'transparent',
-                    color: modo === op.value ? '#a78bfa' : '#8b92a8',
-                    borderRight: i < 2 ? '1px solid rgba(255,255,255,0.1)' : 'none',
-                  }}
-                >
-                  {op.label}
-                </button>
-              ))}
-            </div>
+            <SeletorModoImport modo={modo} setModo={setModo} />
 
             <div
               className="rounded-xl p-8 text-center cursor-pointer transition-all duration-200"
@@ -2240,7 +2906,7 @@ function SecaoBackup() {
   }
 
   return (
-    <Section titulo="Backup completo" subtitulo="Salva todos os dados em um arquivo JSON" icon={Save} cor="#4da6ff">
+    <Section titulo="Backup completo" subtitulo="Salva todos os dados em um arquivo JSON" icon={Save} cor="#4da6ff" defaultOpen={false}>
       <div className="space-y-3">
         <div className="bg-blue-400/5 border border-blue-400/20 rounded-lg p-4">
           <p className="text-[16px] font-semibold text-blue-400 mb-2">O backup inclui:</p>
@@ -2641,14 +3307,88 @@ function SecaoRestore() {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// SEÇÃO — COTAÇÃO DO DÓLAR (PTAX)
+// ══════════════════════════════════════════════════════════════════
+function SecaoCotacaoDolar() {
+  const qc = useQueryClient()
+  const [data, setData] = useState(hojeLocal())
+  const { atual, atualData, taxaEm } = usePtax([data])
+  const [sincronizando, setSincronizando] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const fmtTaxa = (v: number | null) =>
+    v == null ? '—' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
+  const fmtData = (d?: string | null) => (d ? d.split('-').reverse().join('/') : '')
+
+  const taxaData = taxaEm(data)
+  const estimada = !!atualData && data > atualData   // data futura/hoje ainda sem PTAX publicado
+
+  const sincronizar = async () => {
+    setSincronizando(true); setMsg(null)
+    const res = await apiMutate<{ inseridos: number; desde: string; ate: string }>('/investimentos/ptax', 'POST')
+    setSincronizando(false)
+    if (res.ok) {
+      setMsg(`Sincronizado: ${(res.dados as { inseridos?: number } | null)?.inseridos ?? 0} cotação(ões) atualizada(s).`)
+      qc.invalidateQueries({ queryKey: ['ptax'] })
+    } else setMsg(`Erro: ${res.erro}`)
+  }
+
+  return (
+    <Section titulo="Cotação do dólar (PTAX)" subtitulo="Consulta o dólar de referência do Banco Central (USD → BRL)" icon={DollarSign} cor="#10b981" defaultOpen={false}>
+      <div className="space-y-4">
+        {/* Cotação mais recente */}
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+          <p className="text-[14px] text-gray-400">Cotação mais recente (PTAX de venda)</p>
+          <p className="text-[22px] font-bold text-gray-800 dark:text-gray-100">{fmtTaxa(atual)}</p>
+          {atualData && <p className="text-[13px] text-gray-400">Referente a {fmtData(atualData)}</p>}
+        </div>
+
+        {/* Consulta por data */}
+        <div>
+          <p className="text-[15px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Consultar por data</p>
+          <div className="flex items-end gap-4 flex-wrap">
+            <div>
+              <p className="text-[14px] text-gray-400 mb-1">Data</p>
+              <input type="date" value={data} onChange={(e) => setData(e.target.value)}
+                className="bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-2 text-[15px] text-gray-200 outline-none" />
+            </div>
+            <div>
+              <p className="text-[14px] text-gray-400 mb-1">Cotação</p>
+              <p className="text-[20px] font-bold text-gray-800 dark:text-gray-100">{fmtTaxa(taxaData)}</p>
+            </div>
+          </div>
+          {estimada && (
+            <p className="text-[13px] text-amber-400 mt-1.5">
+              Data ainda sem PTAX publicado — exibindo a cotação do último dia útil (estimativa).
+            </p>
+          )}
+          <p className="text-[13px] text-gray-400 mt-1">
+            Fins de semana e feriados usam a cotação do último dia útil anterior.
+          </p>
+        </div>
+
+        {/* Sincronizar */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <Btn onClick={sincronizar} loading={sincronizando} cor="#10b981"><RefreshCw size={14} /> Sincronizar agora</Btn>
+          {msg && <span className="text-[14px]" style={{ color: msg.startsWith('Erro') ? '#f87171' : '#10b981' }}>{msg}</span>}
+        </div>
+        <p className="text-[13px] text-gray-400">
+          Histórico desde 01/01/2021, sincronizado automaticamente com o Banco Central. Usado para converter ativos em dólar.
+        </p>
+      </div>
+    </Section>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════
 // PAGE PRINCIPAL
 // ══════════════════════════════════════════════════════════════════
 export default function ImportExportPage() {
   return (
     <div className="p-5 max-w-[1200px]">
       <div className="mb-5">
-        <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Ferramentas</h1>
-        <p className="text-[16px] text-gray-400 mt-0.5">Exportação, importação, backup completo e limpeza de dados</p>
+        <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Gerenciar dados</h1>
+        <p className="text-[16px] text-gray-400 mt-0.5">Importação, exportação, backup, cotação do dólar e limpeza de dados</p>
       </div>
 
       <div className="mb-4">
@@ -2656,6 +3396,9 @@ export default function ImportExportPage() {
       </div>
 
       <div className="space-y-3">
+        {/* Cotação do dólar (consulta PTAX) — em primeiro lugar */}
+        <SecaoCotacaoDolar />
+
         {/* Linha 1 — Exportar | Importar (XLSX, uso humano) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
           <SecaoExport />
@@ -2704,7 +3447,10 @@ export default function ImportExportPage() {
           </ul>
         </div>
 
-        {/* Linha 2 — Backup | Restore (JSON, salvaguarda) */}
+        {/* Linha 2 — Cotação do dólar (consulta PTAX) */}
+        <SecaoCotacaoDolar />
+
+        {/* Linha 3 — Backup | Restore (JSON, salvaguarda) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
           <SecaoBackup />
           <SecaoRestore />

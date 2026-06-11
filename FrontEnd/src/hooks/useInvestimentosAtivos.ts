@@ -4,7 +4,7 @@ import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import type {
   InvestimentoAtivo, QuestionarioRespostas, TipoAtivoInvestimento,
-  SubtipoRF, IndexadorRF, CategoriaFII,
+  SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo,
 } from '../types'
 
 interface OpResult<T = void> { ok: boolean; dados: T | null; erro: string | null }
@@ -28,6 +28,8 @@ export interface CriarAtivoInput {
   rf_isento_ir?:    boolean | null
   // FII
   fii_categoria?:   CategoriaFII | null
+  // Ações
+  acoes_subtipo?:   AcoesSubtipo | null
 }
 
 export type EditarAtivoInput = Partial<CriarAtivoInput>

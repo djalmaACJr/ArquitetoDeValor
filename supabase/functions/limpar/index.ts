@@ -143,9 +143,15 @@ async function excluirDadosInvestimentos(
     .not("transacao_extrato_id", "is", null);
   const txIds = (divs ?? []).map((d: { transacao_extrato_id: string }) => d.transacao_extrato_id);
 
+  // Apaga apenas os DADOS de carteira (filhos → pais). NÃO apaga
+  // configuração reutilizável: inv_tipos_dividendo (tipos + mapeamento de
+  // categoria) e inv_alocacoes_tipo (alocação-alvo) são seeds/ajustes do
+  // usuário, recriados só no cadastro — perdê-los numa limpeza de dados
+  // obrigaria a reconfigurar tudo. (A exclusão de CONTA, via
+  // fn_excluir_dados_usuario, sim remove essas tabelas.)
   const tabelas = [
     "inv_historico_mensal", "inv_dividendos", "inv_operacoes",
-    "inv_posicoes", "inv_alocacoes_tipo", "inv_ativos", "inv_tipos_dividendo",
+    "inv_posicoes", "inv_ativos",
   ];
   for (const t of tabelas) {
     const { count, error } = await c.from(t).delete({ count: "exact" }).eq("user_id", userId);

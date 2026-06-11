@@ -28,6 +28,14 @@ export interface ConfirmarDividendoInput {
   data_pagamento?: string
 }
 
+// Associação inversa: vincula a um provento que já existe no extrato.
+export interface AssociarDividendoInput {
+  transacao_extrato_id: string
+  ativo_id:             string
+  tipo_dividendo_id?:   string | null
+  descricao?:           string | null
+}
+
 export interface FiltrosDividendos {
   ativo_id?:   string
   tipo_ativo?: TipoAtivoInvestimento
@@ -76,6 +84,13 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
+  // Vincula um provento já existente no extrato (não cria transação nova).
+  const associar = async (payload: AssociarDividendoInput): Promise<OpResult<InvestimentoDividendo>> => {
+    const res = await apiMutate<InvestimentoDividendo>('/investimentos/dividendos', 'POST', payload)
+    if (res.ok) await invalidar()
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   // Reconcilia projeção: transação do extrato vira PAGO com valor/data reais
   const confirmar = async (id: string, payload: ConfirmarDividendoInput = {}): Promise<OpResult<InvestimentoDividendo>> => {
     const res = await apiMutate<InvestimentoDividendo>(`/investimentos/dividendos/${id}/confirmar`, 'POST', payload)
@@ -95,6 +110,7 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     error: error ? (error as Error).message : null,
     criar,
     editar,
+    associar,
     confirmar,
     excluir,
   }

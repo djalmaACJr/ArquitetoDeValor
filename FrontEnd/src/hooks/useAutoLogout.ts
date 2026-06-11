@@ -53,9 +53,17 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
   const snapshotRef = useRef<{ userId: string | null; rota: string; filtros: unknown }>({
     userId: null, rota: '/', filtros: null,
   })
-  // Sem array de deps: roda após todo commit, mantendo o snapshot fresco
-  // (regra react-hooks/refs proíbe escrever em ref durante o render).
+  // `navigate` do react-router pode trocar de identidade entre renders. Se
+  // o efeito do timer dependesse dele, re-armaria o setInterval e ZERARIA o
+  // lastActivityRef a cada re-render — e como este hook agora assina
+  // usePageState/useLocation/useAuth, os re-renders ficaram frequentes, o
+  // ocioso nunca chegava ao limite e o logout deixava de acontecer. Por
+  // isso o timer roda UMA vez (deps [timeoutMinutos]) e lê navigate da ref.
+  const navigateRef = useRef(navigate)
+  // Sem array de deps: roda após todo commit, mantendo snapshot/navigate
+  // frescos (regra react-hooks/refs proíbe escrever em ref durante o render).
   useEffect(() => {
+    navigateRef.current = navigate
     snapshotRef.current = {
       userId: session?.user?.id ?? null,
       rota:   location.pathname + location.search,
@@ -105,7 +113,7 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       } catch {
         /* mesmo se signOut falhar, redireciona pra forçar reauth */
       }
-      navigate('/login?expirado=1', { replace: true })
+      navigateRef.current('/login?expirado=1', { replace: true })
     }, INTERVALO_CHECK_MS)
 
     return () => {
@@ -114,5 +122,5 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       }
       window.clearInterval(intervalId)
     }
-  }, [timeoutMinutos, navigate])
+  }, [timeoutMinutos])
 }

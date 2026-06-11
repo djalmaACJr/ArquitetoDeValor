@@ -201,3 +201,21 @@ export const FII_CATEGORIA_INFO: Record<CategoriaFII, CategoriaFIIInfo> = {
     vantagem:   'Verifique o regulamento do fundo',
   },
 }
+
+// ── Ações: subtipo (ON/PN/UNIT/BDR) ───────────────────────────
+export const ACOES_SUBTIPOS = ['ON', 'PN', 'UNIT', 'BDR'] as const
+export type AcoesSubtipo = typeof ACOES_SUBTIPOS[number]
+
+export const ACOES_SUBTIPO_LABEL: Record<AcoesSubtipo, string> = {
+  ON:   'Ordinária (ON)',
+  PN:   'Preferencial (PN)',
+  UNIT: 'Unit',
+  BDR:  'BDR',
+}
+
+export const ACOES_SUBTIPO_DESCRICAO: Record<AcoesSubtipo, string> = {
+  ON:   'Ação ordinária — dá direito a voto nas assembleias.',
+  PN:   'Ação preferencial — prioridade no recebimento de dividendos, em geral sem voto.',
+  UNIT: 'Pacote de ações (ON + PN) negociado como uma única unidade.',
+  BDR:  'Brazilian Depositary Receipt — recibo de ação estrangeira negociada na B3.',
+}

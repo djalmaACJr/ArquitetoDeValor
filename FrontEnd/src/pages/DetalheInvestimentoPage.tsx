@@ -12,6 +12,7 @@ import { useInvestimentosHistorico } from '../hooks/useInvestimentosHistorico'
 import { useDividendos } from '../hooks/useDividendos'
 import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
 import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
+import { usePtax } from '../hooks/usePtax'
 import { Drawer, BtnSalvar, BtnCancelar, Toast } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL, formatData } from '../lib/utils'
@@ -28,6 +29,9 @@ ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, Line
 
 const MUTED = '#8b92a8'
 const MESES_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+
+const fmtUSD = (v: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v)
 
 function fmtMes(anoMes: string): string {
   const [ano, m] = anoMes.split('-')
@@ -104,6 +108,39 @@ export default function DetalheInvestimentoPage() {
     return operacoes.filter((o) => posIds.has(o.posicao_id)).slice(0, 8)
   }, [operacoes, posicoes])
 
+  // ── Conversão cambial (ativos em moeda estrangeira) ────────────
+  // Valores das posições estão na moeda do ativo (ex.: USD). Convertemos
+  // para BRL no front com o PTAX: custo pela cotação da DATA DA COMPRA;
+  // mercado/dividendos pela cotação aplicável (atual / data do pagamento).
+  const moeda = (ativo?.moeda ?? 'BRL').toUpperCase()
+  const ehMoedaEstrangeira = moeda !== 'BRL'
+  const datasPtax = useMemo(
+    () => [...new Set(posicoes.map((p) => p.data_compra).filter(Boolean))],
+    [posicoes],
+  )
+  const { atual: ptaxAtual, atualData: ptaxData, taxaEm } = usePtax(datasPtax, ehMoedaEstrangeira)
+
+  const resumoConvertido = useMemo(() => {
+    if (!ehMoedaEstrangeira) return null
+    const taxaAtual = ptaxAtual ?? 0
+    const ativas = posicoes.filter((p) => p.status === 'ATIVA')
+    const custo = ativas.reduce((s, p) => s + Number(p.valor_custo) * (taxaEm(p.data_compra) ?? taxaAtual), 0)
+    // mercado: snapshot mais recente por conta (na moeda do ativo) × PTAX atual;
+    // posições sem snapshot caem para o custo convertido na data da compra.
+    const ultimoPorConta = new Map<string, number>()
+    const mesPorConta = new Map<string, string>()
+    for (const h of historico) {
+      const m = mesPorConta.get(h.conta_id)
+      if (!m || h.mes_ano > m) { mesPorConta.set(h.conta_id, h.mes_ano); ultimoPorConta.set(h.conta_id, Number(h.valor_mercado)) }
+    }
+    let mercado = [...ultimoPorConta.values()].reduce((s, v) => s + v * taxaAtual, 0)
+    for (const p of ativas) {
+      if (!ultimoPorConta.has(p.conta_id)) mercado += Number(p.valor_custo) * (taxaEm(p.data_compra) ?? taxaAtual)
+    }
+    const divs = dividendos.reduce((s, d) => s + Number(d.valor) * (taxaEm(d.data_pagamento) ?? taxaAtual), 0)
+    return { custo, mercado, ganho: mercado - custo, dividendos: divs }
+  }, [ehMoedaEstrangeira, posicoes, historico, dividendos, taxaEm, ptaxAtual])
+
   if (loading) return <LoadingMascote />
   if (error || !ativo) {
     return (
@@ -170,15 +207,34 @@ export default function DetalheInvestimentoPage() {
 
       <Toast msg={toast} />
 
-      {/* Cards de resumo */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        <CardMini icone={<Wallet size={14} />} titulo="Valor de mercado" valor={formatBRL(resumo.mercado)} />
-        <CardMini icone={<Coins size={14} />} titulo="Custo" valor={formatBRL(resumo.custo)} />
-        <CardMini icone={resumo.ganho >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-          titulo="Ganho / Prejuízo"
-          valor={`${resumo.ganho >= 0 ? '+' : ''}${formatBRL(resumo.ganho)}`} cor={corValor(resumo.ganho)} />
-        <CardMini icone={<Coins size={14} />} titulo="Dividendos" valor={formatBRL(resumo.dividendos)} cor="#00c896" />
-      </div>
+      {/* Cotação do dólar (ativos em moeda estrangeira) */}
+      {ehMoedaEstrangeira && (
+        <div className="mb-4 flex items-center gap-2 text-[13px] rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2" style={{ color: MUTED }}>
+          <span className="font-medium text-white/80">Moeda: {moeda}</span>
+          <span>·</span>
+          {ptaxAtual != null ? (
+            <span>Dólar PTAX{ptaxData ? ` (${formatData(ptaxData)})` : ''}: <span className="text-white/90 font-medium">{formatBRL(ptaxAtual)}</span></span>
+          ) : (
+            <span>Cotação PTAX indisponível no momento.</span>
+          )}
+        </div>
+      )}
+
+      {/* Cards de resumo — em BRL (com o valor original em USD quando estrangeiro) */}
+      {(() => {
+        const r = resumoConvertido ?? resumo
+        const sub = (v: number) => ehMoedaEstrangeira ? fmtUSD(v) : undefined
+        return (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            <CardMini icone={<Wallet size={14} />} titulo="Valor de mercado" valor={formatBRL(r.mercado)} sub={sub(resumo.mercado)} />
+            <CardMini icone={<Coins size={14} />} titulo="Custo" valor={formatBRL(r.custo)} sub={sub(resumo.custo)} />
+            <CardMini icone={r.ganho >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+              titulo="Ganho / Prejuízo"
+              valor={`${r.ganho >= 0 ? '+' : ''}${formatBRL(r.ganho)}`} cor={corValor(r.ganho)} sub={sub(resumo.ganho)} />
+            <CardMini icone={<Coins size={14} />} titulo="Dividendos" valor={formatBRL(r.dividendos)} cor="#00c896" sub={sub(resumo.dividendos)} />
+          </div>
+        )
+      })()}
 
       {/* Características do título (renda fixa / Tesouro) e do FII */}
       <CaracteristicasAtivo ativo={ativo} />
@@ -397,13 +453,14 @@ function CaracteristicasAtivo({ ativo }: { ativo: InvestimentoAtivo }) {
   )
 }
 
-function CardMini({ icone, titulo, valor, cor }: {
-  icone: React.ReactNode; titulo: string; valor: string; cor?: string
+function CardMini({ icone, titulo, valor, cor, sub }: {
+  icone: React.ReactNode; titulo: string; valor: string; cor?: string; sub?: string
 }) {
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
       <div className="flex items-center gap-2 text-[13px]" style={{ color: MUTED }}>{icone}{titulo}</div>
       <p className="mt-1.5 text-[18px] font-bold" style={{ color: cor ?? '#fff' }}>{valor}</p>
+      {sub && <p className="text-[12px] mt-0.5" style={{ color: MUTED }}>{sub}</p>}
     </div>
   )
 }

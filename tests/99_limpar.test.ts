@@ -204,6 +204,14 @@ describe("Limpar — CA-LIM01 a CA-LIM12", () => {
     const { status: sAtv } = await api(`/investimentos/ativos/${ativoId}`)
     expect(sAtv).toBe(404)
     expect(await transacaoExiste(txDivId)).toBe(false)
+
+    // Configuração é PRESERVADA: o tipo de provento (e seu mapeamento de
+    // categoria) NÃO é apagado por uma limpeza de dados.
+    const { data: tiposApos } = await api("/investimentos/tipos-dividendo") as { data: { dados: { id: string }[] } }
+    expect(tiposApos.dados.some((t) => t.id === (tipoDiv.dados.id as string))).toBe(true)
+
+    // Limpa o resíduo do teste (mantém a suíte idempotente)
+    await api(`/investimentos/tipos-dividendo/${tipoDiv.dados.id}`, "DELETE")
   })
 
   // ── CA-LIM08 ─────────────────────────────────────────────────

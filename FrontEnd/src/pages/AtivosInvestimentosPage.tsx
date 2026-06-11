@@ -18,10 +18,11 @@ import {
   INDEXADORES_RF, INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO,
   SUBTIPO_RF_INFO, subtiposParaTipo,
   CATEGORIAS_FII, FII_CATEGORIA_INFO,
+  ACOES_SUBTIPOS, ACOES_SUBTIPO_LABEL, ACOES_SUBTIPO_DESCRICAO,
 } from '../lib/constants'
 import type {
   InvestimentoAtivo, TipoAtivoInvestimento, SubtipoRF, IndexadorRF, CategoriaFII,
-  ResultadoBuscaAtivo,
+  AcoesSubtipo, ResultadoBuscaAtivo,
 } from '../types'
 
 const MUTED = '#8b92a8'
@@ -30,7 +31,7 @@ const FORM_VAZIO: CriarAtivoInput = {
   ticker: '', nome: '', tipo_ativo: 'ACOES', moeda: 'BRL', descricao: '', nota_usuario: null,
   rf_subtipo: null, rf_indexador: null, rf_taxa: null, rf_emissor: null,
   rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
-  fii_categoria: null,
+  fii_categoria: null, acoes_subtipo: null,
 }
 
 const ehRendaFixa = (tipo: TipoAtivoInvestimento) => tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
@@ -78,7 +79,7 @@ export default function AtivosInvestimentosPage() {
       rf_subtipo: a.rf_subtipo, rf_indexador: a.rf_indexador, rf_taxa: a.rf_taxa,
       rf_emissor: a.rf_emissor, rf_vencimento: a.rf_vencimento,
       rf_garantia_fgc: a.rf_garantia_fgc, rf_isento_ir: a.rf_isento_ir,
-      fii_categoria: a.fii_categoria,
+      fii_categoria: a.fii_categoria, acoes_subtipo: a.acoes_subtipo,
     })
     resetBusca()
     setSelecionado(true)   // já tem nome definido — não exige nova seleção
@@ -107,19 +108,23 @@ export default function AtivosInvestimentosPage() {
   function mudarTipo(tipo: TipoAtivoInvestimento) {
     if (!editando) { resetBusca() }
     const limpaIdent = editando ? {} : { ticker: '', nome: '' }
+    // Ações no exterior (Stocks) são, por padrão, em dólar. BDRs e ETFs
+    // internacionais listados na B3 são cotados em BRL (campo editável).
+    const moedaPadrao = tipo === 'STOCKS' ? 'USD' : 'BRL'
     if (tipo === 'TESOURO_DIRETO') {
       const info = SUBTIPO_RF_INFO.TESOURO
-      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null,
+      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, acoes_subtipo: null, moeda: 'BRL',
         rf_subtipo: 'TESOURO', rf_emissor: info.emissor,
         rf_garantia_fgc: info.fgc, rf_isento_ir: info.isentoIR })
     } else if (tipo === 'RENDA_FIXA') {
-      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null,
+      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, acoes_subtipo: null, moeda: 'BRL',
         rf_subtipo: form.rf_subtipo === 'TESOURO' ? null : form.rf_subtipo })
     } else {
-      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo,
+      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, moeda: moedaPadrao,
         rf_subtipo: null, rf_indexador: null, rf_taxa: null, rf_emissor: null,
         rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
-        fii_categoria: tipo === 'FII' ? form.fii_categoria : null })
+        fii_categoria: tipo === 'FII' ? form.fii_categoria : null,
+        acoes_subtipo: tipo === 'ACOES' ? form.acoes_subtipo : null })
     }
   }
 
@@ -237,6 +242,11 @@ export default function AtivosInvestimentosPage() {
                         {FII_CATEGORIA_INFO[a.fii_categoria].label}
                       </span>
                     )}
+                    {a.tipo_ativo === 'ACOES' && a.acoes_subtipo && (
+                      <span className="ml-1.5 text-[11px] px-1.5 py-0.5 rounded-full border border-white/15" style={{ color: MUTED }}>
+                        {ACOES_SUBTIPO_LABEL[a.acoes_subtipo]}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-center text-white/80">{a.nota_usuario ?? '—'}</td>
                   <td className="px-4 py-2.5">
@@ -303,6 +313,18 @@ export default function AtivosInvestimentosPage() {
                 <p><span className="text-white/70">Risco:</span> {FII_CATEGORIA_INFO[form.fii_categoria].risco} ·{' '}
                   <span className="text-white/70">Vantagem:</span> {FII_CATEGORIA_INFO[form.fii_categoria].vantagem}</p>
               </div>
+            )}
+          </Field>
+        )}
+        {form.tipo_ativo === 'ACOES' && (
+          <Field label="Subtipo da ação">
+            <SelectDark value={form.acoes_subtipo ?? ''}
+              onChange={(e) => setForm({ ...form, acoes_subtipo: (e.target.value || null) as AcoesSubtipo | null })}>
+              <option value="">Selecione...</option>
+              {ACOES_SUBTIPOS.map((s) => <option key={s} value={s}>{ACOES_SUBTIPO_LABEL[s]}</option>)}
+            </SelectDark>
+            {form.acoes_subtipo && (
+              <p className="text-[12px] mt-1" style={{ color: MUTED }}>{ACOES_SUBTIPO_DESCRICAO[form.acoes_subtipo]}</p>
             )}
           </Field>
         )}
@@ -520,7 +542,7 @@ function DrawerPosicoes({ ativo, onClose, onToast }: {
         <Field label="Conta">
           <SelectDark value={form.conta_id} onChange={(e) => setForm({ ...form, conta_id: e.target.value })}>
             <option value="">Selecione...</option>
-            {contas.filter((c) => c.ativa).map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
+            {contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa).map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
           </SelectDark>
         </Field>
         <div className="grid grid-cols-2 gap-3">

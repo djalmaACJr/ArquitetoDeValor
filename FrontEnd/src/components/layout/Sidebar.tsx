@@ -121,7 +121,7 @@ const navFerramentas: NavItem[] = [
     icon: <ArrowLeftRight size={15}/>,
     label: 'Ferramentas',
     children: [
-      { to: '/importexport',     icon: <ArrowLeftRight size={13}/>, label: 'Importar/Exportar' },
+      { to: '/importexport',     icon: <ArrowLeftRight size={13}/>, label: 'Gerenciar dados' },
       { to: '/importar-fatura',  icon: <Receipt size={13}/>,        label: 'Importação de Fatura' },
     ],
   },

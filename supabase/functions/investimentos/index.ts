@@ -8,7 +8,7 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import {
-  json, erro, db, autenticar, extrairId, extrairAcao,
+  json, erro, db, dbAdmin, autenticar, extrairId, extrairAcao,
   verificarExistencia, camposParaAtualizar, corsPreFlight,
 } from "../_shared/utils.ts";
 import { logError, logRequest, logResponse, logSuccess } from "../_shared/logger.ts";
@@ -26,6 +26,8 @@ const SUBTIPOS_RF    = ["TESOURO", "CDB", "LCI", "LCA", "CRI", "CRA", "DEBENTURE
 const INDEXADORES_RF = ["PREFIXADO", "POS_FIXADO", "HIBRIDO"];
 // Fundos imobiliários
 const CATEGORIAS_FII = ["TIJOLO", "PAPEL", "FOF", "DESENVOLVIMENTO", "OUTRO"];
+// Ações
+const SUBTIPOS_ACOES = ["ON", "PN", "UNIT", "BDR"];
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return corsPreFlight();
@@ -50,9 +52,14 @@ Deno.serve(async (req: Request) => {
       case "dividendos":      return await rotaDividendos(c, req, m, userId);
       case "tipos-dividendo": return await rotaTiposDividendo(c, req, m, userId);
       case "historico-mensal": return await rotaHistorico(c, req, m, userId);
+      case "importar":        return await rotaImportar(c, req, m, userId);
       case "dashboard":       return m === "GET" ? await dashboard(c, url.searchParams) : erro("Método não permitido", 405);
       case "ranking":         return m === "GET" ? await ranking(c, url.searchParams) : erro("Método não permitido", 405);
       case "busca-externa":   return m === "GET" ? await buscaExterna(url.searchParams) : erro("Método não permitido", 405);
+      case "ptax":
+        if (m === "GET")  return await rotaPtax(c, url.searchParams);
+        if (m === "POST") return await sincronizarPtaxResposta(c);
+        return erro("Método não permitido", 405);
       default:                return erro("Rota não encontrada", 404);
     }
   } catch (e) {
@@ -144,6 +151,7 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
       rf_garantia_fgc: body.rf_garantia_fgc ?? null,
       rf_isento_ir:    body.rf_isento_ir ?? null,
       fii_categoria:   body.fii_categoria ?? null,
+      acoes_subtipo:   body.acoes_subtipo ?? null,
     }).select().single();
 
     if (error) {
@@ -178,6 +186,7 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
       "questionario_respostas", "ativo_pai",
       "rf_subtipo", "rf_indexador", "rf_taxa", "rf_emissor",
       "rf_vencimento", "rf_garantia_fgc", "rf_isento_ir", "fii_categoria",
+      "acoes_subtipo",
     ]);
     if (typeof campos.ticker === "string") campos.ticker = campos.ticker.trim().toUpperCase();
 
@@ -248,6 +257,9 @@ function validarCamposRF(body: Record<string, unknown>): string | null {
   }
   if (body.fii_categoria != null && !CATEGORIAS_FII.includes(String(body.fii_categoria))) {
     return `fii_categoria inválida: ${CATEGORIAS_FII.join(" | ")}`;
+  }
+  if (body.acoes_subtipo != null && !SUBTIPOS_ACOES.includes(String(body.acoes_subtipo))) {
+    return `acoes_subtipo inválido: ${SUBTIPOS_ACOES.join(" | ")}`;
   }
   return null;
 }
@@ -559,6 +571,13 @@ async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
     const body = await req.json();
     logRequest("POST", "/investimentos/dividendos", body);
 
+    // Associação inversa: vincula a um provento que JÁ existe no extrato
+    // (não cria transação nova). Para trazer dividendos antigos, lançados
+    // manualmente como receitas, para o módulo de investimentos.
+    if (body.transacao_extrato_id) {
+      return await associarDividendoExistente(c, body, userId);
+    }
+
     if (!body.ativo_id || !body.conta_id || body.valor == null || !body.data_pagamento ||
         !body.tipo_ativo || !body.tipo_dividendo_id) {
       return erro("Campos obrigatórios: ativo_id, conta_id, valor, data_pagamento, tipo_ativo, tipo_dividendo_id");
@@ -650,6 +669,49 @@ async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
   }
 
   return erro("Rota não encontrada", 404);
+}
+
+// Associa um provento já lançado no extrato a um ativo, criando o
+// inv_dividendos vinculado SEM gerar nova transação. Idempotente: uma
+// transação só pode ser associada a um dividendo.
+async function associarDividendoExistente(c: Db, body: Record<string, unknown>, userId: string) {
+  if (!body.ativo_id) return erro("ativo_id é obrigatório");
+
+  const { data: ativo } = await c.from("inv_ativos")
+    .select("id, tipo_ativo").eq("id", body.ativo_id).maybeSingle();
+  if (!ativo) return erro("Ativo não encontrado", 404);
+
+  const { data: tx } = await c.from("transacoes")
+    .select("id, conta_id, valor, data, tipo").eq("id", body.transacao_extrato_id).maybeSingle();
+  if (!tx) return erro("Transação do extrato não encontrada", 404);
+  if (tx.tipo !== "RECEITA") return erro("Só é possível associar transações de RECEITA", 409);
+  if (Number(tx.valor) <= 0) return erro("A transação deve ter valor maior que zero", 409);
+
+  const { data: jaVinc } = await c.from("inv_dividendos")
+    .select("id").eq("transacao_extrato_id", tx.id).maybeSingle();
+  if (jaVinc) return erro("Esta transação já está associada a um dividendo", 409);
+
+  let tipoDivId: string | null = body.tipo_dividendo_id ? String(body.tipo_dividendo_id) : null;
+  if (tipoDivId) {
+    const { data: td } = await c.from("inv_tipos_dividendo").select("id").eq("id", tipoDivId).maybeSingle();
+    if (!td) tipoDivId = null; // tipo inválido → grava sem tipo (não bloqueia)
+  }
+
+  const { data, error } = await c.from("inv_dividendos").insert({
+    user_id:              userId,
+    ativo_id:             ativo.id,
+    conta_id:             tx.conta_id,
+    valor:                tx.valor,
+    data_pagamento:       tx.data,
+    tipo_ativo:           ativo.tipo_ativo,
+    tipo_dividendo_id:    tipoDivId,
+    descricao:            body.descricao ?? null,
+    transacao_extrato_id: tx.id,
+  }).select("*, inv_ativos(ticker, nome), inv_tipos_dividendo(nome), transacoes(status)").single();
+
+  if (error) { logError("Associar dividendo existente", error); return erro(error.message); }
+  logSuccess("Dividendo associado ao extrato existente", { id: data.id, tx: tx.id });
+  return json({ dados: data }, 201);
 }
 
 // ============================================================
@@ -872,6 +934,356 @@ async function rotaHistorico(c: Db, req: Request, m: string, userId: string) {
   }
 
   return erro("Rota não encontrada", 404);
+}
+
+// ============================================================
+// /investimentos/importar — importação em lote (extrato + posição B3)
+//
+// O frontend faz o parsing dos dois arquivos da B3 e envia UM payload
+// já resolvido (instituições já viram conta_id; tipos já escolhidos).
+// O servidor insere em ordem de dependência (ativo → posição → operação
+// → dividendo → histórico) usando inserts em lote, com dedup/upsert para
+// ser idempotente (re-importar não duplica).
+//
+// Princípio: a POSIÇÃO é a fonte da verdade da quantidade atual e do
+// valor de mercado; o EXTRATO fornece o custo (média das compras), o
+// histórico de operações e os proventos.
+// ============================================================
+
+interface AtivoIn {
+  ticker: string; nome?: string; tipo_ativo: string; moeda?: string;
+  rf_subtipo?: string | null; rf_indexador?: string | null;
+  rf_emissor?: string | null; rf_vencimento?: string | null;
+  fii_categoria?: string | null; acoes_subtipo?: string | null;
+}
+interface PosicaoIn {
+  ticker: string; conta_id: string; quantidade: number; preco_custo: number;
+  data_compra: string; valor_mercado: number; mes_ano?: string;
+}
+interface OperacaoIn {
+  ticker: string; conta_id: string; tipo_operacao: string; quantidade: number;
+  preco_unitario?: number; valor_total?: number; data_operacao: string;
+}
+interface DividendoIn {
+  ticker: string; conta_id: string; valor: number; data_pagamento: string;
+  tipo_ativo: string; tipo_dividendo_nome?: string | null;
+}
+
+// Insere um array em lote, em pedaços, devolvendo as linhas criadas.
+async function inserirEmLote(
+  c: Db, tabela: string, rows: Record<string, unknown>[], retorno = "*", chunk = 500,
+): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  for (let i = 0; i < rows.length; i += chunk) {
+    const fatia = rows.slice(i, i + chunk);
+    // deno-lint-ignore no-explicit-any
+    const { data, error } = await c.from(tabela).insert(fatia as any).select(retorno);
+    if (error) throw new Error(`${tabela}: ${error.message}`);
+    if (data) out.push(...(data as unknown as Record<string, unknown>[]));
+  }
+  return out;
+}
+
+async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  const body = await req.json();
+  logRequest("POST", "/investimentos/importar", {
+    ativos: body?.ativos?.length, posicoes: body?.posicoes?.length,
+    operacoes: body?.operacoes?.length, dividendos: body?.dividendos?.length,
+    gerar_extrato: body?.gerar_extrato_proventos,
+  });
+
+  const ativosIn     = Array.isArray(body.ativos)     ? body.ativos     as AtivoIn[]     : [];
+  const posicoesIn   = Array.isArray(body.posicoes)   ? body.posicoes   as PosicaoIn[]   : [];
+  const operacoesIn  = Array.isArray(body.operacoes)  ? body.operacoes  as OperacaoIn[]  : [];
+  const dividendosIn = Array.isArray(body.dividendos) ? body.dividendos as DividendoIn[] : [];
+  const gerarExtrato = body.gerar_extrato_proventos === true;
+  const avisos: string[] = [];
+
+  if (ativosIn.length === 0 && posicoesIn.length === 0 &&
+      operacoesIn.length === 0 && dividendosIn.length === 0) {
+    return erro("Nada para importar");
+  }
+
+  const up = (s: unknown) => String(s ?? "").trim().toUpperCase();
+
+  try {
+    // ── Validação de contas (uma vez) ───────────────────────────────
+    const contaIds = [...new Set([
+      ...posicoesIn.map((p) => p.conta_id),
+      ...operacoesIn.map((o) => o.conta_id),
+      ...dividendosIn.map((d) => d.conta_id),
+    ].filter(Boolean))];
+    const contasValidas = new Set<string>();
+    if (contaIds.length > 0) {
+      const { data: contasOk } = await c.from("contas").select("id").in("id", contaIds);
+      for (const x of contasOk ?? []) contasValidas.add(String(x.id));
+    }
+
+    // ── 1) Ativos — insere só os que ainda não existem ──────────────
+    const { data: existentes } = await c.from("inv_ativos").select("id, ticker");
+    const idPorTicker = new Map<string, string>();
+    for (const a of existentes ?? []) idPorTicker.set(up(a.ticker), String(a.id));
+
+    const novosPorTicker = new Map<string, Record<string, unknown>>();
+    for (const a of ativosIn) {
+      const ticker = up(a.ticker);
+      if (!ticker || ticker.length > 20) continue;
+      if (!TIPOS_ATIVO.includes(String(a.tipo_ativo))) continue;
+      if (idPorTicker.has(ticker) || novosPorTicker.has(ticker)) continue;
+      novosPorTicker.set(ticker, {
+        user_id:       userId,
+        ticker,
+        nome:          String(a.nome ?? ticker).trim().slice(0, 120) || ticker,
+        tipo_ativo:    a.tipo_ativo,
+        moeda:         a.moeda ? up(a.moeda).slice(0, 3) : "BRL",
+        rf_subtipo:    a.rf_subtipo ?? null,
+        rf_indexador:  a.rf_indexador ?? null,
+        rf_emissor:    a.rf_emissor ?? null,
+        rf_vencimento: a.rf_vencimento ?? null,
+        fii_categoria: a.fii_categoria ?? null,
+        acoes_subtipo: SUBTIPOS_ACOES.includes(String(a.acoes_subtipo)) ? a.acoes_subtipo : null,
+      });
+    }
+    let ativosCriados = 0;
+    if (novosPorTicker.size > 0) {
+      const criados = await inserirEmLote(c, "inv_ativos", [...novosPorTicker.values()], "id, ticker");
+      ativosCriados = criados.length;
+      for (const a of criados) idPorTicker.set(up(a.ticker), String(a.id));
+    }
+
+    // ── 2) Posições — uma por (ativo_id, conta_id), status ATIVA ────
+    const posPorPar = new Map<string, string>(); // ativo_id|conta_id -> posicao_id
+    const { data: posExist } = await c.from("inv_posicoes")
+      .select("id, ativo_id, conta_id").eq("status", "ATIVA");
+    for (const p of posExist ?? []) posPorPar.set(`${p.ativo_id}|${p.conta_id}`, String(p.id));
+
+    const posInserir: Record<string, unknown>[] = [];
+    const posAtualizar: { id: string; campos: Record<string, unknown> }[] = [];
+    const vistosPar = new Set<string>();
+    for (const p of posicoesIn) {
+      const ativoId = idPorTicker.get(up(p.ticker));
+      if (!ativoId || !p.conta_id || !contasValidas.has(p.conta_id)) continue;
+      const key = `${ativoId}|${p.conta_id}`;
+      if (vistosPar.has(key)) continue;
+      vistosPar.add(key);
+      const campos = {
+        quantidade:  Number(p.quantidade)  || 0,
+        preco_custo: Number(p.preco_custo) || 0,
+        data_compra: String(p.data_compra),
+        status:      "ATIVA",
+      };
+      const existId = posPorPar.get(key);
+      if (existId) posAtualizar.push({ id: existId, campos });
+      else posInserir.push({ user_id: userId, ativo_id: ativoId, conta_id: p.conta_id, ...campos });
+    }
+    let posicoesCount = 0;
+    if (posInserir.length > 0) {
+      const criadas = await inserirEmLote(c, "inv_posicoes", posInserir, "id, ativo_id, conta_id");
+      posicoesCount += criadas.length;
+      for (const p of criadas) posPorPar.set(`${p.ativo_id}|${p.conta_id}`, String(p.id));
+    }
+    for (const u of posAtualizar) {
+      const { error } = await c.from("inv_posicoes").update(u.campos).eq("id", u.id);
+      if (error) avisos.push(`Falha ao atualizar posição: ${error.message}`);
+      else posicoesCount++;
+    }
+
+    // Posições "fantasma" ENCERRADAS para pares que só aparecem no
+    // extrato (ativo totalmente vendido) — dão lar às operações sem
+    // distorcer a carteira atual (quantidade 0).
+    const paresOperacao = new Set<string>();
+    for (const o of operacoesIn) {
+      const ativoId = idPorTicker.get(up(o.ticker));
+      if (ativoId && o.conta_id && contasValidas.has(o.conta_id)) paresOperacao.add(`${ativoId}|${o.conta_id}`);
+    }
+    const orfas: Record<string, unknown>[] = [];
+    for (const par of paresOperacao) {
+      if (posPorPar.has(par)) continue;
+      const [ativoId, contaId] = par.split("|");
+      // data_compra = 1ª operação do par
+      const datas = operacoesIn
+        .filter((o) => idPorTicker.get(up(o.ticker)) === ativoId && o.conta_id === contaId)
+        .map((o) => String(o.data_operacao)).filter(Boolean).sort();
+      orfas.push({
+        user_id: userId, ativo_id: ativoId, conta_id: contaId,
+        quantidade: 0, preco_custo: 0,
+        data_compra: datas[0] ?? new Date().toISOString().split("T")[0],
+        status: "ENCERRADA", _par: par,
+      });
+    }
+    if (orfas.length > 0) {
+      const semPar = orfas.map(({ _par, ...r }) => r);
+      const criadas = await inserirEmLote(c, "inv_posicoes", semPar, "id, ativo_id, conta_id");
+      for (const p of criadas) posPorPar.set(`${p.ativo_id}|${p.conta_id}`, String(p.id));
+    }
+
+    // ── 3) Operações — dedup por (posicao, tipo, data, qtd, valor) ──
+    const posIds = [...posPorPar.values()];
+    const opKey = (o: Record<string, unknown>) =>
+      `${o.posicao_id}|${o.tipo_operacao}|${o.data_operacao}|${Number(o.quantidade)}|${Number(o.valor_total)}`;
+    const opsExistSet = new Set<string>();
+    if (posIds.length > 0) {
+      // .in() em pedaços para não estourar limite de URL
+      for (let i = 0; i < posIds.length; i += 200) {
+        const { data } = await c.from("inv_operacoes")
+          .select("posicao_id, tipo_operacao, data_operacao, quantidade, valor_total")
+          .in("posicao_id", posIds.slice(i, i + 200));
+        for (const o of data ?? []) opsExistSet.add(opKey(o));
+      }
+    }
+    const opsInserir: Record<string, unknown>[] = [];
+    for (const o of operacoesIn) {
+      const ativoId = idPorTicker.get(up(o.ticker));
+      if (!ativoId || !o.conta_id || !contasValidas.has(o.conta_id)) continue;
+      if (!TIPOS_OPERACAO.includes(String(o.tipo_operacao))) continue;
+      const posId = posPorPar.get(`${ativoId}|${o.conta_id}`);
+      if (!posId) continue;
+      const qtd   = Number(o.quantidade) || 0;
+      const preco = Number(o.preco_unitario) || 0;
+      const valor = o.valor_total != null ? Number(o.valor_total) : qtd * preco;
+      const row = {
+        user_id: userId, posicao_id: posId, tipo_operacao: o.tipo_operacao,
+        conta_id: o.conta_id, quantidade: qtd, preco_unitario: preco,
+        valor_total: valor, data_operacao: String(o.data_operacao),
+      };
+      const k = opKey(row);
+      if (opsExistSet.has(k)) continue;
+      opsExistSet.add(k);
+      opsInserir.push(row);
+    }
+    let operacoesCount = 0;
+    if (opsInserir.length > 0) {
+      const criadas = await inserirEmLote(c, "inv_operacoes", opsInserir);
+      operacoesCount = criadas.length;
+    }
+
+    // ── 4) Dividendos — dedup por (ativo, data, valor, tipo_ativo) ──
+    const { data: tiposDiv } = await c.from("inv_tipos_dividendo").select("id, nome, categoria_id");
+    const tipoDivPorNome = new Map<string, { id: string; categoria_id: string | null }>();
+    for (const t of tiposDiv ?? []) {
+      tipoDivPorNome.set(String(t.nome).toLowerCase(), { id: String(t.id), categoria_id: t.categoria_id ?? null });
+    }
+    // cria tipos de provento ausentes (sem categoria mapeada)
+    const nomesNecessarios = [...new Set(
+      dividendosIn.map((d) => (d.tipo_dividendo_nome ?? "").trim()).filter(Boolean),
+    )];
+    for (const nome of nomesNecessarios) {
+      if (tipoDivPorNome.has(nome.toLowerCase())) continue;
+      const { data, error } = await c.from("inv_tipos_dividendo")
+        .insert({ user_id: userId, nome: nome.slice(0, 40) }).select("id, categoria_id").single();
+      if (!error && data) tipoDivPorNome.set(nome.toLowerCase(), { id: String(data.id), categoria_id: data.categoria_id ?? null });
+    }
+
+    const { data: divExist } = await c.from("inv_dividendos")
+      .select("ativo_id, data_pagamento, valor, tipo_ativo");
+    const divKey = (ativoId: string, data: string, valor: number, tipo: string) =>
+      `${ativoId}|${data}|${valor}|${tipo}`;
+    const divExistSet = new Set<string>();
+    for (const d of divExist ?? []) divExistSet.add(divKey(String(d.ativo_id), String(d.data_pagamento), Number(d.valor), String(d.tipo_ativo)));
+
+    const hoje = new Date().toISOString().split("T")[0];
+    const divSemExtrato: Record<string, unknown>[] = [];
+    const divComExtrato: { div: Record<string, unknown>; categoriaId: string; ticker: string; tipoNome: string }[] = [];
+    let semCategoria = 0;
+    for (const d of dividendosIn) {
+      const ativoId = idPorTicker.get(up(d.ticker));
+      const valor = Number(d.valor);
+      if (!ativoId || !d.conta_id || !contasValidas.has(d.conta_id)) continue;
+      if (!(valor > 0) || !TIPOS_ATIVO.includes(String(d.tipo_ativo))) continue;
+      const k = divKey(ativoId, String(d.data_pagamento), valor, String(d.tipo_ativo));
+      if (divExistSet.has(k)) continue;
+      divExistSet.add(k);
+      const tipo = d.tipo_dividendo_nome ? tipoDivPorNome.get(String(d.tipo_dividendo_nome).toLowerCase()) : undefined;
+      const base = {
+        user_id: userId, ativo_id: ativoId, conta_id: d.conta_id, valor,
+        data_pagamento: String(d.data_pagamento), tipo_ativo: d.tipo_ativo,
+        tipo_dividendo_id: tipo?.id ?? null,
+      };
+      if (gerarExtrato && tipo?.categoria_id) {
+        divComExtrato.push({ div: base, categoriaId: tipo.categoria_id, ticker: up(d.ticker), tipoNome: String(d.tipo_dividendo_nome) });
+      } else {
+        if (gerarExtrato && d.tipo_dividendo_nome && !tipo?.categoria_id) semCategoria++;
+        divSemExtrato.push(base);
+      }
+    }
+
+    let dividendosCount = 0;
+    let dividendosNoExtrato = 0;
+    if (divSemExtrato.length > 0) {
+      const criados = await inserirEmLote(c, "inv_dividendos", divSemExtrato, "id");
+      dividendosCount += criados.length;
+    }
+    // Subset com extrato: por linha (precisa vincular a transação criada)
+    for (const item of divComExtrato) {
+      const { data: div, error: errDiv } = await c.from("inv_dividendos").insert(item.div).select("id").single();
+      if (errDiv || !div) { avisos.push(`Falha ao gravar dividendo ${item.ticker}: ${errDiv?.message ?? ""}`); continue; }
+      dividendosCount++;
+      const futuro = String((item.div as Record<string, unknown>).data_pagamento) > hoje;
+      const desc = `${item.ticker} - ${item.tipoNome}`.slice(0, 200);
+      const { data: tx, error: errTx } = await c.from("transacoes").insert({
+        user_id: userId,
+        conta_id: (item.div as Record<string, unknown>).conta_id,
+        categoria_id: item.categoriaId,
+        data: (item.div as Record<string, unknown>).data_pagamento,
+        descricao: desc.length >= 2 ? desc : `Dividendo ${desc}`.slice(0, 200),
+        valor: (item.div as Record<string, unknown>).valor,
+        tipo: "RECEITA",
+        status: futuro ? "PROJECAO" : "PAGO",
+        valor_projetado: futuro ? (item.div as Record<string, unknown>).valor : null,
+      }).select("id").single();
+      if (errTx || !tx) { avisos.push(`Dividendo ${item.ticker} gravado, mas falhou no extrato: ${errTx?.message ?? ""}`); continue; }
+      await c.from("inv_dividendos").update({ transacao_extrato_id: tx.id }).eq("id", div.id);
+      dividendosNoExtrato++;
+    }
+    if (semCategoria > 0) {
+      avisos.push(`${semCategoria} provento(s) gravados sem extrato: o tipo não tem categoria mapeada (configure em Investimentos › Tipos de provento).`);
+    }
+
+    // ── 5) Histórico mensal — snapshot do mês corrente ──────────────
+    const mesAno = hoje.slice(0, 7);
+    let historicoCount = 0;
+    const histVistos = new Set<string>();
+    for (const p of posicoesIn) {
+      const ativoId = idPorTicker.get(up(p.ticker));
+      if (!ativoId || !p.conta_id || !contasValidas.has(p.conta_id)) continue;
+      const mes = p.mes_ano && RE_MES_ANO.test(String(p.mes_ano)) ? String(p.mes_ano) : mesAno;
+      const par = `${ativoId}|${p.conta_id}|${mes}`;
+      if (histVistos.has(par)) continue;
+      histVistos.add(par);
+      const valorMercado = Number(p.valor_mercado);
+      if (!Number.isFinite(valorMercado) || valorMercado < 0) continue;
+      const quantidade = Number(p.quantidade) || 0;
+      const precoMedio = Number(p.preco_custo) || 0;
+      const prev = await snapshotVizinho(c, ativoId, p.conta_id, mes, "anterior");
+      const desempenho = calcularDesempenho(valorMercado, quantidade, precoMedio, prev);
+      const { error } = await c.from("inv_historico_mensal").upsert({
+        user_id: userId, ativo_id: ativoId, conta_id: p.conta_id, mes_ano: mes,
+        valor_mercado: valorMercado, quantidade, preco_medio: precoMedio, ...desempenho,
+      }, { onConflict: "ativo_id,conta_id,mes_ano" });
+      if (error) { avisos.push(`Histórico ${up(p.ticker)}: ${error.message}`); continue; }
+      await recalcularSeguinte(c, ativoId, p.conta_id, mes);
+      historicoCount++;
+    }
+
+    logSuccess("Importação de investimentos concluída", {
+      ativosCriados, posicoesCount, operacoesCount, dividendosCount, dividendosNoExtrato,
+    });
+    return json({
+      dados: {
+        ativos_criados:        ativosCriados,
+        posicoes:              posicoesCount,
+        operacoes:             operacoesCount,
+        dividendos:            dividendosCount,
+        dividendos_no_extrato: dividendosNoExtrato,
+        historico:             historicoCount,
+        avisos,
+      },
+    }, 201);
+  } catch (e) {
+    logError("Importar investimentos", e);
+    return erro(`Falha na importação: ${(e as Error).message}`);
+  }
 }
 
 // ============================================================
@@ -1210,4 +1622,152 @@ async function buscaExterna(params: URLSearchParams) {
     logError("Busca externa", e);
     return erro(`Não foi possível consultar a fonte externa: ${(e as Error).message}`, 502);
   }
+}
+
+// ============================================================
+// /investimentos/ptax — cotação PTAX do dólar (USD/BRL)
+//
+// Tabela COMPARTILHADA (arqvalor.cotacoes_ptax) sincronizada com o PTAX
+// do Banco Central (Olinda/BCB), com data de corte 2021-01-01.
+//
+//   GET  /investimentos/ptax?datas=2024-01-05,...  → cotações por data
+//   POST /investimentos/ptax                        → força sincronização
+//                                                     (uso por agendador/cron)
+//
+// Sincronização automática: a cada GET, se a tabela estiver vazia faz o
+// backfill desde a data de corte; senão re-busca uma janela recente até
+// hoje. Com isso:
+//   • lançamento com data de HOJE: o PTAX do dia ainda não saiu (publica
+//     ~13h) → o front usa a cotação "atual" (último dia útil disponível);
+//   • nos dias seguintes: o re-fetch traz o PTAX oficial daquela data e a
+//     conversão exibida passa a usar o valor correto (upsert sobrescreve).
+//
+// Leitura via JWT do usuário; gravação via service_role.
+// ============================================================
+
+const RE_DATA = /^\d{4}-\d{2}-\d{2}$/;
+const PTAX_DATA_CORTE = "2021-01-01"; // histórico a partir desta data
+
+function hojeISO(): string { return new Date().toISOString().slice(0, 10); }
+function deslocarDias(dataISO: string, n: number): string {
+  const dt = new Date(`${dataISO}T12:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+}
+const recuarDias = (d: string, n: number) => deslocarDias(d, -n);
+const maiorData  = (a: string, b: string) => (a > b ? a : b);
+const menorData  = (a: string, b: string) => (a < b ? a : b);
+
+// Busca o PTAX de fechamento (1 por dia útil) na janela [ini, fim] no BCB.
+// CotacaoDolarPeriodo já devolve a cotação de fechamento por dia útil.
+async function buscarPtaxBCB(
+  ini: string, fim: string,
+): Promise<{ data: string; cotacao_compra: number; cotacao_venda: number }[]> {
+  const fmt = (d: string) => { const [a, m, dd] = d.split("-"); return `${m}-${dd}-${a}`; }; // MM-dd-yyyy
+  const url =
+    "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/" +
+    "CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)" +
+    `?@dataInicial='${fmt(ini)}'&@dataFinalCotacao='${fmt(fim)}'&$top=100&$format=json`;
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`BCB respondeu ${res.status}`);
+  const data = await res.json() as {
+    value?: { cotacaoCompra: number; cotacaoVenda: number; dataHoraCotacao: string }[];
+  };
+  const porData = new Map<string, { compra: number; venda: number }>();
+  for (const v of data.value ?? []) {
+    const d = String(v.dataHoraCotacao).slice(0, 10);
+    if (!RE_DATA.test(d)) continue;
+    porData.set(d, { compra: Number(v.cotacaoCompra), venda: Number(v.cotacaoVenda) });
+  }
+  return [...porData.entries()].map(([data, v]) => ({
+    data, cotacao_compra: v.compra, cotacao_venda: v.venda,
+  }));
+}
+
+// Sincroniza [desde..ate] em janelas (≤ ~65 dias úteis cada, compatível
+// com $top=100). Idempotente (upsert por data). Devolve o total inserido.
+async function sincronizarPtax(desde: string, ate: string): Promise<number> {
+  if (desde > ate) return 0;
+  const admin = dbAdmin();
+  let inicio = desde;
+  let total = 0;
+  for (let i = 0; i < 60 && inicio <= ate; i++) {          // trava de segurança
+    const fim = menorData(deslocarDias(inicio, 95), ate);  // ~65 dias úteis < 100
+    let linhas: { data: string; cotacao_compra: number; cotacao_venda: number }[];
+    try {
+      linhas = await buscarPtaxBCB(inicio, fim);
+    } catch (e) { logError("PTAX BCB janela", e); break; }
+    if (linhas.length > 0) {
+      const { error } = await admin.from("cotacoes_ptax").upsert(linhas, { onConflict: "data" });
+      if (error) { logError("Upsert cotacoes_ptax", error); break; }
+      total += linhas.length;
+    }
+    inicio = deslocarDias(fim, 1);
+  }
+  return total;
+}
+
+async function ultimaCotacaoPtax(c: Db): Promise<string | null> {
+  const { data } = await c.from("cotacoes_ptax")
+    .select("data").order("data", { ascending: false }).limit(1).maybeSingle();
+  return (data as { data?: string } | null)?.data ?? null;
+}
+
+// Garante a tabela sincronizada: backfill desde o corte quando vazia;
+// senão re-busca uma janela recente (trailing 3 dias) até hoje — assim a
+// cotação de um lançamento feito "hoje" é atualizada quando o PTAX oficial
+// daquele dia é publicado.
+async function garantirSincronizado(c: Db): Promise<void> {
+  const hoje = hojeISO();
+  const ultima = await ultimaCotacaoPtax(c);
+  if (!ultima) { await sincronizarPtax(PTAX_DATA_CORTE, hoje); return; }
+  if (ultima < hoje) {
+    await sincronizarPtax(maiorData(PTAX_DATA_CORTE, recuarDias(ultima, 3)), hoje);
+  }
+}
+
+async function rotaPtax(c: Db, params: URLSearchParams) {
+  try { await garantirSincronizado(c); } catch (e) { logError("Sincronizar PTAX", e); }
+
+  const hoje = hojeISO();
+  const pedidas = new Set<string>([hoje]);
+  for (const d of (params.get("datas") ?? "").split(",")) {
+    const t = d.trim();
+    if (RE_DATA.test(t)) pedidas.add(t);
+  }
+  const lista = [...pedidas].sort();
+  const janelaIni = recuarDias(lista[0], 15);
+
+  const { data } = await c.from("cotacoes_ptax")
+    .select("data, cotacao_venda")
+    .gte("data", janelaIni).lte("data", hoje)
+    .order("data", { ascending: true });
+  const rows = (data ?? []) as { data: string; cotacao_venda: number }[];
+
+  const byDate: Record<string, number> = {};
+  for (const d of lista) {
+    let aplicavel: number | null = null;
+    for (const r of rows) { if (r.data <= d) aplicavel = Number(r.cotacao_venda); else break; }
+    if (aplicavel != null) byDate[d] = aplicavel;
+  }
+  const atualRow = rows.length ? rows[rows.length - 1] : null;
+  return json({
+    dados: {
+      byDate,
+      atual:      atualRow ? Number(atualRow.cotacao_venda) : null,
+      atual_data: atualRow?.data ?? null,
+    },
+  });
+}
+
+// POST /investimentos/ptax — sincronização explícita (agendador/cron).
+async function sincronizarPtaxResposta(c: Db) {
+  logRequest("POST", "/investimentos/ptax");
+  const hoje = hojeISO();
+  const ultima = await ultimaCotacaoPtax(c);
+  const desde = ultima ? maiorData(PTAX_DATA_CORTE, recuarDias(ultima, 3)) : PTAX_DATA_CORTE;
+  const inseridos = await sincronizarPtax(desde, hoje);
+  logSuccess("PTAX sincronizado", { desde, ate: hoje, inseridos });
+  return json({ dados: { inseridos, desde, ate: hoje } });
 }

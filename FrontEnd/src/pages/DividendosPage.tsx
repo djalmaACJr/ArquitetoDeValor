@@ -1,24 +1,44 @@
 import { useState } from 'react'
-import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2 } from 'lucide-react'
+import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useDividendos, type CriarDividendoInput } from '../hooks/useDividendos'
 import { useTiposDividendo } from '../hooks/useTiposDividendo'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useCategorias } from '../hooks/useCategorias'
 import { useContas } from '../hooks/useContas'
+import { apiFetch, extrairLista } from '../lib/api'
 import {
   Drawer, Field, Input, SelectDark, SearchableSelect, BtnSalvar, BtnCancelar,
   Toast, ModalExcluir, Segmented,
 } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
-import { formatBRL, formatData, hojeLocal } from '../lib/utils'
+import { formatBRL, formatData, hojeLocal, mesAtual } from '../lib/utils'
 import type { InvestimentoDividendo, InvestimentoTipoDividendo, TipoAtivoInvestimento } from '../types'
 
 const MUTED = '#8b92a8'
 
+// Lista de meses (YYYY-MM) de `ini` até `fim`, inclusive.
+function gerarMeses(ini: string, fim: string): string[] {
+  const out: string[] = []
+  let [a, m] = ini.split('-').map(Number)
+  const [af, mf] = fim.split('-').map(Number)
+  while (a < af || (a === af && m <= mf)) {
+    out.push(`${a}-${String(m).padStart(2, '0')}`)
+    m++; if (m > 12) { m = 1; a++ }
+  }
+  return out
+}
+function mesMenos(m: string, n: number): string {
+  const [a, mo] = m.split('-').map(Number)
+  let a2 = a, m2 = mo - n
+  while (m2 <= 0) { m2 += 12; a2-- }
+  return `${a2}-${String(m2).padStart(2, '0')}`
+}
+
 export default function DividendosPage() {
   const [drawerNovo,   setDrawerNovo]   = useState(false)
   const [drawerConfig, setDrawerConfig] = useState(false)
+  const [drawerAssoc,  setDrawerAssoc]  = useState(false)
   const [excluindo,    setExcluindo]    = useState<InvestimentoDividendo | null>(null)
   const [confirmando,  setConfirmando]  = useState<InvestimentoDividendo | null>(null)
   const [salvando,     setSalvando]     = useState(false)
@@ -57,6 +77,10 @@ export default function DividendosPage() {
           <button onClick={() => setDrawerConfig(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
             <Settings size={15} /> Configurar tipos
+          </button>
+          <button onClick={() => setDrawerAssoc(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
+            <Link2 size={15} /> Associar do extrato
           </button>
           <button onClick={() => setDrawerNovo(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white" style={{ background: '#3b82f6' }}>
@@ -127,6 +151,7 @@ export default function DividendosPage() {
 
       {drawerNovo   && <DrawerNovoDividendo onClose={() => setDrawerNovo(false)} onToast={showToast} />}
       {drawerConfig && <DrawerConfigTipos   onClose={() => setDrawerConfig(false)} onToast={showToast} />}
+      {drawerAssoc  && <DrawerAssociar      onClose={() => setDrawerAssoc(false)} onToast={showToast} />}
       {confirmando  && <DrawerConfirmar dividendo={confirmando} onClose={() => setConfirmando(null)} onToast={showToast} />}
 
       {excluindo && (
@@ -200,7 +225,7 @@ function DrawerNovoDividendo({ onClose, onToast }: { onClose: () => void; onToas
       <Field label="Conta de recebimento">
         <SelectDark value={contaId} onChange={(e) => setContaId(e.target.value)}>
           <option value="">Selecione...</option>
-          {contas.filter((c) => c.ativa).map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
+          {contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa).map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
         </SelectDark>
       </Field>
       <div className="grid grid-cols-2 gap-3">
@@ -379,5 +404,182 @@ function MapRow({ tipo, onToast }: { tipo: InvestimentoTipoDividendo; onToast: (
         </button>
       </div>
     </div>
+  )
+}
+
+// ── Drawer: associar proventos já lançados no extrato ───────────
+// Caso de uso: o usuário já registrava dividendos/aluguéis como receitas
+// no extrato antes de existir o módulo de investimentos. Aqui vinculamos
+// esses lançamentos a um ativo (cria inv_dividendos apontando para a
+// transação existente, SEM criar lançamento novo → sem duplicar).
+interface LinhaAssoc {
+  transacao_id: string
+  data: string
+  descricao: string
+  valor: number
+  ativo_id: string
+  tipo_dividendo_id: string
+  importar: boolean
+}
+interface TxAssoc {
+  id: string; data: string; descricao?: string; valor: number; tipo: string
+  categoria_id?: string; categoria_nome?: string
+}
+
+function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m: string) => void }) {
+  const { ativos } = useInvestimentosAtivos()
+  const { tipos }  = useTiposDividendo()
+  const { categorias } = useCategorias()
+  const { dividendos, associar } = useDividendos()
+
+  const [categoriaId, setCategoriaId] = useState('')
+  const [de,  setDe]  = useState(mesMenos(mesAtual(), 11))
+  const [ate, setAte] = useState(mesAtual())
+  const [etapa, setEtapa] = useState<'config' | 'revisando'>('config')
+  const [carregando, setCarregando] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const [linhas, setLinhas] = useState<LinhaAssoc[]>([])
+
+  const catsOpcoes = categorias.map((c) => ({
+    id: c.id, label: c.descricao,
+    sublabel: c.id_pai ? categorias.find((p) => p.id === c.id_pai)?.descricao : undefined,
+  }))
+  // Tickers do mais longo p/ o mais curto, evitando casar um prefixo curto
+  const tickersOrd = [...ativos].sort((a, b) => b.ticker.length - a.ticker.length)
+  const detectarAtivo = (desc: string): string => {
+    const d = desc.toUpperCase()
+    return tickersOrd.find((a) => d.includes(a.ticker.toUpperCase()))?.id ?? ''
+  }
+  const tipoPorCategoria = (catId: string): string => tipos.find((t) => t.categoria_id === catId)?.id ?? ''
+  const setLinha = (idx: number, patch: Partial<LinhaAssoc>) =>
+    setLinhas((ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)))
+
+  async function buscar() {
+    if (!categoriaId) { onToast('Selecione a categoria onde os proventos foram lançados'); return }
+    setCarregando(true)
+    try {
+      const meses = gerarMeses(de, ate)
+      const resArr = await Promise.all(meses.map((mm) => apiFetch(`/transacoes?mes=${mm}&per_page=1000`)))
+      const txs = resArr.flatMap((r) => extrairLista<TxAssoc>(r.dados))
+      const linkados = new Set(dividendos.map((d) => d.transacao_extrato_id).filter(Boolean) as string[])
+      const catDesc = (categorias.find((c) => c.id === categoriaId)?.descricao ?? '').toLowerCase()
+      const vistos = new Set<string>()
+      const ls: LinhaAssoc[] = []
+      for (const t of txs) {
+        if (!t.id || vistos.has(t.id) || t.tipo !== 'RECEITA') continue
+        const casa = t.categoria_id === categoriaId ||
+          (!!catDesc && (t.categoria_nome ?? '').toLowerCase() === catDesc)
+        if (!casa || linkados.has(t.id) || !(Number(t.valor) > 0)) continue
+        vistos.add(t.id)
+        const ativoId = detectarAtivo(String(t.descricao ?? ''))
+        ls.push({
+          transacao_id: t.id, data: t.data, descricao: String(t.descricao ?? ''),
+          valor: Number(t.valor), ativo_id: ativoId,
+          tipo_dividendo_id: tipoPorCategoria(categoriaId), importar: !!ativoId,
+        })
+      }
+      ls.sort((a, b) => (a.data < b.data ? 1 : -1))
+      setLinhas(ls)
+      setEtapa('revisando')
+      if (ls.length === 0) onToast('Nenhuma receita não associada encontrada nesse período/categoria.')
+    } catch (e) {
+      onToast(`Erro ao buscar: ${(e as Error).message}`)
+    } finally { setCarregando(false) }
+  }
+
+  async function confirmar() {
+    const sel = linhas.filter((l) => l.importar && l.ativo_id)
+    if (sel.length === 0) { onToast('Defina o ativo e marque ao menos uma linha.'); return }
+    setSalvando(true)
+    let ok = 0, erros = 0
+    for (const l of sel) {
+      const res = await associar({
+        transacao_extrato_id: l.transacao_id, ativo_id: l.ativo_id,
+        tipo_dividendo_id: l.tipo_dividendo_id || null,
+      })
+      if (res.ok) ok++; else erros++
+    }
+    setSalvando(false)
+    onToast(`${ok} provento(s) associado(s)${erros ? `, ${erros} com erro` : ''}.`)
+    onClose()
+  }
+
+  const selCount = linhas.filter((l) => l.importar && l.ativo_id).length
+
+  return (
+    <Drawer open onClose={onClose} titulo="Associar proventos do extrato"
+      subtitulo="Vincula dividendos/aluguéis já lançados aos investimentos (sem duplicar)"
+      rodape={etapa === 'revisando'
+        ? <>
+            <button onClick={() => setEtapa('config')}
+              className="px-4 py-2.5 rounded-lg border border-white/10 text-[16px] font-semibold text-white/80 hover:border-white/25">
+              Voltar
+            </button>
+            <BtnSalvar editando={false} onClick={confirmar} salvando={salvando} labelSalvar={`Associar ${selCount}`} />
+          </>
+        : <><BtnCancelar onClick={onClose} /><BtnSalvar editando={false} onClick={buscar} salvando={carregando} labelSalvar="Buscar" /></>}>
+      {etapa === 'config' ? (
+        <>
+          <p className="text-[13px]" style={{ color: MUTED }}>
+            Escolha a categoria onde você lança os proventos no extrato e o período. Listaremos as
+            receitas ainda não associadas para você vincular a cada ativo — sem criar lançamentos novos.
+          </p>
+          <Field label="Categoria dos proventos">
+            <SearchableSelect value={categoriaId} onChange={setCategoriaId} placeholder="Buscar categoria..." opcoes={catsOpcoes} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="De"><Input type="month" value={de} onChange={(e) => setDe(e.target.value)} /></Field>
+            <Field label="Até"><Input type="month" value={ate} onChange={(e) => setAte(e.target.value)} /></Field>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-[13px] mb-2" style={{ color: MUTED }}>
+            {linhas.length} lançamento(s) encontrado(s). Confira o ativo detectado pela descrição e o tipo de provento.
+          </p>
+          <div className="overflow-auto rounded-lg border border-white/10 max-h-[50vh]">
+            <table className="w-full text-[13px]">
+              <thead className="bg-white/[0.03] sticky top-0">
+                <tr className="text-left" style={{ color: MUTED }}>
+                  <th className="px-2 py-2 w-8 text-center">✓</th>
+                  <th className="px-2 py-2">Data</th>
+                  <th className="px-2 py-2">Descrição</th>
+                  <th className="px-2 py-2 text-right">Valor</th>
+                  <th className="px-2 py-2">Ativo</th>
+                  <th className="px-2 py-2">Tipo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {linhas.map((l, i) => (
+                  <tr key={l.transacao_id} className="border-t border-white/5" style={{ opacity: l.importar ? 1 : 0.5 }}>
+                    <td className="px-2 py-1 text-center">
+                      <input type="checkbox" checked={l.importar} onChange={(e) => setLinha(i, { importar: e.target.checked })} className="accent-av-green" />
+                    </td>
+                    <td className="px-2 py-1 whitespace-nowrap text-white/80">{formatData(l.data)}</td>
+                    <td className="px-2 py-1 text-white/70 max-w-[160px] truncate" title={l.descricao}>{l.descricao}</td>
+                    <td className="px-2 py-1 text-right" style={{ color: '#00c896' }}>{formatBRL(l.valor)}</td>
+                    <td className="px-1 py-1">
+                      <SelectDark value={l.ativo_id} onChange={(e) => setLinha(i, { ativo_id: e.target.value, importar: !!e.target.value })} className="!py-1 !text-[12px]">
+                        <option value="">— ativo —</option>
+                        {ativos.map((a) => <option key={a.id} value={a.id}>{a.ticker}</option>)}
+                      </SelectDark>
+                    </td>
+                    <td className="px-1 py-1">
+                      <SelectDark value={l.tipo_dividendo_id} onChange={(e) => setLinha(i, { tipo_dividendo_id: e.target.value })} className="!py-1 !text-[12px]">
+                        <option value="">—</option>
+                        {tipos.map((t) => <option key={t.id} value={t.id}>{t.nome}</option>)}
+                      </SelectDark>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {linhas.some((l) => !l.ativo_id) && (
+            <p className="text-[12px] mt-2" style={{ color: '#ffb74d' }}>Linhas sem ativo não serão associadas — selecione o ativo para incluí-las.</p>
+          )}
+        </>
+      )}
+    </Drawer>
   )
 }

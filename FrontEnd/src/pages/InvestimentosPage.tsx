@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   TrendingUp, TrendingDown, Wallet, Coins, PieChart, Percent, Trophy,
-  HandCoins, BarChart3, ChevronDown, ChevronUp, Calendar,
+  HandCoins, BarChart3, ChevronDown, ChevronUp, Calendar, Upload,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
@@ -513,6 +513,11 @@ export default function InvestimentosPage() {
               text-[13px] text-white transition-all hover:border-white/25">
             <Wallet size={15} /> Meus ativos
           </Link>
+          <Link to="/importexport?import=investimentos"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
+              text-[13px] text-white transition-all hover:border-white/25">
+            <Upload size={15} /> Importar
+          </Link>
         </div>
       </div>
 
@@ -527,13 +532,20 @@ export default function InvestimentosPage() {
           <PieChart size={32} className="mx-auto mb-3" style={{ color: MUTED }} />
           <p className="text-white font-medium">Sua carteira está vazia</p>
           <p className="text-[13px] mt-1" style={{ color: MUTED }}>
-            Cadastre ativos e posições para ver a composição por tipo.
+            Cadastre ativos e posições manualmente — ou <strong className="text-white">importe seus investimentos</strong> pelo
+            módulo de Importações usando os relatórios da B3 (posição e movimentação) ou a carteira do Status Invest.
           </p>
-          <Link to="/investimentos/ativos"
-            className="inline-flex items-center gap-1.5 mt-4 px-4 py-2 rounded-lg text-[13px] font-medium text-white"
-            style={{ background: '#3b82f6' }}>
-            <Wallet size={15} /> Cadastrar ativos
-          </Link>
+          <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
+            <Link to="/investimentos/ativos"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white"
+              style={{ background: '#3b82f6' }}>
+              <Wallet size={15} /> Cadastrar ativos
+            </Link>
+            <Link to="/importexport?import=investimentos"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30 transition-all">
+              <Upload size={15} /> Importar investimentos
+            </Link>
+          </div>
         </div>
       ) : (
         <>

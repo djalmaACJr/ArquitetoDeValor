@@ -4,10 +4,10 @@
 // para preservar `import type { TipoConta } from '../types'` existentes.
 import type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia,
   TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento,
-  SubtipoRF, IndexadorRF, CategoriaFII } from '../lib/constants'
+  SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo } from '../lib/constants'
 export type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia,
   TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento,
-  SubtipoRF, IndexadorRF, CategoriaFII }
+  SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo }
 
 export interface CartaoVirtual {
   id:      string   // uuid local, gerado no front via crypto.randomUUID()
@@ -275,6 +275,8 @@ export interface InvestimentoAtivo {
   rf_isento_ir:    boolean | null
   // Categoria do FII (só tipo_ativo = FII)
   fii_categoria:   CategoriaFII | null
+  // Subtipo da ação (só tipo_ativo = ACOES)
+  acoes_subtipo:   AcoesSubtipo | null
   created_at:   string
   updated_at:   string
 }
