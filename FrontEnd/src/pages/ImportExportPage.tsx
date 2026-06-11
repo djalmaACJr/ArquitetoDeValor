@@ -1220,7 +1220,7 @@ function ImportInvestimentos({ contas }: { contas: Conta[] }) {
               Posições{posicoes.length === 0 && <span className="text-[13px] font-normal text-gray-400"> (derivadas das operações)</span>}
             </p>
             <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 max-h-[340px]">
-              <table className="w-full text-[15px]">
+              <table className="w-full min-w-[760px] text-[15px]">
                 <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
                   <tr>
                     <th className="px-2 py-2 text-left font-semibold text-gray-500">Ticker</th>
@@ -1359,17 +1359,11 @@ function ImportInvestimentos({ contas }: { contas: Conta[] }) {
   )
 }
 
-function SecaoImport() {
+function SecaoImport({ modo, setModo }: { modo: ModoImport; setModo: (m: ModoImport) => void }) {
   const { contas } = useContas()
   const { categorias } = useCategorias()
 
   const inputRef = useRef<HTMLInputElement>(null)
-  // Permite deep-link para um modo específico (ex.: /importexport?import=investimentos)
-  const [modo, setModo] = useState<ModoImport>(() => {
-    const p = new URLSearchParams(window.location.search).get('import')
-    return (['transacoes', 'contas', 'categorias', 'investimentos'] as const).includes(p as ModoImport)
-      ? (p as ModoImport) : 'transacoes'
-  })
   const [etapa, setEtapa] = useState<'idle' | 'analisando' | 'revisando' | 'importando' | 'concluido'>('idle')
   const [dragOver, setDragOver] = useState(false)
   const [grid, setGrid] = useState<LinhaGrid[]>([])
@@ -3334,7 +3328,7 @@ function SecaoCotacaoDolar() {
   }
 
   return (
-    <Section titulo="Cotação do dólar (PTAX)" subtitulo="Consulta o dólar de referência do Banco Central (USD → BRL)" icon={DollarSign} cor="#10b981" defaultOpen={false}>
+    <Section titulo="Cotação do dólar (PTAX)" subtitulo="Consulta o dólar de referência do Banco Central (USD → BRL)" icon={DollarSign} cor="#10b981" defaultOpen>
       <div className="space-y-4">
         {/* Cotação mais recente */}
         <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
@@ -3384,6 +3378,14 @@ function SecaoCotacaoDolar() {
 // PAGE PRINCIPAL
 // ══════════════════════════════════════════════════════════════════
 export default function ImportExportPage() {
+  // Modo da importação vive aqui para o modo "investimentos" poder ocupar a
+  // largura total (suas tabelas não cabem na metade da grade Export|Import).
+  const [modoImport, setModoImport] = useState<ModoImport>(() => {
+    const p = new URLSearchParams(window.location.search).get('import')
+    return (['transacoes', 'contas', 'categorias', 'investimentos'] as const).includes(p as ModoImport)
+      ? (p as ModoImport) : 'transacoes'
+  })
+
   return (
     <div className="p-5 max-w-[1200px]">
       <div className="mb-5">
@@ -3399,11 +3401,17 @@ export default function ImportExportPage() {
         {/* Cotação do dólar (consulta PTAX) — em primeiro lugar */}
         <SecaoCotacaoDolar />
 
-        {/* Linha 1 — Exportar | Importar (XLSX, uso humano) */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
-          <SecaoExport />
-          <SecaoImport />
-        </div>
+        {/* Linha 1 — Exportar | Importar (XLSX, uso humano).
+            No modo "investimentos" a importação ocupa a largura total
+            (tem tabelas largas que não cabem em meia tela). */}
+        {modoImport === 'investimentos' ? (
+          <SecaoImport modo={modoImport} setModo={setModoImport} />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+            <SecaoExport />
+            <SecaoImport modo={modoImport} setModo={setModoImport} />
+          </div>
+        )}
 
         {/* Explicação Exportar vs Backup, em linguagem leiga.
             Posicionada entre as duas linhas para o usuário ler antes de

@@ -507,7 +507,7 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
   const selCount = linhas.filter((l) => l.importar && l.ativo_id).length
 
   return (
-    <Drawer open onClose={onClose} titulo="Associar proventos do extrato"
+    <Drawer open onClose={onClose} largura="larga" titulo="Associar proventos do extrato"
       subtitulo="Vincula dividendos/aluguéis já lançados aos investimentos (sem duplicar)"
       rodape={etapa === 'revisando'
         ? <>
@@ -559,13 +559,13 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
                     <td className="px-2 py-1 text-white/70 max-w-[160px] truncate" title={l.descricao}>{l.descricao}</td>
                     <td className="px-2 py-1 text-right" style={{ color: '#00c896' }}>{formatBRL(l.valor)}</td>
                     <td className="px-1 py-1">
-                      <SelectDark value={l.ativo_id} onChange={(e) => setLinha(i, { ativo_id: e.target.value, importar: !!e.target.value })} className="!py-1 !text-[12px]">
+                      <SelectDark value={l.ativo_id} onChange={(e) => setLinha(i, { ativo_id: e.target.value, importar: !!e.target.value })} className="!py-1 !text-[12px] min-w-[88px]">
                         <option value="">— ativo —</option>
                         {ativos.map((a) => <option key={a.id} value={a.id}>{a.ticker}</option>)}
                       </SelectDark>
                     </td>
                     <td className="px-1 py-1">
-                      <SelectDark value={l.tipo_dividendo_id} onChange={(e) => setLinha(i, { tipo_dividendo_id: e.target.value })} className="!py-1 !text-[12px]">
+                      <SelectDark value={l.tipo_dividendo_id} onChange={(e) => setLinha(i, { tipo_dividendo_id: e.target.value })} className="!py-1 !text-[12px] min-w-[130px]">
                         <option value="">—</option>
                         {tipos.map((t) => <option key={t.id} value={t.id}>{t.nome}</option>)}
                       </SelectDark>

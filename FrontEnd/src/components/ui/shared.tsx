@@ -56,10 +56,12 @@ const ICONES_ALL = [...new Set([
 // Responsivo: full-width em mobile, 420px fixo em desktop.
 // Desliza da direita. Para trocar para modal: edite só aqui.
 export function Drawer({
-  open, onClose, titulo, subtitulo, children, rodape,
+  open, onClose, titulo, subtitulo, children, rodape, largura = 'normal',
 }: {
   open: boolean; onClose: () => void; titulo: string
   subtitulo?: string; children: React.ReactNode; rodape?: React.ReactNode
+  // 'larga' para conteúdos largos (ex.: tabelas com vários campos editáveis)
+  largura?: 'normal' | 'larga'
 }) {
   useEffect(() => {
     const fn = (e: KeyboardEvent) => { if (e.key === 'Escape' && open) onClose() }
@@ -85,7 +87,7 @@ export function Drawer({
         }}
         className={`fixed top-0 h-full z-[101]
           bg-[#1a1f2e] border-r border-white/10 flex flex-col transition-all duration-300
-          left-0 w-full md:w-[min(460px,calc(100vw-220px))]
+          left-0 w-full ${largura === 'larga' ? 'md:w-[min(840px,calc(100vw-220px))]' : 'md:w-[min(460px,calc(100vw-220px))]'}
           ${open ? 'translate-x-0 md:left-[220px]' : '-translate-x-full md:left-[-600px] md:translate-x-0'}`}>
 
         {/* Header */}
