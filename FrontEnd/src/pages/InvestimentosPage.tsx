@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   TrendingUp, TrendingDown, Wallet, Coins, PieChart, Percent, Trophy,
-  HandCoins, BarChart3, ChevronDown, ChevronUp, Calendar, Upload,
+  HandCoins, BarChart3, ChevronDown, ChevronUp, ChevronRight, Calendar, Upload, Target,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
@@ -9,17 +9,33 @@ import {
   Chart as ChartJS, ArcElement, Tooltip, Legend,
   CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement,
 } from 'chart.js'
-import { useInvestimentosDashboard, useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
+import { useInvestimentosDashboard, useInvestimentosRanking, useInvestimentosAlocacao, type AlocacaoInput } from '../hooks/useInvestimentosDashboard'
 import { useInvestimentosHistorico } from '../hooks/useInvestimentosHistorico'
+import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useDividendos } from '../hooks/useDividendos'
 import { useContas } from '../hooks/useContas'
 import LoadingMascote from '../components/ui/LoadingMascote'
-import { SelectDark } from '../components/ui/shared'
+import { SelectDark, Drawer, Input, BtnSalvar, BtnCancelar, Toast } from '../components/ui/shared'
 import { formatBRL } from '../lib/utils'
-import { TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, TIPO_ATIVO_COR } from '../lib/constants'
+import { recomendacaoCompra } from '../lib/questionarioAtivos'
+import {
+  TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
+  FII_CATEGORIA_INFO, ACOES_SUBTIPO_LABEL, SUBTIPO_RF_INFO,
+} from '../lib/constants'
 import type {
   InvestimentoDashboardTipo, InvestimentoRankingAtivo, TipoAtivoInvestimento,
+  InvestimentoAtivo,
 } from '../types'
+
+// Rótulo da categoria/subtipo de um ativo (FII: Tijolo/Papel…; Ações:
+// ON/PN/BDR; Renda Fixa/Tesouro: CDB/LCI/Tesouro…). null = sem categoria.
+function rotuloCategoriaAtivo(meta?: InvestimentoAtivo): string | null {
+  if (!meta) return null
+  if (meta.tipo_ativo === 'FII' && meta.fii_categoria) return FII_CATEGORIA_INFO[meta.fii_categoria].label
+  if (meta.tipo_ativo === 'ACOES' && meta.acoes_subtipo) return ACOES_SUBTIPO_LABEL[meta.acoes_subtipo]
+  if ((meta.tipo_ativo === 'RENDA_FIXA' || meta.tipo_ativo === 'TESOURO_DIRETO') && meta.rf_subtipo) return SUBTIPO_RF_INFO[meta.rf_subtipo].label
+  return null
+}
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement)
 
@@ -271,12 +287,145 @@ function AtivosNaCarteira({ tipos }: { tipos: InvestimentoDashboardTipo[] }) {
 
 // ── Lista expansível por tipo ─────────────────────────────────
 
-function LinhaTipoExpansivel({ t, ativos }: {
+const COR_REC = { COMPRAR: '#00c896', NEUTRO: '#8b92a8', AGUARDAR: '#ffb74d' } as const
+const LABEL_REC = { COMPRAR: 'Comprar', NEUTRO: 'Neutro', AGUARDAR: 'Aguardar' } as const
+// Tolerante a undefined/null (ranking pode vir sem alguns campos se a edge
+// function ainda não foi redeployada).
+const pct2 = (v: number | null | undefined) => `${(Number(v) || 0).toFixed(2).replace('.', ',')}%`
+
+// Tabela detalhada dos ativos de um tipo (Quant., preço médio/atual,
+// variação, saldo, nota, % carteira, comprar? — e DY/Yield on Cost p/ FII).
+// Colunas ordenáveis ao clicar no cabeçalho.
+type SortKey = 'ticker' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart'
+function precoMedio(a: InvestimentoRankingAtivo) { const q = Number(a.quantidade) || 0; return q > 0 ? a.valor_custo / q : 0 }
+function precoAtual(a: InvestimentoRankingAtivo) { const q = Number(a.quantidade) || 0; return q > 0 ? a.valor_mercado / q : 0 }
+function valorOrdenacao(a: InvestimentoRankingAtivo, k: SortKey): number | string {
+  switch (k) {
+    case 'ticker':     return a.ticker
+    case 'quantidade': return Number(a.quantidade) || 0
+    case 'pm':         return precoMedio(a)
+    case 'pa':         return precoAtual(a)
+    case 'rent':       return a.rentabilidade_pct
+    case 'dy':         return Number(a.dividend_yield_pct) || 0
+    case 'yoc':        return Number(a.yield_on_cost_pct) || 0
+    case 'saldo':      return a.valor_mercado
+    case 'nota':       return a.nota_usuario ?? -1
+    case 'cart':       return a.participacao_pct
+  }
+}
+
+function TabelaAtivos({ ativos, t }: { ativos: InvestimentoRankingAtivo[]; t: InvestimentoDashboardTipo }) {
+  const ehFII = t.tipo_ativo === 'FII'
+  const idealRef = t.percentual_ideal > 0 ? t.desvio_pct : null
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'saldo', dir: 'desc' })
+  const clickSort = (key: SortKey) => setSort((s) =>
+    s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'ticker' ? 'asc' : 'desc' })
+
+  const ordenados = useMemo(() => {
+    const arr = [...ativos]
+    arr.sort((x, y) => {
+      const vx = valorOrdenacao(x, sort.key), vy = valorOrdenacao(y, sort.key)
+      const cmp = typeof vx === 'string' ? vx.localeCompare(String(vy)) : (vx as number) - (vy as number)
+      return sort.dir === 'asc' ? cmp : -cmp
+    })
+    return arr
+  }, [ativos, sort])
+
+  const cols: { k: SortKey; label: string; align: 'left' | 'right' | 'center'; fii?: boolean; title?: string }[] = [
+    { k: 'ticker',     label: 'Ativo',       align: 'left' },
+    { k: 'quantidade', label: 'Quant.',      align: 'right' },
+    { k: 'pm',         label: 'Preço médio', align: 'right' },
+    { k: 'pa',         label: 'Preço atual', align: 'right' },
+    { k: 'rent',       label: 'Variação',    align: 'right' },
+    { k: 'dy',         label: 'DY',          align: 'right', fii: true, title: 'Dividend Yield (12m)' },
+    { k: 'yoc',        label: 'YoC',         align: 'right', fii: true, title: 'Yield on Cost (12m)' },
+    { k: 'saldo',      label: 'Saldo',       align: 'right' },
+    { k: 'nota',       label: 'Nota',        align: 'center' },
+    { k: 'cart',       label: '% Cart.',     align: 'right' },
+  ]
+  const alinhar = (a: 'left' | 'right' | 'center') => a === 'left' ? 'text-left' : a === 'center' ? 'text-center' : 'text-right'
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[12px]" style={{ minWidth: ehFII ? 720 : 600 }}>
+        <thead>
+          <tr style={{ color: MUTED }}>
+            {cols.filter((c) => !c.fii || ehFII).map((c) => (
+              <th key={c.k} title={c.title} onClick={() => clickSort(c.k)}
+                className={`px-2 py-1.5 font-medium cursor-pointer select-none hover:text-white/80 ${alinhar(c.align)}`}>
+                {c.label}{sort.key === c.k ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+              </th>
+            ))}
+            <th className="px-2 py-1.5 font-medium text-center">Comprar?</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ordenados.map((a) => {
+            const qtd = Number(a.quantidade) || 0
+            const pm = qtd > 0 ? a.valor_custo / qtd : 0
+            const pa = qtd > 0 ? a.valor_mercado / qtd : 0
+            const nota = a.nota_usuario ?? null
+            const rec = recomendacaoCompra(nota, idealRef)
+            return (
+              <tr key={a.ativo_id} className="border-t border-white/5 hover:bg-white/[0.03]">
+                <td className="px-2 py-1.5">
+                  <Link to={`/investimentos/ativos/${a.ativo_id}`} className="text-white font-semibold hover:underline">{a.ticker}</Link>
+                </td>
+                <td className="px-2 py-1.5 text-right text-white/80">{qtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</td>
+                <td className="px-2 py-1.5 text-right text-white/80">{formatBRL(pm)}</td>
+                <td className="px-2 py-1.5 text-right text-white/80">{formatBRL(pa)}</td>
+                <td className="px-2 py-1.5 text-right" style={{ color: corValor(a.rentabilidade_pct) }}>{fmtPct(a.rentabilidade_pct)}</td>
+                {ehFII && <td className="px-2 py-1.5 text-right" style={{ color: a.dividend_yield_pct > 0 ? VERDE : MUTED }}>{pct2(a.dividend_yield_pct)}</td>}
+                {ehFII && <td className="px-2 py-1.5 text-right text-white/70">{pct2(a.yield_on_cost_pct)}</td>}
+                <td className="px-2 py-1.5 text-right text-white font-medium">{formatBRL(a.valor_mercado)}</td>
+                <td className="px-2 py-1.5 text-center">
+                  {nota != null
+                    ? <span className="inline-block px-1.5 rounded bg-white/10 text-white text-[11px] font-semibold">{nota}</span>
+                    : <span style={{ color: MUTED }}>—</span>}
+                </td>
+                <td className="px-2 py-1.5 text-right text-white/80">{pct2(a.participacao_pct)}</td>
+                <td className="px-2 py-1.5 text-center">
+                  {rec
+                    ? <span className="text-[11px] px-1.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: `${COR_REC[rec.recomendacao]}22`, color: COR_REC[rec.recomendacao] }} title={rec.motivo}>{LABEL_REC[rec.recomendacao]}</span>
+                    : <span style={{ color: MUTED }}>—</span>}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function LinhaTipoExpansivel({ t, ativos, catPorAtivo }: {
   t: InvestimentoDashboardTipo; ativos: InvestimentoRankingAtivo[]
+  catPorAtivo: Record<string, string>
 }) {
   const [aberto, setAberto] = useState(false)
+  const [agrupar, setAgrupar] = useState(true)
+  const [catsAbertas, setCatsAbertas] = useState<Set<string>>(new Set())
+  const toggleCat = (cat: string) => setCatsAbertas((s) => {
+    const n = new Set(s)
+    if (n.has(cat)) n.delete(cat); else n.add(cat)
+    return n
+  })
   const cor = TIPO_ATIVO_COR[t.tipo_ativo]
   const variacaoPct = t.valor_custo > 0 ? (t.ganho_perda / t.valor_custo) * 100 : 0
+
+  // Subdivisão por categoria/subtipo (ordenada por valor)
+  const grupos = useMemo(() => {
+    const map = new Map<string, InvestimentoRankingAtivo[]>()
+    for (const a of ativos) {
+      const cat = catPorAtivo[a.ativo_id] ?? 'Sem categoria'
+      if (!map.has(cat)) map.set(cat, [])
+      map.get(cat)!.push(a)
+    }
+    return [...map.entries()]
+      .map(([cat, lista]) => ({ cat, lista, total: lista.reduce((s, a) => s + a.valor_mercado, 0) }))
+      .sort((a, b) => b.total - a.total)
+  }, [ativos, catPorAtivo])
+  const subdividir = grupos.length > 1 || (grupos.length === 1 && grupos[0].cat !== 'Sem categoria')
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.02]">
@@ -340,25 +489,49 @@ function LinhaTipoExpansivel({ t, ativos }: {
             </div>
           )}
 
-          {/* Ativos do tipo */}
+          {/* Alternar entre lista agrupada por categoria e lista única */}
+          {ativos.length > 0 && subdividir && (
+            <div className="flex justify-end">
+              <button onClick={() => setAgrupar((a) => !a)}
+                className="text-[12px] px-2.5 py-1 rounded-lg border border-white/10 hover:border-white/25 transition-colors"
+                style={{ color: MUTED }}>
+                {agrupar ? 'Agrupar por categoria: ligado' : 'Agrupar por categoria: desligado'}
+              </button>
+            </div>
+          )}
+
+          {/* Ativos do tipo — subdivididos por categoria/subtipo */}
           {ativos.length === 0 ? (
             <p className="text-[13px] text-center py-2" style={{ color: MUTED }}>Nenhum ativo com posição ativa neste tipo.</p>
-          ) : (
+          ) : subdividir && agrupar ? (
             <div className="space-y-1.5">
-              {ativos.map((a) => (
-                <Link key={a.ativo_id} to={`/investimentos/ativos/${a.ativo_id}`}
-                  className="flex items-center justify-between gap-2 text-[13px] rounded-lg px-2 py-1.5 hover:bg-white/[0.04]">
-                  <span className="flex items-center gap-2 min-w-0">
-                    <span className="text-white font-semibold">{a.ticker}</span>
-                    <span className="truncate" style={{ color: MUTED }}>{a.nome}</span>
-                  </span>
-                  <span className="flex items-center gap-3 shrink-0">
-                    <span style={{ color: corValor(a.rentabilidade_pct) }}>{fmtPct(a.rentabilidade_pct)}</span>
-                    <span className="text-white font-medium">{formatBRL(a.valor_mercado)}</span>
-                  </span>
-                </Link>
-              ))}
+              {grupos.map((g) => {
+                const catAberta = catsAbertas.has(g.cat)
+                return (
+                  <div key={g.cat}>
+                    {/* Cabeçalho da categoria — expansível, estilo Relatório */}
+                    <button onClick={() => toggleCat(g.cat)}
+                      className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] transition-colors">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {catAberta ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: cor }} />
+                        <span className="text-[13px] font-semibold" style={{ color: '#c5cad8' }}>{g.cat}</span>
+                        <span className="text-[12px] shrink-0" style={{ color: MUTED }}>· {g.lista.length}</span>
+                      </div>
+                      <span className="text-[13px] font-medium shrink-0" style={{ color: '#e8eaf0' }}>{formatBRL(g.total)}</span>
+                    </button>
+                    {/* Ativos da categoria — tabela detalhada */}
+                    {catAberta && (
+                      <div className="pl-3 ml-2 border-l border-white/5 mt-1">
+                        <TabelaAtivos ativos={g.lista} t={t} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
+          ) : (
+            <TabelaAtivos ativos={ativos} t={t} />
           )}
         </div>
       )}
@@ -458,12 +631,23 @@ function DividendosPorMes({ dividendos }: { dividendos: { data_pagamento: string
 
 export default function InvestimentosPage() {
   const [contaId, setContaId] = useState<string>('')
+  const [metasAberto, setMetasAberto] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3000) }
   const { dashboard, loading, error } = useInvestimentosDashboard(contaId || null)
   const { ranking } = useInvestimentosRanking(contaId || null)
   const { dividendos } = useDividendos()
   const { contas } = useContas()
+  const { ativos: ativosMeta } = useInvestimentosAtivos()
   // Só contas de investimento ATIVAS são relevantes na carteira
   const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa)
+
+  // Categoria/subtipo por ativo (para subdividir os tipos no quadro)
+  const catPorAtivo = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const a of ativosMeta) { const r = rotuloCategoriaAtivo(a); if (r) m[a.id] = r }
+    return m
+  }, [ativosMeta])
 
   // Proventos recebidos nos últimos 12 meses
   const proventos12m = useMemo(() => {
@@ -503,6 +687,11 @@ export default function InvestimentosPage() {
               <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>
             ))}
           </SelectDark>
+          <button onClick={() => setMetasAberto(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
+              text-[13px] text-white transition-all hover:border-white/25">
+            <Target size={15} /> Metas %
+          </button>
           <Link to="/investimentos/dividendos"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
               text-[13px] text-white transition-all hover:border-white/25">
@@ -570,7 +759,8 @@ export default function InvestimentosPage() {
           <div className="space-y-2">
             {tipos.map((t) => (
               <LinhaTipoExpansivel key={t.tipo_ativo} t={t}
-                ativos={ativosRanking.filter((a) => a.tipo_ativo === t.tipo_ativo)} />
+                ativos={ativosRanking.filter((a) => a.tipo_ativo === t.tipo_ativo)}
+                catPorAtivo={catPorAtivo} />
             ))}
           </div>
 
@@ -579,6 +769,75 @@ export default function InvestimentosPage() {
           <DividendosPorMes dividendos={dividendos} />
         </>
       )}
+
+      <Toast msg={toast} />
+      {metasAberto && <DrawerMetasAlocacao onClose={() => setMetasAberto(false)} onToast={showToast} />}
     </div>
+  )
+}
+
+// ── Drawer: metas de alocação (% ideal por tipo de ativo) ───────
+
+function DrawerMetasAlocacao({ onClose, onToast }: { onClose: () => void; onToast: (m: string) => void }) {
+  const { alocacoes, salvar } = useInvestimentosAlocacao()
+  // Mapa tipo → % atual salvo
+  const [valores, setValores] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {}
+    for (const t of TIPOS_ATIVO_INV) {
+      const a = alocacoes.find((x) => x.tipo_ativo === t)
+      init[t] = a && a.percentual_ideal > 0 ? String(a.percentual_ideal) : ''
+    }
+    return init
+  })
+  const [salvando, setSalvando] = useState(false)
+
+  const total = TIPOS_ATIVO_INV.reduce((s, t) => s + (Number(valores[t]) || 0), 0)
+  const totalOk = Math.abs(total - 100) < 0.01 || total === 0
+
+  async function handleSalvar() {
+    if (!totalOk) { onToast('A soma das metas deve ser 100% (ou tudo zerado para limpar).'); return }
+    const itens: AlocacaoInput[] = TIPOS_ATIVO_INV
+      .map((t) => ({ tipo_ativo: t, percentual_ideal: Number(valores[t]) || 0 }))
+      .filter((x) => x.percentual_ideal > 0)
+    setSalvando(true)
+    const res = await salvar(itens)
+    setSalvando(false)
+    if (res.ok) { onToast('Metas de alocação salvas!'); onClose() }
+    else onToast(res.erro ?? 'Erro ao salvar metas')
+  }
+
+  return (
+    <Drawer open onClose={onClose} titulo="Metas de alocação"
+      subtitulo="Defina o % ideal de cada tipo de ativo na carteira (soma 100%)"
+      rodape={<><BtnCancelar onClick={onClose} /><BtnSalvar editando onClick={handleSalvar} salvando={salvando} labelSalvar="Salvar metas" /></>}>
+      <div className="space-y-2">
+        {TIPOS_ATIVO_INV.map((t) => (
+          <div key={t} className="flex items-center gap-3">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: TIPO_ATIVO_COR[t] }} />
+            <span className="flex-1 text-[14px] text-white/85">{TIPO_ATIVO_LABEL[t]}</span>
+            <div className="w-28">
+              <Input type="number" min={0} max={100} step="any" value={valores[t]}
+                onChange={(e) => setValores((v) => ({ ...v, [t]: e.target.value }))} placeholder="0" />
+            </div>
+            <span className="text-[13px] w-4" style={{ color: MUTED }}>%</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex items-center justify-between text-[13px] px-1">
+        <span style={{ color: MUTED }}>Total</span>
+        <span className="font-semibold" style={{ color: totalOk ? '#00c896' : '#ffb74d' }}>
+          {total.toFixed(2).replace('.', ',')}%
+        </span>
+      </div>
+      {!totalOk && (
+        <p className="text-[12px] mt-1" style={{ color: '#ffb74d' }}>
+          A soma precisa ser 100% (ou deixe tudo em branco/zero para não usar metas).
+        </p>
+      )}
+      <p className="text-[12px] mt-3" style={{ color: MUTED }}>
+        As metas alimentam a barra "Meta %" nos quadros de tipo e a recomendação de compra
+        (que combina a nota do ativo com o desvio da meta).
+      </p>
+    </Drawer>
   )
 }

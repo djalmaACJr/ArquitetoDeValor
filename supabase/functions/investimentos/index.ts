@@ -53,6 +53,7 @@ Deno.serve(async (req: Request) => {
       case "tipos-dividendo": return await rotaTiposDividendo(c, req, m, userId);
       case "historico-mensal": return await rotaHistorico(c, req, m, userId);
       case "importar":        return await rotaImportar(c, req, m, userId);
+      case "restaurar":       return await rotaRestaurar(c, req, m, userId);
       case "dashboard":       return m === "GET" ? await dashboard(c, url.searchParams) : erro("Método não permitido", 405);
       case "ranking":         return m === "GET" ? await ranking(c, url.searchParams) : erro("Método não permitido", 405);
       case "busca-externa":   return m === "GET" ? await buscaExterna(url.searchParams) : erro("Método não permitido", 405);
@@ -1287,6 +1288,206 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
 }
 
 // ============================================================
+// /investimentos/restaurar — restauração a partir do backup JSON
+//
+// Recria os dados de investimento preservando a estrutura (lotes,
+// vínculos operação→posição, etc.). O client envia os dados do backup
+// com seus IDs ORIGINAIS + um mapa conta_id e categoria_id (antigo→novo,
+// resolvido no restore das contas/categorias). É idempotente: dedup por
+// chaves naturais, então re-rodar não duplica.
+// ============================================================
+
+async function rotaRestaurar(c: Db, req: Request, m: string, userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  const body = await req.json();
+  const up = (s: unknown) => String(s ?? "").trim().toUpperCase();
+  const arr = (x: unknown) => (Array.isArray(x) ? x : []) as Record<string, unknown>[];
+  const contaMap     = (body.conta_map     ?? {}) as Record<string, string>;
+  const categoriaMap = (body.categoria_map ?? {}) as Record<string, string>;
+  const avisos: string[] = [];
+
+  // contas-alvo válidas (do usuário)
+  const contasValidas = new Set<string>();
+  const alvos = [...new Set(Object.values(contaMap))];
+  if (alvos.length) {
+    const { data } = await c.from("contas").select("id").in("id", alvos);
+    for (const x of data ?? []) contasValidas.add(String(x.id));
+  }
+  const novaConta = (old: unknown): string | null => {
+    const n = contaMap[String(old)];
+    return n && contasValidas.has(n) ? n : null;
+  };
+
+  try {
+    const out = { tipos: 0, ativos: 0, posicoes: 0, operacoes: 0, dividendos: 0, historico: 0, alocacoes: 0 };
+
+    // ── 1) Tipos de dividendo (por nome) ──
+    const tiposIn = arr(body.tipos_dividendo);
+    const { data: tiposEx } = await c.from("inv_tipos_dividendo").select("id, nome");
+    const tipoPorNome = new Map<string, string>();
+    for (const t of tiposEx ?? []) tipoPorNome.set(String(t.nome).toLowerCase(), String(t.id));
+    const tipoMap: Record<string, string> = {};
+    for (const t of tiposIn) {
+      const nome = String(t.nome ?? "").trim();
+      if (!nome) continue;
+      let id = tipoPorNome.get(nome.toLowerCase());
+      if (!id) {
+        const catId = t.categoria_id ? (categoriaMap[String(t.categoria_id)] ?? null) : null;
+        const { data } = await c.from("inv_tipos_dividendo").insert({ user_id: userId, nome: nome.slice(0, 40), categoria_id: catId }).select("id").single();
+        if (data) { id = String(data.id); tipoPorNome.set(nome.toLowerCase(), id); out.tipos++; }
+      }
+      if (id && t.id) tipoMap[String(t.id)] = id;
+    }
+
+    // ── 2) Ativos (por ticker) ──
+    const ativosIn = arr(body.ativos);
+    const { data: ativosEx } = await c.from("inv_ativos").select("id, ticker");
+    const ativoPorTicker = new Map<string, string>();
+    for (const a of ativosEx ?? []) ativoPorTicker.set(up(a.ticker), String(a.id));
+    const novosAtivos: Record<string, unknown>[] = [];
+    for (const a of ativosIn) {
+      const ticker = up(a.ticker);
+      if (!ticker || ativoPorTicker.has(ticker)) continue;
+      if (!TIPOS_ATIVO.includes(String(a.tipo_ativo))) continue;
+      novosAtivos.push({
+        user_id: userId, ticker, nome: String(a.nome ?? ticker).slice(0, 120), tipo_ativo: a.tipo_ativo,
+        moeda: a.moeda ? up(a.moeda).slice(0, 3) : "BRL", descricao: a.descricao ?? null,
+        nota_usuario: a.nota_usuario ?? null, questionario_respostas: a.questionario_respostas ?? null,
+        rf_subtipo: a.rf_subtipo ?? null, rf_indexador: a.rf_indexador ?? null, rf_taxa: a.rf_taxa ?? null,
+        rf_emissor: a.rf_emissor ?? null, rf_vencimento: a.rf_vencimento ?? null,
+        rf_garantia_fgc: a.rf_garantia_fgc ?? null, rf_isento_ir: a.rf_isento_ir ?? null,
+        fii_categoria: a.fii_categoria ?? null, acoes_subtipo: a.acoes_subtipo ?? null,
+      });
+    }
+    if (novosAtivos.length) {
+      const cr = await inserirEmLote(c, "inv_ativos", novosAtivos, "id, ticker");
+      out.ativos = cr.length;
+      for (const x of cr) ativoPorTicker.set(up(x.ticker), String(x.id));
+    }
+    const ativoMap: Record<string, string> = {};
+    for (const a of ativosIn) { const nid = ativoPorTicker.get(up(a.ticker)); if (nid && a.id) ativoMap[String(a.id)] = nid; }
+
+    // ── 3) Posições (dedup por ativo+conta+data+qtd+custo) ──
+    const posIn = arr(body.posicoes);
+    const { data: posEx } = await c.from("inv_posicoes").select("id, ativo_id, conta_id, data_compra, quantidade, preco_custo");
+    const posKey = (av: string, ct: string, dt: unknown, q: unknown, p: unknown) => `${av}|${ct}|${dt}|${Number(q)}|${Number(p)}`;
+    const posPorChave = new Map<string, string>();
+    for (const p of posEx ?? []) posPorChave.set(posKey(String(p.ativo_id), String(p.conta_id), String(p.data_compra), p.quantidade, p.preco_custo), String(p.id));
+    const posMap: Record<string, string> = {};
+    const posInserir: Record<string, unknown>[] = [];
+    const posRef: { oldId: string; key: string }[] = [];
+    for (const p of posIn) {
+      const ativoId = ativoMap[String(p.ativo_id)];
+      const contaId = novaConta(p.conta_id);
+      if (!ativoId || !contaId) { avisos.push("Posição ignorada: ativo/conta não restaurados."); continue; }
+      const k = posKey(ativoId, contaId, String(p.data_compra), p.quantidade, p.preco_custo);
+      const existId = posPorChave.get(k);
+      if (existId) { if (p.id) posMap[String(p.id)] = existId; continue; }
+      posInserir.push({
+        user_id: userId, ativo_id: ativoId, conta_id: contaId,
+        quantidade: Number(p.quantidade) || 0, preco_custo: Number(p.preco_custo) || 0,
+        data_compra: String(p.data_compra), status: p.status === "ENCERRADA" ? "ENCERRADA" : "ATIVA",
+      });
+      posRef.push({ oldId: String(p.id ?? ""), key: k });
+    }
+    if (posInserir.length) {
+      const cr = await inserirEmLote(c, "inv_posicoes", posInserir, "id, ativo_id, conta_id, data_compra, quantidade, preco_custo");
+      out.posicoes = cr.length;
+      const novaPorChave = new Map<string, string>();
+      for (const x of cr) novaPorChave.set(posKey(String(x.ativo_id), String(x.conta_id), String(x.data_compra), x.quantidade, x.preco_custo), String(x.id));
+      for (const r of posRef) { const nid = novaPorChave.get(r.key); if (nid) { posPorChave.set(r.key, nid); if (r.oldId) posMap[r.oldId] = nid; } }
+    }
+
+    // ── 4) Operações (dedup por posição+tipo+data+qtd+valor) ──
+    const opIn = arr(body.operacoes);
+    const posIds = [...new Set(Object.values(posMap))];
+    const opKey = (pos: string, tp: string, dt: string, q: unknown, v: unknown) => `${pos}|${tp}|${dt}|${Number(q)}|${Number(v)}`;
+    const opExistSet = new Set<string>();
+    for (let i = 0; i < posIds.length; i += 200) {
+      const { data } = await c.from("inv_operacoes").select("posicao_id, tipo_operacao, data_operacao, quantidade, valor_total").in("posicao_id", posIds.slice(i, i + 200));
+      for (const o of data ?? []) opExistSet.add(opKey(String(o.posicao_id), String(o.tipo_operacao), String(o.data_operacao), o.quantidade, o.valor_total));
+    }
+    const opInserir: Record<string, unknown>[] = [];
+    for (const o of opIn) {
+      const posId = posMap[String(o.posicao_id)];
+      const contaId = novaConta(o.conta_id);
+      if (!posId || !contaId || !TIPOS_OPERACAO.includes(String(o.tipo_operacao))) continue;
+      const k = opKey(posId, String(o.tipo_operacao), String(o.data_operacao), o.quantidade, o.valor_total);
+      if (opExistSet.has(k)) continue;
+      opExistSet.add(k);
+      opInserir.push({
+        user_id: userId, posicao_id: posId, tipo_operacao: o.tipo_operacao, conta_id: contaId,
+        quantidade: Number(o.quantidade) || 0, preco_unitario: Number(o.preco_unitario) || 0,
+        valor_total: Number(o.valor_total) || 0, data_operacao: String(o.data_operacao),
+      });
+    }
+    if (opInserir.length) out.operacoes = (await inserirEmLote(c, "inv_operacoes", opInserir)).length;
+
+    // ── 5) Dividendos (dedup por ativo+data+valor+tipo_ativo) ──
+    const divIn = arr(body.dividendos);
+    const { data: divEx } = await c.from("inv_dividendos").select("ativo_id, data_pagamento, valor, tipo_ativo");
+    const divKey = (av: string, dt: string, v: unknown, ta: string) => `${av}|${dt}|${Number(v)}|${ta}`;
+    const divExistSet = new Set<string>();
+    for (const d of divEx ?? []) divExistSet.add(divKey(String(d.ativo_id), String(d.data_pagamento), d.valor, String(d.tipo_ativo)));
+    const divInserir: Record<string, unknown>[] = [];
+    for (const d of divIn) {
+      const ativoId = ativoMap[String(d.ativo_id)];
+      const contaId = novaConta(d.conta_id);
+      const valor = Number(d.valor);
+      if (!ativoId || !contaId || !(valor > 0) || !TIPOS_ATIVO.includes(String(d.tipo_ativo))) continue;
+      const k = divKey(ativoId, String(d.data_pagamento), valor, String(d.tipo_ativo));
+      if (divExistSet.has(k)) continue;
+      divExistSet.add(k);
+      divInserir.push({
+        user_id: userId, ativo_id: ativoId, conta_id: contaId, valor, data_pagamento: String(d.data_pagamento),
+        tipo_ativo: d.tipo_ativo, descricao: d.descricao ?? null,
+        tipo_dividendo_id: d.tipo_dividendo_id ? (tipoMap[String(d.tipo_dividendo_id)] ?? null) : null,
+        // O lançamento do extrato é restaurado em separado (não relinkamos).
+      });
+    }
+    if (divInserir.length) out.dividendos = (await inserirEmLote(c, "inv_dividendos", divInserir, "id")).length;
+
+    // ── 6) Histórico mensal (upsert por ativo+conta+mês) ──
+    const histIn = arr(body.historico);
+    const histInserir: Record<string, unknown>[] = [];
+    const histVistos = new Set<string>();
+    for (const h of histIn) {
+      const ativoId = ativoMap[String(h.ativo_id)];
+      const contaId = novaConta(h.conta_id);
+      const mes = String(h.mes_ano ?? "");
+      if (!ativoId || !contaId || !RE_MES_ANO.test(mes)) continue;
+      const k = `${ativoId}|${contaId}|${mes}`;
+      if (histVistos.has(k)) continue;
+      histVistos.add(k);
+      histInserir.push({
+        user_id: userId, ativo_id: ativoId, conta_id: contaId, mes_ano: mes,
+        valor_mercado: Number(h.valor_mercado) || 0, quantidade: Number(h.quantidade) || 0,
+        preco_medio: Number(h.preco_medio) || 0,
+        variacao_percentual: Number(h.variacao_percentual) || 0, rentabilidade_mes: Number(h.rentabilidade_mes) || 0,
+      });
+    }
+    if (histInserir.length) {
+      const { error } = await c.from("inv_historico_mensal").upsert(histInserir, { onConflict: "ativo_id,conta_id,mes_ano" });
+      if (error) avisos.push(`Histórico: ${error.message}`); else out.historico = histInserir.length;
+    }
+
+    // ── 7) Alocações ideais (upsert por tipo) ──
+    const alocIn = arr(body.alocacoes).filter((a) => TIPOS_ATIVO.includes(String(a.tipo_ativo)));
+    if (alocIn.length) {
+      const linhas = alocIn.map((a) => ({ user_id: userId, tipo_ativo: a.tipo_ativo, percentual_ideal: Number(a.percentual_ideal) || 0, updated_at: new Date().toISOString() }));
+      const { error } = await c.from("inv_alocacoes_tipo").upsert(linhas, { onConflict: "user_id,tipo_ativo" });
+      if (error) avisos.push(`Alocações: ${error.message}`); else out.alocacoes = linhas.length;
+    }
+
+    logSuccess("Investimentos restaurados", out);
+    return json({ dados: { ...out, avisos } }, 201);
+  } catch (e) {
+    logError("Restaurar investimentos", e);
+    return erro(`Falha ao restaurar investimentos: ${(e as Error).message}`);
+  }
+}
+
+// ============================================================
 // /investimentos/dashboard — consolidação por tipo de ativo
 // Agrega em JS (volume pequeno por usuário). Valor de mercado usa
 // o snapshot mensal mais recente por ativo+conta; se não houver,
@@ -1411,7 +1612,7 @@ async function ranking(c: Db, params: URLSearchParams) {
   const [posRes, histRes, divRes] = await Promise.all([
     (() => {
       let q = c.from("inv_posicoes")
-        .select("ativo_id, conta_id, quantidade, valor_custo, inv_ativos(ticker, nome, tipo_ativo)")
+        .select("ativo_id, conta_id, quantidade, valor_custo, inv_ativos(ticker, nome, tipo_ativo, nota_usuario)")
         .eq("status", "ATIVA");
       if (contaFiltro) q = q.eq("conta_id", contaFiltro);
       return q;
@@ -1439,13 +1640,14 @@ async function ranking(c: Db, params: URLSearchParams) {
   type AggAtivo = {
     ativo_id: string; ticker: string; nome: string; tipo_ativo: string;
     valor_custo: number; valor_mercado: number; dividendos_12m: number;
+    quantidade: number; nota_usuario: number | null;
   };
   const porAtivo = new Map<string, AggAtivo>();
 
   // Custo agrupado por ativo+conta (snapshot cobre o par inteiro)
   const custoPorPar = new Map<string, { ativo: AggAtivo; custo: number }>();
   for (const p of posRes.data ?? []) {
-    const meta = p.inv_ativos as { ticker?: string; nome?: string; tipo_ativo?: string } | null;
+    const meta = p.inv_ativos as { ticker?: string; nome?: string; tipo_ativo?: string; nota_usuario?: number | null } | null;
     if (!meta?.tipo_ativo) continue;
     if (tipoFiltro && meta.tipo_ativo !== tipoFiltro) continue;
     const aid = String(p.ativo_id);
@@ -1453,8 +1655,10 @@ async function ranking(c: Db, params: URLSearchParams) {
       porAtivo.set(aid, {
         ativo_id: aid, ticker: meta.ticker ?? "", nome: meta.nome ?? "",
         tipo_ativo: meta.tipo_ativo, valor_custo: 0, valor_mercado: 0, dividendos_12m: 0,
+        quantidade: 0, nota_usuario: meta.nota_usuario ?? null,
       });
     }
+    porAtivo.get(aid)!.quantidade += Number(p.quantidade) || 0;
     const k = `${aid}|${p.conta_id}`;
     const par = custoPorPar.get(k) ?? { ativo: porAtivo.get(aid)!, custo: 0 };
     par.custo += Number(p.valor_custo) || 0;
@@ -1477,12 +1681,15 @@ async function ranking(c: Db, params: URLSearchParams) {
     ticker:             a.ticker,
     nome:               a.nome,
     tipo_ativo:         a.tipo_ativo,
+    quantidade:         a.quantidade,
+    nota_usuario:       a.nota_usuario,
     valor_custo:        Number(a.valor_custo.toFixed(2)),
     valor_mercado:      Number(a.valor_mercado.toFixed(2)),
     ganho_perda:        Number((a.valor_mercado - a.valor_custo).toFixed(2)),
     rentabilidade_pct:  a.valor_custo > 0 ? Number((((a.valor_mercado - a.valor_custo) / a.valor_custo) * 100).toFixed(2)) : 0,
     dividendos_12m:     Number(a.dividendos_12m.toFixed(2)),
     dividend_yield_pct: a.valor_mercado > 0 ? Number(((a.dividendos_12m / a.valor_mercado) * 100).toFixed(2)) : 0,
+    yield_on_cost_pct:  a.valor_custo > 0 ? Number(((a.dividendos_12m / a.valor_custo) * 100).toFixed(2)) : 0,
     participacao_pct:   totalMercado > 0 ? Number(((a.valor_mercado / totalMercado) * 100).toFixed(2)) : 0,
   })).sort((x, y) => y.rentabilidade_pct - x.rentabilidade_pct);
 

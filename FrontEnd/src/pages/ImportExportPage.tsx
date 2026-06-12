@@ -23,6 +23,7 @@ import {
   detectarTipoArquivo, parsePosicao, parseMovimentacao, parseStatusInvest,
   tiposMovimentacao, calcularCustoMedio, quantidadeLiquida, rotuloInstituicao,
   nomeProventoPadrao, derivarPosicoes, tipoPadraoTicker, acoesSubtipoPorTicker,
+  fiiCategoriaPorTicker,
   type PosicaoB3, type MovB3, type AcaoMov, type AtivoB3, type XlsxLike,
 } from '../lib/importB3'
 
@@ -67,12 +68,33 @@ interface CategoriaBackup {
 
 type XlsxRow = Record<string, unknown>
 
+interface InvestimentosBackup {
+  ativos:          Record<string, unknown>[]
+  posicoes:        Record<string, unknown>[]
+  operacoes:       Record<string, unknown>[]
+  dividendos:      Record<string, unknown>[]
+  historico:       Record<string, unknown>[]
+  tipos_dividendo: Record<string, unknown>[]
+  alocacoes:       Record<string, unknown>[]
+}
+
+interface LembreteBackup {
+  id?: string
+  data: string
+  descricao: string
+  status?: string
+  lancamento_id?: string | null
+  [key: string]: unknown
+}
+
 interface BackupPayload {
   gerado_em: string
   contas: ContaBackup[]
   categorias: CategoriaBackup[]
   transacoes: TransacaoRaw[]
   transferencias?: TransacaoRaw[]
+  investimentos?: InvestimentosBackup
+  lembretes?: LembreteBackup[]
 }
 
 interface LinhaImport {
@@ -466,6 +488,7 @@ function SecaoExport() {
   // origem→destino vira uma linha). Sem isso, o usuário leigo poderia
   // exportar transações sem perceber que transferências estão de fora.
   const [exportarTransacoes, setExportarTransacoes] = useState(true)
+  const [exportarInvestimentos, setExportarInvestimentos] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const exportar = async () => {
@@ -643,6 +666,84 @@ function SecaoExport() {
         })
       }
 
+      // Abas: Investimentos (ativos, posições, operações, dividendos)
+      if (exportarInvestimentos) {
+        const [rAtivos, rPos, rOps, rDiv] = await Promise.all([
+          apiFetch('/investimentos/ativos'),
+          apiFetch('/investimentos/posicoes'),
+          apiFetch('/investimentos/operacoes'),
+          apiFetch('/investimentos/dividendos'),
+        ])
+        type InvRow = Record<string, unknown> & { id?: string; inv_ativos?: { ticker?: string }; contas?: { nome?: string }; inv_tipos_dividendo?: { nome?: string } }
+        const ativosInv = extrairLista<InvRow>(rAtivos.dados)
+        const posInv    = extrairLista<InvRow>(rPos.dados)
+        const opsInv    = extrairLista<InvRow>(rOps.dados)
+        const divInv    = extrairLista<InvRow>(rDiv.dados)
+        const labelTipo = (t: unknown) => TIPO_ATIVO_LABEL[t as TipoAtivoInvestimento] ?? String(t ?? '')
+        const tickerPorPos = Object.fromEntries(posInv.map(p => [String(p.id), p.inv_ativos?.ticker ?? '']))
+        const dataLocal = (d: unknown) => new Date(String(d) + 'T12:00:00')
+
+        if (ativosInv.length) sheets.push({
+          name: 'Inv. Ativos', title: 'Investimentos — Ativos',
+          columns: [
+            { key: 'ticker', label: 'Ticker', type: 'text', width: 14 },
+            { key: 'nome',   label: 'Nome',   type: 'text', width: 34 },
+            { key: 'tipo',   label: 'Tipo',   type: 'text', width: 18 },
+            { key: 'moeda',  label: 'Moeda',  type: 'text', width: 8, align: 'center' },
+            { key: 'nota',   label: 'Nota',   type: 'text', width: 8, align: 'center' },
+          ],
+          rows: ativosInv.map(a => ({ ticker: String(a.ticker ?? ''), nome: String(a.nome ?? ''), tipo: labelTipo(a.tipo_ativo), moeda: String(a.moeda ?? ''), nota: a.nota_usuario != null ? Number(a.nota_usuario) : '' })),
+        })
+
+        if (posInv.length) sheets.push({
+          name: 'Inv. Posições', title: 'Investimentos — Posições',
+          columns: [
+            { key: 'ticker',     label: 'Ticker',      type: 'text',     width: 14 },
+            { key: 'conta',      label: 'Conta',       type: 'text',     width: 22 },
+            { key: 'qtd',        label: 'Quantidade',  type: 'number',   width: 16 },
+            { key: 'precoCusto', label: 'Preço custo', type: 'currency', width: 16 },
+            { key: 'valorCusto', label: 'Valor custo', type: 'currency', width: 16 },
+            { key: 'data',       label: 'Data compra', type: 'date',     width: 13 },
+            { key: 'status',     label: 'Status',      type: 'text',     width: 12 },
+          ],
+          rows: posInv.map(p => ({
+            ticker: String(p.inv_ativos?.ticker ?? ''), conta: String(p.contas?.nome ?? ''),
+            qtd: Number(p.quantidade), precoCusto: Number(p.preco_custo), valorCusto: Number(p.valor_custo),
+            data: dataLocal(p.data_compra), status: String(p.status ?? ''),
+          })),
+        })
+
+        if (opsInv.length) sheets.push({
+          name: 'Inv. Operações', title: 'Investimentos — Operações',
+          columns: [
+            { key: 'data',   label: 'Data',     type: 'date',     width: 13 },
+            { key: 'ticker', label: 'Ticker',   type: 'text',     width: 14 },
+            { key: 'tipo',   label: 'Operação', type: 'text',     width: 14 },
+            { key: 'qtd',    label: 'Quantidade', type: 'number', width: 16 },
+            { key: 'preco',  label: 'Preço',    type: 'currency', width: 16 },
+            { key: 'valor',  label: 'Valor',    type: 'currency', width: 16 },
+          ],
+          rows: opsInv.map(o => ({
+            data: dataLocal(o.data_operacao), ticker: String(tickerPorPos[String(o.posicao_id)] ?? ''),
+            tipo: String(o.tipo_operacao ?? ''), qtd: Number(o.quantidade), preco: Number(o.preco_unitario), valor: Number(o.valor_total),
+          })),
+        })
+
+        if (divInv.length) sheets.push({
+          name: 'Inv. Dividendos', title: 'Investimentos — Dividendos',
+          columns: [
+            { key: 'data',   label: 'Pagamento', type: 'date',     width: 13 },
+            { key: 'ticker', label: 'Ticker',    type: 'text',     width: 14 },
+            { key: 'tipo',   label: 'Tipo',      type: 'text',     width: 20 },
+            { key: 'valor',  label: 'Valor',     type: 'currency', width: 16 },
+          ],
+          rows: divInv.map(d => ({
+            data: dataLocal(d.data_pagamento), ticker: d.inv_ativos?.ticker ?? '',
+            tipo: d.inv_tipos_dividendo?.nome ?? '', valor: Number(d.valor),
+          })),
+        })
+      }
+
       if (sheets.length === 0) {
         alert('Nada selecionado para exportar.')
         return
@@ -658,7 +759,7 @@ function SecaoExport() {
     }
   }
 
-  const algumSelecionado = exportarContas || exportarCategorias || exportarTransacoes
+  const algumSelecionado = exportarContas || exportarCategorias || exportarTransacoes || exportarInvestimentos
 
   return (
     <Section titulo="Exportar dados" subtitulo="Gera um arquivo XLSX com abas separadas" icon={Download} cor="#00c896">
@@ -686,11 +787,12 @@ function SecaoExport() {
           <p className="text-[15px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
             O que exportar
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {[
-              { label: 'Contas',     sub: 'Todas as contas',                            checked: exportarContas,     set: setExportarContas,     cor: '#4da6ff' },
-              { label: 'Categorias', sub: 'Com hierarquia',                             checked: exportarCategorias, set: setExportarCategorias, cor: '#a78bfa' },
-              { label: 'Transações', sub: `${mesInicio} → ${mesFim}`, checked: exportarTransacoes, set: setExportarTransacoes, cor: '#00c896' },
+              { label: 'Contas',        sub: 'Todas as contas',         checked: exportarContas,        set: setExportarContas,        cor: '#4da6ff' },
+              { label: 'Categorias',    sub: 'Com hierarquia',          checked: exportarCategorias,    set: setExportarCategorias,    cor: '#a78bfa' },
+              { label: 'Transações',    sub: `${mesInicio} → ${mesFim}`, checked: exportarTransacoes,   set: setExportarTransacoes,    cor: '#00c896' },
+              { label: 'Investimentos', sub: 'Ativos, posições, etc.',  checked: exportarInvestimentos, set: setExportarInvestimentos, cor: '#3b82f6' },
             ].map(item => (
               <label key={item.label}
                 className="flex flex-col gap-1 p-3 rounded-lg border cursor-pointer transition-all"
@@ -1004,7 +1106,7 @@ function ImportInvestimentos({ contas }: { contas: Conta[] }) {
           ticker: a.ticker, nome: a.nome, tipo_ativo: tipo, moeda: a.moeda || 'BRL',
           rf_subtipo: a.rf_subtipo ?? null, rf_indexador: a.rf_indexador ?? null,
           rf_emissor: a.rf_emissor ?? null, rf_vencimento: a.rf_vencimento ?? null,
-          fii_categoria: tipo === 'FII' ? (a.fii_categoria ?? 'OUTRO') : null,
+          fii_categoria: tipo === 'FII' ? (a.fii_categoria ?? fiiCategoriaPorTicker(a.ticker)) : null,
           acoes_subtipo: tipo === 'ACOES' ? (a.acoes_subtipo ?? null) : null,
         }
       })
@@ -2872,14 +2974,44 @@ function SecaoBackup() {
       const transferencias = [...trfMap.values()]
       addLog('ok', `Transferências: ${transferencias.length} registros`)
 
+      // 5. Investimentos (ativos, posições, operações, dividendos, histórico, tipos, alocações)
+      addLog('ok', 'Buscando investimentos...')
+      const [rAtivos, rPos, rOps, rDiv, rHist, rTipos, rAloc] = await Promise.all([
+        apiFetch('/investimentos/ativos'),
+        apiFetch('/investimentos/posicoes'),
+        apiFetch('/investimentos/operacoes'),
+        apiFetch('/investimentos/dividendos'),
+        apiFetch('/investimentos/historico-mensal'),
+        apiFetch('/investimentos/tipos-dividendo'),
+        apiFetch('/investimentos/alocacoes'),
+      ])
+      const investimentos: InvestimentosBackup = {
+        ativos:          extrairLista<Record<string, unknown>>(rAtivos.dados),
+        posicoes:        extrairLista<Record<string, unknown>>(rPos.dados),
+        operacoes:       extrairLista<Record<string, unknown>>(rOps.dados),
+        dividendos:      extrairLista<Record<string, unknown>>(rDiv.dados),
+        historico:       extrairLista<Record<string, unknown>>(rHist.dados),
+        tipos_dividendo: extrairLista<Record<string, unknown>>(rTipos.dados),
+        alocacoes:       extrairLista<Record<string, unknown>>(rAloc.dados),
+      }
+      addLog('ok', `Investimentos: ${investimentos.ativos.length} ativos, ${investimentos.posicoes.length} posições, ${investimentos.operacoes.length} operações, ${investimentos.dividendos.length} dividendos`)
+
+      // 6. Lembretes (avulsos e vinculados a lançamentos)
+      addLog('ok', 'Buscando lembretes...')
+      const rLemb = await apiFetch('/lembretes')
+      const lembretes = extrairLista<LembreteBackup>(rLemb.dados)
+      addLog('ok', `Lembretes: ${lembretes.length} registros`)
+
       // Montar payload
       const payload = {
         gerado_em: new Date().toISOString(),
-        versao: '1.0',
+        versao: '1.2',
         contas,
         categorias,
         transacoes,
         transferencias,
+        investimentos,
+        lembretes,
       }
 
       // Download do JSON
@@ -2910,6 +3042,8 @@ function SecaoBackup() {
               'Todas as categorias (com hierarquia)',
               'Todas as transações (sem limite de período)',
               'Todas as transferências',
+              'Investimentos (ativos, posições, operações, dividendos, histórico)',
+              'Lembretes (avulsos e vinculados a lançamentos)',
             ].map((item, i) => (
               <li key={i} className="flex items-center gap-2 text-[16px] text-gray-400">
                 <CheckCircle2 size={12} className="text-blue-400 flex-shrink-0" />
@@ -2946,12 +3080,14 @@ function SecaoBackup() {
 // SEÇÃO 5 — RESTORE COMPLETO
 // ══════════════════════════════════════════════════════════════════
 function SecaoRestore() {
+  const qc = useQueryClient()
   const { contas } = useContas()
   const { categorias } = useCategorias()
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [etapa, setEtapa] = useState<'idle' | 'confirmando' | 'restaurando' | 'concluido'>('idle')
   const [payload, setPayload] = useState<BackupPayload | null>(null)
+  const [escopo, setEscopo] = useState<'tudo' | 'extrato' | 'investimentos' | 'lembretes'>('tudo')
   const [progresso, setProgresso] = useState(0)
   const [progressoLabel, setProgressoLabel] = useState('')
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro' | 'aviso'; msg: string }[]>([])
@@ -2994,178 +3130,263 @@ function SecaoRestore() {
     setProgresso(0)
     canceladoRef.current = false
     const logs: typeof log = []
-    const addLog = (tipo: 'ok' | 'erro' | 'aviso', msg: string) => {
-      logs.push({ tipo, msg })
-      setLog([...logs])
-    }
+    const addLog = (tipo: 'ok' | 'erro' | 'aviso', msg: string) => { logs.push({ tipo, msg }); setLog([...logs]) }
 
+    const fazExtrato    = escopo === 'tudo' || escopo === 'extrato'
+    const fazInvest     = escopo === 'tudo' || escopo === 'investimentos'
+    const fazLembretes  = escopo === 'tudo' || escopo === 'lembretes'
+    const criaFaltantes = escopo === 'tudo'   // só "Tudo" cria contas/categorias novas
     const mapaContas:       Record<string, string> = {}
     const mapaCategorias:   Record<string, string> = {}
     const contasReativadas: string[]               = []
+
+    // Chaves de deduplicação — o restore NÃO recria o que já existe.
+    const normDesc = (s?: string | null) => normalizarNome(String(s ?? ''))
+    const txKey = (data: string, valor: unknown, tipo: string, descricao?: string | null, contaId?: string) =>
+      `${data}|${Number(valor)}|${tipo}|${normDesc(descricao)}|${contaId ?? ''}`
+    const trfKey = (data: string, valor: unknown, origem?: string, destino?: string) =>
+      `${data}|${Number(valor)}|${origem ?? ''}|${destino ?? ''}`
 
     try {
       if (!payload) throw new Error('Backup não carregado')
       const { contas: cntBackup, categorias: catBackup, transacoes: txBackup, transferencias: trfBackup } = payload
 
-      const totalPassos = cntBackup.length + catBackup.filter((c: CategoriaBackup) => !c.protegida).length + txBackup.length + (trfBackup?.length ?? 0)
-      let passo = 0
-      const avanco = () => { passo++; setProgresso(Math.round((passo / totalPassos) * 100)) }
-
-      // ── 1. Contas ────────────────────────────────────────────────
-      setProgressoLabel('Recriando contas...')
-      let okCnt = 0
+      // ── 1. Contas — mapeia existentes; cria as faltantes só no modo "Tudo" ──
+      setProgressoLabel('Conferindo contas...')
+      let criadasCnt = 0
       for (const c of cntBackup) {
-        if (canceladoRef.current) { addLog('aviso', `Cancelado. ${okCnt} contas criadas.`); break }
-        // Verificar se já existe (ativa ou inativa)
+        if (canceladoRef.current) break
         const existente = contas.find(x => normalizarNome(x.nome) === normalizarNome(c.nome) && x.tipo === c.tipo)
         if (existente) {
           mapaContas[c.conta_id] = existente.conta_id
-          if (!existente.ativa) {
+          // Só reativa conta inativa quando o restore vai escrever no extrato
+          // (lançamentos exigem conta ativa). Restore de lembretes/investimentos
+          // não mexe nas contas — apenas mapeia para relink.
+          if (!existente.ativa && fazExtrato) {
             const r = await apiComRetry(`/contas/${existente.conta_id}`, 'PUT', { ativa: true })
-            if (r.ok) {
-              contasReativadas.push(existente.conta_id)
-              addLog('aviso', `Conta "${c.nome}" estava inativa — reativada temporariamente.`)
-            } else {
-              addLog('erro', `Não foi possível reativar conta "${c.nome}": ${r.erro}`)
-            }
+            if (r.ok) { contasReativadas.push(existente.conta_id); addLog('aviso', `Conta "${c.nome}" estava inativa — reativada temporariamente.`) }
+            else addLog('erro', `Não foi possível reativar conta "${c.nome}": ${r.erro}`)
           }
-        } else {
+        } else if (criaFaltantes) {
           const r = await apiComRetry('/contas', 'POST', {
-            nome: c.nome, tipo: c.tipo,
-            saldo_inicial: c.saldo_inicial ?? 0,
+            nome: c.nome, tipo: c.tipo, saldo_inicial: c.saldo_inicial ?? 0,
             icone: c.icone, cor: c.cor, ativa: c.ativa,
           })
-          if (r.ok && (r.dados as { conta_id?: string } | null)?.conta_id) {
-            mapaContas[c.conta_id] = (r.dados as { conta_id: string }).conta_id
-            okCnt++
-          } else if (r.erro?.includes('409') || r.erro?.includes('duplicat')) {
-            const lista = await apiFetch('/contas')
-            const ex = extrairLista<ContaBackup>(lista.dados).find(
-              x => normalizarNome(x.nome) === normalizarNome(c.nome) && x.tipo === c.tipo
-            )
-            if (ex) mapaContas[c.conta_id] = ex.conta_id
-          } else {
-            addLog('erro', `Conta "${c.nome}": ${r.erro}`)
-          }
+          if (r.ok && (r.dados as { conta_id?: string } | null)?.conta_id) { mapaContas[c.conta_id] = (r.dados as { conta_id: string }).conta_id; criadasCnt++ }
+          else addLog('erro', `Conta "${c.nome}": ${r.erro}`)
+          await _sleep(60)
         }
-        avanco(); await _sleep(80)
+        // sem criar + inexistente → não mapeia (itens dessa conta serão pulados)
       }
-      addLog('ok', `Contas: ${okCnt} criadas, ${cntBackup.length - okCnt} já existiam`)
+      addLog('ok', criaFaltantes
+        ? `Contas: ${criadasCnt} criadas, ${cntBackup.length - criadasCnt} já existiam`
+        : `Contas reconhecidas: ${Object.keys(mapaContas).length}`)
 
-      // ── 2. Categorias (protegidas: só mapear) ───────────────────
-      setProgressoLabel('Recriando categorias...')
-      // Mapear protegidas
+      // ── 2. Categorias — idem (cria faltantes só no modo "Tudo") ──
+      setProgressoLabel('Conferindo categorias...')
       for (const c of catBackup.filter((x: CategoriaBackup) => x.protegida)) {
         const ex = categorias.find(x => normalizarNome(x.descricao) === normalizarNome(c.descricao) && x.protegida)
         if (ex) mapaCategorias[c.id] = ex.id
       }
-      // Pais não protegidos
-      let okCat = 0
+      let criadasCat = 0
       const pais   = catBackup.filter((c: CategoriaBackup) => !c.id_pai && !c.protegida)
       const filhos = catBackup.filter((c: CategoriaBackup) => !!c.id_pai && !c.protegida)
       for (const c of pais) {
-        if (canceladoRef.current) { addLog('aviso', `Cancelado. ${okCat} categorias criadas.`); break }
         const ex = categorias.find(x => normalizarNome(x.descricao) === normalizarNome(c.descricao) && !x.id_pai)
-        if (ex) { mapaCategorias[c.id] = ex.id }
-        else {
-          const r = await apiComRetry('/categorias', 'POST', { descricao: c.descricao, tipo: c.tipo, icone: c.icone, cor: c.cor })
-          if (r.ok && (r.dados as { id?: string } | null)?.id) { mapaCategorias[c.id] = (r.dados as { id: string }).id; okCat++ }
-          else addLog('erro', `Categoria "${c.descricao}": ${r.erro}`)
-        }
-        avanco(); await _sleep(80)
+        if (ex) { mapaCategorias[c.id] = ex.id; continue }
+        if (!criaFaltantes) continue
+        const r = await apiComRetry('/categorias', 'POST', { descricao: c.descricao, tipo: c.tipo, icone: c.icone, cor: c.cor })
+        if (r.ok && (r.dados as { id?: string } | null)?.id) { mapaCategorias[c.id] = (r.dados as { id: string }).id; criadasCat++ }
+        else addLog('erro', `Categoria "${c.descricao}": ${r.erro}`)
+        await _sleep(60)
       }
-      // Filhos
       for (const c of filhos) {
-        if (canceladoRef.current) break
         const novoIdPai = mapaCategorias[c.id_pai ?? '']
-        if (!novoIdPai) { addLog('aviso', `Subcategoria "${c.descricao}": pai não encontrado`); avanco(); continue }
-        const ex = categorias.find(x => normalizarNome(x.descricao) === normalizarNome(c.descricao) && x.id_pai === novoIdPai)
-        if (ex) { mapaCategorias[c.id] = ex.id }
-        else {
-          const r = await apiComRetry('/categorias', 'POST', { descricao: c.descricao, tipo: c.tipo, icone: c.icone, cor: c.cor, id_pai: novoIdPai })
-          if (r.ok && (r.dados as { id?: string } | null)?.id) { mapaCategorias[c.id] = (r.dados as { id: string }).id; okCat++ }
-          else addLog('erro', `Subcategoria "${c.descricao}": ${r.erro}`)
-        }
-        avanco(); await _sleep(80)
+        const ex = categorias.find(x => normalizarNome(x.descricao) === normalizarNome(c.descricao) && (novoIdPai ? x.id_pai === novoIdPai : !!x.id_pai))
+        if (ex) { mapaCategorias[c.id] = ex.id; continue }
+        if (!criaFaltantes) continue
+        if (!novoIdPai) { addLog('aviso', `Subcategoria "${c.descricao}": pai não encontrado`); continue }
+        const r = await apiComRetry('/categorias', 'POST', { descricao: c.descricao, tipo: c.tipo, icone: c.icone, cor: c.cor, id_pai: novoIdPai })
+        if (r.ok && (r.dados as { id?: string } | null)?.id) { mapaCategorias[c.id] = (r.dados as { id: string }).id; criadasCat++ }
+        else addLog('erro', `Subcategoria "${c.descricao}": ${r.erro}`)
+        await _sleep(60)
       }
-      addLog('ok', `Categorias: ${okCat} criadas`)
+      if (criaFaltantes) addLog('ok', `Categorias: ${criadasCat} criadas`)
 
-      // ── 3. Transações ────────────────────────────────────────────
-      setProgressoLabel('Recriando transações...')
-      let okTx = 0, errTx = 0
-      const txOrdenadas  = [...txBackup].sort((a: TransacaoRaw, b: TransacaoRaw) => a.data.localeCompare(b.data))
-      const totalTx      = txOrdenadas.length
-      const txChunks = dividirEmChunks(txOrdenadas, 8)
-
-      addLog('ok', `Iniciando com ${txChunks.length} workers paralelos (${totalTx} transações)...`)
-
-      const processarChunkTx = async (chunk: TransacaoRaw[]) => {
-        for (const t of chunk) {
+      // ── 3. Mapas de dedup / relink (lançamentos e transferências) ──
+      const txIdPorKey    = new Map<string, string>()   // chave → id (existentes + criadas)
+      const keyPorOldTxId = new Map<string, string>()   // id antigo (backup) → chave
+      if (fazExtrato || fazLembretes) {
+        setProgressoLabel('Verificando lançamentos já existentes...')
+        for (let page = 1; ; page++) {
           if (canceladoRef.current) break
-          const conta_id     = mapaContas[t.conta_id ?? '']
-          const categoria_id = t.categoria_id ? mapaCategorias[t.categoria_id] : undefined
-          if (!conta_id) { addLog('aviso', `"${t.descricao}" ignorada: conta não mapeada`); errTx++; avanco(); continue }
-          const r = await apiComRetry('/transacoes', 'POST', {
-            tipo: t.tipo, data: t.data, descricao: t.descricao,
-            valor: t.valor, conta_id, categoria_id,
-            status: t.status, observacao: t.observacao,
-          })
-          if (r.ok) okTx++
-          else { addLog('erro', `"${t.descricao}" (${t.data}): ${r.erro}`); errTx++ }
-          avanco()
+          const r = await apiFetch(`/transacoes?per_page=1000&page=${page}`)
+          const pag = extrairLista<TransacaoRaw>(r.dados)
+          for (const t of pag) { const k = txKey(t.data, t.valor, t.tipo, t.descricao, t.conta_id); if (t.id && !txIdPorKey.has(k)) txIdPorKey.set(k, String(t.id)) }
+          if (pag.length < 1000) break
+        }
+        // chave de cada lançamento do backup pelo seu id antigo (p/ relink de lembretes)
+        for (const t of txBackup) {
+          const conta_id = mapaContas[t.conta_id ?? '']
+          if (t.id && conta_id) keyPorOldTxId.set(String(t.id), txKey(t.data, t.valor, t.tipo, t.descricao, conta_id))
         }
       }
 
-      await Promise.all(txChunks.map(processarChunkTx))
-      if (canceladoRef.current) addLog('aviso', `Cancelado. ${okTx} transações criadas de ${totalTx}.`)
-      else addLog('ok', `Transações: ${okTx} criadas, ${errTx} erros`)
+      const existentesTrf = new Set<string>()
+      if (fazExtrato) {
+        const mesesTrf: string[] = []
+        const hoje = new Date()
+        for (let i = 60; i >= -24; i--) { const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1); mesesTrf.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`) }
+        const resTrfEx = await Promise.all(mesesTrf.map(m => apiFetch(`/transferencias?mes=${m}`)))
+        for (const r of resTrfEx) {
+          for (const t of extrairLista<TransacaoRaw>(r.dados ?? r)) {
+            const origem = (t.conta_origem_id ?? t.conta_id) as string | undefined
+            existentesTrf.add(trfKey(t.data, t.valor, origem, t.conta_destino_id as string | undefined))
+          }
+        }
+      }
 
-      // ── 4. Transferências ────────────────────────────────────────
-      if (trfBackup && trfBackup.length > 0) {
-        setProgressoLabel('Recriando transferências...')
-        let okTrf = 0, errTrf = 0
+      // ── 4. Filtra do backup o que falta (só extrato) ──
+      let dupTx = 0, semContaTx = 0
+      const txParaCriar = !fazExtrato ? [] : [...txBackup]
+        .sort((a, b) => a.data.localeCompare(b.data))
+        .filter((t) => {
+          const conta_id = mapaContas[t.conta_id ?? '']
+          if (!conta_id) { semContaTx++; return false }
+          const k = txKey(t.data, t.valor, t.tipo, t.descricao, conta_id)
+          if (txIdPorKey.has(k)) { dupTx++; return false }
+          txIdPorKey.set(k, '')   // reserva (id preenchido após criar)
+          return true
+        })
+
+      let dupTrf = 0, semContaTrf = 0
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const trfParaCriar: any[] = []
+      if (fazExtrato && trfBackup && trfBackup.length > 0) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const parsUnicos = new Map<string, any>()
-        for (const t of trfBackup) {
-          const parId = (t.id_par ?? t.id_recorrencia) as string | undefined
-          if (parId && !parsUnicos.has(parId)) parsUnicos.set(parId, t)
+        for (const t of trfBackup) { const parId = (t.id_par ?? t.id_recorrencia) as string | undefined; if (parId && !parsUnicos.has(parId)) parsUnicos.set(parId, t) }
+        for (const t of parsUnicos.values()) {
+          const origem  = mapaContas[t.conta_origem_id ?? t.conta_id]
+          const destino = mapaContas[t.conta_destino_id]
+          if (!origem || !destino) { semContaTrf++; continue }
+          const k = trfKey(t.data, t.valor, origem, destino)
+          if (existentesTrf.has(k)) { dupTrf++; continue }
+          existentesTrf.add(k)
+          trfParaCriar.push({ ...t, _origem: origem, _destino: destino })
         }
-        const trfList    = Array.from(parsUnicos.values())
-        const trfChunks  = dividirEmChunks(trfList, 8)
+      }
 
-        addLog('ok', `Iniciando com ${trfChunks.length} workers paralelos (${trfList.length} transferências)...`)
+      const lembEstimate = fazLembretes ? (payload.lembretes?.length ?? 0) : 0
+      const totalPassos = Math.max(1, txParaCriar.length + trfParaCriar.length + lembEstimate)
+      let passo = 0
+      const avanco = () => { passo++; setProgresso(Math.round((passo / totalPassos) * 100)) }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const processarChunkTrf = async (chunk: any[]) => {
+      // ── 5. Cria só os lançamentos que faltam (registra id p/ relink) ──
+      if (txParaCriar.length > 0) {
+        setProgressoLabel(`Restaurando ${txParaCriar.length} lançamento(s)...`)
+        let okTx = 0, errTx = 0
+        const chunks = dividirEmChunks(txParaCriar, 8)
+        const proc = async (chunk: TransacaoRaw[]) => {
           for (const t of chunk) {
             if (canceladoRef.current) break
-            const origem  = mapaContas[t.conta_origem_id ?? t.conta_id]
-            const destino = mapaContas[t.conta_destino_id]
-            if (!origem || !destino) { addLog('aviso', `Transferência "${t.descricao ?? ''}" ignorada: contas não mapeadas`); errTrf++; avanco(); continue }
-            const r = await apiComRetry('/transferencias', 'POST', {
-              conta_origem_id: origem, conta_destino_id: destino,
-              valor: t.valor, data: t.data, descricao: t.descricao, status: t.status,
+            const conta_id     = mapaContas[t.conta_id ?? '']
+            const categoria_id = t.categoria_id ? mapaCategorias[t.categoria_id] : undefined
+            const r = await apiComRetry('/transacoes', 'POST', {
+              tipo: t.tipo, data: t.data, descricao: t.descricao, valor: t.valor,
+              conta_id, categoria_id, status: t.status, observacao: t.observacao,
             })
-            if (r.ok) okTrf++
-            else { addLog('erro', `Transferência "${t.descricao}" (${t.data}): ${r.erro}`); errTrf++ }
+            if (r.ok) { okTx++; const nid = (r.dados as { id?: string } | null)?.id; if (nid) txIdPorKey.set(txKey(t.data, t.valor, t.tipo, t.descricao, conta_id), String(nid)) }
+            else { addLog('erro', `"${t.descricao}" (${t.data}): ${r.erro}`); errTx++ }
             avanco()
           }
         }
-        await Promise.all(trfChunks.map(processarChunkTrf))
-        if (canceladoRef.current) addLog('aviso', `Cancelado. ${okTrf} transferências criadas de ${trfList.length}.`)
-        else addLog('ok', `Transferências: ${okTrf} criadas, ${errTrf} erros`)
+        await Promise.all(chunks.map(proc))
+        addLog('ok', `Lançamentos: ${okTx} restaurado(s), ${dupTx} já existia(m)${semContaTx ? `, ${semContaTx} sem conta` : ''}${errTx ? `, ${errTx} erro(s)` : ''}`)
+      }
+
+      // ── 6. Cria só as transferências que faltam ──
+      if (trfParaCriar.length > 0) {
+        setProgressoLabel(`Restaurando ${trfParaCriar.length} transferência(s)...`)
+        let okTrf = 0, errTrf = 0
+        const tchunks = dividirEmChunks(trfParaCriar, 8)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ptrf = async (chunk: any[]) => {
+          for (const t of chunk) {
+            if (canceladoRef.current) break
+            const r = await apiComRetry('/transferencias', 'POST', {
+              conta_origem_id: t._origem, conta_destino_id: t._destino,
+              valor: t.valor, data: t.data, descricao: t.descricao, status: t.status,
+            })
+            if (r.ok) okTrf++; else { addLog('erro', `Transferência "${t.descricao}" (${t.data}): ${r.erro}`); errTrf++ }
+            avanco()
+          }
+        }
+        await Promise.all(tchunks.map(ptrf))
+        addLog('ok', `Transferências: ${okTrf} restaurada(s), ${dupTrf} já existia(m)${semContaTrf ? `, ${semContaTrf} sem conta` : ''}${errTrf ? `, ${errTrf} erro(s)` : ''}`)
+      }
+
+      // ── 7. Lembretes (relink ao lançamento; dedup por data+descrição+vínculo) ──
+      if (fazLembretes && payload.lembretes && payload.lembretes.length > 0) {
+        setProgressoLabel('Restaurando lembretes...')
+        const lembKey = (data: string, desc: string, lanc?: string | null) => `${data}|${normDesc(desc)}|${lanc ?? ''}`
+        const existentesLemb = new Set<string>()
+        const rLembEx = await apiFetch('/lembretes')
+        for (const l of extrairLista<LembreteBackup>(rLembEx.dados)) existentesLemb.add(lembKey(String(l.data), String(l.descricao), (l.lancamento_id as string | null) ?? null))
+        let okL = 0, errL = 0, semVinculo = 0
+        for (const l of payload.lembretes) {
+          if (canceladoRef.current) break
+          const novoLanc = l.lancamento_id ? (txIdPorKey.get(keyPorOldTxId.get(String(l.lancamento_id)) ?? '') || null) : null
+          const k = lembKey(String(l.data), String(l.descricao), novoLanc)
+          if (existentesLemb.has(k)) { avanco(); continue }
+          existentesLemb.add(k)
+          if (l.lancamento_id && !novoLanc) semVinculo++
+          const r = await apiComRetry('/lembretes', 'POST', { data: l.data, descricao: l.descricao, lancamento_id: novoLanc })
+          if (r.ok) {
+            okL++
+            if (l.status === 'CONCLUIDO') { const id = (r.dados as { id?: string } | null)?.id; if (id) await apiComRetry(`/lembretes/${id}`, 'PUT', { status: 'CONCLUIDO' }) }
+          } else { addLog('erro', `Lembrete "${l.descricao}": ${r.erro}`); errL++ }
+          avanco()
+        }
+        addLog('ok', `Lembretes: ${okL} restaurado(s)${semVinculo ? `, ${semVinculo} sem vínculo (viraram avulsos)` : ''}${errL ? `, ${errL} erro(s)` : ''}`)
+        qc.invalidateQueries({ queryKey: ['lembretes'] })
+      }
+
+      if (passo === 0) {
+        addLog('ok', 'Nada novo a restaurar — os itens do backup já estão presentes.')
+        setProgresso(100)
+      }
+
+      // ── 8. Investimentos (modos "Tudo" e "Somente investimentos") ──
+      if (fazInvest && payload.investimentos) {
+        setProgressoLabel('Restaurando investimentos...')
+        const inv = payload.investimentos
+        const res = await apiMutate('/investimentos/restaurar', 'POST', {
+          conta_map: mapaContas,
+          categoria_map: mapaCategorias,
+          ativos: inv.ativos, posicoes: inv.posicoes, operacoes: inv.operacoes,
+          dividendos: inv.dividendos, historico: inv.historico,
+          tipos_dividendo: inv.tipos_dividendo, alocacoes: inv.alocacoes,
+        })
+        if (res.ok) {
+          const d = res.dados as { ativos?: number; posicoes?: number; operacoes?: number; dividendos?: number; historico?: number; avisos?: string[] } | null
+          addLog('ok', `Investimentos: ${d?.ativos ?? 0} ativos, ${d?.posicoes ?? 0} posições, ${d?.operacoes ?? 0} operações, ${d?.dividendos ?? 0} dividendos, ${d?.historico ?? 0} snapshots restaurados`)
+          for (const a of d?.avisos ?? []) addLog('aviso', a)
+          for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo'], ['inv-alocacoes']]) {
+            qc.invalidateQueries({ queryKey: k })
+          }
+        } else addLog('erro', `Investimentos: ${res.erro}`)
       }
 
       setProgressoLabel('Concluído!')
+      setProgresso(100)
     } catch (e) {
       addLog('erro', `Erro inesperado: ${(e as Error).message}`)
     } finally {
       // Desativar contas que foram reativadas temporariamente
       if (contasReativadas.length > 0) {
         setProgressoLabel('Restaurando estado das contas...')
-        for (const contaId of contasReativadas) {
-          await apiComRetry(`/contas/${contaId}`, 'PUT', { ativa: false })
-        }
+        for (const contaId of contasReativadas) await apiComRetry(`/contas/${contaId}`, 'PUT', { ativa: false })
         addLog('ok', `${contasReativadas.length} conta(s) devolvida(s) ao estado inativo.`)
       }
       setEtapa('concluido')
@@ -3219,6 +3440,8 @@ function SecaoRestore() {
                   ['Categorias', payload.categorias?.length ?? 0],
                   ['Transações', payload.transacoes?.length ?? 0],
                   ['Transferências', payload.transferencias?.length ?? 0],
+                  ['Investim. (ativos)', payload.investimentos?.ativos?.length ?? 0],
+                  ['Lembretes', payload.lembretes?.length ?? 0],
                 ].map(([k, v]) => (
                   <div key={String(k)} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
                     <span className="text-[15px] text-gray-400">{k}</span>
@@ -3230,13 +3453,40 @@ function SecaoRestore() {
                 ⚠️ Dados já existentes não serão duplicados — o restore verifica antes de criar.
               </p>
             </div>
+
+            {/* Escopo do restore */}
+            <div>
+              <p className="text-[15px] font-semibold text-gray-400 uppercase tracking-wide mb-2">O que restaurar?</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {[
+                  { v: 'tudo'          as const, t: 'Tudo',                  d: 'Contas, categorias, extrato, investimentos e lembretes (cria o que faltar).' },
+                  { v: 'extrato'       as const, t: 'Somente extrato',       d: 'Só transações e transferências. Contas/categorias apenas reconhecidas.' },
+                  { v: 'investimentos' as const, t: 'Somente investimentos', d: 'Ativos, posições, operações, dividendos, histórico (nas contas existentes).' },
+                  { v: 'lembretes'     as const, t: 'Somente lembretes',     d: 'Lembretes avulsos e os vinculados a lançamentos que já existam.' },
+                ].map(op => (
+                  <button key={op.v} onClick={() => setEscopo(op.v)}
+                    className="text-left p-3 rounded-lg border transition-all"
+                    style={{
+                      background: escopo === op.v ? '#f0b42915' : 'transparent',
+                      borderColor: escopo === op.v ? '#f0b42960' : 'rgba(255,255,255,0.08)',
+                    }}>
+                    <span className="text-[16px] font-semibold" style={{ color: escopo === op.v ? '#f0b429' : '#8b92a8' }}>{op.t}</span>
+                    <p className="text-[14px] text-gray-400 mt-0.5">{op.d}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex gap-2">
               <button onClick={resetar}
                 className="px-4 py-2 rounded-lg text-[17px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 transition-colors">
                 Cancelar
               </button>
               <Btn onClick={executarRestore} cor="#f0b429">
-                <RotateCcw size={14} /> Iniciar restore
+                <RotateCcw size={14} /> {escopo === 'tudo' ? 'Iniciar restore'
+                  : escopo === 'extrato' ? 'Restaurar extrato'
+                  : escopo === 'investimentos' ? 'Restaurar investimentos'
+                  : 'Restaurar lembretes'}
               </Btn>
             </div>
           </div>
@@ -3455,10 +3705,7 @@ export default function ImportExportPage() {
           </ul>
         </div>
 
-        {/* Linha 2 — Cotação do dólar (consulta PTAX) */}
-        <SecaoCotacaoDolar />
-
-        {/* Linha 3 — Backup | Restore (JSON, salvaguarda) */}
+        {/* Backup | Restore (JSON, salvaguarda) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
           <SecaoBackup />
           <SecaoRestore />

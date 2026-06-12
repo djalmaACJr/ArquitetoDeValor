@@ -406,12 +406,15 @@ export interface InvestimentoRankingAtivo {
   ticker:             string
   nome:               string
   tipo_ativo:         TipoAtivoInvestimento
+  quantidade:         number
+  nota_usuario:       number | null
   valor_custo:        number
   valor_mercado:      number
   ganho_perda:        number
   rentabilidade_pct:  number
   dividendos_12m:     number
   dividend_yield_pct: number
+  yield_on_cost_pct:  number
   participacao_pct:   number
 }
 

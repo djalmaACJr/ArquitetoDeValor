@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Plus, Pencil, Trash2, Layers, ArrowLeft, LineChart, Search, RefreshCw } from 'lucide-react'
+import { useState, useEffect, useMemo, Fragment } from 'react'
+import { Plus, Pencil, Trash2, Layers, ArrowLeft, LineChart, Search, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   useInvestimentosAtivos, useBuscaAtivoExterno,
@@ -26,6 +26,15 @@ import type {
 } from '../types'
 
 const MUTED = '#8b92a8'
+
+// Rótulo da categoria/subtipo de um ativo (FII: Tijolo/Papel…; Ações:
+// ON/PN/BDR; Renda Fixa/Tesouro: CDB/LCI/Tesouro…). null = sem categoria.
+function rotuloCategoriaAtivo(a: InvestimentoAtivo): string | null {
+  if (a.tipo_ativo === 'FII' && a.fii_categoria) return FII_CATEGORIA_INFO[a.fii_categoria].label
+  if (a.tipo_ativo === 'ACOES' && a.acoes_subtipo) return ACOES_SUBTIPO_LABEL[a.acoes_subtipo]
+  if ((a.tipo_ativo === 'RENDA_FIXA' || a.tipo_ativo === 'TESOURO_DIRETO') && a.rf_subtipo) return SUBTIPO_RF_INFO[a.rf_subtipo].label
+  return null
+}
 
 const FORM_VAZIO: CriarAtivoInput = {
   ticker: '', nome: '', tipo_ativo: 'ACOES', moeda: 'BRL', descricao: '', nota_usuario: null,
@@ -63,6 +72,48 @@ export default function AtivosInvestimentosPage() {
 
   const filtros = tipoFiltro ? { tipo: tipoFiltro } : {}
   const { ativos, loading, error, criar, editar, excluir } = useInvestimentosAtivos(filtros)
+
+  // Categorias colapsadas (expansível). Vazio = todas abertas.
+  const [catsFechadas, setCatsFechadas] = useState<Set<string>>(new Set())
+  const toggleCat = (key: string) => setCatsFechadas((s) => {
+    const n = new Set(s)
+    if (n.has(key)) n.delete(key); else n.add(key)
+    return n
+  })
+
+  // Contas (de investimento) onde cada ativo tem posição ATIVA — para
+  // mostrar a conta do ativo e sinalizar os que ficaram sem posição.
+  const { posicoes: todasPosicoes } = useInvestimentosPosicoes({})
+  const contasPorAtivo = useMemo(() => {
+    const m = new Map<string, Set<string>>()
+    for (const p of todasPosicoes) {
+      if (p.status !== 'ATIVA') continue
+      const nome = p.contas?.nome
+      if (!nome) continue
+      if (!m.has(p.ativo_id)) m.set(p.ativo_id, new Set())
+      m.get(p.ativo_id)!.add(nome)
+    }
+    return m
+  }, [todasPosicoes])
+
+  // Agrupa por Tipo → Categoria/subtipo (mesmo estilo do Relatório por categoria)
+  const grupos = useMemo(() => {
+    const porTipo = new Map<TipoAtivoInvestimento, Map<string, InvestimentoAtivo[]>>()
+    for (const a of ativos) {
+      if (!porTipo.has(a.tipo_ativo)) porTipo.set(a.tipo_ativo, new Map())
+      const cats = porTipo.get(a.tipo_ativo)!
+      const cat = rotuloCategoriaAtivo(a) ?? 'Sem categoria'
+      if (!cats.has(cat)) cats.set(cat, [])
+      cats.get(cat)!.push(a)
+    }
+    return [...porTipo.entries()]
+      .sort((x, y) => TIPOS_ATIVO_INV.indexOf(x[0]) - TIPOS_ATIVO_INV.indexOf(y[0]))
+      .map(([tipo, cats]) => ({
+        tipo,
+        total: [...cats.values()].reduce((s, l) => s + l.length, 0),
+        categorias: [...cats.entries()].sort((a, b) => b[1].length - a[1].length).map(([cat, lista]) => ({ cat, lista })),
+      }))
+  }, [ativos])
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
@@ -219,14 +270,50 @@ export default function AtivosInvestimentosPage() {
               </tr>
             </thead>
             <tbody>
-              {ativos.map((a) => (
+              {grupos.map((g) => (
+                <Fragment key={g.tipo}>
+                  {/* Cabeçalho do tipo (pai) */}
+                  <tr className="border-t border-white/10" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <td colSpan={5} className="px-4 py-2">
+                      <span className="text-[13px] font-bold uppercase tracking-wider" style={{ color: TIPO_ATIVO_COR[g.tipo] }}>{TIPO_ATIVO_LABEL[g.tipo]}</span>
+                      <span className="text-[12px] ml-2" style={{ color: MUTED }}>· {g.total} {g.total === 1 ? 'ativo' : 'ativos'}</span>
+                    </td>
+                  </tr>
+                  {g.categorias.map((c) => {
+                    const temHeader = g.categorias.length > 1 || c.cat !== 'Sem categoria'
+                    const key = `${g.tipo}|${c.cat}`
+                    const aberta = !temHeader || !catsFechadas.has(key)
+                    return (
+                    <Fragment key={c.cat}>
+                      {/* Cabeçalho da categoria (sub) — expansível */}
+                      {temHeader && (
+                        <tr className="border-t border-white/[0.03] cursor-pointer hover:bg-white/[0.02]" onClick={() => toggleCat(key)}>
+                          <td colSpan={5} className="px-4 py-1.5">
+                            <span className="inline-flex items-center gap-2 pl-1">
+                              {aberta ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ background: TIPO_ATIVO_COR[g.tipo] }} />
+                              <span className="text-[12px] font-semibold" style={{ color: '#c5cad8' }}>{c.cat}</span>
+                              <span className="text-[11px]" style={{ color: MUTED }}>· {c.lista.length}</span>
+                            </span>
+                          </td>
+                        </tr>
+                      )}
+                      {aberta && c.lista.map((a) => (
                 <tr key={a.id} className="border-t border-white/5">
                   <td className="px-4 py-2.5">
                     <Link to={`/investimentos/ativos/${a.id}`} className="font-semibold text-white hover:underline">
                       {a.ticker}
                     </Link>
                   </td>
-                  <td className="px-4 py-2.5 text-white/80">{a.nome}</td>
+                  <td className="px-4 py-2.5 text-white/80">
+                    {a.nome}
+                    {(() => {
+                      const cs = contasPorAtivo.get(a.id)
+                      return cs && cs.size > 0
+                        ? <span className="block text-[11px]" style={{ color: MUTED }}>{[...cs].join(', ')}</span>
+                        : <span className="block text-[11px]" style={{ color: '#ffb74d' }}>Sem posição em conta</span>
+                    })()}
+                  </td>
                   <td className="px-4 py-2.5">
                     <span className="inline-flex items-center gap-1.5 text-[12px] px-2 py-0.5 rounded-full"
                       style={{ background: `${TIPO_ATIVO_COR[a.tipo_ativo]}22`, color: TIPO_ATIVO_COR[a.tipo_ativo] }}>
@@ -270,6 +357,11 @@ export default function AtivosInvestimentosPage() {
                     </div>
                   </td>
                 </tr>
+                      ))}
+                    </Fragment>
+                    )
+                  })}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -516,6 +608,16 @@ function DrawerPosicoes({ ativo, onClose, onToast }: {
   const [form, setForm] = useState(POS_VAZIO)
   const [salvando, setSalvando] = useState(false)
 
+  // Opções de conta: contas de investimento ativas + qualquer conta onde o
+  // ativo já tem posição (mesmo inativa/outro tipo), pra nunca ficar vazio
+  // quando a posição caiu numa conta que não é INVESTIMENTO ativa.
+  const contasOpcoes = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of contas) if (c.tipo === 'INVESTIMENTO' && c.ativa) m.set(c.conta_id, c.nome)
+    for (const p of posicoes) if (p.conta_id && !m.has(p.conta_id)) m.set(p.conta_id, p.contas?.nome ?? '—')
+    return [...m.entries()]
+  }, [contas, posicoes])
+
   async function adicionar() {
     if (!form.conta_id) { onToast('Selecione a conta'); return }
     const qtd = Number(form.quantidade), preco = Number(form.preco_custo)
@@ -542,7 +644,7 @@ function DrawerPosicoes({ ativo, onClose, onToast }: {
         <Field label="Conta">
           <SelectDark value={form.conta_id} onChange={(e) => setForm({ ...form, conta_id: e.target.value })}>
             <option value="">Selecione...</option>
-            {contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa).map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
+            {contasOpcoes.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
           </SelectDark>
         </Field>
         <div className="grid grid-cols-2 gap-3">

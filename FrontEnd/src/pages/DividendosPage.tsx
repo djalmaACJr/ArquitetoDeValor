@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useDividendos, type CriarDividendoInput } from '../hooks/useDividendos'
@@ -13,9 +13,15 @@ import {
 } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL, formatData, hojeLocal, mesAtual } from '../lib/utils'
+import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR } from '../lib/constants'
 import type { InvestimentoDividendo, InvestimentoTipoDividendo, TipoAtivoInvestimento } from '../types'
 
 const MUTED = '#8b92a8'
+
+// Rótulo padrão do tipo de provento quando o registro não tem tipo vinculado
+// (ex.: dividendos importados/associados antes do auto-preenchimento).
+const TIPO_DEFAULT_LABEL = (t: TipoAtivoInvestimento): string =>
+  t === 'FII' ? 'Aluguel de FII' : 'Dividendos'
 
 // Lista de meses (YYYY-MM) de `ini` até `fim`, inclusive.
 function gerarMeses(ini: string, fim: string): string[] {
@@ -101,52 +107,7 @@ export default function DividendosPage() {
           </p>
         </div>
       ) : (
-        <div className="rounded-xl border border-white/10 overflow-hidden">
-          <table className="w-full text-[14px]">
-            <thead>
-              <tr className="text-left" style={{ color: MUTED }}>
-                <th className="px-4 py-2.5 font-medium">Ativo</th>
-                <th className="px-4 py-2.5 font-medium">Tipo</th>
-                <th className="px-4 py-2.5 font-medium">Pagamento</th>
-                <th className="px-4 py-2.5 font-medium text-right">Valor</th>
-                <th className="px-4 py-2.5 font-medium text-center">Extrato</th>
-                <th className="px-4 py-2.5"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {dividendos.map((d) => (
-                <tr key={d.id} className="border-t border-white/5">
-                  <td className="px-4 py-2.5 font-semibold text-white">{d.inv_ativos?.ticker ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-white/80">{d.inv_tipos_dividendo?.nome ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-white/80">{formatData(d.data_pagamento)}</td>
-                  <td className="px-4 py-2.5 text-right font-medium" style={{ color: '#00c896' }}>{formatBRL(d.valor)}</td>
-                  <td className="px-4 py-2.5 text-center">
-                    {d.transacoes?.status === 'PROJECAO' ? (
-                      <span className="text-[12px] px-2 py-0.5 rounded-full" style={{ background: '#ffb74d22', color: '#ffb74d' }}>Projetado</span>
-                    ) : d.transacao_extrato_id ? (
-                      <span className="text-[12px] px-2 py-0.5 rounded-full" style={{ background: '#00c89622', color: '#00c896' }}>Pago</span>
-                    ) : (
-                      <span className="text-[12px]" style={{ color: MUTED }}>—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {d.transacoes?.status === 'PROJECAO' && (
-                        <button onClick={() => setConfirmando(d)} title="Confirmar recebimento"
-                          className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-emerald-400/40" style={{ color: '#00c896' }}>
-                          <CheckCircle2 size={13} />
-                        </button>
-                      )}
-                      <button onClick={() => setExcluindo(d)} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ListaDividendos dividendos={dividendos} onExcluir={setExcluindo} onConfirmar={setConfirmando} />
       )}
 
       {drawerNovo   && <DrawerNovoDividendo onClose={() => setDrawerNovo(false)} onToast={showToast} />}
@@ -160,6 +121,182 @@ export default function DividendosPage() {
           onConfirmar={confirmarExclusao} onCancelar={() => setExcluindo(null)} salvando={salvando} />
       )}
     </div>
+  )
+}
+
+// ── Lista de dividendos (filtros + ordenação + agrupamento) ─────
+
+type DivSortKey = 'ticker' | 'tipo' | 'data' | 'valor'
+
+function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
+  dividendos: InvestimentoDividendo[]
+  onExcluir: (d: InvestimentoDividendo) => void
+  onConfirmar: (d: InvestimentoDividendo) => void
+}) {
+  const [filtroTicker, setFiltroTicker] = useState('')
+  const [filtroTipoAtivo, setFiltroTipoAtivo] = useState<'' | TipoAtivoInvestimento>('')
+  const [agrupar, setAgrupar] = useState(true)
+  const [sort, setSort] = useState<{ key: DivSortKey; dir: 'asc' | 'desc' }>({ key: 'data', dir: 'desc' })
+
+  const tipoLabel = (d: InvestimentoDividendo) => d.inv_tipos_dividendo?.nome ?? TIPO_DEFAULT_LABEL(d.tipo_ativo)
+
+  const tickers = useMemo(() => {
+    const s = new Set<string>()
+    for (const d of dividendos) if (d.inv_ativos?.ticker) s.add(d.inv_ativos.ticker)
+    return [...s].sort()
+  }, [dividendos])
+  const tiposAtivo = useMemo(() => {
+    const s = new Set<TipoAtivoInvestimento>()
+    for (const d of dividendos) s.add(d.tipo_ativo)
+    return [...s]
+  }, [dividendos])
+
+  const filtrados = useMemo(() => dividendos.filter((d) =>
+    (!filtroTicker || d.inv_ativos?.ticker === filtroTicker) &&
+    (!filtroTipoAtivo || d.tipo_ativo === filtroTipoAtivo)
+  ), [dividendos, filtroTicker, filtroTipoAtivo])
+
+  const valorOrd = (d: InvestimentoDividendo): string | number => {
+    switch (sort.key) {
+      case 'ticker': return d.inv_ativos?.ticker ?? ''
+      case 'tipo':   return tipoLabel(d)
+      case 'data':   return d.data_pagamento
+      case 'valor':  return d.valor
+    }
+  }
+  const ordenados = useMemo(() => {
+    const arr = [...filtrados]
+    arr.sort((a, b) => {
+      const va = valorOrd(a), vb = valorOrd(b)
+      const c = typeof va === 'number' && typeof vb === 'number'
+        ? va - vb : String(va).localeCompare(String(vb), 'pt-BR')
+      return sort.dir === 'asc' ? c : -c
+    })
+    return arr
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtrados, sort])
+
+  const clickSort = (key: DivSortKey) =>
+    setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'valor' || key === 'data' ? 'desc' : 'asc' }))
+
+  const grupos = useMemo(() => {
+    if (!agrupar) return null
+    const map = new Map<TipoAtivoInvestimento, InvestimentoDividendo[]>()
+    for (const d of ordenados) {
+      if (!map.has(d.tipo_ativo)) map.set(d.tipo_ativo, [])
+      map.get(d.tipo_ativo)!.push(d)
+    }
+    return [...map.entries()]
+      .map(([tipo, lista]) => ({ tipo, lista, total: lista.reduce((s, d) => s + d.valor, 0) }))
+      .sort((a, b) => b.total - a.total)
+  }, [ordenados, agrupar])
+
+  const total = useMemo(() => filtrados.reduce((s, d) => s + d.valor, 0), [filtrados])
+
+  const seta = (k: DivSortKey) => (sort.key === k ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '')
+  const Th = ({ k, label, cls }: { k: DivSortKey; label: string; cls?: string }) => (
+    <th onClick={() => clickSort(k)}
+      className={`px-4 py-2.5 font-medium cursor-pointer select-none hover:text-white ${cls ?? ''}`}>
+      {label}{seta(k)}
+    </th>
+  )
+
+  const linha = (d: InvestimentoDividendo) => (
+    <tr key={d.id} className="border-t border-white/5">
+      <td className="px-4 py-2.5 font-semibold text-white">{d.inv_ativos?.ticker ?? '—'}</td>
+      <td className="px-4 py-2.5">
+        {d.inv_tipos_dividendo?.nome
+          ? <span className="text-white/80">{d.inv_tipos_dividendo.nome}</span>
+          : <span className="italic" style={{ color: MUTED }}>{TIPO_DEFAULT_LABEL(d.tipo_ativo)}</span>}
+      </td>
+      <td className="px-4 py-2.5 text-white/80">{formatData(d.data_pagamento)}</td>
+      <td className="px-4 py-2.5 text-right font-medium" style={{ color: '#00c896' }}>{formatBRL(d.valor)}</td>
+      <td className="px-4 py-2.5 text-center">
+        {d.transacoes?.status === 'PROJECAO' ? (
+          <span className="text-[12px] px-2 py-0.5 rounded-full" style={{ background: '#ffb74d22', color: '#ffb74d' }}>Projetado</span>
+        ) : d.transacao_extrato_id ? (
+          <span className="text-[12px] px-2 py-0.5 rounded-full" style={{ background: '#00c89622', color: '#00c896' }}>Pago</span>
+        ) : (
+          <span className="text-[12px]" style={{ color: MUTED }}>—</span>
+        )}
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        <div className="flex items-center justify-end gap-1">
+          {d.transacoes?.status === 'PROJECAO' && (
+            <button onClick={() => onConfirmar(d)} title="Confirmar recebimento"
+              className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-emerald-400/40" style={{ color: '#00c896' }}>
+              <CheckCircle2 size={13} />
+            </button>
+          )}
+          <button onClick={() => onExcluir(d)} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  )
+
+  return (
+    <>
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <SelectDark value={filtroTicker} onChange={(e) => setFiltroTicker(e.target.value)} className="!py-1.5 !text-[13px] min-w-[130px]">
+          <option value="">Todos os tickers</option>
+          {tickers.map((t) => <option key={t} value={t}>{t}</option>)}
+        </SelectDark>
+        <SelectDark value={filtroTipoAtivo} onChange={(e) => setFiltroTipoAtivo(e.target.value as '' | TipoAtivoInvestimento)} className="!py-1.5 !text-[13px] min-w-[130px]">
+          <option value="">Todos os tipos</option>
+          {tiposAtivo.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
+        </SelectDark>
+        {(filtroTicker || filtroTipoAtivo) && (
+          <button onClick={() => { setFiltroTicker(''); setFiltroTipoAtivo('') }}
+            className="text-[13px] px-2.5 py-1.5 rounded-lg border border-white/10 hover:border-white/25" style={{ color: MUTED }}>
+            Limpar
+          </button>
+        )}
+        <button onClick={() => setAgrupar((a) => !a)}
+          className="text-[13px] px-2.5 py-1.5 rounded-lg border border-white/10 hover:border-white/25 ml-auto" style={{ color: MUTED }}>
+          Agrupar por tipo: {agrupar ? 'ligado' : 'desligado'}
+        </button>
+        <span className="text-[13px] font-medium" style={{ color: '#00c896' }}>{formatBRL(total)}</span>
+      </div>
+
+      <div className="rounded-xl border border-white/10 overflow-hidden">
+        <table className="w-full text-[14px]">
+          <thead>
+            <tr className="text-left" style={{ color: MUTED }}>
+              <Th k="ticker" label="Ativo" />
+              <Th k="tipo" label="Tipo" />
+              <Th k="data" label="Pagamento" />
+              <Th k="valor" label="Valor" cls="text-right" />
+              <th className="px-4 py-2.5 font-medium text-center">Extrato</th>
+              <th className="px-4 py-2.5"></th>
+            </tr>
+          </thead>
+          {agrupar && grupos ? (
+            grupos.map((g) => (
+              <tbody key={g.tipo}>
+                <tr className="border-t border-white/10 bg-white/[0.03]">
+                  <td colSpan={3} className="px-4 py-2">
+                    <span className="font-semibold text-[13px]" style={{ color: TIPO_ATIVO_COR[g.tipo] }}>{TIPO_ATIVO_LABEL[g.tipo]}</span>
+                    <span className="text-[12px] ml-2" style={{ color: MUTED }}>· {g.lista.length}</span>
+                  </td>
+                  <td className="px-4 py-2 text-right font-semibold text-[13px]" style={{ color: '#00c896' }}>{formatBRL(g.total)}</td>
+                  <td colSpan={2}></td>
+                </tr>
+                {g.lista.map(linha)}
+              </tbody>
+            ))
+          ) : (
+            <tbody>{ordenados.map(linha)}</tbody>
+          )}
+        </table>
+      </div>
+
+      {ordenados.length === 0 && (
+        <p className="text-[13px] text-center py-4" style={{ color: MUTED }}>Nenhum dividendo para os filtros selecionados.</p>
+      )}
+    </>
   )
 }
 
@@ -438,6 +575,7 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
   const [etapa, setEtapa] = useState<'config' | 'revisando'>('config')
   const [carregando, setCarregando] = useState(false)
   const [salvando, setSalvando] = useState(false)
+  const [progresso, setProgresso] = useState(0)
   const [linhas, setLinhas] = useState<LinhaAssoc[]>([])
 
   const catsOpcoes = categorias.map((c) => ({
@@ -451,6 +589,13 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
     return tickersOrd.find((a) => d.includes(a.ticker.toUpperCase()))?.id ?? ''
   }
   const tipoPorCategoria = (catId: string): string => tipos.find((t) => t.categoria_id === catId)?.id ?? ''
+  // Sugere o tipo de provento pelo tipo do ativo (FII → Aluguel de FII; demais → Dividendos)
+  const sugerirTipo = (ativoId: string): string => {
+    const at = ativos.find((a) => a.id === ativoId)
+    const ehFii = at?.tipo_ativo === 'FII'
+    const m = tipos.find((x) => (ehFii ? /aluguel|fii/i : /dividend/i).test(x.nome))
+    return m?.id ?? tipoPorCategoria(categoriaId)
+  }
   const setLinha = (idx: number, patch: Partial<LinhaAssoc>) =>
     setLinhas((ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)))
 
@@ -475,7 +620,7 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
         ls.push({
           transacao_id: t.id, data: t.data, descricao: String(t.descricao ?? ''),
           valor: Number(t.valor), ativo_id: ativoId,
-          tipo_dividendo_id: tipoPorCategoria(categoriaId), importar: !!ativoId,
+          tipo_dividendo_id: ativoId ? sugerirTipo(ativoId) : '', importar: !!ativoId,
         })
       }
       ls.sort((a, b) => (a.data < b.data ? 1 : -1))
@@ -490,14 +635,16 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
   async function confirmar() {
     const sel = linhas.filter((l) => l.importar && l.ativo_id)
     if (sel.length === 0) { onToast('Defina o ativo e marque ao menos uma linha.'); return }
-    setSalvando(true)
+    setSalvando(true); setProgresso(0)
     let ok = 0, erros = 0
-    for (const l of sel) {
+    for (let i = 0; i < sel.length; i++) {
+      const l = sel[i]
       const res = await associar({
         transacao_extrato_id: l.transacao_id, ativo_id: l.ativo_id,
         tipo_dividendo_id: l.tipo_dividendo_id || null,
       })
       if (res.ok) ok++; else erros++
+      setProgresso(Math.round(((i + 1) / sel.length) * 100))
     }
     setSalvando(false)
     onToast(`${ok} provento(s) associado(s)${erros ? `, ${erros} com erro` : ''}.`)
@@ -559,7 +706,7 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
                     <td className="px-2 py-1 text-white/70 max-w-[160px] truncate" title={l.descricao}>{l.descricao}</td>
                     <td className="px-2 py-1 text-right" style={{ color: '#00c896' }}>{formatBRL(l.valor)}</td>
                     <td className="px-1 py-1">
-                      <SelectDark value={l.ativo_id} onChange={(e) => setLinha(i, { ativo_id: e.target.value, importar: !!e.target.value })} className="!py-1 !text-[12px] min-w-[88px]">
+                      <SelectDark value={l.ativo_id} onChange={(e) => setLinha(i, { ativo_id: e.target.value, importar: !!e.target.value, tipo_dividendo_id: e.target.value ? sugerirTipo(e.target.value) : '' })} className="!py-1 !text-[12px] min-w-[88px]">
                         <option value="">— ativo —</option>
                         {ativos.map((a) => <option key={a.id} value={a.id}>{a.ticker}</option>)}
                       </SelectDark>
@@ -577,6 +724,16 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
           </div>
           {linhas.some((l) => !l.ativo_id) && (
             <p className="text-[12px] mt-2" style={{ color: '#ffb74d' }}>Linhas sem ativo não serão associadas — selecione o ativo para incluí-las.</p>
+          )}
+          {salvando && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[12px] mb-1" style={{ color: MUTED }}>
+                <span>Associando proventos…</span><span>{progresso}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: `${progresso}%`, background: '#00c896' }} />
+              </div>
+            </div>
           )}
         </>
       )}

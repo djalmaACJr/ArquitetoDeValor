@@ -46,6 +46,10 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
   // como 0 e o useEffect abaixo seta o timestamp real ao montar.
   const lastActivityRef = useRef<number>(0)
   const expiradoRef = useRef<boolean>(false)
+  // Momento em que a aba ficou em segundo plano (0 = visível). Usado para
+  // deslogar imediatamente ao voltar a uma aba que ficou oculta tempo demais
+  // (defesa contra timers estrangulados/congelados em abas inativas).
+  const hiddenAtRef = useRef<number>(0)
 
   // Snapshot "sempre atual" de rota/filtros/usuário em ref — o timer lê
   // daqui na hora da expiração sem precisar reiniciar o efeito a cada
@@ -93,34 +97,52 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       document.addEventListener(ev, marcarAtividade, { passive: true })
     }
 
-    const intervalId = window.setInterval(async () => {
+    // Executa a expiração (signOut + redireciona). `forcar` ignora o cálculo
+    // de ociosidade (usado quando a aba já passou do limite escondida).
+    async function checarExpiracao(forcar = false) {
       if (expiradoRef.current) return
-      const ocioso = Date.now() - lastActivityRef.current
-      if (ocioso < limiteMs) return
+      if (!forcar && Date.now() - lastActivityRef.current < limiteMs) return
 
-      // Evita dispara múltiplas vezes em sequência
       expiradoRef.current = true
-
       // Guarda rota + filtros para retomar após o próximo login do
       // mesmo usuário nesta aba (LoginPage e PageStateProvider consomem).
       const snap = snapshotRef.current
       if (snap.userId) {
         salvarRetornoPosExpiracao(snap.userId, snap.rota, snap.filtros)
       }
-
       try {
         await supabase.auth.signOut()
       } catch {
         /* mesmo se signOut falhar, redireciona pra forçar reauth */
       }
       navigateRef.current('/login?expirado=1', { replace: true })
-    }, INTERVALO_CHECK_MS)
+    }
+
+    const intervalId = window.setInterval(() => { checarExpiracao() }, INTERVALO_CHECK_MS)
+
+    // Ciclo de visibilidade: ao voltar a uma aba que ficou oculta além do
+    // limite, desloga IMEDIATAMENTE — antes que um mousemove resete o timer.
+    // Cobre o caso de timers estrangulados/congelados em segundo plano.
+    function onVisibilidade() {
+      if (document.visibilityState === 'hidden') {
+        hiddenAtRef.current = Date.now()
+      } else {
+        const escondidaMs = hiddenAtRef.current ? Date.now() - hiddenAtRef.current : 0
+        hiddenAtRef.current = 0
+        checarExpiracao(escondidaMs >= limiteMs)
+      }
+    }
+    function onFoco() { checarExpiracao() }
+    document.addEventListener('visibilitychange', onVisibilidade)
+    window.addEventListener('focus', onFoco)
 
     return () => {
       for (const ev of EVENTOS_INTERACAO) {
         document.removeEventListener(ev, marcarAtividade)
       }
       window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisibilidade)
+      window.removeEventListener('focus', onFoco)
     }
   }, [timeoutMinutos])
 }

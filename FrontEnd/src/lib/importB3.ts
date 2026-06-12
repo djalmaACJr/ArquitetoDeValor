@@ -14,7 +14,8 @@
 // histórico e os proventos. Tudo é chaveado por (ticker, instituição).
 // ============================================================
 import type {
-  TipoAtivoInvestimento, SubtipoRF, IndexadorRF, TipoOperacaoInvestimento, AcoesSubtipo,
+  TipoAtivoInvestimento, SubtipoRF, IndexadorRF, TipoOperacaoInvestimento,
+  AcoesSubtipo, CategoriaFII,
 } from './constants'
 
 // Tipo mínimo do SheetJS que usamos (evita depender do CDN nos tipos)
@@ -81,9 +82,38 @@ export function tipoPadraoTicker(ticker: string): TipoAtivoInvestimento {
   return 'ACOES'
 }
 
-// BDRs têm ticker terminado em 32/33/34/35 → subtipo BDR de Ações
+// Subtipo da ação pelo sufixo do ticker (convenção B3):
+//   3 = ON · 4/5/6/7/8 = PN (classes preferenciais) · 11 = Unit ·
+//   31/32/33/34/35/39 = BDR
 export function acoesSubtipoPorTicker(ticker: string): AcoesSubtipo | null {
-  return /(32|33|34|35)$/.test(ticker.toUpperCase()) ? 'BDR' : null
+  const t = ticker.toUpperCase()
+  if (/(31|32|33|34|35|39)$/.test(t)) return 'BDR'
+  if (/11$/.test(t)) return 'UNIT'
+  if (/3$/.test(t)) return 'ON'
+  if (/[4-8]$/.test(t)) return 'PN'
+  return null
+}
+
+// Segmento dos FIIs mais comuns da B3 (não há regra pelo ticker). Curado;
+// FIIs fora da lista caem em 'OUTRO' (editável no cadastro).
+const FII_SEGMENTO: Record<string, CategoriaFII> = {
+  // Papel (CRI / crédito imobiliário)
+  MXRF11: 'PAPEL', KNCR11: 'PAPEL', KNIP11: 'PAPEL', KNHY11: 'PAPEL', KNCA11: 'PAPEL',
+  CPTS11: 'PAPEL', IRDM11: 'PAPEL', RBRR11: 'PAPEL', RBRY11: 'PAPEL', VGIR11: 'PAPEL',
+  HGCR11: 'PAPEL', DEVA11: 'PAPEL', CVBI11: 'PAPEL', VRTA11: 'PAPEL', HCTR11: 'PAPEL',
+  OUJP11: 'PAPEL', MCCI11: 'PAPEL', BTCI11: 'PAPEL', RECR11: 'PAPEL', VCJR11: 'PAPEL',
+  // Tijolo (imóveis físicos)
+  XPLG11: 'TIJOLO', XPML11: 'TIJOLO', INLG11: 'TIJOLO', GARE11: 'TIJOLO', KORE11: 'TIJOLO',
+  KNRI11: 'TIJOLO', HGLG11: 'TIJOLO', HGRE11: 'TIJOLO', HGRU11: 'TIJOLO', VISC11: 'TIJOLO',
+  VILG11: 'TIJOLO', PVBI11: 'TIJOLO', HSML11: 'TIJOLO', VINO11: 'TIJOLO', BTLG11: 'TIJOLO',
+  BRCO11: 'TIJOLO', LVBI11: 'TIJOLO', RBRP11: 'TIJOLO', TRXF11: 'TIJOLO', MALL11: 'TIJOLO',
+  RCRB11: 'TIJOLO', ALZR11: 'TIJOLO', BLMG11: 'TIJOLO', GTWR11: 'TIJOLO',
+  // FoF (fundo de fundos)
+  CPFF11: 'FOF', BCFF11: 'FOF', HFOF11: 'FOF', RBRF11: 'FOF', KFOF11: 'FOF',
+  MGFF11: 'FOF', BPFF11: 'FOF', VGRI11: 'FOF',
+}
+export function fiiCategoriaPorTicker(ticker: string): CategoriaFII {
+  return FII_SEGMENTO[ticker.toUpperCase()] ?? 'OUTRO'
 }
 
 // ── Helpers numéricos / datas ────────────────────────────────────
@@ -285,7 +315,8 @@ export function parsePosicao(XLSX: XlsxUtils, wb: XlsxLike): PosicaoB3[] {
       if (tipoFinal === 'ACOES') {
         acoesSub = bdr ? 'BDR'
           : (tipoCol.includes('UNT') || tipoCol.includes('UNIT')) ? 'UNIT'
-          : tipoCol === 'ON' ? 'ON' : tipoCol === 'PN' ? 'PN' : null
+          : tipoCol === 'ON' ? 'ON' : tipoCol === 'PN' ? 'PN'
+          : acoesSubtipoPorTicker(ticker)   // fallback robusto pelo sufixo
       }
       add({
         ticker, nome: produto.split(' - ').slice(1).join(' - ').trim() || produto || ticker,
@@ -293,7 +324,7 @@ export function parsePosicao(XLSX: XlsxUtils, wb: XlsxLike): PosicaoB3[] {
         instituicao: String(pick(r, 'instituição', 'instituicao')).trim(),
         quantidade, valor_mercado: valor, preco_fechamento: fech,
         custo_fallback: fech || (quantidade > 0 ? valor / quantidade : 0),
-        fii_categoria: tipoFinal === 'FII' ? 'OUTRO' : null,
+        fii_categoria: tipoFinal === 'FII' ? fiiCategoriaPorTicker(ticker) : null,
         acoes_subtipo: acoesSub,
       })
     }
@@ -488,10 +519,12 @@ export function parseStatusInvest(XLSX: XlsxUtils, wb: XlsxLike): MovB3[] {
     const cvRaw = String(pick(r, 'operação c/v', 'operacao c/v', 'operação', 'operacao', 'c/v')).trim().toUpperCase()
     const acao: AcaoMov = cvRaw.startsWith('V') ? 'VENDA' : 'COMPRA'
     const tipoAtivo = tipoAtivoStatusInvest(categoria, codigo)
-    const acoesSubtipo: AcoesSubtipo | null = tipoAtivo === 'ACOES' && /bdr/i.test(categoria) ? 'BDR' : null
     const ticker = tipoAtivo === 'TESOURO_DIRETO'
       ? normalizarTickerTesouro(codigo)
       : codigo.toUpperCase().replace(/\s+/g, '').slice(0, 20)
+    const acoesSubtipo: AcoesSubtipo | null = tipoAtivo === 'ACOES'
+      ? (/bdr/i.test(categoria) ? 'BDR' : acoesSubtipoPorTicker(ticker))
+      : null
     const data = dmyToYmd(pick(r, 'data operação', 'data operacao', 'data'))
     if (!ticker || !data) continue
     const quantidade = num(pick(r, 'quantidade', 'qtd'))
@@ -540,7 +573,7 @@ export function derivarPosicoes(movs: MovB3[], custo: Map<string, CustoMedio>): 
       rf_indexador: null,
       rf_emissor: e.tipo === 'TESOURO_DIRETO' ? 'Governo Federal' : null,
       rf_vencimento: null,
-      fii_categoria: e.tipo === 'FII' ? 'OUTRO' : null,
+      fii_categoria: e.tipo === 'FII' ? fiiCategoriaPorTicker(e.ticker) : null,
       acoes_subtipo: e.tipo === 'ACOES' ? e.subtipo : null,
     })
   }
