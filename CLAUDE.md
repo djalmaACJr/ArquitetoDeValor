@@ -238,6 +238,7 @@ Roda no Firefox; relatório HTML em `FrontEnd/e2e/report/`.
 - Considerar impacto em RLS, recorrência e pares de transferência
 - Respeitar os ENUMs e constraints do banco
 - Atualizar testes quando alterar comportamento
+- **Backup/Restore obrigatório para toda tabela nova**: sempre que uma nova tabela de dados do usuário for incorporada ao sistema, ela DEVE ser incluída nas rotinas de backup e restore em [`ImportExportPage.tsx`](FrontEnd/src/pages/ImportExportPage.tsx) — adicionar ao `BackupPayload` + `fazerBackup` (coleta), ao `executarRestore` (recriação com dedup e remapeamento de FKs via `mapaContas`/`mapaCategorias`), à lista "O backup inclui" e, quando fizer sentido, a um escopo "Somente \<tabela\>" no restore. Também avaliar inclusão na exportação Excel.
 
 ### ❌ Não deve
 

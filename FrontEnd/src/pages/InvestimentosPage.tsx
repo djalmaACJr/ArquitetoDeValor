@@ -781,14 +781,19 @@ export default function InvestimentosPage() {
 function DrawerMetasAlocacao({ onClose, onToast }: { onClose: () => void; onToast: (m: string) => void }) {
   const { alocacoes, salvar } = useInvestimentosAlocacao()
   // Mapa tipo → % atual salvo
-  const [valores, setValores] = useState<Record<string, string>>(() => {
-    const init: Record<string, string> = {}
+  // Edições do usuário (sobrepõem o que veio do servidor). Derivar em render
+  // — em vez de init no useState — garante carregar os valores salvos mesmo
+  // com o useQuery resolvendo de forma assíncrona (antes vinha tudo em branco).
+  const [edits, setEdits] = useState<Record<string, string>>({})
+  const valores = useMemo(() => {
+    const out: Record<string, string> = {}
     for (const t of TIPOS_ATIVO_INV) {
+      if (t in edits) { out[t] = edits[t]; continue }
       const a = alocacoes.find((x) => x.tipo_ativo === t)
-      init[t] = a && a.percentual_ideal > 0 ? String(a.percentual_ideal) : ''
+      out[t] = a && a.percentual_ideal > 0 ? String(a.percentual_ideal) : ''
     }
-    return init
-  })
+    return out
+  }, [alocacoes, edits])
   const [salvando, setSalvando] = useState(false)
 
   const total = TIPOS_ATIVO_INV.reduce((s, t) => s + (Number(valores[t]) || 0), 0)
@@ -816,8 +821,8 @@ function DrawerMetasAlocacao({ onClose, onToast }: { onClose: () => void; onToas
             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: TIPO_ATIVO_COR[t] }} />
             <span className="flex-1 text-[14px] text-white/85">{TIPO_ATIVO_LABEL[t]}</span>
             <div className="w-28">
-              <Input type="number" min={0} max={100} step="any" value={valores[t]}
-                onChange={(e) => setValores((v) => ({ ...v, [t]: e.target.value }))} placeholder="0" />
+              <Input type="number" min={0} max={100} step="any" value={valores[t] ?? ''}
+                onChange={(e) => setEdits((v) => ({ ...v, [t]: e.target.value }))} placeholder="0" />
             </div>
             <span className="text-[13px] w-4" style={{ color: MUTED }}>%</span>
           </div>

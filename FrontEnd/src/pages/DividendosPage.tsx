@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, type ReactNode } from 'react'
-import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, Info, ChevronDown, ChevronRight, ChevronLeft, Layers } from 'lucide-react'
+import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, ChevronDown, ChevronRight, Layers } from 'lucide-react'
 import { Doughnut } from 'react-chartjs-2'
-import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, type Plugin } from 'chart.js'
+import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, type Plugin, type ChartType } from 'chart.js'
 import { Link } from 'react-router-dom'
 import { useDividendos, type CriarDividendoInput } from '../hooks/useDividendos'
 import { useObjetivos } from '../hooks/useObjetivos'
@@ -15,11 +15,26 @@ import {
   Toast, ModalExcluir, Segmented,
 } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
-import { formatBRL, formatData, hojeLocal, mesAtual, mesLabel, proximoMes, ultimoDiaMes, MESES_ABREV } from '../lib/utils'
+import { MonthPicker } from '../components/ui/MonthPicker'
+import { formatBRL, formatData, hojeLocal, mesAtual, mesLabel, MESES_ABREV } from '../lib/utils'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPO_OBJETIVO_LABEL } from '../lib/constants'
 import type { InvestimentoDividendo, InvestimentoTipoDividendo, TipoAtivoInvestimento } from '../types'
 
 ChartJS.register(ArcElement, ChartTooltip)
+
+// Opção customizada do gráfico de dividendos: dados que o plugin de rótulos
+// lê de chart.options (em vez de closure, que o react-chartjs-2 não recria).
+declare module 'chart.js' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface PluginOptionsByType<TType extends ChartType> {
+    rotulosDividendos?: {
+      externos: { label: string; pct: number }[]
+      tiposVis: { tipo: TipoAtivoInvestimento; pct: number }[]
+      corTexto: string
+      corLinha: string
+    }
+  }
+}
 
 const MUTED = '#8b92a8'
 
@@ -27,6 +42,24 @@ const MUTED = '#8b92a8'
 // (ex.: dividendos importados/associados antes do auto-preenchimento).
 const TIPO_DEFAULT_LABEL = (t: TipoAtivoInvestimento): string =>
   t === 'FII' ? 'Aluguel de FII' : 'Dividendos'
+
+// "Provisionado/futuro" = ainda não recebido = transação no extrato com
+// status PROJECAO. Independe da data (uma projeção do mês corrente também
+// é futura). Sem transação vinculada → tratado como recebido (histórico).
+const ehProvisionado = (d: InvestimentoDividendo): boolean =>
+  d.transacoes?.status === 'PROJECAO'
+
+// Barra de participação (% sobre o total) usada nos cards de proventos.
+function Barra({ pct, cor }: { pct: number; cor: string }) {
+  return (
+    <div className="relative h-3.5 rounded-full bg-white/10 overflow-hidden">
+      <div className="h-full rounded-full" style={{ width: `${Math.max(pct, 2)}%`, background: cor }} />
+      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
+        {pct}%
+      </span>
+    </div>
+  )
+}
 
 // Lista de meses (YYYY-MM) de `ini` até `fim`, inclusive.
 function gerarMeses(ini: string, fim: string): string[] {
@@ -140,11 +173,10 @@ export default function DividendosPage() {
 
 function ProventosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[] }) {
   const { cards, demais, totalDemais, totalGeral } = useMemo(() => {
-    const fim = ultimoDiaMes(mesAtual())
     const porTipo = new Map<TipoAtivoInvestimento, number>()
     let totalGeral = 0
     for (const d of dividendos) {
-      if (d.data_pagamento > fim) continue // só recebidos
+      if (ehProvisionado(d)) continue // só recebidos
       porTipo.set(d.tipo_ativo, (porTipo.get(d.tipo_ativo) ?? 0) + d.valor)
       totalGeral += d.valor
     }
@@ -163,22 +195,10 @@ function ProventosPorCategoria({ dividendos }: { dividendos: InvestimentoDividen
   if (totalGeral <= 0) return null
 
   const pct = (v: number) => Math.round((v / totalGeral) * 100)
-  const Barra = ({ valor, cor }: { valor: number; cor: string }) => (
-    <div className="relative h-3.5 rounded-full bg-white/10 overflow-hidden">
-      <div className="h-full rounded-full" style={{ width: `${Math.max(pct(valor), 2)}%`, background: cor }} />
-      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
-        {pct(valor)}%
-      </span>
-    </div>
-  )
 
   return (
     <div className="rounded-xl border border-white/10 p-4 mb-4">
-      <h2 className="flex items-center gap-1.5 text-[15px] font-semibold text-white mb-3">
-        Proventos por categoria
-        <Info size={13} style={{ color: MUTED }} aria-hidden />
-        <span className="sr-only">Total recebido por tipo de ativo, até o fim do mês atual</span>
-      </h2>
+      <h2 className="text-[15px] font-semibold text-white mb-3">Proventos por categoria</h2>
       {/* flex fluido: os cards crescem p/ ocupar a linha inteira, sem sobrar
           espaço vazio quando há menos de 5 tipos */}
       <div className="flex flex-wrap gap-3">
@@ -189,7 +209,7 @@ function ProventosPorCategoria({ dividendos }: { dividendos: InvestimentoDividen
               <span className="text-[13px] font-medium text-white truncate">{TIPO_ATIVO_LABEL[c.tipo]}</span>
             </div>
             <p className="text-[16px] font-bold text-white mb-2">{formatBRL(c.valor)}</p>
-            <Barra valor={c.valor} cor={TIPO_ATIVO_COR[c.tipo]} />
+            <Barra pct={pct(c.valor)} cor={TIPO_ATIVO_COR[c.tipo]} />
           </div>
         ))}
 
@@ -200,7 +220,7 @@ function ProventosPorCategoria({ dividendos }: { dividendos: InvestimentoDividen
               <span className="text-[13px] font-medium text-white">Demais</span>
             </div>
             <p className="text-[16px] font-bold text-white mb-2">{formatBRL(totalDemais)}</p>
-            <Barra valor={totalDemais} cor="#e5e7eb" />
+            <Barra pct={pct(totalDemais)} cor="#e5e7eb" />
 
             {/* Hint com o detalhamento das categorias agregadas */}
             <div className="absolute right-0 top-full mt-2 z-20 hidden group-hover:block rounded-xl border border-white/10 shadow-2xl px-4 py-3 min-w-[210px]"
@@ -226,7 +246,7 @@ function ProventosPorCategoria({ dividendos }: { dividendos: InvestimentoDividen
 // ── Quadro "Ativos por categoria" (donut de 2 anéis) ────────────
 // Anel interno = tipos de ativo; anel externo = ativos de cada tipo
 // (tons da cor do tipo). Períodos: últimos 6/12/24 meses (recebidos)
-// e Provisionado (após o fim do mês atual). As linhas abaixo trazem
+// e Provisionado (projeções ainda não recebidas). As linhas abaixo trazem
 // os 4 totais por categoria e expandem para o detalhamento por ativo.
 
 type PeriodoGraf = '6m' | '12m' | '24m' | 'prov'
@@ -238,8 +258,25 @@ const PERIODOS_GRAF: { value: PeriodoGraf; label: string }[] = [
 ]
 const IDX_GRAF: Record<PeriodoGraf, number> = { '6m': 0, '12m': 1, '24m': 2, prov: 3 }
 const COLS_GRAF = ['Total últ. 6 meses', 'Total últ. 12 meses', 'Total últ. 24 meses', 'Provisionado']
-// Alphas que diferenciam os ativos dentro da cor do tipo
-const TONS = ['ff', 'c4', '96', '6e', 'd9', 'ab', '82', '5a']
+// Fatores de brilho (sólidos) que diferenciam os ativos dentro da cor do
+// tipo. Usamos cor sólida — não alpha — porque alpha sobre fundo escuro/claro
+// faz a fatia "sumir" no fundo (some no modo noite e no dia). A faixa é
+// limitada [0.62, 1.18] para manter todas visíveis nos dois temas.
+const FATORES_TOM = [1.0, 1.18, 0.82, 0.9, 1.1, 0.7, 0.96, 0.62]
+// Multiplica o brilho de um hex sólido (#rrggbb) por `fator`, clampando 0..255.
+function escalaTom(hex: string, fator: number): string {
+  const n = parseInt(hex.slice(1), 16)
+  const r = Math.min(255, Math.round(((n >> 16) & 255) * fator))
+  const g = Math.min(255, Math.round(((n >> 8) & 255) * fator))
+  const b = Math.min(255, Math.round((n & 255) * fator))
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
+}
+// Texto escuro ou claro conforme a luminância do fundo (#rrggbb).
+function corLegivel(hex: string): string {
+  const n = parseInt(hex.slice(1), 16)
+  const lum = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)
+  return lum > 150 ? '#10131c' : '#ffffff'
+}
 // Paleta pastel do gráfico — versão suave de TIPO_ATIVO_COR
 const COR_SUAVE: Record<TipoAtivoInvestimento, string> = {
   ACOES:             '#f08da4',
@@ -258,7 +295,23 @@ interface LinhaGraf {
   ativos: { ticker: string; totais: number[] }[]
 }
 
+// Observa a classe `.dark` no <html> para re-renderizar no toggle de tema.
+// (o useTheme do app guarda estado por instância e não propaga o toggle a
+// componentes que só leem cor — o canvas precisa disso para se ajustar.)
+function useModoEscuro(): boolean {
+  const [dark, setDark] = useState(() =>
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark'))
+  useEffect(() => {
+    const alvo = document.documentElement
+    const obs = new MutationObserver(() => setDark(alvo.classList.contains('dark')))
+    obs.observe(alvo, { attributes: true, attributeFilter: ['class'] })
+    return () => obs.disconnect()
+  }, [])
+  return dark
+}
+
 function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[] }) {
+  const dark = useModoEscuro() // rótulos do canvas precisam contrastar com o fundo
   const [periodo, setPeriodo] = useState<PeriodoGraf>('12m')
   // Drill-down: clicar numa categoria foca o gráfico só nela
   const [tipoFoco, setTipoFoco] = useState<TipoAtivoInvestimento | null>(null)
@@ -271,7 +324,6 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
 
   const linhas = useMemo<LinhaGraf[]>(() => {
     const mesA = mesAtual()
-    const fimRec = ultimoDiaMes(mesA)
     const ini6  = `${mesMenos(mesA, 5)}-01`
     const ini12 = `${mesMenos(mesA, 11)}-01`
     const ini24 = `${mesMenos(mesA, 23)}-01`
@@ -279,9 +331,10 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
     const porTipo = new Map<TipoAtivoInvestimento, Map<string, number[]>>()
     for (const d of dividendos) {
       const dt = d.data_pagamento
-      // buckets em que o registro entra (6m ⊂ 12m ⊂ 24m; prov à parte)
+      // buckets em que o registro entra (6m ⊂ 12m ⊂ 24m; prov à parte).
+      // Provisionado = projeção (status PROJECAO), independe da data.
       const idxs: number[] = []
-      if (dt > fimRec) idxs.push(3)
+      if (ehProvisionado(d)) idxs.push(3)
       else {
         if (dt >= ini6)  idxs.push(0)
         if (dt >= ini12) idxs.push(1)
@@ -311,10 +364,25 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
   [linhas, sel])
   const tiposVis = useMemo(() =>
     (tipoFoco ? tipos.filter((t) => t.tipo === tipoFoco) : tipos), [tipos, tipoFoco])
-  const externos = useMemo(() => tiposVis.flatMap((t) => t.ativos.map((a, i) => ({
-    label: a.ticker, valor: a.totais[sel], tipo: t.tipo,
-    cor: `${COR_SUAVE[t.tipo]}${TONS[i % TONS.length]}`,
-  }))), [tiposVis, sel])
+  // Total do período exibido — base para os percentuais dos rótulos.
+  const totalSel = useMemo(() => tiposVis.reduce((s, t) => s + t.totais[sel], 0), [tiposVis, sel])
+  const pctDe = (v: number) => (totalSel > 0 ? Math.round((v / totalSel) * 100) : 0)
+  // No 1º nível, cada categoria exibe os maiores ~60% dos ativos; o restante
+  // (a partir de 2 itens) é somado numa fatia "Outros". No drill-down mostra todos.
+  const externos = useMemo(() => tiposVis.flatMap((t) => {
+    const limite = Math.ceil(t.ativos.length * 0.6)
+    const agregar = tipoFoco == null && t.ativos.length - limite >= 2
+    const itens = agregar
+      ? [
+          ...t.ativos.slice(0, limite).map((a) => ({ label: a.ticker, valor: a.totais[sel] })),
+          { label: 'Outros', valor: t.ativos.slice(limite).reduce((s, a) => s + a.totais[sel], 0) },
+        ]
+      : t.ativos.map((a) => ({ label: a.ticker, valor: a.totais[sel] }))
+    return itens.map((it, i) => ({
+      ...it, tipo: t.tipo, pct: totalSel > 0 ? Math.round((it.valor / totalSel) * 100) : 0,
+      cor: escalaTom(COR_SUAVE[t.tipo], FATORES_TOM[i % FATORES_TOM.length]),
+    }))
+  }), [tiposVis, sel, tipoFoco, totalSel])
 
   // Plugin: rótulos sempre visíveis apontando para os segmentos (linha-guia
   // com cotovelo, como no app de referência). Tickers fora do anel externo,
@@ -322,52 +390,88 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
   const pluginRotulos = useMemo<Plugin<'doughnut'>>(() => ({
     id: 'rotulosDividendos',
     afterDatasetsDraw(chart) {
+      // Lê os rótulos de chart.options (atualizado a cada render). NÃO usar
+      // closure: o react-chartjs-2 captura o plugin na criação do gráfico e
+      // não o recria no drill-down — o closure ficaria com dados defasados.
+      const cfg = chart.options.plugins?.rotulosDividendos
+      if (!cfg) return
+      const { externos, tiposVis, corTexto, corLinha } = cfg
       const { ctx, chartArea } = chart
       const metaExt = chart.getDatasetMeta(0)
       const metaInt = chart.getDatasetMeta(1)
       if (!metaExt?.data?.length) return
 
-      // ── tickers com linha-guia ──
-      interface Rotulo { ax: number; ay: number; tx: number; ty: number; side: 1 | -1; label: string }
-      const itens: Rotulo[] = metaExt.data.map((el, i) => {
-        const p = (el as ArcElement).getProps(['x', 'y', 'startAngle', 'endAngle', 'outerRadius'], true) as
-          { x: number; y: number; startAngle: number; endAngle: number; outerRadius: number }
-        const ang = (p.startAngle + p.endAngle) / 2
-        const side: 1 | -1 = Math.cos(ang) >= 0 ? 1 : -1
-        return {
-          ax: p.x + Math.cos(ang) * (p.outerRadius + 3),
-          ay: p.y + Math.sin(ang) * (p.outerRadius + 3),
-          tx: p.x + side * (p.outerRadius + 26),
-          ty: p.y + Math.sin(ang) * (p.outerRadius + 14),
-          side,
-          label: externos[i]?.label ?? '',
-        }
-      })
-      // Distribui verticalmente cada lado p/ os rótulos não se sobreporem
-      const gap = 12
-      for (const side of [1, -1] as const) {
-        const ls = itens.filter((l) => l.side === side).sort((a, b) => a.ty - b.ty)
-        for (let i = 1; i < ls.length; i++) ls[i].ty = Math.max(ls[i].ty, ls[i - 1].ty + gap)
-        const sobra = ls.length ? ls[ls.length - 1].ty - (chartArea.bottom - 4) : 0
-        if (sobra > 0) for (const l of ls) l.ty -= sobra
-        for (let i = ls.length - 2; i >= 0; i--) ls[i].ty = Math.min(ls[i].ty, ls[i + 1].ty - gap)
-        const falta = ls.length ? (chartArea.top + 4) - ls[0].ty : 0
-        if (falta > 0) for (const l of ls) l.ty += falta
-      }
       ctx.save()
-      ctx.lineWidth = 1
-      ctx.strokeStyle = 'rgba(255,255,255,.30)'
       ctx.font = '600 10px ui-sans-serif, system-ui, sans-serif'
       ctx.textBaseline = 'middle'
-      for (const l of itens) {
-        if (!l.label) continue
+
+      // ── rótulos dos ativos ──
+      // Cabe na fatia → desenha DENTRO, tangencial (acompanhando o anel), com
+      // cor que contrasta com a fatia. Fatia estreita → linha-guia externa curta.
+      interface Rotulo { ax: number; ay: number; tx: number; ty: number; side: 1 | -1; label: string }
+      const fora: Rotulo[] = []
+      metaExt.data.forEach((el, i) => {
+        const lab = externos[i] ? `${externos[i].label} ${externos[i].pct}%` : ''
+        if (!lab) return
+        const p = (el as ArcElement).getProps(['x', 'y', 'startAngle', 'endAngle', 'innerRadius', 'outerRadius'], true) as
+          { x: number; y: number; startAngle: number; endAngle: number; innerRadius: number; outerRadius: number }
+        const ang = (p.startAngle + p.endAngle) / 2
+        const midR = (p.innerRadius + p.outerRadius) / 2
+        const w = ctx.measureText(lab).width
+        const cabeDentro = (p.endAngle - p.startAngle) * midR >= w + 12 && (p.outerRadius - p.innerRadius) >= 14
+        if (cabeDentro) {
+          ctx.save()
+          ctx.translate(p.x + Math.cos(ang) * midR, p.y + Math.sin(ang) * midR)
+          let rot = ang + Math.PI / 2          // tangente ao anel
+          if (Math.sin(ang) > 0) rot += Math.PI // metade de baixo: mantém de pé
+          ctx.rotate(rot)
+          ctx.textAlign = 'center'
+          ctx.fillStyle = corLegivel(externos[i].cor)
+          ctx.fillText(lab, 0, 0)
+          ctx.restore()
+        } else {
+          const side: 1 | -1 = Math.cos(ang) >= 0 ? 1 : -1
+          fora.push({
+            ax: p.x + Math.cos(ang) * (p.outerRadius + 3),
+            ay: p.y + Math.sin(ang) * (p.outerRadius + 3),
+            tx: p.x + side * (p.outerRadius + 22),
+            ty: p.y + Math.sin(ang) * (p.outerRadius + 12),
+            side, label: lab,
+          })
+        }
+      })
+
+      // Distribui verticalmente os rótulos externos (fatias finas), sempre
+      // dentro de [topo, base]; comprime o gap se não couber (não corta).
+      const gap = 14
+      const topo = chartArea.top + 4
+      const base = chartArea.bottom - 4
+      for (const side of [1, -1] as const) {
+        const ls = fora.filter((l) => l.side === side).sort((a, b) => a.ty - b.ty)
+        if (!ls.length) continue
+        for (let i = 1; i < ls.length; i++) ls[i].ty = Math.max(ls[i].ty, ls[i - 1].ty + gap)
+        const sobra = ls[ls.length - 1].ty - base
+        if (sobra > 0) for (const l of ls) l.ty -= sobra
+        for (let i = ls.length - 2; i >= 0; i--) ls[i].ty = Math.min(ls[i].ty, ls[i + 1].ty - gap)
+        if (ls[0].ty < topo) {
+          const g2 = ls.length > 1 ? Math.min(gap, (base - topo) / (ls.length - 1)) : 0
+          ls.forEach((l, i) => { l.ty = topo + i * g2 })
+        }
+      }
+      ctx.lineWidth = 1
+      ctx.strokeStyle = corLinha
+      const margem = 4
+      for (const l of fora) {
+        const w = ctx.measureText(l.label).width
+        if (l.side === 1) l.tx = Math.min(l.tx, chart.width - margem - 4 - w)
+        else              l.tx = Math.max(l.tx, margem + 4 + w)
         ctx.beginPath()
         ctx.moveTo(l.ax, l.ay)
         ctx.lineTo(l.tx - l.side * 8, l.ty)
         ctx.lineTo(l.tx, l.ty)
         ctx.stroke()
         ctx.textAlign = l.side === 1 ? 'left' : 'right'
-        ctx.fillStyle = '#dbe2f0'
+        ctx.fillStyle = corTexto
         ctx.fillText(l.label, l.tx + l.side * 4, l.ty)
       }
 
@@ -381,12 +485,12 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
         if (p.endAngle - p.startAngle < 0.35) return // fatia estreita: fica só no tooltip
         const ang = (p.startAngle + p.endAngle) / 2
         const r = (p.innerRadius + p.outerRadius) / 2
-        const nome = tiposVis[i] ? TIPO_ATIVO_LABEL[tiposVis[i].tipo] : ''
+        const nome = tiposVis[i] ? `${TIPO_ATIVO_LABEL[tiposVis[i].tipo]} ${tiposVis[i].pct}%` : ''
         if (nome) ctx.fillText(nome, p.x + Math.cos(ang) * r, p.y + Math.sin(ang) * r)
       })
       ctx.restore()
     },
-  }), [externos, tiposVis])
+  }), [])
 
   if (linhas.length === 0) return null
 
@@ -396,31 +500,27 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
   return (
     <div className="rounded-xl border border-white/10 p-4 mb-4">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-        <h2 className="flex items-center gap-1.5 text-[15px] font-semibold text-white">
-          Ativos por categoria
-          <Info size={13} style={{ color: MUTED }} aria-hidden />
-          <span className="sr-only">Distribuição dos proventos por tipo de ativo e por ativo no período</span>
-        </h2>
-        <div className="flex items-center gap-2 flex-wrap">
-          {tipoFoco && (
-            <button onClick={() => setTipoFoco(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
-              <ArrowLeft size={13} />
-              Voltar
-              <span className="font-semibold" style={{ color: COR_SUAVE[tipoFoco] }}>· {TIPO_ATIVO_LABEL[tipoFoco]}</span>
-            </button>
-          )}
-          {/* trocar o período mantém o tipo focado (drill-down) */}
-          <Segmented value={periodo} onChange={(v) => setPeriodo(v as PeriodoGraf)} opcoes={PERIODOS_GRAF} />
-        </div>
+        <h2 className="text-[15px] font-semibold text-white">Ativos por categoria</h2>
+        {/* trocar o período mantém o tipo focado (drill-down) */}
+        <Segmented value={periodo} onChange={(v) => setPeriodo(v as PeriodoGraf)} opcoes={PERIODOS_GRAF} />
       </div>
+
+      {/* Voltar do drill-down: abaixo do label, em linha própria */}
+      {tipoFoco && (
+        <button onClick={() => setTipoFoco(null)}
+          className="flex items-center gap-1.5 px-3 py-1.5 mb-3 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
+          <ArrowLeft size={13} />
+          Voltar
+          <span className="font-semibold" style={{ color: COR_SUAVE[tipoFoco] }}>· {TIPO_ATIVO_LABEL[tipoFoco]}</span>
+        </button>
+      )}
 
       {tiposVis.length === 0 ? (
         <p className="text-[13px] text-center py-6" style={{ color: MUTED }}>
           Nenhum provento no período selecionado.
         </p>
       ) : (
-        <div className="h-[380px] w-full max-w-[760px] mx-auto mb-4">
+        <div className="h-[500px] w-full max-w-[760px] mx-auto mb-4">
           <Doughnut
             plugins={[pluginRotulos]}
             data={{
@@ -441,7 +541,7 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
               maintainAspectRatio: false,
               cutout: '45%',
               // espaço lateral p/ os rótulos com linha-guia
-              layout: { padding: { left: 95, right: 95, top: 10, bottom: 10 } },
+              layout: { padding: { left: 110, right: 110, top: 18, bottom: 18 } },
               // Drill-down: clique numa categoria (ou num ativo dela) foca o tipo
               onClick: (_evt, els) => {
                 if (tipoFoco || !els.length) return
@@ -453,6 +553,13 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
                 chart.canvas.style.cursor = els.length && !tipoFoco ? 'pointer' : 'default'
               },
               plugins: {
+                // dados lidos pelo nosso plugin pluginRotulos (atualizam no drill-down)
+                rotulosDividendos: {
+                  externos,
+                  tiposVis: tiposVis.map((t) => ({ tipo: t.tipo, pct: pctDe(t.totais[sel]) })),
+                  corTexto: dark ? '#dbe2f0' : '#1f2433',
+                  corLinha: dark ? 'rgba(255,255,255,.30)' : 'rgba(0,0,0,.30)',
+                },
                 legend: { display: false },
                 tooltip: {
                   callbacks: {
@@ -500,7 +607,12 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
                 <div className="border-t border-white/10 px-4 py-2">
                   {[...l.ativos].sort((a, b) => b.totais[sel] - a.totais[sel]).map((a) => (
                     <div key={a.ticker} className="flex items-center justify-between gap-3 py-1.5 border-b border-white/5 last:border-b-0">
-                      <span className="text-[13px] font-medium text-white">{a.ticker}</span>
+                      <span className="flex items-baseline gap-2">
+                        <span className="text-[13px] font-medium text-white">{a.ticker}</span>
+                        <span className="text-[11px]" style={{ color: MUTED }}>
+                          {l.totais[sel] > 0 ? Math.round((a.totais[sel] / l.totais[sel]) * 100) : 0}% da categoria
+                        </span>
+                      </span>
                       <span className="flex items-center gap-5 flex-wrap justify-end">
                         {a.totais.map((v, i) => (
                           <span key={i} className="text-[12px] text-right min-w-[90px] hidden sm:block"
@@ -566,44 +678,6 @@ function ObjetivosAtivos() {
   )
 }
 
-// ── Filtro de período ───────────────────────────────────────────
-
-type PeriodoDiv =
-  | 'ano-atual' | 'ult-12m' | 'ult-5a'
-  | 'mes-anterior' | 'mes-atual' | 'prox-mes'
-  | 'futuros' | 'recebidos' | 'todos'
-
-const PERIODOS: { value: PeriodoDiv; label: string }[] = [
-  { value: 'ano-atual',    label: 'Ano atual' },
-  { value: 'ult-12m',      label: 'Últimos 12 meses' },
-  { value: 'ult-5a',       label: 'Últimos 5 anos' },
-  { value: 'mes-anterior', label: 'Mês anterior' },
-  { value: 'mes-atual',    label: 'Mês atual' },
-  { value: 'prox-mes',     label: 'Próximo mês' },
-  { value: 'futuros',      label: 'Futuros' },
-  { value: 'recebidos',    label: 'Recebidos' },
-  { value: 'todos',        label: 'Todos (Recebidos e Futuros)' },
-]
-
-// Intervalo [ini, fim] inclusivo (YYYY-MM-DD) de cada período; null = aberto.
-// "Recebidos" vai até o FIM do mês atual (não até hoje) — e "Futuros" começa
-// no mês seguinte, para os dois serem complementares.
-function intervaloPeriodo(p: PeriodoDiv): { ini: string | null; fim: string | null } {
-  const mesA = mesAtual()
-  const ano  = Number(mesA.slice(0, 4))
-  switch (p) {
-    case 'ano-atual':    return { ini: `${ano}-01-01`, fim: `${ano}-12-31` }
-    case 'ult-12m':      return { ini: `${mesMenos(mesA, 11)}-01`, fim: ultimoDiaMes(mesA) }
-    case 'ult-5a':       return { ini: `${ano - 4}-01-01`, fim: `${ano}-12-31` }
-    case 'mes-anterior': { const m = mesMenos(mesA, 1);   return { ini: `${m}-01`, fim: ultimoDiaMes(m) } }
-    case 'mes-atual':    return { ini: `${mesA}-01`, fim: ultimoDiaMes(mesA) }
-    case 'prox-mes':     { const m = proximoMes(mesA, 1); return { ini: `${m}-01`, fim: ultimoDiaMes(m) } }
-    case 'futuros':      return { ini: `${proximoMes(mesA, 1)}-01`, fim: null }
-    case 'recebidos':    return { ini: null, fim: ultimoDiaMes(mesA) }
-    case 'todos':        return { ini: null, fim: null }
-  }
-}
-
 // ── Quadro "Histórico mensal" (ano × mês, com média e total) ────
 
 const fmtNum = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -632,9 +706,12 @@ function ResumoMensal({ dividendos: todosDividendos }: { dividendos: Investiment
   const [hint, setHint] = useState<HintResumo | null>(null)
 
   const dividendos = useMemo(() => {
-    const { ini, fim } = intervaloPeriodo(periodo)
+    // Recebidos vs Futuros agora se baseia no status da projeção (PROJECAO),
+    // não na data — uma projeção do mês corrente também conta como futura.
     return todosDividendos.filter((d) =>
-      (!ini || d.data_pagamento >= ini) && (!fim || d.data_pagamento <= fim))
+      periodo === 'todos' ? true
+      : periodo === 'futuros' ? ehProvisionado(d)
+      : !ehProvisionado(d))
   }, [todosDividendos, periodo])
 
   const { linhas, totalGeral, porMes } = useMemo(() => {
@@ -728,10 +805,6 @@ function ResumoMensal({ dividendos: todosDividendos }: { dividendos: Investiment
                   </td>
                 ))}
                 <td className="px-3 py-2 font-semibold text-white">
-                  {l.parcial && (
-                    <Info size={11} className="inline-block mr-1 align-[-1px]" style={{ color: MUTED }}
-                      aria-label="Média parcial" />
-                  )}
                   <span title={l.parcial ? 'Média parcial: considera os meses até o atual' : undefined}>{fmtNum(l.media)}</span>
                 </td>
                 <td className="px-3 py-2 font-semibold" style={{ color: '#00c896' }}>{fmtNum(l.total)}</td>
@@ -769,7 +842,6 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
   onExcluir: (d: InvestimentoDividendo) => void
   onConfirmar: (d: InvestimentoDividendo) => void
 }) {
-  const [filtroPeriodo, setFiltroPeriodo] = useState<PeriodoDiv>('recebidos')
   const [filtroTicker, setFiltroTicker] = useState('')
   const [filtroTipoAtivo, setFiltroTipoAtivo] = useState<'' | TipoAtivoInvestimento>('')
   const [agrupar, setAgrupar] = useState(true)
@@ -798,17 +870,13 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
   }
 
   // Recorte por tipo/ativo — alimenta o quadro de resumo (que tem período próprio)
+  // e o extrato (paginado por mês, sem filtro de período).
   const filtradosBase = useMemo(() => dividendos.filter((d) =>
     (!filtroTipoAtivo || d.tipo_ativo === filtroTipoAtivo) &&
     (!filtroTicker || d.inv_ativos?.ticker === filtroTicker)
   ), [dividendos, filtroTicker, filtroTipoAtivo])
 
-  // Período da barra vale só para o extrato (lista) de dividendos
-  const filtrados = useMemo(() => {
-    const { ini, fim } = intervaloPeriodo(filtroPeriodo)
-    return filtradosBase.filter((d) =>
-      (!ini || d.data_pagamento >= ini) && (!fim || d.data_pagamento <= fim))
-  }, [filtradosBase, filtroPeriodo])
+  const filtrados = filtradosBase
 
   const valorOrd = (d: InvestimentoDividendo): string | number => {
     switch (sort.key) {
@@ -833,14 +901,8 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
   const clickSort = (key: DivSortKey) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'valor' || key === 'data' ? 'desc' : 'asc' }))
 
-  // Agrupa por mês (expansível); dentro do mês, opcionalmente por tipo de
-  // ativo. As linhas seguem a ordenação corrente (padrão: data desc).
-  const [fechados, setFechados] = useState<Set<string>>(new Set())
-  const toggleMes = (ym: string) => setFechados((s) => {
-    const n = new Set(s)
-    if (n.has(ym)) n.delete(ym); else n.add(ym)
-    return n
-  })
+  // O extrato mostra um mês por vez (via MonthPicker); dentro do mês os
+  // lançamentos são opcionalmente agrupados por tipo de ativo.
   // Subgrupos de tipo recolhidos, por chave "YYYY-MM|TIPO"
   const [tiposFechados, setTiposFechados] = useState<Set<string>>(new Set())
   const toggleTipo = (ym: string, tipo: TipoAtivoInvestimento) => setTiposFechados((s) => {
@@ -877,11 +939,9 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
       })
   }, [ordenados, agrupar, sort])
 
-  // Paginação: o extrato exibe um mês por vez (em vez de lista sem fim)
-  const [paginaMes, setPaginaMes] = useState(0)
-  useEffect(() => { setPaginaMes(0) }, [filtroPeriodo, filtroTipoAtivo, filtroTicker])
-  const idxMes = Math.min(paginaMes, Math.max(porMesExtrato.length - 1, 0))
-  const mesPagina = porMesExtrato[idxMes] ?? null
+  // Mês exibido no extrato — escolhido pelo calendário padrão (MonthPicker).
+  const [mesSel, setMesSel] = useState<string>(mesAtual())
+  const mesPagina = porMesExtrato.find((m) => m.ym === mesSel) ?? null
 
   const total = useMemo(() => filtrados.reduce((s, d) => s + d.valor, 0), [filtrados])
 
@@ -950,37 +1010,18 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
 
       <ResumoMensal dividendos={filtradosBase} />
 
-      {/* Período do extrato (não afeta o quadro acima) */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <SelectDark value={filtroPeriodo} onChange={(e) => setFiltroPeriodo(e.target.value as PeriodoDiv)} className="!py-1.5 !text-[13px] min-w-[150px]">
-          {PERIODOS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-        </SelectDark>
-        <button onClick={() => setAgrupar((a) => !a)}
-          className="text-[13px] px-2.5 py-1.5 rounded-lg border border-white/10 hover:border-white/25 ml-auto" style={{ color: MUTED }}>
-          Agrupar por tipo: {agrupar ? 'ligado' : 'desligado'}
-        </button>
-        <span className="text-[13px] font-medium" style={{ color: '#00c896' }}>{formatBRL(total)}</span>
-      </div>
-
-      {/* Paginação por mês do extrato */}
-      {porMesExtrato.length > 1 && mesPagina && (
-        <div className="flex items-center justify-center gap-3 mb-2">
-          <button onClick={() => setPaginaMes(idxMes - 1)} disabled={idxMes <= 0} aria-label="Mês anterior da lista"
-            className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-30"
-            style={{ color: MUTED }}>
-            <ChevronLeft size={15} />
+      {/* Extrato — mês escolhido pelo calendário padrão (MonthPicker), centralizado */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="flex-1" />
+        <MonthPicker value={mesSel} onChange={setMesSel} />
+        <div className="flex-1 flex items-center justify-end gap-2">
+          <button onClick={() => setAgrupar((a) => !a)}
+            className="text-[13px] px-2.5 py-1.5 rounded-lg border border-white/10 hover:border-white/25" style={{ color: MUTED }}>
+            Agrupar por tipo: {agrupar ? 'ligado' : 'desligado'}
           </button>
-          <span className="text-[13px] font-medium text-white min-w-[150px] text-center">
-            {mesLabel(mesPagina.ym, 'longo')}
-            <span className="ml-1.5 text-[12px]" style={{ color: MUTED }}>({idxMes + 1}/{porMesExtrato.length})</span>
-          </span>
-          <button onClick={() => setPaginaMes(idxMes + 1)} disabled={idxMes >= porMesExtrato.length - 1} aria-label="Próximo mês da lista"
-            className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-30"
-            style={{ color: MUTED }}>
-            <ChevronRight size={15} />
-          </button>
+          <span className="text-[13px] font-medium" style={{ color: '#00c896' }}>{formatBRL(total)}</span>
         </div>
-      )}
+      </div>
 
       <div className="rounded-xl border border-white/10 overflow-hidden">
         <table className="w-full text-[14px]">
@@ -994,50 +1035,39 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
-          {(mesPagina ? [mesPagina] : []).map((m) => {
-            const aberto = !fechados.has(m.ym)
-            return (
-              <tbody key={m.ym}>
-                <tr className="border-t border-white/10 bg-white/[0.04] cursor-pointer select-none hover:bg-white/[0.06]"
-                  onClick={() => toggleMes(m.ym)}>
-                  <td colSpan={3} className="px-4 py-2">
-                    <span className="inline-flex items-center gap-1.5 font-semibold text-[13px] text-white">
-                      {aberto ? <ChevronDown size={14} style={{ color: MUTED }} /> : <ChevronRight size={14} style={{ color: MUTED }} />}
-                      {mesLabel(m.ym, 'longo')}
-                    </span>
-                    <span className="text-[12px] ml-2" style={{ color: MUTED }}>· {m.lista.length}</span>
-                  </td>
-                  <td className="px-4 py-2 text-right font-semibold text-[13px]" style={{ color: '#00c896' }}>{formatBRL(m.total)}</td>
-                  <td colSpan={2}></td>
-                </tr>
-                {aberto && (m.grupos
-                  ? m.grupos.flatMap((g) => {
-                      const tipoAberto = !tiposFechados.has(`${m.ym}|${g.tipo}`)
-                      return [
-                        <tr key={`${m.ym}-${g.tipo}`} className="border-t border-white/5 bg-white/[0.02] cursor-pointer select-none hover:bg-white/[0.05]"
-                          onClick={() => toggleTipo(m.ym, g.tipo)}>
-                          <td colSpan={3} className="px-4 py-1.5 pl-9">
-                            <span className="inline-flex items-center gap-1.5 font-medium text-[12px]" style={{ color: TIPO_ATIVO_COR[g.tipo] }}>
-                              {tipoAberto ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
-                              {TIPO_ATIVO_LABEL[g.tipo]}
-                            </span>
-                            <span className="text-[11px] ml-2" style={{ color: MUTED }}>· {g.lista.length}</span>
-                          </td>
-                          <td className="px-4 py-1.5 text-right font-medium text-[12px]" style={{ color: '#00c896' }}>{formatBRL(g.total)}</td>
-                          <td colSpan={2}></td>
-                        </tr>,
-                        ...(tipoAberto ? g.lista.map(linha) : []),
-                      ]
-                    })
-                  : m.lista.map(linha))}
-              </tbody>
-            )
-          })}
+          {(mesPagina ? [mesPagina] : []).map((m) => (
+            <tbody key={m.ym}>
+              {m.grupos
+                ? m.grupos.flatMap((g) => {
+                    const tipoAberto = !tiposFechados.has(`${m.ym}|${g.tipo}`)
+                    return [
+                      <tr key={`${m.ym}-${g.tipo}`} className="border-t border-white/10 bg-white/[0.02] cursor-pointer select-none hover:bg-white/[0.05]"
+                        onClick={() => toggleTipo(m.ym, g.tipo)}>
+                        <td colSpan={3} className="px-4 py-1.5">
+                          <span className="inline-flex items-center gap-1.5 font-medium text-[12px]" style={{ color: TIPO_ATIVO_COR[g.tipo] }}>
+                            {tipoAberto ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
+                            {TIPO_ATIVO_LABEL[g.tipo]}
+                          </span>
+                          <span className="text-[11px] ml-2" style={{ color: MUTED }}>· {g.lista.length}</span>
+                        </td>
+                        <td className="px-4 py-1.5 text-right font-medium text-[12px]" style={{ color: '#00c896' }}>{formatBRL(g.total)}</td>
+                        <td colSpan={2}></td>
+                      </tr>,
+                      ...(tipoAberto ? g.lista.map(linha) : []),
+                    ]
+                  })
+                : m.lista.map(linha)}
+            </tbody>
+          ))}
         </table>
       </div>
 
-      {ordenados.length === 0 && (
+      {ordenados.length === 0 ? (
         <p className="text-[13px] text-center py-4" style={{ color: MUTED }}>Nenhum dividendo para os filtros selecionados.</p>
+      ) : !mesPagina && (
+        <p className="text-[13px] text-center py-4" style={{ color: MUTED }}>
+          Nenhum dividendo em {mesLabel(mesSel, 'longo')}.
+        </p>
       )}
     </>
   )

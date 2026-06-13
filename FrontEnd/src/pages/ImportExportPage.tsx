@@ -87,6 +87,26 @@ interface LembreteBackup {
   [key: string]: unknown
 }
 
+interface ObjetivoBackup {
+  id?: string
+  tipo: string
+  nome: string
+  descricao?: string | null
+  icone?: string
+  cor?: string
+  ativo?: boolean
+  valor_meta: number
+  data_inicio: string
+  data_fim: string
+  conta_id?: string | null
+  categoria_id?: string | null
+  frequencia?: string | null
+  contas_sonho?: string[]
+  contas_projeto?: string[]
+  categorias_objetivo?: string[]
+  [key: string]: unknown
+}
+
 interface BackupPayload {
   gerado_em: string
   contas: ContaBackup[]
@@ -95,6 +115,7 @@ interface BackupPayload {
   transferencias?: TransacaoRaw[]
   investimentos?: InvestimentosBackup
   lembretes?: LembreteBackup[]
+  objetivos?: ObjetivoBackup[]
 }
 
 interface LinhaImport {
@@ -3022,16 +3043,31 @@ function SecaoBackup() {
       const lembretes = extrairLista<LembreteBackup>(rLemb.dados)
       addLog('ok', `Lembretes: ${lembretes.length} registros`)
 
+      // 7. Objetivos (metas / sonhos / projetos)
+      addLog('ok', 'Buscando objetivos...')
+      const rObj = await apiFetch('/objetivos')
+      const objetivos = extrairLista<ObjetivoBackup>(rObj.dados).map((o) => ({
+        id: o.id, tipo: o.tipo, nome: o.nome, descricao: o.descricao ?? null,
+        icone: o.icone, cor: o.cor, ativo: o.ativo,
+        valor_meta: o.valor_meta, data_inicio: o.data_inicio, data_fim: o.data_fim,
+        conta_id: o.conta_id ?? null, categoria_id: o.categoria_id ?? null,
+        frequencia: o.frequencia ?? null,
+        contas_sonho: o.contas_sonho ?? [], contas_projeto: o.contas_projeto ?? [],
+        categorias_objetivo: o.categorias_objetivo ?? [],
+      }))
+      addLog('ok', `Objetivos: ${objetivos.length} registros`)
+
       // Montar payload
       const payload = {
         gerado_em: new Date().toISOString(),
-        versao: '1.2',
+        versao: '1.3',
         contas,
         categorias,
         transacoes,
         transferencias,
         investimentos,
         lembretes,
+        objetivos,
       }
 
       // Download do JSON
@@ -3064,6 +3100,7 @@ function SecaoBackup() {
               'Todas as transferências',
               'Investimentos (ativos, posições, operações, dividendos, histórico)',
               'Lembretes (avulsos e vinculados a lançamentos)',
+              'Objetivos (metas, sonhos e projetos)',
             ].map((item, i) => (
               <li key={i} className="flex items-center gap-2 text-[16px] text-gray-400">
                 <CheckCircle2 size={12} className="text-blue-400 flex-shrink-0" />
@@ -3107,7 +3144,7 @@ function SecaoRestore() {
   const [dragOver, setDragOver] = useState(false)
   const [etapa, setEtapa] = useState<'idle' | 'confirmando' | 'restaurando' | 'concluido'>('idle')
   const [payload, setPayload] = useState<BackupPayload | null>(null)
-  const [escopo, setEscopo] = useState<'tudo' | 'extrato' | 'investimentos' | 'lembretes'>('tudo')
+  const [escopo, setEscopo] = useState<'tudo' | 'extrato' | 'investimentos' | 'lembretes' | 'objetivos'>('tudo')
   const [progresso, setProgresso] = useState(0)
   const [progressoLabel, setProgressoLabel] = useState('')
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro' | 'aviso'; msg: string }[]>([])
@@ -3155,6 +3192,7 @@ function SecaoRestore() {
     const fazExtrato    = escopo === 'tudo' || escopo === 'extrato'
     const fazInvest     = escopo === 'tudo' || escopo === 'investimentos'
     const fazLembretes  = escopo === 'tudo' || escopo === 'lembretes'
+    const fazObjetivos  = escopo === 'tudo' || escopo === 'objetivos'
     const criaFaltantes = escopo === 'tudo'   // só "Tudo" cria contas/categorias novas
     const mapaContas:       Record<string, string> = {}
     const mapaCategorias:   Record<string, string> = {}
@@ -3372,7 +3410,11 @@ function SecaoRestore() {
         qc.invalidateQueries({ queryKey: ['lembretes'] })
       }
 
-      if (passo === 0) {
+      // "Nada novo" só quando realmente não há mais nada a processar — os
+      // blocos de investimentos e objetivos rodam depois e logam por conta.
+      const haInvest    = fazInvest && !!payload.investimentos
+      const haObjetivos = fazObjetivos && !!payload.objetivos?.length
+      if (passo === 0 && !haInvest && !haObjetivos) {
         addLog('ok', 'Nada novo a restaurar — os itens do backup já estão presentes.')
         setProgresso(100)
       }
@@ -3396,6 +3438,45 @@ function SecaoRestore() {
             qc.invalidateQueries({ queryKey: k })
           }
         } else addLog('erro', `Investimentos: ${res.erro}`)
+      }
+
+      // ── 9. Objetivos (modo "Tudo") — remapeia conta/categoria e recria ──
+      if (fazObjetivos && payload.objetivos && payload.objetivos.length > 0) {
+        setProgressoLabel('Restaurando objetivos...')
+        const objKey = (tipo: string, nome: string, ini: string, fim: string) =>
+          `${tipo}|${normalizarNome(nome)}|${ini}|${fim}`
+        const rObjEx = await apiFetch('/objetivos')
+        const existentesObj = new Set<string>()
+        for (const o of extrairLista<ObjetivoBackup>(rObjEx.dados))
+          existentesObj.add(objKey(String(o.tipo), String(o.nome), String(o.data_inicio), String(o.data_fim)))
+
+        const mapArr = (arr: string[] | undefined, m: Record<string, string>) =>
+          (arr ?? []).map((x) => m[x]).filter(Boolean)
+
+        let okO = 0, dupO = 0, errO = 0
+        for (const o of payload.objetivos) {
+          if (canceladoRef.current) break
+          if (existentesObj.has(objKey(o.tipo, o.nome, o.data_inicio, o.data_fim))) { dupO++; continue }
+          const r = await apiComRetry('/objetivos', 'POST', {
+            tipo: o.tipo, nome: o.nome, descricao: o.descricao ?? null,
+            icone: o.icone, cor: o.cor,
+            valor_meta: o.valor_meta, data_inicio: o.data_inicio, data_fim: o.data_fim,
+            conta_id: (o.conta_id && mapaContas[o.conta_id]) || null,
+            categoria_id: (o.categoria_id && mapaCategorias[o.categoria_id]) || null,
+            frequencia: o.frequencia ?? null,
+            contas_sonho: mapArr(o.contas_sonho, mapaContas),
+            contas_projeto: mapArr(o.contas_projeto, mapaContas),
+            categorias_objetivo: mapArr(o.categorias_objetivo, mapaCategorias),
+          })
+          if (r.ok) {
+            okO++
+            const novoId = (r.dados as { id?: string } | null)?.id
+            if (novoId && o.ativo === false) await apiComRetry(`/objetivos/${novoId}`, 'PUT', { ativo: false })
+          } else { errO++; addLog('erro', `Objetivo "${o.nome}": ${r.erro}`) }
+          await _sleep(60)
+        }
+        addLog('ok', `Objetivos: ${okO} restaurado(s), ${dupO} já existia(m)${errO ? `, ${errO} erro(s)` : ''}`)
+        qc.invalidateQueries({ queryKey: ['objetivos'] })
       }
 
       setProgressoLabel('Concluído!')
@@ -3483,6 +3564,7 @@ function SecaoRestore() {
                   { v: 'extrato'       as const, t: 'Somente extrato',       d: 'Só transações e transferências. Contas/categorias apenas reconhecidas.' },
                   { v: 'investimentos' as const, t: 'Somente investimentos', d: 'Ativos, posições, operações, dividendos, histórico (nas contas existentes).' },
                   { v: 'lembretes'     as const, t: 'Somente lembretes',     d: 'Lembretes avulsos e os vinculados a lançamentos que já existam.' },
+                  { v: 'objetivos'     as const, t: 'Somente objetivos',     d: 'Metas, sonhos e projetos (religados às contas/categorias existentes).' },
                 ].map(op => (
                   <button key={op.v} onClick={() => setEscopo(op.v)}
                     className="text-left p-3 rounded-lg border transition-all"
@@ -3506,6 +3588,7 @@ function SecaoRestore() {
                 <RotateCcw size={14} /> {escopo === 'tudo' ? 'Iniciar restore'
                   : escopo === 'extrato' ? 'Restaurar extrato'
                   : escopo === 'investimentos' ? 'Restaurar investimentos'
+                  : escopo === 'objetivos' ? 'Restaurar objetivos'
                   : 'Restaurar lembretes'}
               </Btn>
             </div>
