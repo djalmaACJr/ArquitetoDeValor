@@ -683,35 +683,55 @@ function SecaoExport() {
         const tickerPorPos = Object.fromEntries(posInv.map(p => [String(p.id), p.inv_ativos?.ticker ?? '']))
         const dataLocal = (d: unknown) => new Date(String(d) + 'T12:00:00')
 
-        if (ativosInv.length) sheets.push({
-          name: 'Inv. Ativos', title: 'Investimentos — Ativos',
-          columns: [
-            { key: 'ticker', label: 'Ticker', type: 'text', width: 14 },
-            { key: 'nome',   label: 'Nome',   type: 'text', width: 34 },
-            { key: 'tipo',   label: 'Tipo',   type: 'text', width: 18 },
-            { key: 'moeda',  label: 'Moeda',  type: 'text', width: 8, align: 'center' },
-            { key: 'nota',   label: 'Nota',   type: 'text', width: 8, align: 'center' },
-          ],
-          rows: ativosInv.map(a => ({ ticker: String(a.ticker ?? ''), nome: String(a.nome ?? ''), tipo: labelTipo(a.tipo_ativo), moeda: String(a.moeda ?? ''), nota: a.nota_usuario != null ? Number(a.nota_usuario) : '' })),
-        })
-
-        if (posInv.length) sheets.push({
-          name: 'Inv. Posições', title: 'Investimentos — Posições',
-          columns: [
-            { key: 'ticker',     label: 'Ticker',      type: 'text',     width: 14 },
-            { key: 'conta',      label: 'Conta',       type: 'text',     width: 22 },
-            { key: 'qtd',        label: 'Quantidade',  type: 'number',   width: 16 },
-            { key: 'precoCusto', label: 'Preço custo', type: 'currency', width: 16 },
-            { key: 'valorCusto', label: 'Valor custo', type: 'currency', width: 16 },
-            { key: 'data',       label: 'Data compra', type: 'date',     width: 13 },
-            { key: 'status',     label: 'Status',      type: 'text',     width: 12 },
-          ],
-          rows: posInv.map(p => ({
-            ticker: String(p.inv_ativos?.ticker ?? ''), conta: String(p.contas?.nome ?? ''),
-            qtd: Number(p.quantidade), precoCusto: Number(p.preco_custo), valorCusto: Number(p.valor_custo),
-            data: dataLocal(p.data_compra), status: String(p.status ?? ''),
-          })),
-        })
+        // Ativos + Posições mesclados: uma linha por posição com os dados
+        // do ativo; ativos sem posição entram no fim com as células vazias.
+        if (ativosInv.length || posInv.length) {
+          const ativoPorId = new Map(ativosInv.map(a => [String(a.id), a]))
+          type LinhaCarteira = {
+            ticker: string; nome: string; tipo: string; moeda: string; conta: string
+            qtd: number | ''; precoCusto: number | ''; valorCusto: number | ''
+            data: Date | null; status: string; nota: number | ''
+          }
+          const rows: LinhaCarteira[] = posInv.map(p => {
+            const a = ativoPorId.get(String(p.ativo_id))
+            return {
+              ticker: String(p.inv_ativos?.ticker ?? a?.ticker ?? ''), nome: String(a?.nome ?? ''),
+              tipo: labelTipo(a?.tipo_ativo), moeda: String(a?.moeda ?? ''),
+              conta: String(p.contas?.nome ?? ''),
+              qtd: Number(p.quantidade), precoCusto: Number(p.preco_custo), valorCusto: Number(p.valor_custo),
+              data: dataLocal(p.data_compra), status: String(p.status ?? ''),
+              nota: a?.nota_usuario != null ? Number(a.nota_usuario) : '',
+            }
+          })
+          const comPosicao = new Set(posInv.map(p => String(p.ativo_id)))
+          for (const a of ativosInv) {
+            if (comPosicao.has(String(a.id))) continue
+            rows.push({
+              ticker: String(a.ticker ?? ''), nome: String(a.nome ?? ''),
+              tipo: labelTipo(a.tipo_ativo), moeda: String(a.moeda ?? ''),
+              conta: '', qtd: '', precoCusto: '', valorCusto: '', data: null, status: '',
+              nota: a.nota_usuario != null ? Number(a.nota_usuario) : '',
+            })
+          }
+          rows.sort((x, y) => x.ticker.localeCompare(y.ticker, 'pt-BR') || x.conta.localeCompare(y.conta, 'pt-BR'))
+          sheets.push({
+            name: 'Inv. Ativos e Posições', title: 'Investimentos — Ativos e Posições',
+            columns: [
+              { key: 'ticker',     label: 'Ticker',      type: 'text',     width: 14 },
+              { key: 'nome',       label: 'Nome',        type: 'text',     width: 30 },
+              { key: 'tipo',       label: 'Tipo',        type: 'text',     width: 18 },
+              { key: 'moeda',      label: 'Moeda',       type: 'text',     width: 8, align: 'center' },
+              { key: 'conta',      label: 'Conta',       type: 'text',     width: 22 },
+              { key: 'qtd',        label: 'Quantidade',  type: 'number',   width: 16 },
+              { key: 'precoCusto', label: 'Preço custo', type: 'currency', width: 16 },
+              { key: 'valorCusto', label: 'Valor custo', type: 'currency', width: 16 },
+              { key: 'data',       label: 'Data compra', type: 'date',     width: 13 },
+              { key: 'status',     label: 'Status',      type: 'text',     width: 12 },
+              { key: 'nota',       label: 'Nota',        type: 'text',     width: 8, align: 'center' },
+            ],
+            rows,
+          })
+        }
 
         if (opsInv.length) sheets.push({
           name: 'Inv. Operações', title: 'Investimentos — Operações',

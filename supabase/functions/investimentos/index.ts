@@ -521,8 +521,13 @@ async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
       if (!Number.isFinite(v) || v <= 0) return erro("valor deve ser > 0");
     }
     if (body.conta_id && !(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
+    if (body.tipo_dividendo_id) {
+      const { data: td } = await c.from("inv_tipos_dividendo")
+        .select("id").eq("id", body.tipo_dividendo_id).maybeSingle();
+      if (!td) return erro("Tipo de dividendo não encontrado", 404);
+    }
 
-    const campos = camposParaAtualizar(body, ["valor", "data_pagamento", "descricao", "conta_id"]);
+    const campos = camposParaAtualizar(body, ["valor", "data_pagamento", "descricao", "conta_id", "tipo_dividendo_id"]);
     if (Object.keys(campos).length === 0) return erro("Nenhum campo para atualizar");
 
     const { data: divFinal, error } = await c.from("inv_dividendos")
@@ -683,7 +688,7 @@ async function associarDividendoExistente(c: Db, body: Record<string, unknown>, 
   if (!ativo) return erro("Ativo não encontrado", 404);
 
   const { data: tx } = await c.from("transacoes")
-    .select("id, conta_id, valor, data, tipo").eq("id", body.transacao_extrato_id).maybeSingle();
+    .select("id, conta_id, categoria_id, valor, data, tipo").eq("id", body.transacao_extrato_id).maybeSingle();
   if (!tx) return erro("Transação do extrato não encontrada", 404);
   if (tx.tipo !== "RECEITA") return erro("Só é possível associar transações de RECEITA", 409);
   if (Number(tx.valor) <= 0) return erro("A transação deve ter valor maior que zero", 409);
@@ -696,6 +701,12 @@ async function associarDividendoExistente(c: Db, body: Record<string, unknown>, 
   if (tipoDivId) {
     const { data: td } = await c.from("inv_tipos_dividendo").select("id").eq("id", tipoDivId).maybeSingle();
     if (!td) tipoDivId = null; // tipo inválido → grava sem tipo (não bloqueia)
+  }
+  // Sem tipo informado: infere pelo mapeamento tipo ↔ categoria do extrato
+  if (!tipoDivId && tx.categoria_id) {
+    const { data: td } = await c.from("inv_tipos_dividendo")
+      .select("id").eq("categoria_id", tx.categoria_id).limit(1).maybeSingle();
+    if (td) tipoDivId = String(td.id);
   }
 
   const { data, error } = await c.from("inv_dividendos").insert({

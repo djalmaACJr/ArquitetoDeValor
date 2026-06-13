@@ -1,7 +1,10 @@
-import { useState, useMemo } from 'react'
-import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2 } from 'lucide-react'
+import { useState, useMemo, useEffect, type ReactNode } from 'react'
+import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, Info, ChevronDown, ChevronRight, ChevronLeft, Layers } from 'lucide-react'
+import { Doughnut } from 'react-chartjs-2'
+import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, type Plugin } from 'chart.js'
 import { Link } from 'react-router-dom'
 import { useDividendos, type CriarDividendoInput } from '../hooks/useDividendos'
+import { useObjetivos } from '../hooks/useObjetivos'
 import { useTiposDividendo } from '../hooks/useTiposDividendo'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useCategorias } from '../hooks/useCategorias'
@@ -12,9 +15,11 @@ import {
   Toast, ModalExcluir, Segmented,
 } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
-import { formatBRL, formatData, hojeLocal, mesAtual } from '../lib/utils'
-import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR } from '../lib/constants'
+import { formatBRL, formatData, hojeLocal, mesAtual, mesLabel, proximoMes, ultimoDiaMes, MESES_ABREV } from '../lib/utils'
+import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPO_OBJETIVO_LABEL } from '../lib/constants'
 import type { InvestimentoDividendo, InvestimentoTipoDividendo, TipoAtivoInvestimento } from '../types'
+
+ChartJS.register(ArcElement, ChartTooltip)
 
 const MUTED = '#8b92a8'
 
@@ -97,6 +102,10 @@ export default function DividendosPage() {
 
       <Toast msg={toast} />
 
+      <ProventosPorCategoria dividendos={dividendos} />
+      <AtivosPorCategoria dividendos={dividendos} />
+      <ObjetivosAtivos />
+
       {/* Lista */}
       {dividendos.length === 0 ? (
         <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
@@ -124,6 +133,633 @@ export default function DividendosPage() {
   )
 }
 
+// ── Quadro "Proventos por categoria" (topo da página) ───────────
+// Top 4 tipos de ativo por valor recebido (até o fim do mês atual) com
+// barra de participação; o restante é agregado em "Demais", com hint
+// listando cada categoria no hover.
+
+function ProventosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[] }) {
+  const { cards, demais, totalDemais, totalGeral } = useMemo(() => {
+    const fim = ultimoDiaMes(mesAtual())
+    const porTipo = new Map<TipoAtivoInvestimento, number>()
+    let totalGeral = 0
+    for (const d of dividendos) {
+      if (d.data_pagamento > fim) continue // só recebidos
+      porTipo.set(d.tipo_ativo, (porTipo.get(d.tipo_ativo) ?? 0) + d.valor)
+      totalGeral += d.valor
+    }
+    const ordenado = [...porTipo.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([tipo, valor]) => ({ tipo, valor }))
+    const demais = ordenado.slice(4)
+    return {
+      cards: ordenado.slice(0, 4),
+      demais,
+      totalDemais: demais.reduce((s, c) => s + c.valor, 0),
+      totalGeral,
+    }
+  }, [dividendos])
+
+  if (totalGeral <= 0) return null
+
+  const pct = (v: number) => Math.round((v / totalGeral) * 100)
+  const Barra = ({ valor, cor }: { valor: number; cor: string }) => (
+    <div className="relative h-3.5 rounded-full bg-white/10 overflow-hidden">
+      <div className="h-full rounded-full" style={{ width: `${Math.max(pct(valor), 2)}%`, background: cor }} />
+      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
+        {pct(valor)}%
+      </span>
+    </div>
+  )
+
+  return (
+    <div className="rounded-xl border border-white/10 p-4 mb-4">
+      <h2 className="flex items-center gap-1.5 text-[15px] font-semibold text-white mb-3">
+        Proventos por categoria
+        <Info size={13} style={{ color: MUTED }} aria-hidden />
+        <span className="sr-only">Total recebido por tipo de ativo, até o fim do mês atual</span>
+      </h2>
+      {/* flex fluido: os cards crescem p/ ocupar a linha inteira, sem sobrar
+          espaço vazio quando há menos de 5 tipos */}
+      <div className="flex flex-wrap gap-3">
+        {cards.map((c) => (
+          <div key={c.tipo} className="flex-1 min-w-[160px] rounded-lg border border-white/10 bg-white/[0.02] p-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: TIPO_ATIVO_COR[c.tipo] }} />
+              <span className="text-[13px] font-medium text-white truncate">{TIPO_ATIVO_LABEL[c.tipo]}</span>
+            </div>
+            <p className="text-[16px] font-bold text-white mb-2">{formatBRL(c.valor)}</p>
+            <Barra valor={c.valor} cor={TIPO_ATIVO_COR[c.tipo]} />
+          </div>
+        ))}
+
+        {demais.length > 0 && (
+          <div className="relative group flex-1 min-w-[160px] rounded-lg border border-white/10 bg-white/[0.02] p-3 cursor-help">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Layers size={13} className="shrink-0" style={{ color: MUTED }} />
+              <span className="text-[13px] font-medium text-white">Demais</span>
+            </div>
+            <p className="text-[16px] font-bold text-white mb-2">{formatBRL(totalDemais)}</p>
+            <Barra valor={totalDemais} cor="#e5e7eb" />
+
+            {/* Hint com o detalhamento das categorias agregadas */}
+            <div className="absolute right-0 top-full mt-2 z-20 hidden group-hover:block rounded-xl border border-white/10 shadow-2xl px-4 py-3 min-w-[210px]"
+              style={{ background: '#1a1f2e' }}>
+              <p className="text-[13px] font-semibold text-white">Demais categorias:</p>
+              {demais.map((c) => (
+                <div key={c.tipo} className="flex items-center justify-between gap-4 border-t border-white/5 mt-2 pt-2">
+                  <span className="inline-flex items-center gap-1.5 text-[12px]" style={{ color: MUTED }}>
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: TIPO_ATIVO_COR[c.tipo] }} />
+                    {TIPO_ATIVO_LABEL[c.tipo]}
+                  </span>
+                  <span className="text-[13px] font-semibold text-white whitespace-nowrap">{formatBRL(c.valor)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Quadro "Ativos por categoria" (donut de 2 anéis) ────────────
+// Anel interno = tipos de ativo; anel externo = ativos de cada tipo
+// (tons da cor do tipo). Períodos: últimos 6/12/24 meses (recebidos)
+// e Provisionado (após o fim do mês atual). As linhas abaixo trazem
+// os 4 totais por categoria e expandem para o detalhamento por ativo.
+
+type PeriodoGraf = '6m' | '12m' | '24m' | 'prov'
+const PERIODOS_GRAF: { value: PeriodoGraf; label: string }[] = [
+  { value: '6m',   label: 'Últ. 6 meses' },
+  { value: '12m',  label: 'Últ. 12 meses' },
+  { value: '24m',  label: 'Últ. 24 meses' },
+  { value: 'prov', label: 'Provisionado' },
+]
+const IDX_GRAF: Record<PeriodoGraf, number> = { '6m': 0, '12m': 1, '24m': 2, prov: 3 }
+const COLS_GRAF = ['Total últ. 6 meses', 'Total últ. 12 meses', 'Total últ. 24 meses', 'Provisionado']
+// Alphas que diferenciam os ativos dentro da cor do tipo
+const TONS = ['ff', 'c4', '96', '6e', 'd9', 'ab', '82', '5a']
+// Paleta pastel do gráfico — versão suave de TIPO_ATIVO_COR
+const COR_SUAVE: Record<TipoAtivoInvestimento, string> = {
+  ACOES:             '#f08da4',
+  ETF:               '#7dd6e8',
+  FII:               '#7aa7f7',
+  STOCKS:            '#b79df5',
+  ETF_INTERNACIONAL: '#eda4d4',
+  RENDA_FIXA:        '#f2c98a',
+  CRIPTOMOEDAS:      '#f5b08c',
+  TESOURO_DIRETO:    '#8ad8b0',
+}
+
+interface LinhaGraf {
+  tipo: TipoAtivoInvestimento
+  totais: number[]                                   // [6m, 12m, 24m, prov]
+  ativos: { ticker: string; totais: number[] }[]
+}
+
+function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[] }) {
+  const [periodo, setPeriodo] = useState<PeriodoGraf>('12m')
+  // Drill-down: clicar numa categoria foca o gráfico só nela
+  const [tipoFoco, setTipoFoco] = useState<TipoAtivoInvestimento | null>(null)
+  const [abertos, setAbertos] = useState<Set<TipoAtivoInvestimento>>(new Set())
+  const toggleAberto = (t: TipoAtivoInvestimento) => setAbertos((s) => {
+    const n = new Set(s)
+    if (n.has(t)) n.delete(t); else n.add(t)
+    return n
+  })
+
+  const linhas = useMemo<LinhaGraf[]>(() => {
+    const mesA = mesAtual()
+    const fimRec = ultimoDiaMes(mesA)
+    const ini6  = `${mesMenos(mesA, 5)}-01`
+    const ini12 = `${mesMenos(mesA, 11)}-01`
+    const ini24 = `${mesMenos(mesA, 23)}-01`
+
+    const porTipo = new Map<TipoAtivoInvestimento, Map<string, number[]>>()
+    for (const d of dividendos) {
+      const dt = d.data_pagamento
+      // buckets em que o registro entra (6m ⊂ 12m ⊂ 24m; prov à parte)
+      const idxs: number[] = []
+      if (dt > fimRec) idxs.push(3)
+      else {
+        if (dt >= ini6)  idxs.push(0)
+        if (dt >= ini12) idxs.push(1)
+        if (dt >= ini24) idxs.push(2)
+      }
+      if (idxs.length === 0) continue
+      const ticker = d.inv_ativos?.ticker ?? '—'
+      if (!porTipo.has(d.tipo_ativo)) porTipo.set(d.tipo_ativo, new Map())
+      const porAtivo = porTipo.get(d.tipo_ativo)!
+      if (!porAtivo.has(ticker)) porAtivo.set(ticker, [0, 0, 0, 0])
+      const tot = porAtivo.get(ticker)!
+      for (const i of idxs) tot[i] += d.valor
+    }
+    return [...porTipo.entries()].map(([tipo, porAtivo]) => {
+      const ativos = [...porAtivo.entries()].map(([ticker, totais]) => ({ ticker, totais }))
+      const totais = [0, 1, 2, 3].map((i) => ativos.reduce((s, a) => s + a.totais[i], 0))
+      return { tipo, totais, ativos }
+    })
+  }, [dividendos])
+
+  const sel = IDX_GRAF[periodo]
+  // Tipos/ativos com valor no período escolhido, do maior p/ o menor
+  const tipos = useMemo(() =>
+    linhas.filter((l) => l.totais[sel] > 0)
+      .map((l) => ({ ...l, ativos: l.ativos.filter((a) => a.totais[sel] > 0).sort((a, b) => b.totais[sel] - a.totais[sel]) }))
+      .sort((a, b) => b.totais[sel] - a.totais[sel]),
+  [linhas, sel])
+  const tiposVis = useMemo(() =>
+    (tipoFoco ? tipos.filter((t) => t.tipo === tipoFoco) : tipos), [tipos, tipoFoco])
+  const externos = useMemo(() => tiposVis.flatMap((t) => t.ativos.map((a, i) => ({
+    label: a.ticker, valor: a.totais[sel], tipo: t.tipo,
+    cor: `${COR_SUAVE[t.tipo]}${TONS[i % TONS.length]}`,
+  }))), [tiposVis, sel])
+
+  // Plugin: rótulos sempre visíveis apontando para os segmentos (linha-guia
+  // com cotovelo, como no app de referência). Tickers fora do anel externo,
+  // nome do tipo dentro do anel interno quando a fatia comporta o texto.
+  const pluginRotulos = useMemo<Plugin<'doughnut'>>(() => ({
+    id: 'rotulosDividendos',
+    afterDatasetsDraw(chart) {
+      const { ctx, chartArea } = chart
+      const metaExt = chart.getDatasetMeta(0)
+      const metaInt = chart.getDatasetMeta(1)
+      if (!metaExt?.data?.length) return
+
+      // ── tickers com linha-guia ──
+      interface Rotulo { ax: number; ay: number; tx: number; ty: number; side: 1 | -1; label: string }
+      const itens: Rotulo[] = metaExt.data.map((el, i) => {
+        const p = (el as ArcElement).getProps(['x', 'y', 'startAngle', 'endAngle', 'outerRadius'], true) as
+          { x: number; y: number; startAngle: number; endAngle: number; outerRadius: number }
+        const ang = (p.startAngle + p.endAngle) / 2
+        const side: 1 | -1 = Math.cos(ang) >= 0 ? 1 : -1
+        return {
+          ax: p.x + Math.cos(ang) * (p.outerRadius + 3),
+          ay: p.y + Math.sin(ang) * (p.outerRadius + 3),
+          tx: p.x + side * (p.outerRadius + 26),
+          ty: p.y + Math.sin(ang) * (p.outerRadius + 14),
+          side,
+          label: externos[i]?.label ?? '',
+        }
+      })
+      // Distribui verticalmente cada lado p/ os rótulos não se sobreporem
+      const gap = 12
+      for (const side of [1, -1] as const) {
+        const ls = itens.filter((l) => l.side === side).sort((a, b) => a.ty - b.ty)
+        for (let i = 1; i < ls.length; i++) ls[i].ty = Math.max(ls[i].ty, ls[i - 1].ty + gap)
+        const sobra = ls.length ? ls[ls.length - 1].ty - (chartArea.bottom - 4) : 0
+        if (sobra > 0) for (const l of ls) l.ty -= sobra
+        for (let i = ls.length - 2; i >= 0; i--) ls[i].ty = Math.min(ls[i].ty, ls[i + 1].ty - gap)
+        const falta = ls.length ? (chartArea.top + 4) - ls[0].ty : 0
+        if (falta > 0) for (const l of ls) l.ty += falta
+      }
+      ctx.save()
+      ctx.lineWidth = 1
+      ctx.strokeStyle = 'rgba(255,255,255,.30)'
+      ctx.font = '600 10px ui-sans-serif, system-ui, sans-serif'
+      ctx.textBaseline = 'middle'
+      for (const l of itens) {
+        if (!l.label) continue
+        ctx.beginPath()
+        ctx.moveTo(l.ax, l.ay)
+        ctx.lineTo(l.tx - l.side * 8, l.ty)
+        ctx.lineTo(l.tx, l.ty)
+        ctx.stroke()
+        ctx.textAlign = l.side === 1 ? 'left' : 'right'
+        ctx.fillStyle = '#dbe2f0'
+        ctx.fillText(l.label, l.tx + l.side * 4, l.ty)
+      }
+
+      // ── nome do tipo dentro do anel interno ──
+      ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillStyle = '#10131c'
+      metaInt?.data?.forEach((el, i) => {
+        const p = (el as ArcElement).getProps(['x', 'y', 'startAngle', 'endAngle', 'innerRadius', 'outerRadius'], true) as
+          { x: number; y: number; startAngle: number; endAngle: number; innerRadius: number; outerRadius: number }
+        if (p.endAngle - p.startAngle < 0.35) return // fatia estreita: fica só no tooltip
+        const ang = (p.startAngle + p.endAngle) / 2
+        const r = (p.innerRadius + p.outerRadius) / 2
+        const nome = tiposVis[i] ? TIPO_ATIVO_LABEL[tiposVis[i].tipo] : ''
+        if (nome) ctx.fillText(nome, p.x + Math.cos(ang) * r, p.y + Math.sin(ang) * r)
+      })
+      ctx.restore()
+    },
+  }), [externos, tiposVis])
+
+  if (linhas.length === 0) return null
+
+  // Linhas de resumo abaixo do gráfico seguem a ordem do período escolhido
+  const linhasOrd = [...linhas].sort((a, b) => b.totais[sel] - a.totais[sel])
+
+  return (
+    <div className="rounded-xl border border-white/10 p-4 mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <h2 className="flex items-center gap-1.5 text-[15px] font-semibold text-white">
+          Ativos por categoria
+          <Info size={13} style={{ color: MUTED }} aria-hidden />
+          <span className="sr-only">Distribuição dos proventos por tipo de ativo e por ativo no período</span>
+        </h2>
+        <div className="flex items-center gap-2 flex-wrap">
+          {tipoFoco && (
+            <button onClick={() => setTipoFoco(null)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
+              <ArrowLeft size={13} />
+              Voltar
+              <span className="font-semibold" style={{ color: COR_SUAVE[tipoFoco] }}>· {TIPO_ATIVO_LABEL[tipoFoco]}</span>
+            </button>
+          )}
+          {/* trocar o período mantém o tipo focado (drill-down) */}
+          <Segmented value={periodo} onChange={(v) => setPeriodo(v as PeriodoGraf)} opcoes={PERIODOS_GRAF} />
+        </div>
+      </div>
+
+      {tiposVis.length === 0 ? (
+        <p className="text-[13px] text-center py-6" style={{ color: MUTED }}>
+          Nenhum provento no período selecionado.
+        </p>
+      ) : (
+        <div className="h-[380px] w-full max-w-[760px] mx-auto mb-4">
+          <Doughnut
+            plugins={[pluginRotulos]}
+            data={{
+              datasets: [
+                { // anel externo: ativos
+                  data: externos.map((o) => o.valor),
+                  backgroundColor: externos.map((o) => o.cor),
+                  borderWidth: 0, spacing: 2, borderRadius: 5, hoverOffset: 5,
+                },
+                { // anel interno: tipos
+                  data: tiposVis.map((t) => t.totais[sel]),
+                  backgroundColor: tiposVis.map((t) => COR_SUAVE[t.tipo]),
+                  borderWidth: 0, spacing: 2, borderRadius: 5, hoverOffset: 5,
+                },
+              ],
+            }}
+            options={{
+              maintainAspectRatio: false,
+              cutout: '45%',
+              // espaço lateral p/ os rótulos com linha-guia
+              layout: { padding: { left: 95, right: 95, top: 10, bottom: 10 } },
+              // Drill-down: clique numa categoria (ou num ativo dela) foca o tipo
+              onClick: (_evt, els) => {
+                if (tipoFoco || !els.length) return
+                const el = els[0]
+                const t = el.datasetIndex === 1 ? tiposVis[el.index]?.tipo : externos[el.index]?.tipo
+                if (t) setTipoFoco(t)
+              },
+              onHover: (_evt, els, chart) => {
+                chart.canvas.style.cursor = els.length && !tipoFoco ? 'pointer' : 'default'
+              },
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    title: () => '',
+                    label: (ctx) => {
+                      const nome = ctx.datasetIndex === 0
+                        ? externos[ctx.dataIndex].label
+                        : TIPO_ATIVO_LABEL[tiposVis[ctx.dataIndex].tipo]
+                      return ` ${nome}: ${formatBRL(ctx.parsed)}`
+                    },
+                  },
+                },
+              },
+            }}
+          />
+        </div>
+      )}
+
+      {/* Resumo por categoria (expansível → detalhamento por ativo) */}
+      <div className="space-y-2">
+        {linhasOrd.map((l) => {
+          const aberto = abertos.has(l.tipo)
+          return (
+            <div key={l.tipo} className="rounded-lg border border-white/10">
+              <button onClick={() => toggleAberto(l.tipo)}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left">
+                <span className="font-semibold text-[14px]" style={{ color: COR_SUAVE[l.tipo] }}>
+                  {TIPO_ATIVO_LABEL[l.tipo]}
+                </span>
+                <span className="flex items-center gap-5 flex-wrap justify-end">
+                  {l.totais.map((v, i) => (
+                    <span key={i} className="text-right hidden sm:block">
+                      <span className="block text-[13px] font-semibold text-white">{formatBRL(v)}</span>
+                      <span className="block text-[11px]" style={{ color: MUTED }}>{COLS_GRAF[i]}</span>
+                    </span>
+                  ))}
+                  <span className="text-right sm:hidden">
+                    <span className="block text-[13px] font-semibold text-white">{formatBRL(l.totais[sel])}</span>
+                    <span className="block text-[11px]" style={{ color: MUTED }}>{COLS_GRAF[sel]}</span>
+                  </span>
+                  {aberto ? <ChevronDown size={15} style={{ color: MUTED }} /> : <ChevronRight size={15} style={{ color: MUTED }} />}
+                </span>
+              </button>
+              {aberto && (
+                <div className="border-t border-white/10 px-4 py-2">
+                  {[...l.ativos].sort((a, b) => b.totais[sel] - a.totais[sel]).map((a) => (
+                    <div key={a.ticker} className="flex items-center justify-between gap-3 py-1.5 border-b border-white/5 last:border-b-0">
+                      <span className="text-[13px] font-medium text-white">{a.ticker}</span>
+                      <span className="flex items-center gap-5 flex-wrap justify-end">
+                        {a.totais.map((v, i) => (
+                          <span key={i} className="text-[12px] text-right min-w-[90px] hidden sm:block"
+                            style={{ color: v > 0 ? 'rgba(255,255,255,.8)' : MUTED }}>
+                            {formatBRL(v)}
+                          </span>
+                        ))}
+                        <span className="text-[12px] text-right sm:hidden" style={{ color: 'rgba(255,255,255,.8)' }}>
+                          {formatBRL(a.totais[sel])}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Quadro "Objetivos ativos" ───────────────────────────────────
+// Mostra objetivos de Renda Recorrente (tipo interno OBJETIVO) habilitados
+// cujo período compreende a data de hoje.
+
+function ObjetivosAtivos() {
+  const { objetivos } = useObjetivos({ ativo: true, tipo: 'OBJETIVO' })
+  const hoje = hojeLocal()
+  const vigentes = objetivos.filter((o) => o.data_inicio <= hoje && hoje <= o.data_fim)
+
+  if (vigentes.length === 0) return null
+
+  return (
+    <div className="rounded-xl border border-white/10 p-4 mb-4">
+      <h2 className="text-[15px] font-semibold text-white mb-3">Objetivos ativos</h2>
+      <div className="flex flex-wrap gap-3">
+        {vigentes.map((o) => {
+          const pct = Math.min(Math.max(o.percentual, 0), 100)
+          return (
+            <div key={o.id} className="flex-1 min-w-[240px] rounded-lg border border-white/10 bg-white/[0.02] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[13px] font-medium text-white truncate">{o.icone} {o.nome}</span>
+                <span className="text-[11px] shrink-0" style={{ color: MUTED }}>{TIPO_OBJETIVO_LABEL[o.tipo]}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 mt-1 mb-1.5 text-[11px]" style={{ color: MUTED }}>
+                <span>{formatData(o.data_inicio)} – {formatData(o.data_fim)}</span>
+                <span className="font-semibold text-white">{o.percentual}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${pct}%`, background: o.cor }} />
+              </div>
+              <div className="flex items-center justify-between gap-2 mt-1.5 text-[12px]">
+                <span className="font-medium" style={{ color: o.cor }}>{formatBRL(o.valor_atingido)}</span>
+                <span style={{ color: MUTED }}>meta {formatBRL(o.valor_meta)}</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Filtro de período ───────────────────────────────────────────
+
+type PeriodoDiv =
+  | 'ano-atual' | 'ult-12m' | 'ult-5a'
+  | 'mes-anterior' | 'mes-atual' | 'prox-mes'
+  | 'futuros' | 'recebidos' | 'todos'
+
+const PERIODOS: { value: PeriodoDiv; label: string }[] = [
+  { value: 'ano-atual',    label: 'Ano atual' },
+  { value: 'ult-12m',      label: 'Últimos 12 meses' },
+  { value: 'ult-5a',       label: 'Últimos 5 anos' },
+  { value: 'mes-anterior', label: 'Mês anterior' },
+  { value: 'mes-atual',    label: 'Mês atual' },
+  { value: 'prox-mes',     label: 'Próximo mês' },
+  { value: 'futuros',      label: 'Futuros' },
+  { value: 'recebidos',    label: 'Recebidos' },
+  { value: 'todos',        label: 'Todos (Recebidos e Futuros)' },
+]
+
+// Intervalo [ini, fim] inclusivo (YYYY-MM-DD) de cada período; null = aberto.
+// "Recebidos" vai até o FIM do mês atual (não até hoje) — e "Futuros" começa
+// no mês seguinte, para os dois serem complementares.
+function intervaloPeriodo(p: PeriodoDiv): { ini: string | null; fim: string | null } {
+  const mesA = mesAtual()
+  const ano  = Number(mesA.slice(0, 4))
+  switch (p) {
+    case 'ano-atual':    return { ini: `${ano}-01-01`, fim: `${ano}-12-31` }
+    case 'ult-12m':      return { ini: `${mesMenos(mesA, 11)}-01`, fim: ultimoDiaMes(mesA) }
+    case 'ult-5a':       return { ini: `${ano - 4}-01-01`, fim: `${ano}-12-31` }
+    case 'mes-anterior': { const m = mesMenos(mesA, 1);   return { ini: `${m}-01`, fim: ultimoDiaMes(m) } }
+    case 'mes-atual':    return { ini: `${mesA}-01`, fim: ultimoDiaMes(mesA) }
+    case 'prox-mes':     { const m = proximoMes(mesA, 1); return { ini: `${m}-01`, fim: ultimoDiaMes(m) } }
+    case 'futuros':      return { ini: `${proximoMes(mesA, 1)}-01`, fim: null }
+    case 'recebidos':    return { ini: null, fim: ultimoDiaMes(mesA) }
+    case 'todos':        return { ini: null, fim: null }
+  }
+}
+
+// ── Quadro "Histórico mensal" (ano × mês, com média e total) ────
+
+const fmtNum = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+interface HintResumo {
+  titulo: string                                          // "04/2026"
+  itens: { tipo: TipoAtivoInvestimento; valor: number }[] // só tipos com valor
+  x: number
+  y: number
+  acima: boolean
+}
+
+// Períodos do quadro de resumo (independentes do filtro da lista)
+type PeriodoResumo = 'recebidos' | 'futuros' | 'todos'
+const PERIODOS_RESUMO: { value: PeriodoResumo; label: string }[] = [
+  { value: 'recebidos', label: 'Recebidos' },
+  { value: 'futuros',   label: 'Futuros' },
+  { value: 'todos',     label: 'Todos (Recebidos e Futuros)' },
+]
+
+function ResumoMensal({ dividendos: todosDividendos }: { dividendos: InvestimentoDividendo[] }) {
+  const hoje        = new Date()
+  const anoAtual    = hoje.getFullYear()
+  const mesCorrente = hoje.getMonth() + 1
+  const [periodo, setPeriodo] = useState<PeriodoResumo>('recebidos')
+  const [hint, setHint] = useState<HintResumo | null>(null)
+
+  const dividendos = useMemo(() => {
+    const { ini, fim } = intervaloPeriodo(periodo)
+    return todosDividendos.filter((d) =>
+      (!ini || d.data_pagamento >= ini) && (!fim || d.data_pagamento <= fim))
+  }, [todosDividendos, periodo])
+
+  const { linhas, totalGeral, porMes } = useMemo(() => {
+    const porAno = new Map<number, number[]>()
+    // "ano-mes" → soma por tipo de ativo (alimenta o hint da célula)
+    const porMes = new Map<string, Map<TipoAtivoInvestimento, number>>()
+    let totalGeral = 0
+    for (const d of dividendos) {
+      const ano = Number(d.data_pagamento.slice(0, 4))
+      const mes = Number(d.data_pagamento.slice(5, 7))
+      if (!porAno.has(ano)) porAno.set(ano, Array(12).fill(0))
+      porAno.get(ano)![mes - 1] += d.valor
+      totalGeral += d.valor
+      const k = `${ano}-${mes}`
+      if (!porMes.has(k)) porMes.set(k, new Map())
+      const m = porMes.get(k)!
+      m.set(d.tipo_ativo, (m.get(d.tipo_ativo) ?? 0) + d.valor)
+    }
+    const linhas = [...porAno.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([ano, meses]) => {
+        const total = meses.reduce((s, v) => s + v, 0)
+        // Média: anos passados dividem por 12; ano atual pelos meses já
+        // decorridos (parcial); anos futuros pelos meses com valor.
+        const divisor = ano < anoAtual ? 12
+          : ano === anoAtual ? mesCorrente
+          : Math.max(1, meses.filter((v) => v > 0).length)
+        return { ano, meses, total, media: total / divisor, parcial: ano >= anoAtual }
+      })
+    return { linhas, totalGeral, porMes }
+  }, [dividendos, anoAtual, mesCorrente])
+
+  const mostrarHint = (ano: number, mesIdx: number, el: HTMLElement) => {
+    const itens = [...(porMes.get(`${ano}-${mesIdx + 1}`)?.entries() ?? [])]
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([tipo, valor]) => ({ tipo, valor }))
+    if (itens.length === 0) return
+    const r = el.getBoundingClientRect()
+    const altura = 40 + itens.length * 46 // estimativa p/ decidir abrir acima
+    const acima  = r.bottom + altura + 8 > window.innerHeight
+    setHint({
+      titulo: `${String(mesIdx + 1).padStart(2, '0')}/${ano}`,
+      itens,
+      x: Math.min(Math.max(r.left + r.width / 2, 110), window.innerWidth - 110),
+      y: acima ? r.top - 6 : r.bottom + 6,
+      acima,
+    })
+  }
+
+  if (todosDividendos.length === 0) return null
+
+  return (
+    <div className="rounded-xl border border-white/10 mb-4 overflow-hidden">
+      <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3 border-b border-white/10 bg-white/[0.02]">
+        <h2 className="text-[15px] font-semibold text-white">Histórico mensal</h2>
+        <div className="flex items-center gap-3">
+          <span className="text-[13px]" style={{ color: MUTED }}>
+            Total <span className="font-semibold text-[14px]" style={{ color: '#00c896' }}>{formatBRL(totalGeral)}</span>
+          </span>
+          <SelectDark value={periodo} onChange={(e) => setPeriodo(e.target.value as PeriodoResumo)} className="!py-1.5 !text-[13px] min-w-[120px]">
+            {PERIODOS_RESUMO.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </SelectDark>
+        </div>
+      </div>
+      {linhas.length === 0 && (
+        <p className="text-[13px] text-center py-4" style={{ color: MUTED }}>
+          Nenhum dividendo no período selecionado.
+        </p>
+      )}
+      <div className="overflow-x-auto" onScroll={() => setHint(null)}>
+        <table className="w-full text-[12px] whitespace-nowrap">
+          <thead>
+            <tr className="text-right" style={{ color: MUTED }}>
+              <th className="px-3 py-2 font-medium text-left">Ano</th>
+              {MESES_ABREV.map((m) => <th key={m} className="px-2 py-2 font-medium">{m}</th>)}
+              <th className="px-3 py-2 font-medium">Média</th>
+              <th className="px-3 py-2 font-medium">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {linhas.map((l) => (
+              <tr key={l.ano} className="border-t border-white/5 text-right">
+                <td className="px-3 py-2 text-left font-semibold text-white">{l.ano}</td>
+                {l.meses.map((v, i) => (
+                  <td key={i} className={v > 0 ? 'px-2 py-2 cursor-help' : 'px-2 py-2'}
+                    style={{ color: v > 0 ? 'rgba(255,255,255,.8)' : MUTED, opacity: v > 0 ? 1 : 0.5 }}
+                    onMouseEnter={(e) => mostrarHint(l.ano, i, e.currentTarget)}
+                    onMouseLeave={() => setHint(null)}>
+                    {fmtNum(v)}
+                  </td>
+                ))}
+                <td className="px-3 py-2 font-semibold text-white">
+                  {l.parcial && (
+                    <Info size={11} className="inline-block mr-1 align-[-1px]" style={{ color: MUTED }}
+                      aria-label="Média parcial" />
+                  )}
+                  <span title={l.parcial ? 'Média parcial: considera os meses até o atual' : undefined}>{fmtNum(l.media)}</span>
+                </td>
+                <td className="px-3 py-2 font-semibold" style={{ color: '#00c896' }}>{fmtNum(l.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {hint && (
+        <div className="fixed z-50 pointer-events-none rounded-xl border border-white/10 shadow-2xl px-4 py-3 min-w-[180px]"
+          style={{ left: hint.x, top: hint.y, transform: `translate(-50%, ${hint.acima ? '-100%' : '0'})`, background: '#1a1f2e' }}>
+          <p className="text-[13px] font-semibold text-white">{hint.titulo}</p>
+          {hint.itens.map((it) => (
+            <div key={it.tipo} className="border-t border-white/5 mt-2 pt-2">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: TIPO_ATIVO_COR[it.tipo] }} />
+                <span className="text-[12px]" style={{ color: MUTED }}>{TIPO_ATIVO_LABEL[it.tipo]}</span>
+              </div>
+              <p className="text-[13px] font-semibold text-white mt-0.5">{formatBRL(it.valor)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Lista de dividendos (filtros + ordenação + agrupamento) ─────
 
 type DivSortKey = 'ticker' | 'tipo' | 'data' | 'valor'
@@ -133,6 +769,7 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
   onExcluir: (d: InvestimentoDividendo) => void
   onConfirmar: (d: InvestimentoDividendo) => void
 }) {
+  const [filtroPeriodo, setFiltroPeriodo] = useState<PeriodoDiv>('recebidos')
   const [filtroTicker, setFiltroTicker] = useState('')
   const [filtroTipoAtivo, setFiltroTipoAtivo] = useState<'' | TipoAtivoInvestimento>('')
   const [agrupar, setAgrupar] = useState(true)
@@ -140,21 +777,38 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
 
   const tipoLabel = (d: InvestimentoDividendo) => d.inv_tipos_dividendo?.nome ?? TIPO_DEFAULT_LABEL(d.tipo_ativo)
 
+  // Tickers correlatos ao tipo de ativo selecionado (tipo vem antes do ativo)
   const tickers = useMemo(() => {
     const s = new Set<string>()
-    for (const d of dividendos) if (d.inv_ativos?.ticker) s.add(d.inv_ativos.ticker)
+    for (const d of dividendos) {
+      if (filtroTipoAtivo && d.tipo_ativo !== filtroTipoAtivo) continue
+      if (d.inv_ativos?.ticker) s.add(d.inv_ativos.ticker)
+    }
     return [...s].sort()
-  }, [dividendos])
+  }, [dividendos, filtroTipoAtivo])
   const tiposAtivo = useMemo(() => {
     const s = new Set<TipoAtivoInvestimento>()
     for (const d of dividendos) s.add(d.tipo_ativo)
     return [...s]
   }, [dividendos])
 
-  const filtrados = useMemo(() => dividendos.filter((d) =>
-    (!filtroTicker || d.inv_ativos?.ticker === filtroTicker) &&
-    (!filtroTipoAtivo || d.tipo_ativo === filtroTipoAtivo)
+  const mudarTipoAtivo = (t: '' | TipoAtivoInvestimento) => {
+    setFiltroTipoAtivo(t)
+    setFiltroTicker('') // ticker pode não pertencer ao novo tipo
+  }
+
+  // Recorte por tipo/ativo — alimenta o quadro de resumo (que tem período próprio)
+  const filtradosBase = useMemo(() => dividendos.filter((d) =>
+    (!filtroTipoAtivo || d.tipo_ativo === filtroTipoAtivo) &&
+    (!filtroTicker || d.inv_ativos?.ticker === filtroTicker)
   ), [dividendos, filtroTicker, filtroTipoAtivo])
+
+  // Período da barra vale só para o extrato (lista) de dividendos
+  const filtrados = useMemo(() => {
+    const { ini, fim } = intervaloPeriodo(filtroPeriodo)
+    return filtradosBase.filter((d) =>
+      (!ini || d.data_pagamento >= ini) && (!fim || d.data_pagamento <= fim))
+  }, [filtradosBase, filtroPeriodo])
 
   const valorOrd = (d: InvestimentoDividendo): string | number => {
     switch (sort.key) {
@@ -179,17 +833,55 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
   const clickSort = (key: DivSortKey) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'valor' || key === 'data' ? 'desc' : 'asc' }))
 
-  const grupos = useMemo(() => {
-    if (!agrupar) return null
-    const map = new Map<TipoAtivoInvestimento, InvestimentoDividendo[]>()
+  // Agrupa por mês (expansível); dentro do mês, opcionalmente por tipo de
+  // ativo. As linhas seguem a ordenação corrente (padrão: data desc).
+  const [fechados, setFechados] = useState<Set<string>>(new Set())
+  const toggleMes = (ym: string) => setFechados((s) => {
+    const n = new Set(s)
+    if (n.has(ym)) n.delete(ym); else n.add(ym)
+    return n
+  })
+  // Subgrupos de tipo recolhidos, por chave "YYYY-MM|TIPO"
+  const [tiposFechados, setTiposFechados] = useState<Set<string>>(new Set())
+  const toggleTipo = (ym: string, tipo: TipoAtivoInvestimento) => setTiposFechados((s) => {
+    const k = `${ym}|${tipo}`
+    const n = new Set(s)
+    if (n.has(k)) n.delete(k); else n.add(k)
+    return n
+  })
+
+  const porMesExtrato = useMemo(() => {
+    const map = new Map<string, InvestimentoDividendo[]>()
     for (const d of ordenados) {
-      if (!map.has(d.tipo_ativo)) map.set(d.tipo_ativo, [])
-      map.get(d.tipo_ativo)!.push(d)
+      const ym = d.data_pagamento.slice(0, 7)
+      if (!map.has(ym)) map.set(ym, [])
+      map.get(ym)!.push(d)
     }
+    // Meses acompanham a direção quando a ordenação é por data
+    const dirMes = sort.key === 'data' && sort.dir === 'asc' ? 1 : -1
     return [...map.entries()]
-      .map(([tipo, lista]) => ({ tipo, lista, total: lista.reduce((s, d) => s + d.valor, 0) }))
-      .sort((a, b) => b.total - a.total)
-  }, [ordenados, agrupar])
+      .sort((a, b) => a[0].localeCompare(b[0]) * dirMes)
+      .map(([ym, lista]) => {
+        let grupos: { tipo: TipoAtivoInvestimento; lista: InvestimentoDividendo[]; total: number }[] | null = null
+        if (agrupar) {
+          const porTipo = new Map<TipoAtivoInvestimento, InvestimentoDividendo[]>()
+          for (const d of lista) {
+            if (!porTipo.has(d.tipo_ativo)) porTipo.set(d.tipo_ativo, [])
+            porTipo.get(d.tipo_ativo)!.push(d)
+          }
+          grupos = [...porTipo.entries()]
+            .map(([tipo, ls]) => ({ tipo, lista: ls, total: ls.reduce((s, d) => s + d.valor, 0) }))
+            .sort((a, b) => b.total - a.total)
+        }
+        return { ym, lista, grupos, total: lista.reduce((s, d) => s + d.valor, 0) }
+      })
+  }, [ordenados, agrupar, sort])
+
+  // Paginação: o extrato exibe um mês por vez (em vez de lista sem fim)
+  const [paginaMes, setPaginaMes] = useState(0)
+  useEffect(() => { setPaginaMes(0) }, [filtroPeriodo, filtroTipoAtivo, filtroTicker])
+  const idxMes = Math.min(paginaMes, Math.max(porMesExtrato.length - 1, 0))
+  const mesPagina = porMesExtrato[idxMes] ?? null
 
   const total = useMemo(() => filtrados.reduce((s, d) => s + d.valor, 0), [filtrados])
 
@@ -238,15 +930,15 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
 
   return (
     <>
-      {/* Filtros */}
+      {/* Filtros — tipo de ativo → ativo (valem p/ quadro e extrato) */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <SelectDark value={filtroTicker} onChange={(e) => setFiltroTicker(e.target.value)} className="!py-1.5 !text-[13px] min-w-[130px]">
-          <option value="">Todos os tickers</option>
-          {tickers.map((t) => <option key={t} value={t}>{t}</option>)}
-        </SelectDark>
-        <SelectDark value={filtroTipoAtivo} onChange={(e) => setFiltroTipoAtivo(e.target.value as '' | TipoAtivoInvestimento)} className="!py-1.5 !text-[13px] min-w-[130px]">
+        <SelectDark value={filtroTipoAtivo} onChange={(e) => mudarTipoAtivo(e.target.value as '' | TipoAtivoInvestimento)} className="!py-1.5 !text-[13px] min-w-[130px]">
           <option value="">Todos os tipos</option>
           {tiposAtivo.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
+        </SelectDark>
+        <SelectDark value={filtroTicker} onChange={(e) => setFiltroTicker(e.target.value)} className="!py-1.5 !text-[13px] min-w-[130px]">
+          <option value="">Todos os ativos</option>
+          {tickers.map((t) => <option key={t} value={t}>{t}</option>)}
         </SelectDark>
         {(filtroTicker || filtroTipoAtivo) && (
           <button onClick={() => { setFiltroTicker(''); setFiltroTipoAtivo('') }}
@@ -254,12 +946,41 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
             Limpar
           </button>
         )}
+      </div>
+
+      <ResumoMensal dividendos={filtradosBase} />
+
+      {/* Período do extrato (não afeta o quadro acima) */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <SelectDark value={filtroPeriodo} onChange={(e) => setFiltroPeriodo(e.target.value as PeriodoDiv)} className="!py-1.5 !text-[13px] min-w-[150px]">
+          {PERIODOS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </SelectDark>
         <button onClick={() => setAgrupar((a) => !a)}
           className="text-[13px] px-2.5 py-1.5 rounded-lg border border-white/10 hover:border-white/25 ml-auto" style={{ color: MUTED }}>
           Agrupar por tipo: {agrupar ? 'ligado' : 'desligado'}
         </button>
         <span className="text-[13px] font-medium" style={{ color: '#00c896' }}>{formatBRL(total)}</span>
       </div>
+
+      {/* Paginação por mês do extrato */}
+      {porMesExtrato.length > 1 && mesPagina && (
+        <div className="flex items-center justify-center gap-3 mb-2">
+          <button onClick={() => setPaginaMes(idxMes - 1)} disabled={idxMes <= 0} aria-label="Mês anterior da lista"
+            className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-30"
+            style={{ color: MUTED }}>
+            <ChevronLeft size={15} />
+          </button>
+          <span className="text-[13px] font-medium text-white min-w-[150px] text-center">
+            {mesLabel(mesPagina.ym, 'longo')}
+            <span className="ml-1.5 text-[12px]" style={{ color: MUTED }}>({idxMes + 1}/{porMesExtrato.length})</span>
+          </span>
+          <button onClick={() => setPaginaMes(idxMes + 1)} disabled={idxMes >= porMesExtrato.length - 1} aria-label="Próximo mês da lista"
+            className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-30"
+            style={{ color: MUTED }}>
+            <ChevronRight size={15} />
+          </button>
+        </div>
+      )}
 
       <div className="rounded-xl border border-white/10 overflow-hidden">
         <table className="w-full text-[14px]">
@@ -273,23 +994,45 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
-          {agrupar && grupos ? (
-            grupos.map((g) => (
-              <tbody key={g.tipo}>
-                <tr className="border-t border-white/10 bg-white/[0.03]">
+          {(mesPagina ? [mesPagina] : []).map((m) => {
+            const aberto = !fechados.has(m.ym)
+            return (
+              <tbody key={m.ym}>
+                <tr className="border-t border-white/10 bg-white/[0.04] cursor-pointer select-none hover:bg-white/[0.06]"
+                  onClick={() => toggleMes(m.ym)}>
                   <td colSpan={3} className="px-4 py-2">
-                    <span className="font-semibold text-[13px]" style={{ color: TIPO_ATIVO_COR[g.tipo] }}>{TIPO_ATIVO_LABEL[g.tipo]}</span>
-                    <span className="text-[12px] ml-2" style={{ color: MUTED }}>· {g.lista.length}</span>
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-[13px] text-white">
+                      {aberto ? <ChevronDown size={14} style={{ color: MUTED }} /> : <ChevronRight size={14} style={{ color: MUTED }} />}
+                      {mesLabel(m.ym, 'longo')}
+                    </span>
+                    <span className="text-[12px] ml-2" style={{ color: MUTED }}>· {m.lista.length}</span>
                   </td>
-                  <td className="px-4 py-2 text-right font-semibold text-[13px]" style={{ color: '#00c896' }}>{formatBRL(g.total)}</td>
+                  <td className="px-4 py-2 text-right font-semibold text-[13px]" style={{ color: '#00c896' }}>{formatBRL(m.total)}</td>
                   <td colSpan={2}></td>
                 </tr>
-                {g.lista.map(linha)}
+                {aberto && (m.grupos
+                  ? m.grupos.flatMap((g) => {
+                      const tipoAberto = !tiposFechados.has(`${m.ym}|${g.tipo}`)
+                      return [
+                        <tr key={`${m.ym}-${g.tipo}`} className="border-t border-white/5 bg-white/[0.02] cursor-pointer select-none hover:bg-white/[0.05]"
+                          onClick={() => toggleTipo(m.ym, g.tipo)}>
+                          <td colSpan={3} className="px-4 py-1.5 pl-9">
+                            <span className="inline-flex items-center gap-1.5 font-medium text-[12px]" style={{ color: TIPO_ATIVO_COR[g.tipo] }}>
+                              {tipoAberto ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
+                              {TIPO_ATIVO_LABEL[g.tipo]}
+                            </span>
+                            <span className="text-[11px] ml-2" style={{ color: MUTED }}>· {g.lista.length}</span>
+                          </td>
+                          <td className="px-4 py-1.5 text-right font-medium text-[12px]" style={{ color: '#00c896' }}>{formatBRL(g.total)}</td>
+                          <td colSpan={2}></td>
+                        </tr>,
+                        ...(tipoAberto ? g.lista.map(linha) : []),
+                      ]
+                    })
+                  : m.lista.map(linha))}
               </tbody>
-            ))
-          ) : (
-            <tbody>{ordenados.map(linha)}</tbody>
-          )}
+            )
+          })}
         </table>
       </div>
 
@@ -578,33 +1321,96 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
   const [progresso, setProgresso] = useState(0)
   const [linhas, setLinhas] = useState<LinhaAssoc[]>([])
 
-  const catsOpcoes = categorias.map((c) => ({
+  // Só categorias já associadas a um tipo de provento (Configurar tipos):
+  // é o mapeamento que define em qual tipo o provento será gravado.
+  const catsMapeadas = new Set(tipos.map((t) => t.categoria_id).filter(Boolean))
+  const catsOpcoes = categorias.filter((c) => catsMapeadas.has(c.id)).map((c) => ({
     id: c.id, label: c.descricao,
     sublabel: c.id_pai ? categorias.find((p) => p.id === c.id_pai)?.descricao : undefined,
   }))
   // Tickers do mais longo p/ o mais curto, evitando casar um prefixo curto
   const tickersOrd = [...ativos].sort((a, b) => b.ticker.length - a.ticker.length)
+  // Raiz (letras) → ativos: casa variantes como "MXRF13" (recibo de
+  // subscrição que depois vira 11) e "ALUGUEL MXRF" (sem o sufixo
+  // numérico) com MXRF11 — só quando a raiz aponta para UM único ativo.
+  const porRaiz = new Map<string, string[]>()
+  for (const a of ativos) {
+    const raiz = a.ticker.toUpperCase().replace(/\d+[A-Z]?$/, '')
+    if (raiz.length < 4) continue
+    porRaiz.set(raiz, [...(porRaiz.get(raiz) ?? []), a.id])
+  }
   const detectarAtivo = (desc: string): string => {
     const d = desc.toUpperCase()
-    return tickersOrd.find((a) => d.includes(a.ticker.toUpperCase()))?.id ?? ''
+    const exato = tickersOrd.find((a) => d.includes(a.ticker.toUpperCase()))
+    if (exato) return exato.id
+    for (const token of d.split(/[^A-Z0-9]+/)) {
+      const m = token.match(/^([A-Z]{4,})(\d{0,4}[A-Z]?)$/)
+      if (!m) continue
+      const ids = porRaiz.get(m[1])
+      if (ids?.length === 1) return ids[0]
+    }
+    return ''
   }
   const tipoPorCategoria = (catId: string): string => tipos.find((t) => t.categoria_id === catId)?.id ?? ''
-  // Sugere o tipo de provento pelo tipo do ativo (FII → Aluguel de FII; demais → Dividendos)
+  // Sugere o tipo: primeiro pelo mapeamento tipo ↔ categoria escolhida;
+  // fallback pelo tipo do ativo (FII → Aluguel de FII; demais → Dividendos)
   const sugerirTipo = (ativoId: string): string => {
+    const porCategoria = tipoPorCategoria(categoriaId)
+    if (porCategoria) return porCategoria
     const at = ativos.find((a) => a.id === ativoId)
     const ehFii = at?.tipo_ativo === 'FII'
-    const m = tipos.find((x) => (ehFii ? /aluguel|fii/i : /dividend/i).test(x.nome))
-    return m?.id ?? tipoPorCategoria(categoriaId)
+    return tipos.find((x) => (ehFii ? /aluguel|fii/i : /dividend/i).test(x.nome))?.id ?? ''
   }
   const setLinha = (idx: number, patch: Partial<LinhaAssoc>) =>
     setLinhas((ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)))
 
+  // Ordenação clicando no cabeçalho (mantém o índice original p/ edição)
+  type CampoOrd = 'sel' | 'data' | 'descricao' | 'valor' | 'ativo' | 'tipo'
+  const [ordCampo, setOrdCampo] = useState<CampoOrd>('data')
+  const [ordDir, setOrdDir] = useState<1 | -1>(-1)
+  const ordenarPor = (campo: CampoOrd) => {
+    if (campo === ordCampo) setOrdDir((d) => (d === 1 ? -1 : 1))
+    else { setOrdCampo(campo); setOrdDir(campo === 'data' || campo === 'valor' ? -1 : 1) }
+  }
+  const tickerDe   = (id: string) => ativos.find((a) => a.id === id)?.ticker ?? ''
+  const nomeTipoDe = (id: string) => tipos.find((t) => t.id === id)?.nome ?? ''
+  const valorOrd = (l: LinhaAssoc): string | number | boolean => {
+    switch (ordCampo) {
+      case 'sel':       return l.importar
+      case 'valor':     return l.valor
+      case 'descricao': return l.descricao
+      case 'ativo':     return tickerDe(l.ativo_id)
+      case 'tipo':      return nomeTipoDe(l.tipo_dividendo_id)
+      default:          return l.data
+    }
+  }
+  const linhasOrd = linhas.map((l, idx) => ({ l, idx })).sort((a, b) => {
+    const va = valorOrd(a.l), vb = valorOrd(b.l)
+    let cmp: number
+    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb
+    else if (typeof va === 'boolean' && typeof vb === 'boolean') cmp = Number(va) - Number(vb)
+    else cmp = String(va).localeCompare(String(vb), 'pt-BR')
+    return cmp * ordDir
+  })
+  const ThOrd = ({ campo, className, children }: { campo: CampoOrd; className?: string; children: ReactNode }) => (
+    <th className={`px-2 py-2 cursor-pointer select-none hover:text-white ${className ?? ''}`}
+      onClick={() => ordenarPor(campo)} title="Ordenar">
+      {children}{ordCampo === campo ? (ordDir === 1 ? ' ▲' : ' ▼') : ''}
+    </th>
+  )
+
   async function buscar() {
     if (!categoriaId) { onToast('Selecione a categoria onde os proventos foram lançados'); return }
-    setCarregando(true)
+    setCarregando(true); setProgresso(0)
     try {
       const meses = gerarMeses(de, ate)
-      const resArr = await Promise.all(meses.map((mm) => apiFetch(`/transacoes?mes=${mm}&per_page=1000`)))
+      let concluidos = 0
+      const resArr = await Promise.all(meses.map(async (mm) => {
+        const r = await apiFetch(`/transacoes?mes=${mm}&per_page=1000`)
+        concluidos++
+        setProgresso(Math.round((concluidos / meses.length) * 100))
+        return r
+      }))
       const txs = resArr.flatMap((r) => extrairLista<TxAssoc>(r.dados))
       const linkados = new Set(dividendos.map((d) => d.transacao_extrato_id).filter(Boolean) as string[])
       const catDesc = (categorias.find((c) => c.id === categoriaId)?.descricao ?? '').toLowerCase()
@@ -674,10 +1480,26 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
           <Field label="Categoria dos proventos">
             <SearchableSelect value={categoriaId} onChange={setCategoriaId} placeholder="Buscar categoria..." opcoes={catsOpcoes} />
           </Field>
+          {catsOpcoes.length === 0 && (
+            <p className="text-[12px]" style={{ color: '#ffb74d' }}>
+              Nenhuma categoria associada a um tipo de provento. Abra "Configurar tipos" e mapeie
+              cada tipo (Dividendos, JSCP, Aluguel de FII…) para a categoria usada no extrato.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="De"><Input type="month" value={de} onChange={(e) => setDe(e.target.value)} /></Field>
             <Field label="Até"><Input type="month" value={ate} onChange={(e) => setAte(e.target.value)} /></Field>
           </div>
+          {carregando && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[12px] mb-1" style={{ color: MUTED }}>
+                <span>Buscando lançamentos…</span><span>{progresso}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: `${progresso}%`, background: '#00c896' }} />
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -686,18 +1508,20 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
           </p>
           <div className="overflow-auto rounded-lg border border-white/10 max-h-[50vh]">
             <table className="w-full text-[13px]">
-              <thead className="bg-white/[0.03] sticky top-0">
+              {/* fundo sólido (drawer #1a1f2e + leve clareada) — translúcido deixava
+                  as linhas aparecerem através do cabeçalho fixo ao rolar */}
+              <thead className="sticky top-0 z-10 bg-[#232938]">
                 <tr className="text-left" style={{ color: MUTED }}>
-                  <th className="px-2 py-2 w-8 text-center">✓</th>
-                  <th className="px-2 py-2">Data</th>
-                  <th className="px-2 py-2">Descrição</th>
-                  <th className="px-2 py-2 text-right">Valor</th>
-                  <th className="px-2 py-2">Ativo</th>
-                  <th className="px-2 py-2">Tipo</th>
+                  <ThOrd campo="sel" className="w-8 text-center">✓</ThOrd>
+                  <ThOrd campo="data">Data</ThOrd>
+                  <ThOrd campo="descricao">Descrição</ThOrd>
+                  <ThOrd campo="valor" className="text-right">Valor</ThOrd>
+                  <ThOrd campo="ativo">Ativo</ThOrd>
+                  <ThOrd campo="tipo">Tipo</ThOrd>
                 </tr>
               </thead>
               <tbody>
-                {linhas.map((l, i) => (
+                {linhasOrd.map(({ l, idx: i }) => (
                   <tr key={l.transacao_id} className="border-t border-white/5" style={{ opacity: l.importar ? 1 : 0.5 }}>
                     <td className="px-2 py-1 text-center">
                       <input type="checkbox" checked={l.importar} onChange={(e) => setLinha(i, { importar: e.target.checked })} className="accent-av-green" />
