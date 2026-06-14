@@ -277,6 +277,12 @@ export interface InvestimentoAtivo {
   fii_categoria:   CategoriaFII | null
   // Subtipo da ação (só tipo_ativo = ACOES)
   acoes_subtipo:   AcoesSubtipo | null
+  // Quando false, o ativo é pulado pela busca automática de cotação
+  cotacao_automatica: boolean
+  // URL do logo/ícone oficial (brapi); null quando a fonte não fornece
+  logo_url:     string | null
+  // Setor econômico cru (inglês, ex.: "Finance"); null quando sem fonte
+  setor:        string | null
   created_at:   string
   updated_at:   string
 }

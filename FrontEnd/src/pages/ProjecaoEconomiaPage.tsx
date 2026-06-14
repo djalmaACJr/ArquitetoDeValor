@@ -271,7 +271,7 @@ export default function ProjecaoEconomiaPage() {
   )
 
   return (
-    <div className="space-y-6">
+    <div className="p-5 space-y-6">
 
       <MascoteTutorial pagina="projecao" />
 

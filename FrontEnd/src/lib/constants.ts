@@ -61,7 +61,7 @@ export const TIPO_OBJETIVO_EMOJI: Record<TipoObjetivo, string> = {
 
 // ── Investimentos ─────────────────────────────────────────────
 export const TIPOS_ATIVO_INV = [
-  'ACOES', 'ETF', 'FII', 'STOCKS',
+  'ACOES', 'ETF', 'FII', 'REIT', 'STOCKS',
   'ETF_INTERNACIONAL', 'RENDA_FIXA', 'CRIPTOMOEDAS', 'TESOURO_DIRETO',
 ] as const
 export type TipoAtivoInvestimento = typeof TIPOS_ATIVO_INV[number]
@@ -77,6 +77,7 @@ export const TIPO_ATIVO_LABEL: Record<TipoAtivoInvestimento, string> = {
   ACOES:             'Ações',
   ETF:               'ETF',
   FII:               'FIIs',
+  REIT:              'REITs',
   STOCKS:            'Stocks',
   ETF_INTERNACIONAL: 'ETF Internacional',
   RENDA_FIXA:        'Renda Fixa',
@@ -88,6 +89,7 @@ export const TIPO_ATIVO_COR: Record<TipoAtivoInvestimento, string> = {
   ACOES:             '#3b82f6',
   ETF:               '#06b6d4',
   FII:               '#00c896',
+  REIT:              '#14b8a6',
   STOCKS:            '#8b5cf6',
   ETF_INTERNACIONAL: '#ec4899',
   RENDA_FIXA:        '#f59e0b',
@@ -218,4 +220,34 @@ export const ACOES_SUBTIPO_DESCRICAO: Record<AcoesSubtipo, string> = {
   PN:   'Ação preferencial — prioridade no recebimento de dividendos, em geral sem voto.',
   UNIT: 'Pacote de ações (ON + PN) negociado como uma única unidade.',
   BDR:  'Brazilian Depositary Receipt — recibo de ação estrangeira negociada na B3.',
+}
+
+// Tradução do setor econômico cru da brapi (campo `sector`, em inglês) para
+// rótulo em PT-BR. Fallback: devolve o valor cru se não houver tradução.
+const SETOR_LABEL: Record<string, string> = {
+  'Finance':                'Financeiro',
+  'Energy Minerals':        'Petróleo e Gás',
+  'Non-Energy Minerals':    'Mineração',
+  'Utilities':              'Utilidade Pública',
+  'Retail Trade':           'Varejo',
+  'Health Technology':      'Saúde',
+  'Health Services':        'Serviços de Saúde',
+  'Consumer Non-Durables':  'Consumo não Durável',
+  'Consumer Durables':      'Consumo Durável',
+  'Consumer Services':      'Serviços ao Consumidor',
+  'Process Industries':     'Indústria de Processo',
+  'Producer Manufacturing': 'Bens Industriais',
+  'Industrial Services':    'Serviços Industriais',
+  'Transportation':         'Transporte',
+  'Communications':         'Comunicações',
+  'Technology Services':    'Tecnologia',
+  'Electronic Technology':  'Tecnologia Eletrônica',
+  'Distribution Services':  'Distribuição',
+  'Commercial Services':    'Serviços Comerciais',
+  'Miscellaneous':          'Diversos',
+}
+
+export function setorLabel(setor: string | null | undefined): string | null {
+  if (!setor) return null
+  return SETOR_LABEL[setor] ?? setor
 }

@@ -1560,7 +1560,7 @@ export default function DashboardPage() {
   }, [doMesRaw])
 
   return (
-    <div className="p-4 md:p-5 max-w-[1400px] mx-auto">
+    <div className="p-5">
       {/* Topbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
@@ -1652,7 +1652,7 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[1fr_1.25fr_1fr] gap-3">
             <div data-tutorial="dashboard-vencidos">
               <CardAlertas
-                titulo="Vencidos não pagos"
+                titulo="Vencidos Não Confirmados"
                 cor="#ff6b4a"
                 total={totalPendentes}
                 itens={pendentes}
@@ -1663,7 +1663,7 @@ export default function DashboardPage() {
             </div>
             <div data-tutorial="dashboard-proximas">
               <CardAlertas
-                titulo="Próximas não pagas"
+                titulo="Próximas Não Confirmadas"
                 cor="#f0b429"
                 total={totalProximas}
                 itens={proximas}

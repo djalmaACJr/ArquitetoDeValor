@@ -52,9 +52,10 @@ const ehProvisionado = (d: InvestimentoDividendo): boolean =>
 // Barra de participação (% sobre o total) usada nos cards de proventos.
 function Barra({ pct, cor }: { pct: number; cor: string }) {
   return (
-    <div className="relative h-3.5 rounded-full bg-white/10 overflow-hidden">
+    <div className="relative h-5 rounded-full bg-white/10 overflow-hidden">
       <div className="h-full rounded-full" style={{ width: `${Math.max(pct, 2)}%`, background: cor }} />
-      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
+      <span className="absolute inset-0 flex items-center justify-center text-[12px] font-semibold text-white"
+        style={{ textShadow: '0 1px 2px rgba(0,0,0,.55)' }}>
         {pct}%
       </span>
     </div>
@@ -113,7 +114,7 @@ export default function DividendosPage() {
             <ArrowLeft size={15} />
           </Link>
           <div>
-            <h1 className="text-[22px] font-bold text-white">Dividendos</h1>
+            <h1 className="text-[22px] font-bold text-white">Proventos</h1>
             <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>Proventos recebidos, integrados ao extrato</p>
           </div>
         </div>
@@ -568,7 +569,10 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
                       const nome = ctx.datasetIndex === 0
                         ? externos[ctx.dataIndex].label
                         : TIPO_ATIVO_LABEL[tiposVis[ctx.dataIndex].tipo]
-                      return ` ${nome}: ${formatBRL(ctx.parsed)}`
+                      const pct = ctx.datasetIndex === 0
+                        ? externos[ctx.dataIndex].pct
+                        : pctDe(tiposVis[ctx.dataIndex].totais[sel])
+                      return ` ${nome}: ${formatBRL(ctx.parsed)} (${pct}%)`
                     },
                   },
                 },
@@ -1340,7 +1344,7 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
   const { ativos } = useInvestimentosAtivos()
   const { tipos }  = useTiposDividendo()
   const { categorias } = useCategorias()
-  const { dividendos, associar } = useDividendos()
+  const { dividendos, associar, invalidar } = useDividendos()
 
   const [categoriaId, setCategoriaId] = useState('')
   const [de,  setDe]  = useState(mesMenos(mesAtual(), 11))
@@ -1475,13 +1479,16 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
     let ok = 0, erros = 0
     for (let i = 0; i < sel.length; i++) {
       const l = sel[i]
+      // skipInvalidar: evita refetch (gráfico/página de fundo) a cada item;
+      // invalidamos uma única vez ao final do lote.
       const res = await associar({
         transacao_extrato_id: l.transacao_id, ativo_id: l.ativo_id,
         tipo_dividendo_id: l.tipo_dividendo_id || null,
-      })
+      }, { skipInvalidar: true })
       if (res.ok) ok++; else erros++
       setProgresso(Math.round(((i + 1) / sel.length) * 100))
     }
+    if (ok > 0) await invalidar()
     setSalvando(false)
     onToast(`${ok} provento(s) associado(s)${erros ? `, ${erros} com erro` : ''}.`)
     onClose()

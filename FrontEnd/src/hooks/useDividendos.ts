@@ -85,9 +85,14 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
   }
 
   // Vincula um provento já existente no extrato (não cria transação nova).
-  const associar = async (payload: AssociarDividendoInput): Promise<OpResult<InvestimentoDividendo>> => {
+  // `skipInvalidar` permite associar em lote sem disparar refetch a cada item;
+  // nesse caso o chamador deve invocar `invalidar()` uma única vez ao final.
+  const associar = async (
+    payload: AssociarDividendoInput,
+    opts: { skipInvalidar?: boolean } = {},
+  ): Promise<OpResult<InvestimentoDividendo>> => {
     const res = await apiMutate<InvestimentoDividendo>('/investimentos/dividendos', 'POST', payload)
-    if (res.ok) await invalidar()
+    if (res.ok && !opts.skipInvalidar) await invalidar()
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
@@ -113,5 +118,6 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     associar,
     confirmar,
     excluir,
+    invalidar,
   }
 }

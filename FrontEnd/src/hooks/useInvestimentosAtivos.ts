@@ -30,9 +30,17 @@ export interface CriarAtivoInput {
   fii_categoria?:   CategoriaFII | null
   // Ações
   acoes_subtipo?:   AcoesSubtipo | null
+  // Quando false, o ativo é pulado pela busca automática de cotação
+  cotacao_automatica?: boolean
 }
 
 export type EditarAtivoInput = Partial<CriarAtivoInput>
+
+export interface AtualizarAtivosResultado {
+  processados: number
+  atualizados: number
+  ativos: { ticker: string; nome: string }[]
+}
 
 export interface FiltrosAtivos {
   tipo?: TipoAtivoInvestimento
@@ -74,9 +82,26 @@ export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
+  const atualizarAtivos = async (): Promise<OpResult<AtualizarAtivosResultado>> => {
+    const res = await apiMutate<AtualizarAtivosResultado>('/investimentos/atualizar-ativos', 'POST', {})
+    if (res.ok) {
+      // Nome/moeda podem ter mudado — invalida o que exibe ativos.
+      for (const k of ['inv-ativos', 'inv-posicoes', 'inv-dividendos', 'inv-historico', 'inv-dashboard', 'inv-ranking']) {
+        await qc.invalidateQueries({ queryKey: [k, uid] })
+      }
+    }
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   const excluir = async (id: string): Promise<OpResult> => {
     const res = await apiMutate(`/investimentos/ativos/${id}`, 'DELETE')
-    if (res.ok) await invalidar()
+    if (res.ok) {
+      // A exclusão cascateia para posições/operações/dividendos/histórico —
+      // invalida todos os caches do módulo de investimentos.
+      for (const k of ['inv-ativos', 'inv-posicoes', 'inv-operacoes', 'inv-dividendos', 'inv-historico', 'inv-dashboard', 'inv-ranking']) {
+        await qc.invalidateQueries({ queryKey: [k, uid] })
+      }
+    }
     return { ok: res.ok, dados: null, erro: res.erro }
   }
 
@@ -87,6 +112,7 @@ export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
     criar,
     editar,
     excluir,
+    atualizarAtivos,
   }
 }
 

@@ -598,7 +598,7 @@ export default function AssinaturasPage() {
   const { totalMensal, totalAnual, ativas, novas, inativos, reajustadas, maior, porCat } = kpis
 
   return (
-    <div className="space-y-6">
+    <div className="p-5 space-y-6">
 
       <MascoteTutorial pagina="assinaturas" />
 

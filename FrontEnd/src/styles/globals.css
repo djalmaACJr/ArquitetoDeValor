@@ -61,6 +61,12 @@
   --tint-2:         rgba(255, 255, 255, 0.045);
 }
 
+/* color-scheme amarrado ao tema (modo noite/dia) para que os controles
+   NATIVOS — sobretudo o popup de <select> — sigam o tema escolhido,
+   ficando escuros no modo noite e claros no modo dia. */
+html.dark        { color-scheme: dark; }
+html:not(.dark)  { color-scheme: light; }
+
 /* === LAYOUT: Clássico Dia ====================================== */
 html:not(.dark)[data-theme="classico"],
 html:not(.dark):not([data-theme]) {

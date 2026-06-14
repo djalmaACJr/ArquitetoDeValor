@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star } from 'lucide-react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2 } from 'lucide-react'
 import { Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, Tooltip, Legend,
@@ -13,12 +13,13 @@ import { useDividendos } from '../hooks/useDividendos'
 import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
 import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
 import { usePtax } from '../hooks/usePtax'
-import { Drawer, BtnSalvar, BtnCancelar, Toast } from '../components/ui/shared'
+import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL, formatData } from '../lib/utils'
 import {
   TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
   INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO, SUBTIPO_RF_INFO, FII_CATEGORIA_INFO,
+  setorLabel,
 } from '../lib/constants'
 import {
   perguntasParaTipo, calcularNotaQuestionario, recomendacaoCompra,
@@ -55,11 +56,15 @@ const OPCOES_GRAFICO = {
 
 export default function DetalheInvestimentoPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const ativoId = id ?? null
   const [toast, setToast] = useState<string | null>(null)
   const [editandoNota, setEditandoNota] = useState(false)
+  const [excluindo, setExcluindo] = useState(false)
+  const [salvandoExclusao, setSalvandoExclusao] = useState(false)
 
   const { ativo, loading, error } = useInvestimentoAtivo(ativoId)
+  const { excluir } = useInvestimentosAtivos()
   const { posicoes }  = useInvestimentosPosicoes(ativoId ? { ativo_id: ativoId } : {})
   const { historico } = useInvestimentosHistorico(ativoId ? { ativo_id: ativoId } : {})
   const { dividendos } = useDividendos(ativoId ? { ativo_id: ativoId } : {})
@@ -157,6 +162,15 @@ export default function DetalheInvestimentoPage() {
 
   const cor = TIPO_ATIVO_COR[ativo.tipo_ativo]
 
+  async function confirmarExclusao() {
+    if (!ativo) return
+    setSalvandoExclusao(true)
+    const res = await excluir(ativo.id)
+    setSalvandoExclusao(false)
+    if (res.ok) navigate('/investimentos/ativos')
+    else { setExcluindo(false); showToast(res.erro ?? 'Erro ao excluir o ativo') }
+  }
+
   // Recomendação de compra: nota do usuário × desvio da alocação ideal do tipo
   const tipoDash = dashboard?.tipos.find((t) => t.tipo_ativo === ativo.tipo_ativo)
   const recomendacao = recomendacaoCompra(
@@ -173,6 +187,7 @@ export default function DetalheInvestimentoPage() {
           <Link to="/investimentos/ativos" className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
             <ArrowLeft size={15} />
           </Link>
+          <LogoAtivo url={ativo.logo_url} size={36} />
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-[22px] font-bold text-white">{ativo.ticker}</h1>
@@ -180,6 +195,12 @@ export default function DetalheInvestimentoPage() {
                 style={{ background: `${cor}22`, color: cor }}>
                 {TIPO_ATIVO_LABEL[ativo.tipo_ativo]}
               </span>
+              {setorLabel(ativo.setor) && (
+                <span className="inline-flex items-center text-[12px] px-2 py-0.5 rounded-full border border-white/15"
+                  style={{ color: MUTED }}>
+                  {setorLabel(ativo.setor)}
+                </span>
+              )}
             </div>
             <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>{ativo.nome}</p>
           </div>
@@ -197,6 +218,11 @@ export default function DetalheInvestimentoPage() {
             <Star size={14} style={{ color: '#f0b429' }} />
             Nota: {ativo.nota_usuario ?? '—'}
             <Pencil size={12} style={{ color: MUTED }} />
+          </button>
+          <button onClick={() => setExcluindo(true)} title="Excluir ativo"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] transition-colors hover:bg-red-400/10"
+            style={{ borderColor: 'rgba(248,113,113,0.4)', color: '#ff5c7a' }}>
+            <Trash2 size={14} /> Excluir
           </button>
         </div>
       </div>
@@ -382,6 +408,12 @@ export default function DetalheInvestimentoPage() {
       {editandoNota && (
         <DrawerQuestionario ativo={ativo}
           onClose={() => setEditandoNota(false)} onToast={showToast} />
+      )}
+
+      {excluindo && (
+        <ModalExcluir nome={ativo.ticker}
+          mensagem="Isso remove o ativo e todas as suas posições, operações e dividendos."
+          onConfirmar={confirmarExclusao} onCancelar={() => setExcluindo(false)} salvando={salvandoExclusao} />
       )}
     </div>
   )

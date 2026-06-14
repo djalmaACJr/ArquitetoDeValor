@@ -1,15 +1,18 @@
 import { useState, useEffect, useMemo, Fragment } from 'react'
-import { Plus, Pencil, Trash2, Layers, ArrowLeft, LineChart, Search, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Pencil, Trash2, Layers, ArrowLeft, LineChart, Search, RefreshCw, ChevronDown, ChevronUp, ChevronRight, TrendingUp, TrendingDown } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { Bar } from 'react-chartjs-2'
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js'
 import {
   useInvestimentosAtivos, useBuscaAtivoExterno,
   type CriarAtivoInput, type EditarAtivoInput,
 } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes, type CriarPosicaoInput } from '../hooks/useInvestimentosPosicoes'
-import { useInvestimentosHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
+import { useInvestimentosHistorico, useBackfillHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
+import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
 import { useContas } from '../hooks/useContas'
 import {
-  Drawer, Field, Input, SelectDark, BtnSalvar, BtnCancelar, Toast, ModalExcluir,
+  Drawer, Field, Input, SelectDark, BtnSalvar, BtnCancelar, Toast, LogoAtivo,
 } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL, formatData } from '../lib/utils'
@@ -19,13 +22,30 @@ import {
   SUBTIPO_RF_INFO, subtiposParaTipo,
   CATEGORIAS_FII, FII_CATEGORIA_INFO,
   ACOES_SUBTIPOS, ACOES_SUBTIPO_LABEL, ACOES_SUBTIPO_DESCRICAO,
+  setorLabel,
 } from '../lib/constants'
 import type {
   InvestimentoAtivo, TipoAtivoInvestimento, SubtipoRF, IndexadorRF, CategoriaFII,
-  AcoesSubtipo, ResultadoBuscaAtivo,
+  AcoesSubtipo, ResultadoBuscaAtivo, InvestimentoDashboardTipo,
 } from '../types'
 
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
+
 const MUTED = '#8b92a8'
+const VERDE = '#00c896'
+const VERMELHO = '#ff5c7a'
+
+function corValor(v: number): string {
+  if (v > 0) return VERDE
+  if (v < 0) return VERMELHO
+  return MUTED
+}
+function fmtPct(v: number): string {
+  return `${v >= 0 ? '+' : ''}${v.toFixed(2).replace('.', ',')}%`
+}
+function SetaVariacao({ v, size = 11 }: { v: number; size?: number }) {
+  return v >= 0 ? <TrendingUp size={size} /> : <TrendingDown size={size} />
+}
 
 // Rótulo da categoria/subtipo de um ativo (FII: Tijolo/Papel…; Ações:
 // ON/PN/BDR; Renda Fixa/Tesouro: CDB/LCI/Tesouro…). null = sem categoria.
@@ -40,18 +60,92 @@ const FORM_VAZIO: CriarAtivoInput = {
   ticker: '', nome: '', tipo_ativo: 'ACOES', moeda: 'BRL', descricao: '', nota_usuario: null,
   rf_subtipo: null, rf_indexador: null, rf_taxa: null, rf_emissor: null,
   rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
-  fii_categoria: null, acoes_subtipo: null,
+  fii_categoria: null, acoes_subtipo: null, cotacao_automatica: true,
 }
 
 const ehRendaFixa = (tipo: TipoAtivoInvestimento) => tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
 
+// ── Evolução do valor de mercado, empilhada por tipo de ativo ──
+const PERIODOS_EVOLUCAO = [
+  { value: '6',  label: '6 Meses' },
+  { value: '12', label: '12 Meses' },
+  { value: '24', label: '24 Meses' },
+]
+function fmtMesCurto(anoMes: string): string {
+  const [ano, m] = anoMes.split('-')
+  return `${m}/${ano.slice(2)}`
+}
+
+function EvolucaoPorTipo() {
+  const [periodo, setPeriodo] = useState('12')
+  const { historico } = useInvestimentosHistorico({})
+
+  // Por mês: valor de mercado somado por tipo de ativo (segmentos da pilha)
+  const { meses, tipos, porMes } = useMemo(() => {
+    const porMes = new Map<string, Map<string, number>>()
+    const presentes = new Set<string>()
+    for (const h of historico) {
+      const tipo = h.inv_ativos?.tipo_ativo
+      if (!tipo) continue
+      presentes.add(tipo)
+      if (!porMes.has(h.mes_ano)) porMes.set(h.mes_ano, new Map())
+      const mt = porMes.get(h.mes_ano)!
+      mt.set(tipo, (mt.get(tipo) ?? 0) + Number(h.valor_mercado))
+    }
+    const meses = [...porMes.keys()].sort().slice(-Number(periodo))
+    const tipos = TIPOS_ATIVO_INV.filter((t) => presentes.has(t))
+    return { meses, tipos, porMes }
+  }, [historico, periodo])
+
+  return (
+    <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-5">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+        <h2 className="text-[15px] font-semibold text-white">Evolução por tipo de ativo</h2>
+        <SelectDark value={periodo} onChange={(e) => setPeriodo(e.target.value)}
+          style={{ width: 'auto' }} className="!text-[13px] !py-2">
+          {PERIODOS_EVOLUCAO.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </SelectDark>
+      </div>
+
+      {meses.length < 2 ? (
+        <p className="text-[13px] py-10 text-center" style={{ color: MUTED }}>
+          Registre o valor de mercado mensal dos seus ativos para acompanhar a evolução por tipo.
+        </p>
+      ) : (
+        <Bar
+          data={{
+            labels: meses.map(fmtMesCurto),
+            datasets: tipos.map((t) => ({
+              label: TIPO_ATIVO_LABEL[t],
+              data: meses.map((m) => Number((porMes.get(m)?.get(t) ?? 0).toFixed(2))),
+              backgroundColor: TIPO_ATIVO_COR[t],
+              borderRadius: 4,
+              stack: 'tipos',
+            })),
+          }}
+          options={{
+            responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 2.4,
+            plugins: { legend: { display: true, position: 'top', labels: { color: MUTED, boxWidth: 12, font: { size: 11 } } } },
+            scales: {
+              x: { stacked: true, ticks: { color: MUTED }, grid: { color: 'rgba(255,255,255,0.05)' } },
+              y: { stacked: true, ticks: { color: MUTED }, grid: { color: 'rgba(255,255,255,0.05)' } },
+            },
+          }}
+        />
+      )}
+    </section>
+  )
+}
+
 export default function AtivosInvestimentosPage() {
   const [tipoFiltro, setTipoFiltro] = useState<TipoAtivoInvestimento | ''>('')
+  const [pesquisa,   setPesquisa]   = useState('')
   const [drawer,     setDrawer]     = useState(false)
   const [editando,   setEditando]   = useState<InvestimentoAtivo | null>(null)
   const [form,       setForm]       = useState<CriarAtivoInput>(FORM_VAZIO)
   const [salvando,   setSalvando]   = useState(false)
-  const [excluindo,  setExcluindo]  = useState<InvestimentoAtivo | null>(null)
   const [toast,      setToast]      = useState<string | null>(null)
   const [posicoesDe, setPosicoesDe] = useState<InvestimentoAtivo | null>(null)
   const [historicoDe, setHistoricoDe] = useState<InvestimentoAtivo | null>(null)
@@ -71,7 +165,17 @@ export default function AtivosInvestimentosPage() {
   const { resultados, buscando, erroBusca } = useBuscaAtivoExterno(form.tipo_ativo, drawer ? buscaDeb : '')
 
   const filtros = tipoFiltro ? { tipo: tipoFiltro } : {}
-  const { ativos, loading, error, criar, editar, excluir } = useInvestimentosAtivos(filtros)
+  const { ativos, loading, error, criar, editar, atualizarAtivos } = useInvestimentosAtivos(filtros)
+  const [atualizando, setAtualizando] = useState(false)
+
+  // Agregados financeiros por tipo (valor, variação, dividendos, participação),
+  // usados no cabeçalho de cada card — mesma fonte da página de Investimentos.
+  const { dashboard } = useInvestimentosDashboard(null)
+  const dadosPorTipo = useMemo(() => {
+    const m = new Map<TipoAtivoInvestimento, InvestimentoDashboardTipo>()
+    for (const t of dashboard?.tipos ?? []) m.set(t.tipo_ativo, t)
+    return m
+  }, [dashboard])
 
   // Categorias colapsadas (expansível). Vazio = todas abertas.
   const [catsFechadas, setCatsFechadas] = useState<Set<string>>(new Set())
@@ -98,8 +202,12 @@ export default function AtivosInvestimentosPage() {
 
   // Agrupa por Tipo → Categoria/subtipo (mesmo estilo do Relatório por categoria)
   const grupos = useMemo(() => {
+    const termo = pesquisa.trim().toLowerCase()
+    const filtrados = termo
+      ? ativos.filter((a) => a.ticker.toLowerCase().includes(termo) || a.nome.toLowerCase().includes(termo))
+      : ativos
     const porTipo = new Map<TipoAtivoInvestimento, Map<string, InvestimentoAtivo[]>>()
-    for (const a of ativos) {
+    for (const a of filtrados) {
       if (!porTipo.has(a.tipo_ativo)) porTipo.set(a.tipo_ativo, new Map())
       const cats = porTipo.get(a.tipo_ativo)!
       const cat = rotuloCategoriaAtivo(a) ?? 'Sem categoria'
@@ -113,9 +221,25 @@ export default function AtivosInvestimentosPage() {
         total: [...cats.values()].reduce((s, l) => s + l.length, 0),
         categorias: [...cats.entries()].sort((a, b) => b[1].length - a[1].length).map(([cat, lista]) => ({ cat, lista })),
       }))
-  }, [ativos])
+  }, [ativos, pesquisa])
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000) }
+
+  // Re-busca nome/moeda oficiais (brapi) de todos os ativos — útil quando a
+  // busca externa falhou no cadastro/importação e o ativo ficou só com o ticker.
+  async function handleAtualizarAtivos() {
+    if (atualizando) return
+    setAtualizando(true)
+    const res = await atualizarAtivos()
+    setAtualizando(false)
+    if (!res.ok) { showToast(res.erro ?? 'Erro ao atualizar tickets'); return }
+    const d = res.dados
+    showToast(
+      !d || d.atualizados === 0
+        ? 'Nada a atualizar — tickets já estão completos'
+        : `${d.atualizados} ticket(s) atualizado(s) de ${d.processados}`,
+    )
+  }
 
   function resetBusca() {
     setBusca(''); setBuscaDeb(''); setSelecionado(false); setManualLivre(false); setPrecoSel(null)
@@ -131,6 +255,7 @@ export default function AtivosInvestimentosPage() {
       rf_emissor: a.rf_emissor, rf_vencimento: a.rf_vencimento,
       rf_garantia_fgc: a.rf_garantia_fgc, rf_isento_ir: a.rf_isento_ir,
       fii_categoria: a.fii_categoria, acoes_subtipo: a.acoes_subtipo,
+      cotacao_automatica: a.cotacao_automatica,
     })
     resetBusca()
     setSelecionado(true)   // já tem nome definido — não exige nova seleção
@@ -159,9 +284,9 @@ export default function AtivosInvestimentosPage() {
   function mudarTipo(tipo: TipoAtivoInvestimento) {
     if (!editando) { resetBusca() }
     const limpaIdent = editando ? {} : { ticker: '', nome: '' }
-    // Ações no exterior (Stocks) são, por padrão, em dólar. BDRs e ETFs
-    // internacionais listados na B3 são cotados em BRL (campo editável).
-    const moedaPadrao = tipo === 'STOCKS' ? 'USD' : 'BRL'
+    // Ações no exterior (Stocks) e REITs são, por padrão, em dólar. BDRs e
+    // ETFs internacionais listados na B3 são cotados em BRL (campo editável).
+    const moedaPadrao = tipo === 'STOCKS' || tipo === 'REIT' ? 'USD' : 'BRL'
     if (tipo === 'TESOURO_DIRETO') {
       const info = SUBTIPO_RF_INFO.TESOURO
       setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, acoes_subtipo: null, moeda: 'BRL',
@@ -193,11 +318,12 @@ export default function AtivosInvestimentosPage() {
       showToast('Busque e selecione o ativo na lista — ou ative o cadastro manual')
       return
     }
-    if (!form.ticker.trim() || !form.nome.trim()) { showToast('Ticker e nome são obrigatórios'); return }
+    if (!form.ticker.trim()) { showToast('Ticker é obrigatório'); return }
     setSalvando(true)
     const payload: CriarAtivoInput | EditarAtivoInput = {
       ...form,
       ticker: form.ticker.trim().toUpperCase(),
+      // Nome opcional: se em branco, o backend busca o nome oficial pelo ticker
       nome: form.nome.trim(),
       descricao: form.descricao?.trim() || null,
       nota_usuario: form.nota_usuario === null || form.nota_usuario === undefined || Number.isNaN(form.nota_usuario)
@@ -207,16 +333,6 @@ export default function AtivosInvestimentosPage() {
     setSalvando(false)
     if (res.ok) { setDrawer(false); showToast(editando ? 'Ativo atualizado!' : 'Ativo criado!') }
     else showToast(res.erro ?? 'Erro ao salvar')
-  }
-
-  async function confirmarExclusao() {
-    if (!excluindo) return
-    setSalvando(true)
-    const res = await excluir(excluindo.id)
-    setSalvando(false)
-    if (res.ok) showToast('Ativo excluído.')
-    else showToast(res.erro ?? 'Erro ao excluir')
-    setExcluindo(null)
   }
 
   if (loading) return <LoadingMascote />
@@ -234,12 +350,28 @@ export default function AtivosInvestimentosPage() {
             <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>Cartela de ativos e posições</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: MUTED }} />
+            <input value={pesquisa} onChange={(e) => setPesquisa(e.target.value)}
+              placeholder="Buscar por ticker ou nome…"
+              className="w-56 rounded-lg border border-white/10 bg-white/[0.03] pl-8 pr-7 py-2 text-[13px] text-white outline-none focus:border-white/25 placeholder:text-white/30" />
+            {pesquisa && (
+              <button onClick={() => setPesquisa('')} title="Limpar"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[13px]" style={{ color: MUTED }}>✕</button>
+            )}
+          </div>
           <SelectDark value={tipoFiltro} onChange={(e) => setTipoFiltro(e.target.value as TipoAtivoInvestimento | '')}
             style={{ width: 'auto' }} className="!text-[13px] !py-2">
             <option value="">Todos os tipos</option>
             {TIPOS_ATIVO_INV.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
           </SelectDark>
+          <button onClick={handleAtualizarAtivos} disabled={atualizando}
+            title="Re-busca nome e moeda oficiais dos ativos (corrige tickets que ficaram só com o código)"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border border-white/15 text-white/90 hover:border-white/30 disabled:opacity-50">
+            <RefreshCw size={15} className={atualizando ? 'animate-spin' : ''} />
+            {atualizando ? 'Atualizando…' : 'Atualizar tickets'}
+          </button>
           <button onClick={abrirNovo}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white"
             style={{ background: '#3b82f6' }}>
@@ -251,121 +383,31 @@ export default function AtivosInvestimentosPage() {
       <Toast msg={toast} />
       {error && <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-[13px] text-red-300">{error}</div>}
 
-      {/* Lista */}
+      {/* Lista — um card por tipo de ativo (mesmo estilo da página de Investimentos) */}
       {ativos.length === 0 ? (
         <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
           <p className="text-white font-medium">Nenhum ativo cadastrado</p>
           <p className="text-[13px] mt-1" style={{ color: MUTED }}>Comece adicionando o primeiro ativo da sua carteira.</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-white/10 overflow-hidden">
-          <table className="w-full text-[14px]">
-            <thead>
-              <tr className="text-left" style={{ color: MUTED }}>
-                <th className="px-4 py-2.5 font-medium">Ticker</th>
-                <th className="px-4 py-2.5 font-medium">Nome</th>
-                <th className="px-4 py-2.5 font-medium">Tipo</th>
-                <th className="px-4 py-2.5 font-medium text-center">Nota</th>
-                <th className="px-4 py-2.5 font-medium text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
+        <>
+          {!pesquisa && <EvolucaoPorTipo />}
+          {grupos.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center text-[13px]" style={{ color: MUTED }}>
+              Nenhum ativo encontrado para “{pesquisa}”.
+            </div>
+          ) : (
+            <div className="space-y-3">
               {grupos.map((g) => (
-                <Fragment key={g.tipo}>
-                  {/* Cabeçalho do tipo (pai) */}
-                  <tr className="border-t border-white/10" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                    <td colSpan={5} className="px-4 py-2">
-                      <span className="text-[13px] font-bold uppercase tracking-wider" style={{ color: TIPO_ATIVO_COR[g.tipo] }}>{TIPO_ATIVO_LABEL[g.tipo]}</span>
-                      <span className="text-[12px] ml-2" style={{ color: MUTED }}>· {g.total} {g.total === 1 ? 'ativo' : 'ativos'}</span>
-                    </td>
-                  </tr>
-                  {g.categorias.map((c) => {
-                    const temHeader = g.categorias.length > 1 || c.cat !== 'Sem categoria'
-                    const key = `${g.tipo}|${c.cat}`
-                    const aberta = !temHeader || !catsFechadas.has(key)
-                    return (
-                    <Fragment key={c.cat}>
-                      {/* Cabeçalho da categoria (sub) — expansível */}
-                      {temHeader && (
-                        <tr className="border-t border-white/[0.03] cursor-pointer hover:bg-white/[0.02]" onClick={() => toggleCat(key)}>
-                          <td colSpan={5} className="px-4 py-1.5">
-                            <span className="inline-flex items-center gap-2 pl-1">
-                              {aberta ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
-                              <span className="w-1.5 h-1.5 rounded-full" style={{ background: TIPO_ATIVO_COR[g.tipo] }} />
-                              <span className="text-[12px] font-semibold" style={{ color: '#c5cad8' }}>{c.cat}</span>
-                              <span className="text-[11px]" style={{ color: MUTED }}>· {c.lista.length}</span>
-                            </span>
-                          </td>
-                        </tr>
-                      )}
-                      {aberta && c.lista.map((a) => (
-                <tr key={a.id} className="border-t border-white/5">
-                  <td className="px-4 py-2.5">
-                    <Link to={`/investimentos/ativos/${a.id}`} className="font-semibold text-white hover:underline">
-                      {a.ticker}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2.5 text-white/80">
-                    {a.nome}
-                    {(() => {
-                      const cs = contasPorAtivo.get(a.id)
-                      return cs && cs.size > 0
-                        ? <span className="block text-[11px]" style={{ color: MUTED }}>{[...cs].join(', ')}</span>
-                        : <span className="block text-[11px]" style={{ color: '#ffb74d' }}>Sem posição em conta</span>
-                    })()}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <span className="inline-flex items-center gap-1.5 text-[12px] px-2 py-0.5 rounded-full"
-                      style={{ background: `${TIPO_ATIVO_COR[a.tipo_ativo]}22`, color: TIPO_ATIVO_COR[a.tipo_ativo] }}>
-                      {TIPO_ATIVO_LABEL[a.tipo_ativo]}
-                    </span>
-                    {a.tipo_ativo === 'RENDA_FIXA' && a.rf_subtipo && (
-                      <span className="ml-1.5 text-[11px] px-1.5 py-0.5 rounded-full border border-white/15" style={{ color: MUTED }}>
-                        {SUBTIPO_RF_INFO[a.rf_subtipo].label}
-                      </span>
-                    )}
-                    {a.tipo_ativo === 'FII' && a.fii_categoria && (
-                      <span className="ml-1.5 text-[11px] px-1.5 py-0.5 rounded-full border border-white/15" style={{ color: MUTED }}>
-                        {FII_CATEGORIA_INFO[a.fii_categoria].label}
-                      </span>
-                    )}
-                    {a.tipo_ativo === 'ACOES' && a.acoes_subtipo && (
-                      <span className="ml-1.5 text-[11px] px-1.5 py-0.5 rounded-full border border-white/15" style={{ color: MUTED }}>
-                        {ACOES_SUBTIPO_LABEL[a.acoes_subtipo]}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-center text-white/80">{a.nota_usuario ?? '—'}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => setPosicoesDe(a)} title="Posições"
-                        className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
-                        <Layers size={13} />
-                      </button>
-                      <button onClick={() => setHistoricoDe(a)} title="Valor de mercado"
-                        className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
-                        <LineChart size={13} />
-                      </button>
-                      <button onClick={() => abrirEditar(a)} title="Editar"
-                        className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
-                        <Pencil size={13} />
-                      </button>
-                      <button onClick={() => setExcluindo(a)} title="Excluir"
-                        className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-                      ))}
-                    </Fragment>
-                    )
-                  })}
-                </Fragment>
+                <CardTipoAtivos key={g.tipo} grupo={g} dados={dadosPorTipo.get(g.tipo) ?? null}
+                  contasPorAtivo={contasPorAtivo}
+                  catsFechadas={catsFechadas} toggleCat={toggleCat}
+                  onPosicoes={setPosicoesDe} onHistorico={setHistoricoDe}
+                  onEditar={abrirEditar} />
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Drawer criar/editar ativo */}
@@ -497,9 +539,9 @@ export default function AtivosInvestimentosPage() {
                 <Input value={form.moeda} onChange={(e) => setForm({ ...form, moeda: e.target.value.toUpperCase() })} maxLength={3} placeholder="BRL" />
               </Field>
             </div>
-            <Field label="Nome">
+            <Field label="Nome (opcional — busca automática pelo ticker)">
               <Input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })}
-                placeholder="Ex.: Vale S.A." maxLength={120} disabled={!editando && !manualLivre} />
+                placeholder="Deixe em branco para buscar pelo ticker" maxLength={120} disabled={!editando && !manualLivre} />
             </Field>
           </>
         )}
@@ -515,6 +557,20 @@ export default function AtivosInvestimentosPage() {
             <Input value={form.descricao ?? ''} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Opcional" />
           </Field>
         </div>
+
+        {/* Busca automática de cotação — desligue para ativos sem fonte gratuita */}
+        <label className="flex items-start gap-2 text-[13px] cursor-pointer rounded-lg border border-white/10 p-3">
+          <input type="checkbox" className="mt-0.5"
+            checked={form.cotacao_automatica !== false}
+            onChange={(e) => setForm({ ...form, cotacao_automatica: e.target.checked })} />
+          <span>
+            <span className="text-white">Buscar cotação automaticamente</span>
+            <span className="block text-[12px] mt-0.5" style={{ color: MUTED }}>
+              Desligue para ativos sem fonte gratuita (ex.: FIIs pequenos, papéis deslistados).
+              Ele sai das atualizações automáticas e do aviso de lacuna — você lança o valor manualmente.
+            </span>
+          </span>
+        </label>
 
         {/* Características de renda fixa / Tesouro Direto */}
         {ehRendaFixa(form.tipo_ativo) && (
@@ -587,10 +643,155 @@ export default function AtivosInvestimentosPage() {
         <DrawerHistorico ativo={historicoDe} onClose={() => setHistoricoDe(null)} onToast={showToast} />
       )}
 
-      {excluindo && (
-        <ModalExcluir nome={excluindo.ticker}
-          mensagem="Isso remove o ativo e todas as suas posições, operações e dividendos."
-          onConfirmar={confirmarExclusao} onCancelar={() => setExcluindo(null)} salvando={salvando} />
+    </div>
+  )
+}
+
+// ── Card de um tipo de ativo (mesmo estilo da página de Investimentos) ──
+
+type GrupoTipo = { tipo: TipoAtivoInvestimento; total: number; categorias: { cat: string; lista: InvestimentoAtivo[] }[] }
+
+function CardTipoAtivos({
+  grupo, dados, contasPorAtivo, catsFechadas, toggleCat, onPosicoes, onHistorico, onEditar,
+}: {
+  grupo: GrupoTipo
+  dados: InvestimentoDashboardTipo | null
+  contasPorAtivo: Map<string, Set<string>>
+  catsFechadas: Set<string>
+  toggleCat: (key: string) => void
+  onPosicoes: (a: InvestimentoAtivo) => void
+  onHistorico: (a: InvestimentoAtivo) => void
+  onEditar: (a: InvestimentoAtivo) => void
+}) {
+  const [aberto, setAberto] = useState(true)
+  const cor = TIPO_ATIVO_COR[grupo.tipo]
+  const variacaoPct = dados && dados.valor_custo > 0 ? (dados.ganho_perda / dados.valor_custo) * 100 : 0
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02]">
+      {/* Cabeçalho do tipo — colapsável (mesmo layout da página de Investimentos) */}
+      <button onClick={() => setAberto(!aberto)}
+        className="w-full px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-3 items-center text-left">
+        {/* Tipo + contagem */}
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: cor }} />
+          <div className="min-w-0">
+            <p className="font-semibold text-[15px]" style={{ color: cor }}>{TIPO_ATIVO_LABEL[grupo.tipo]}</p>
+            <p className="text-[12px]" style={{ color: MUTED }}>{grupo.total} {grupo.total === 1 ? 'ativo' : 'ativos'}</p>
+          </div>
+        </div>
+
+        {/* Variação total */}
+        <div className="text-right md:text-center">
+          <p className="text-[12px] inline-flex items-center gap-1" style={{ color: corValor(dados?.ganho_perda ?? 0) }}>
+            <SetaVariacao v={dados?.ganho_perda ?? 0} size={11} /> Variação Total
+          </p>
+          <p className="text-[13px] font-medium" style={{ color: corValor(dados?.ganho_perda ?? 0) }}>
+            {dados ? `${fmtPct(variacaoPct)} (${formatBRL(dados.ganho_perda)})` : '—'}
+          </p>
+        </div>
+
+        {/* Dividendos do tipo */}
+        <div className="hidden md:block text-center">
+          <p className="text-[12px]" style={{ color: MUTED }}>Dividendos</p>
+          <p className="text-[13px] font-medium" style={{ color: dados && dados.dividendos > 0 ? VERDE : MUTED }}>
+            {dados ? formatBRL(dados.dividendos) : '—'}
+          </p>
+        </div>
+
+        {/* Valor + participação */}
+        <div className="flex items-center justify-end gap-2">
+          <div className="text-right">
+            <p className="text-[13px] font-semibold text-white">{dados ? formatBRL(dados.valor_mercado) : '—'}</p>
+            {dados && (
+              <div className="flex items-center gap-1.5 justify-end">
+                <div className="w-20 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, dados.percentual_atual)}%`, background: cor }} />
+                </div>
+                <span className="text-[12px] font-semibold text-white">{dados.percentual_atual.toFixed(2).replace('.', ',')}%</span>
+              </div>
+            )}
+          </div>
+          {aberto ? <ChevronUp size={15} style={{ color: MUTED }} /> : <ChevronDown size={15} style={{ color: MUTED }} />}
+        </div>
+      </button>
+
+      {aberto && (
+        <div className="border-t border-white/5 overflow-x-auto">
+          <table className="w-full text-[14px]">
+            <thead>
+              <tr className="text-left" style={{ color: MUTED }}>
+                <th className="px-4 py-2 font-medium">Ticker</th>
+                <th className="px-4 py-2 font-medium">Nome</th>
+                <th className="px-4 py-2 font-medium text-center">Nota</th>
+                <th className="px-4 py-2 font-medium text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {grupo.categorias.map((c) => {
+                const temHeader = grupo.categorias.length > 1 || c.cat !== 'Sem categoria'
+                const key = `${grupo.tipo}|${c.cat}`
+                const catAberta = !temHeader || !catsFechadas.has(key)
+                return (
+                  <Fragment key={c.cat}>
+                    {/* Cabeçalho da categoria (sub) — expansível */}
+                    {temHeader && (
+                      <tr className="border-t border-white/[0.03] cursor-pointer hover:bg-white/[0.02]" onClick={() => toggleCat(key)}>
+                        <td colSpan={4} className="px-4 py-1.5">
+                          <span className="inline-flex items-center gap-2 pl-1">
+                            {catAberta ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: cor }} />
+                            <span className="text-[12px] font-semibold" style={{ color: '#c5cad8' }}>{c.cat}</span>
+                            <span className="text-[11px]" style={{ color: MUTED }}>· {c.lista.length}</span>
+                          </span>
+                        </td>
+                      </tr>
+                    )}
+                    {catAberta && c.lista.map((a) => (
+                      <tr key={a.id} className="border-t border-white/5">
+                        <td className="px-4 py-2.5">
+                          <Link to={`/investimentos/ativos/${a.id}`} className="inline-flex items-center gap-2 font-semibold text-white hover:underline">
+                            <LogoAtivo url={a.logo_url} />
+                            {a.ticker}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-2.5 text-white/80">
+                          {a.nome}
+                          {setorLabel(a.setor) && (
+                            <span className="block text-[11px]" style={{ color: MUTED }}>{setorLabel(a.setor)}</span>
+                          )}
+                          {(() => {
+                            const cs = contasPorAtivo.get(a.id)
+                            return cs && cs.size > 0
+                              ? <span className="block text-[11px]" style={{ color: MUTED }}>{[...cs].join(', ')}</span>
+                              : <span className="block text-[11px]" style={{ color: '#ffb74d' }}>Sem posição em conta</span>
+                          })()}
+                        </td>
+                        <td className="px-4 py-2.5 text-center text-white/80">{a.nota_usuario ?? '—'}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => onPosicoes(a)} title="Posições"
+                              className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
+                              <Layers size={13} />
+                            </button>
+                            <button onClick={() => onHistorico(a)} title="Valor de mercado"
+                              className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
+                              <LineChart size={13} />
+                            </button>
+                            <button onClick={() => onEditar(a)} title="Editar"
+                              className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
+                              <Pencil size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )
@@ -605,6 +806,7 @@ function DrawerPosicoes({ ativo, onClose, onToast }: {
 }) {
   const { posicoes, loading, criar, excluir } = useInvestimentosPosicoes({ ativo_id: ativo.id })
   const { contas } = useContas()
+  const { preencher } = useBackfillHistorico()
   const [form, setForm] = useState(POS_VAZIO)
   const [salvando, setSalvando] = useState(false)
 
@@ -628,7 +830,13 @@ function DrawerPosicoes({ ativo, onClose, onToast }: {
     }
     const res = await criar(payload)
     setSalvando(false)
-    if (res.ok) { setForm(POS_VAZIO); onToast('Posição adicionada!') }
+    if (res.ok) {
+      setForm(POS_VAZIO); onToast('Posição adicionada!')
+      // Reconstrói o histórico de cotação deste ativo (desde a data de compra)
+      preencher({ ativo_id: ativo.id }).then((bf) => {
+        if (bf.ok && (bf.dados?.meses_gravados ?? 0) > 0) onToast(`Histórico reconstruído: ${bf.dados!.meses_gravados} mês(es).`)
+      })
+    }
     else onToast(res.erro ?? 'Erro ao adicionar posição')
   }
 

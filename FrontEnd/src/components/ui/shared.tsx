@@ -646,13 +646,15 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
 // para que o dropdown de opções nativo do navegador também respeite o
 // tema (claro/escuro) escolhido.
 export function SelectDark(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  // O popup de opções nativo segue o `color-scheme` do tema (definido em
+  // globals.css: html.dark → dark / html:not(.dark) → light), ficando
+  // legível e no padrão visual do projeto (escuro no modo noite).
   return (
     <select {...props}
       style={{
         background:  'var(--bg-input)',
         color:       'var(--text-primary)',
         borderColor: 'var(--border-subtle)',
-        colorScheme: 'auto',
         ...props.style,
       }}
       className={`w-full border rounded-lg px-3 py-2 text-[17px] outline-none
@@ -767,6 +769,19 @@ export function Toast({ msg }: { msg: string | null }) {
       style={{ color: '#00c896' }}>
       {msg}
     </div>
+  )
+}
+
+// ── LogoAtivo ─────────────────────────────────────────────────
+// Logo/ícone oficial de um ativo de investimento (URL vinda da brapi).
+// Sem URL ou se a imagem falhar ao carregar → não renderiza nada (só some,
+// mantendo o ticker/nome ao lado). Fundo claro p/ logos com transparência.
+export function LogoAtivo({ url, size = 18 }: { url?: string | null; size?: number }) {
+  const [erro, setErro] = useState(false)
+  if (!url || erro) return null
+  return (
+    <img src={url} alt="" width={size} height={size} loading="lazy" onError={() => setErro(true)}
+      className="rounded-sm bg-white/90 object-contain shrink-0" style={{ width: size, height: size }} />
   )
 }
 

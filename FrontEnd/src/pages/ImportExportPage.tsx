@@ -14,6 +14,7 @@ import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { useAuth } from '../hooks/useAuth'
 import { usePtax } from '../hooks/usePtax'
+import { useBackfillHistorico } from '../hooks/useInvestimentosHistorico'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import type { Conta, CartaoVirtual } from '../types'
 import {
@@ -978,6 +979,7 @@ function ImportInvestimentos({ contas }: { contas: Conta[] }) {
   const qc = useQueryClient()
   const { session } = useAuth()
   const userId = session?.user?.id ?? null
+  const { preencherTodos } = useBackfillHistorico()
   const inputRef = useRef<HTMLInputElement>(null)
   const [etapa, setEtapa] = useState<'idle' | 'revisando' | 'importando' | 'concluido'>('idle')
   const [carregando, setCarregando] = useState(false)
@@ -1199,6 +1201,22 @@ function ImportInvestimentos({ contas }: { contas: Conta[] }) {
       setResultado(dados)
       for (const a of dados.avisos ?? []) addLog('aviso', a)
       addLog('ok', 'Importação concluída!')
+
+      // Reconstrói automaticamente o histórico de valor de mercado dos itens
+      // importados (séries de cotação por mês desde a data de compra).
+      addLog('ok', 'Reconstruindo o histórico de cotações dos itens importados…')
+      // Um ativo por chamada: cobrir a carteira inteira numa única invocação
+      // estoura o limite de recursos da Edge Function (HTTP 546).
+      const bf = await preencherTodos({
+        onProgress: (feito, total, ticker) =>
+          addLog('ok', `Histórico ${feito}/${total}${ticker ? ` (${ticker})` : ''}…`),
+      })
+      if (bf.ok) {
+        const d = bf.dados
+        addLog('ok', `Histórico preenchido: ${d?.meses_gravados ?? 0} mês(es) em ${d?.ativos_processados ?? 0} ativo(s).`)
+      } else {
+        addLog('aviso', `Histórico não pôde ser preenchido agora (${bf.erro ?? 'erro'}). Use "Preencher histórico" na tela de Investimentos.`)
+      }
 
       // Lembra a associação instituição → conta para as próximas
       // importações (normalizada para a conta usada/criada — não recria).

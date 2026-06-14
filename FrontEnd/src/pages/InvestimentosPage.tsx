@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import {
   TrendingUp, TrendingDown, Wallet, Coins, PieChart, Percent, Trophy,
-  HandCoins, BarChart3, ChevronDown, ChevronUp, ChevronRight, Calendar, Upload, Target,
+  HandCoins, BarChart3, ChevronDown, ChevronUp, ChevronRight, Calendar, Upload, Target, RefreshCw, History,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
@@ -10,10 +10,12 @@ import {
   CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement,
 } from 'chart.js'
 import { useInvestimentosDashboard, useInvestimentosRanking, useInvestimentosAlocacao, type AlocacaoInput } from '../hooks/useInvestimentosDashboard'
-import { useInvestimentosHistorico } from '../hooks/useInvestimentosHistorico'
+import { useInvestimentosHistorico, useAtualizarValoresMes, useBackfillHistorico, type ResumoBackfill } from '../hooks/useInvestimentosHistorico'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
+import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useDividendos } from '../hooks/useDividendos'
 import { useContas } from '../hooks/useContas'
+import { useAuth } from '../hooks/useAuth'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { SelectDark, Drawer, Input, BtnSalvar, BtnCancelar, Toast } from '../components/ui/shared'
 import { formatBRL } from '../lib/utils'
@@ -33,7 +35,9 @@ function rotuloCategoriaAtivo(meta?: InvestimentoAtivo): string | null {
   if (!meta) return null
   if (meta.tipo_ativo === 'FII' && meta.fii_categoria) return FII_CATEGORIA_INFO[meta.fii_categoria].label
   if (meta.tipo_ativo === 'ACOES' && meta.acoes_subtipo) return ACOES_SUBTIPO_LABEL[meta.acoes_subtipo]
-  if ((meta.tipo_ativo === 'RENDA_FIXA' || meta.tipo_ativo === 'TESOURO_DIRETO') && meta.rf_subtipo) return SUBTIPO_RF_INFO[meta.rf_subtipo].label
+  // Tesouro Direto tem subtipo único ("Tesouro Direto"), que duplicaria o
+  // título do quadro — só subdividimos Renda Fixa (CDB/LCI/CRI/…).
+  if (meta.tipo_ativo === 'RENDA_FIXA' && meta.rf_subtipo) return SUBTIPO_RF_INFO[meta.rf_subtipo].label
   return null
 }
 
@@ -70,6 +74,24 @@ function corValor(v: number): string {
 
 function fmtPct(v: number): string {
   return `${v >= 0 ? '+' : ''}${v.toFixed(2).replace('.', ',')}%`
+}
+
+// Valor abreviado para rótulos compactos (eixo do gráfico): 12,3k / 1,2M
+function fmtCompacto(v: number): string {
+  const abs = Math.abs(v)
+  if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1).replace('.', ',')}M`
+  if (abs >= 1_000)     return `${(v / 1_000).toFixed(1).replace('.', ',')}k`
+  return v.toFixed(0)
+}
+
+// Mistura uma cor hex com branco para um tom pastel mais suave (mix=0..1)
+function suavizar(hex: string, mix = 0.35): string {
+  const h = hex.replace('#', '')
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  const m = (c: number) => Math.round(c + (255 - c) * mix)
+  return `rgb(${m(r)}, ${m(g)}, ${m(b)})`
 }
 
 // ── Cards superiores (estilo corretora) ───────────────────────
@@ -169,7 +191,33 @@ const PERIODOS = [
   { value: '24', label: '24 Meses' },
 ]
 
-function EvolucaoPatrimonio({ contaId }: { contaId: string | null }) {
+// Plugin: desenha abaixo de cada coluna os valores de cada série (aplicado /
+// ganho / proventos) nas cores do gráfico — funciona como legenda no eixo X.
+const valoresEixoX = {
+  id: 'valoresEixoX',
+  afterDatasetsDraw(chart: ChartJS) {
+    const x = chart.scales.x
+    if (!x) return
+    const { ctx } = chart
+    ctx.save()
+    ctx.font = '600 11px system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    const baseY = x.bottom + 18
+    ;(chart.data.labels as string[]).forEach((_, i) => {
+      const px = x.getPixelForTick(i)
+      chart.data.datasets.forEach((ds, di) => {
+        ctx.fillStyle = ds.backgroundColor as string
+        ctx.fillText(fmtCompacto(Number(ds.data[i])), px, baseY + di * 14)
+      })
+    })
+    ctx.restore()
+  },
+}
+
+function EvolucaoPatrimonio({ contaId, dividendos }: {
+  contaId: string | null
+  dividendos: { conta_id: string; tipo_ativo: TipoAtivoInvestimento; data_pagamento: string; valor: number }[]
+}) {
   const [periodo, setPeriodo] = useState('12')
   const [tipo, setTipo] = useState<TipoAtivoInvestimento | ''>('')
   const { historico } = useInvestimentosHistorico(contaId ? { conta_id: contaId } : {})
@@ -188,6 +236,18 @@ function EvolucaoPatrimonio({ contaId }: { contaId: string | null }) {
       .sort(([a], [b]) => a.localeCompare(b))
       .slice(-Number(periodo))
   }, [historico, tipo, periodo])
+
+  // Proventos recebidos por mês (respeita os filtros de conta e tipo)
+  const provPorMes = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const d of dividendos) {
+      if (contaId && d.conta_id !== contaId) continue
+      if (tipo && d.tipo_ativo !== tipo) continue
+      const mes = d.data_pagamento.slice(0, 7)
+      m.set(mes, (m.get(mes) ?? 0) + Number(d.valor))
+    }
+    return m
+  }, [dividendos, contaId, tipo])
 
   return (
     <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 lg:col-span-2">
@@ -215,6 +275,7 @@ function EvolucaoPatrimonio({ contaId }: { contaId: string | null }) {
         </p>
       ) : (
         <Bar
+          plugins={[valoresEixoX]}
           data={{
             labels: meses.map(([mes]) => fmtMesCurto(mes)),
             datasets: [
@@ -232,10 +293,18 @@ function EvolucaoPatrimonio({ contaId }: { contaId: string | null }) {
                 borderRadius: 4,
                 stack: 'patrimonio',
               },
+              {
+                label: 'Proventos',
+                data: meses.map(([mes]) => Number((provPorMes.get(mes) ?? 0).toFixed(2))),
+                backgroundColor: '#e8b84b',
+                borderRadius: 4,
+                stack: 'patrimonio',
+              },
             ],
           }}
           options={{
             ...OPCOES_GRAFICO,
+            layout: { padding: { bottom: 52 } },
             plugins: { legend: { display: true, position: 'top', labels: { color: MUTED, boxWidth: 12, font: { size: 11 } } } },
             scales: {
               x: { stacked: true, ticks: { color: MUTED }, grid: { color: 'rgba(255,255,255,0.05)' } },
@@ -250,36 +319,92 @@ function EvolucaoPatrimonio({ contaId }: { contaId: string | null }) {
 
 // ── Ativos na Carteira (doughnut + legenda %) ─────────────────
 
-function AtivosNaCarteira({ tipos }: { tipos: InvestimentoDashboardTipo[] }) {
+function AtivosNaCarteira({ tipos, onSelecionarTipo }: {
+  tipos: InvestimentoDashboardTipo[]
+  onSelecionarTipo: (tipo: TipoAtivoInvestimento) => void
+}) {
   const ordenados = [...tipos].sort((a, b) => b.percentual_atual - a.percentual_atual)
+  const total = ordenados.reduce((s, t) => s + t.valor_mercado, 0)
+  const cores = ordenados.map((t) => suavizar(TIPO_ATIVO_COR[t.tipo_ativo]))
+
+  // Rótulos (nome + %) dentro de cada fatia grande o suficiente + total no centro.
+  const rotulosInternos = useMemo(() => ({
+    id: 'rotulosInternos',
+    afterDatasetsDraw(chart: ChartJS) {
+      const { ctx } = chart
+      const meta = chart.getDatasetMeta(0)
+      const dataset = chart.data.datasets[0]
+      const soma = (dataset.data as number[]).reduce((s, v) => s + Number(v), 0)
+      ctx.save()
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      meta.data.forEach((arc, i) => {
+        const pct = soma > 0 ? (Number(dataset.data[i]) / soma) * 100 : 0
+        if (pct < 5) return // fatia muito pequena: identifica só no tooltip
+        const pos = (arc as unknown as { tooltipPosition: () => { x: number; y: number } }).tooltipPosition()
+        ctx.fillStyle = '#0e1525'
+        ctx.font = '600 10px system-ui, sans-serif'
+        ctx.fillText(TIPO_ATIVO_LABEL[ordenados[i].tipo_ativo], pos.x, pos.y - 6)
+        ctx.font = '700 12px system-ui, sans-serif'
+        ctx.fillText(`${pct.toFixed(1).replace('.', ',')}%`, pos.x, pos.y + 8)
+      })
+      // total no buraco central
+      const arc0 = meta.data[0] as unknown as { x: number; y: number } | undefined
+      if (arc0) {
+        ctx.fillStyle = MUTED
+        ctx.font = '500 11px system-ui, sans-serif'
+        ctx.fillText('Patrimônio', arc0.x, arc0.y - 11)
+        ctx.fillStyle = '#fff'
+        ctx.font = '700 16px system-ui, sans-serif'
+        ctx.fillText(formatBRL(soma), arc0.x, arc0.y + 9)
+      }
+      ctx.restore()
+    },
+  }), [ordenados])
+
   return (
-    <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+    <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 flex flex-col">
       <h2 className="text-[15px] font-semibold text-white mb-3">Ativos na Carteira</h2>
-      <div className="flex items-center gap-4">
-        <div className="w-1/2 max-w-[180px]">
-          <Doughnut
-            data={{
-              labels: ordenados.map((t) => TIPO_ATIVO_LABEL[t.tipo_ativo]),
-              datasets: [{
-                data: ordenados.map((t) => t.valor_mercado),
-                backgroundColor: ordenados.map((t) => TIPO_ATIVO_COR[t.tipo_ativo]),
-                borderWidth: 0,
-              }],
-            }}
-            options={{ responsive: true, cutout: '55%', plugins: { legend: { display: false } } }}
-          />
-        </div>
-        <div className="flex-1 space-y-1.5">
-          {ordenados.map((t) => (
-            <div key={t.tipo_ativo} className="flex items-center justify-between gap-2 text-[12px]">
-              <span className="flex items-center gap-1.5 text-white/80">
-                <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: TIPO_ATIVO_COR[t.tipo_ativo] }} />
-                {TIPO_ATIVO_LABEL[t.tipo_ativo]}
-              </span>
-              <span className="font-semibold text-white">{t.percentual_atual.toFixed(2).replace('.', ',')}%</span>
-            </div>
-          ))}
-        </div>
+      {/* Rosca em destaque: rótulos (nome + %) dentro das fatias e total no
+          centro. Fatias muito pequenas aparecem só no tooltip. */}
+      <div className="flex-1 min-h-[360px] flex items-center justify-center">
+        <Doughnut
+          plugins={[rotulosInternos]}
+          data={{
+            labels: ordenados.map((t) => TIPO_ATIVO_LABEL[t.tipo_ativo]),
+            datasets: [{
+              data: ordenados.map((t) => t.valor_mercado),
+              backgroundColor: cores,
+              borderColor: 'rgba(14,21,37,0.55)',
+              borderWidth: 2,
+              borderRadius: 8,
+              hoverOffset: 6,
+            }],
+          }}
+          options={{
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '62%',
+            onClick: (_evt, elements) => {
+              if (elements.length > 0) onSelecionarTipo(ordenados[elements[0].index].tipo_ativo)
+            },
+            onHover: (evt, elements) => {
+              const alvo = evt.native?.target as HTMLElement | null
+              if (alvo) alvo.style.cursor = elements.length ? 'pointer' : 'default'
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const pct = total > 0 ? (Number(ctx.parsed) / total) * 100 : 0
+                    return ` ${formatBRL(Number(ctx.parsed))} · ${pct.toFixed(1).replace('.', ',')}%`
+                  },
+                },
+              },
+            },
+          }}
+        />
       </div>
     </section>
   )
@@ -296,12 +421,13 @@ const pct2 = (v: number | null | undefined) => `${(Number(v) || 0).toFixed(2).re
 // Tabela detalhada dos ativos de um tipo (Quant., preço médio/atual,
 // variação, saldo, nota, % carteira, comprar? — e DY/Yield on Cost p/ FII).
 // Colunas ordenáveis ao clicar no cabeçalho.
-type SortKey = 'ticker' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart'
+type SortKey = 'ticker' | 'nome' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart'
 function precoMedio(a: InvestimentoRankingAtivo) { const q = Number(a.quantidade) || 0; return q > 0 ? a.valor_custo / q : 0 }
 function precoAtual(a: InvestimentoRankingAtivo) { const q = Number(a.quantidade) || 0; return q > 0 ? a.valor_mercado / q : 0 }
 function valorOrdenacao(a: InvestimentoRankingAtivo, k: SortKey): number | string {
   switch (k) {
     case 'ticker':     return a.ticker
+    case 'nome':       return a.nome ?? ''
     case 'quantidade': return Number(a.quantidade) || 0
     case 'pm':         return precoMedio(a)
     case 'pa':         return precoAtual(a)
@@ -333,6 +459,7 @@ function TabelaAtivos({ ativos, t }: { ativos: InvestimentoRankingAtivo[]; t: In
 
   const cols: { k: SortKey; label: string; align: 'left' | 'right' | 'center'; fii?: boolean; title?: string }[] = [
     { k: 'ticker',     label: 'Ativo',       align: 'left' },
+    { k: 'nome',       label: 'Nome',        align: 'left' },
     { k: 'quantidade', label: 'Quant.',      align: 'right' },
     { k: 'pm',         label: 'Preço médio', align: 'right' },
     { k: 'pa',         label: 'Preço atual', align: 'right' },
@@ -347,7 +474,7 @@ function TabelaAtivos({ ativos, t }: { ativos: InvestimentoRankingAtivo[]; t: In
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-[12px]" style={{ minWidth: ehFII ? 720 : 600 }}>
+      <table className="w-full text-[12px]" style={{ minWidth: ehFII ? 880 : 760 }}>
         <thead>
           <tr style={{ color: MUTED }}>
             {cols.filter((c) => !c.fii || ehFII).map((c) => (
@@ -370,6 +497,9 @@ function TabelaAtivos({ ativos, t }: { ativos: InvestimentoRankingAtivo[]; t: In
               <tr key={a.ativo_id} className="border-t border-white/5 hover:bg-white/[0.03]">
                 <td className="px-2 py-1.5">
                   <Link to={`/investimentos/ativos/${a.ativo_id}`} className="text-white font-semibold hover:underline">{a.ticker}</Link>
+                </td>
+                <td className="px-2 py-1.5 text-left text-white/70 max-w-[220px] truncate" title={a.nome ?? ''}>
+                  {a.nome && a.nome.toUpperCase() !== a.ticker.toUpperCase() ? a.nome : '—'}
                 </td>
                 <td className="px-2 py-1.5 text-right text-white/80">{qtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</td>
                 <td className="px-2 py-1.5 text-right text-white/80">{formatBRL(pm)}</td>
@@ -398,11 +528,23 @@ function TabelaAtivos({ ativos, t }: { ativos: InvestimentoRankingAtivo[]; t: In
   )
 }
 
-function LinhaTipoExpansivel({ t, ativos, catPorAtivo }: {
+function LinhaTipoExpansivel({ t, ativos, catPorAtivo, focoSinal }: {
   t: InvestimentoDashboardTipo; ativos: InvestimentoRankingAtivo[]
   catPorAtivo: Record<string, string>
+  focoSinal?: number | null
 }) {
   const [aberto, setAberto] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  // Foco vindo do gráfico "Ativos na Carteira": abre e rola até o quadro
+  useEffect(() => {
+    if (focoSinal == null) return
+    const id = requestAnimationFrame(() => {
+      setAberto(true)
+      requestAnimationFrame(() =>
+        ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+    })
+    return () => cancelAnimationFrame(id)
+  }, [focoSinal])
   const [agrupar, setAgrupar] = useState(true)
   const [catsAbertas, setCatsAbertas] = useState<Set<string>>(new Set())
   const toggleCat = (cat: string) => setCatsAbertas((s) => {
@@ -428,7 +570,7 @@ function LinhaTipoExpansivel({ t, ativos, catPorAtivo }: {
   const subdividir = grupos.length > 1 || (grupos.length === 1 && grupos[0].cat !== 'Sem categoria')
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02]">
+    <div ref={ref} className="rounded-xl border border-white/10 bg-white/[0.02] scroll-mt-4">
       <button onClick={() => setAberto(!aberto)} className="w-full px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-3 items-center text-left">
         {/* Tipo + contagem */}
         <div>
@@ -632,6 +774,8 @@ function DividendosPorMes({ dividendos }: { dividendos: { data_pagamento: string
 export default function InvestimentosPage() {
   const [contaId, setContaId] = useState<string>('')
   const [metasAberto, setMetasAberto] = useState(false)
+  // Sinal de foco disparado ao clicar numa fatia do gráfico "Ativos na Carteira"
+  const [foco, setFoco] = useState<{ tipo: TipoAtivoInvestimento; n: number } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3000) }
   const { dashboard, loading, error } = useInvestimentosDashboard(contaId || null)
@@ -639,8 +783,105 @@ export default function InvestimentosPage() {
   const { dividendos } = useDividendos()
   const { contas } = useContas()
   const { ativos: ativosMeta } = useInvestimentosAtivos()
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
   // Só contas de investimento ATIVAS são relevantes na carteira
   const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa)
+
+  // Captura automática (B) + botão "Atualizar valores" (C) do mês corrente
+  const mesAtual = new Date().toISOString().slice(0, 7)
+  const { atualizar, executando } = useAtualizarValoresMes()
+  const { historico: histMes, loading: histMesLoading } = useInvestimentosHistorico({ mes_ano: mesAtual })
+  const autoDisparado = useRef(false)
+
+  const atualizarValores = async (silencioso = false) => {
+    const res = await atualizar(mesAtual)
+    if (!res.ok) { if (!silencioso) showToast(res.erro ?? 'Erro ao atualizar valores'); return }
+    const d = res.dados
+    const ign = d?.ignorados.length ?? 0
+    showToast(
+      `Valores do mês ${silencioso ? 'registrados automaticamente' : 'atualizados'}: ${d?.atualizados ?? 0} ativo(s)`
+      + (ign ? ` · ${ign} sem cotação` : ''),
+    )
+  }
+
+  // (Passo 2) Preenche o histórico de meses passados dos itens antigos.
+  // O botão só aparece quando há LACUNA real AINDA NÃO TENTADA. Lacuna =
+  // buraco INTERNO (mês faltando ENTRE o primeiro e o último snapshot do
+  // ativo). Meses antes do 1º snapshot (pré-IPO / fora do alcance da fonte)
+  // não contam, e furos que o backfill já tentou e não conseguiu também não.
+  const { preencherTodos, executando: preenchendo } = useBackfillHistorico()
+  const [resultadoBackfill, setResultadoBackfill] = useState<ResumoBackfill | null>(null)
+  const { posicoes: todasPosicoes } = useInvestimentosPosicoes({})
+  const { historico: todoHistorico } = useInvestimentosHistorico({})
+
+  const lacunas = useMemo(() => {
+    // ativos que optaram por não buscar cotação automática saem do aviso
+    const semCotacao = new Set(ativosMeta.filter((a) => a.cotacao_automatica === false).map((a) => a.id))
+    const chavesAtivas = new Set<string>()
+    for (const p of todasPosicoes) {
+      if (p.status !== 'ATIVA' || semCotacao.has(p.ativo_id)) continue
+      chavesAtivas.add(`${p.ativo_id}|${p.conta_id}`)
+    }
+    const mesesPorChave = new Map<string, string[]>()
+    const tickerPorAtivo = new Map<string, string>()
+    for (const h of todoHistorico) {
+      if (h.inv_ativos?.ticker) tickerPorAtivo.set(h.ativo_id, h.inv_ativos.ticker)
+      const key = `${h.ativo_id}|${h.conta_id}`
+      if (!chavesAtivas.has(key)) continue
+      if (!mesesPorChave.has(key)) mesesPorChave.set(key, [])
+      mesesPorChave.get(key)!.push(h.mes_ano)
+    }
+    const keys = new Set<string>()
+    const tickers = new Set<string>()
+    for (const [key, meses] of mesesPorChave) {
+      if (meses.length < 2) continue
+      const ord = [...meses].sort()
+      const presentes = new Set(ord)
+      const ativoId = key.split('|')[0]
+      let [y, mo] = ord[0].split('-').map(Number)
+      const [yf, mf] = ord[ord.length - 1].split('-').map(Number)
+      let guard = 0
+      while ((y < yf || (y === yf && mo <= mf)) && guard++ < 600) {
+        const me = `${y}-${String(mo).padStart(2, '0')}`
+        if (!presentes.has(me)) { keys.add(`${ativoId}|${me}`); tickers.add(tickerPorAtivo.get(ativoId) ?? ativoId) }
+        mo++; if (mo > 12) { mo = 1; y++ }
+      }
+    }
+    return { keys, tickers: [...tickers] }
+  }, [todasPosicoes, todoHistorico, ativosMeta])
+
+  // Furos que o backfill já tentou NESTA SESSÃO e não conseguiu preencher —
+  // evita o loop do botão sem persistir. Assim, após um deploy/correção que
+  // torne o período disponível, o botão reaparece no próximo carregamento.
+  const [tentadas, setTentadas] = useState<Set<string>>(new Set())
+
+  const lacunasNovas = useMemo(() => [...lacunas.keys].filter((k) => !tentadas.has(k)), [lacunas, tentadas])
+  const mostrarPreencher = lacunasNovas.length > 0
+
+  const preencherHistorico = async () => {
+    setResultadoBackfill(null)
+    const res = await preencherTodos()
+    if (!res.ok) { showToast(res.erro ?? 'Erro ao preencher histórico'); return }
+    setResultadoBackfill(res.dados ?? null)
+    // marca os furos atuais como já tentados: os preenchidos deixam de ser
+    // furo; os que sobrarem (fonte não tem) não reexibem o botão nesta sessão
+    setTentadas(new Set([...tentadas, ...lacunas.keys]))
+  }
+
+  // (B) Ao abrir: se o mês corrente ainda não tem snapshot, captura uma vez.
+  // Trava por sessão+mês para não repetir a cada navegação.
+  useEffect(() => {
+    if (loading || histMesLoading || autoDisparado.current) return
+    if (!dashboard || dashboard.tipos.length === 0) return
+    if (histMes.length > 0) return
+    const flag = `snapauto:${uid ?? 'anon'}:${mesAtual}`
+    if (sessionStorage.getItem(flag)) return
+    autoDisparado.current = true
+    sessionStorage.setItem(flag, '1')
+    void atualizarValores(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, histMesLoading, dashboard, histMes.length, uid])
 
   // Categoria/subtipo por ativo (para subdividir os tipos no quadro)
   const catPorAtivo = useMemo(() => {
@@ -666,7 +907,7 @@ export default function InvestimentosPage() {
   const vazio = tipos.length === 0
 
   return (
-    <div className="p-4 md:p-6 max-w-6xl mx-auto">
+    <div className="p-5">
       {/* Header */}
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
@@ -687,6 +928,22 @@ export default function InvestimentosPage() {
               <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>
             ))}
           </SelectDark>
+          <button onClick={() => atualizarValores(false)} disabled={executando}
+            title="Busca a cotação atual de cada ativo e grava o valor de mercado do mês"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
+              text-[13px] text-white transition-all hover:border-white/25 disabled:opacity-50">
+            <RefreshCw size={15} className={executando ? 'animate-spin' : ''} />
+            {executando ? 'Atualizando…' : 'Atualizar cotação'}
+          </button>
+          {mostrarPreencher && (
+            <button onClick={preencherHistorico} disabled={preenchendo}
+              title={`Há meses faltando no histórico de: ${lacunas.tickers.join(', ')}`}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] text-white transition-all disabled:opacity-50"
+              style={{ borderColor: 'rgba(240,180,41,0.5)', color: '#f0b429' }}>
+              <History size={15} className={preenchendo ? 'animate-spin' : ''} />
+              {preenchendo ? 'Preenchendo…' : 'Preencher histórico'}
+            </button>
+          )}
           <button onClick={() => setMetasAberto(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
               text-[13px] text-white transition-all hover:border-white/25">
@@ -695,7 +952,7 @@ export default function InvestimentosPage() {
           <Link to="/investimentos/dividendos"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
               text-[13px] text-white transition-all hover:border-white/25">
-            <Coins size={15} /> Dividendos
+            <Coins size={15} /> Proventos
           </Link>
           <Link to="/investimentos/ativos"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
@@ -715,6 +972,47 @@ export default function InvestimentosPage() {
           {error}
         </div>
       )}
+
+      {resultadoBackfill && (() => {
+        const r = resultadoBackfill
+        const ok = r.ignorados.length === 0 && lacunas.keys.size === 0
+        return (
+          <div className="mb-4 rounded-lg border px-4 py-3 text-[13px] flex items-start justify-between gap-3"
+            style={ok
+              ? { borderColor: 'rgba(0,200,150,0.4)', background: 'rgba(0,200,150,0.08)', color: '#7be3c3' }
+              : { borderColor: 'rgba(240,180,41,0.45)', background: 'rgba(240,180,41,0.08)', color: '#f0b429' }}>
+            <div className="min-w-0">
+              <p className="font-medium">
+                {ok ? '✅ ' : ''}Histórico preenchido: {r.meses_gravados} mês(es) em {r.ativos_processados} ativo(s).
+              </p>
+              {r.ignorados.length > 0 && (
+                <>
+                  <p className="mt-1">Ainda sem série histórica (não consegui cotação):</p>
+                  <ul className="mt-0.5 list-disc list-inside">
+                    {r.ignorados.map((i) => <li key={i.ticker}>{i.ticker} — {i.motivo}</li>)}
+                  </ul>
+                </>
+              )}
+              {r.ignorados.length === 0 && lacunas.keys.size > 0 && (
+                <p className="mt-1">
+                  Ainda há meses faltando em: <span className="font-medium">{lacunas.tickers.join(', ')}</span>
+                  {' '}— alguns períodos podem não estar disponíveis na fonte.
+                </p>
+              )}
+              {ok && <p className="mt-0.5 opacity-80">Tudo certo, sem pendências.</p>}
+              {Array.isArray(r.diagnostico) && r.diagnostico.length > 0 && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer opacity-80">Diagnóstico (por que faltou)</summary>
+                  <pre className="mt-1 text-[11px] whitespace-pre-wrap opacity-90" style={{ color: '#c5cad8' }}>
+                    {JSON.stringify(r.diagnostico, null, 2)}
+                  </pre>
+                </details>
+              )}
+            </div>
+            <button onClick={() => setResultadoBackfill(null)} className="shrink-0 opacity-70 hover:opacity-100" title="Fechar">✕</button>
+          </div>
+        )
+      })()}
 
       {vazio ? (
         <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
@@ -751,8 +1049,9 @@ export default function InvestimentosPage() {
 
           {/* Evolução + composição */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-5">
-            <EvolucaoPatrimonio contaId={contaId || null} />
-            <AtivosNaCarteira tipos={tipos} />
+            <EvolucaoPatrimonio contaId={contaId || null} dividendos={dividendos} />
+            <AtivosNaCarteira tipos={tipos}
+              onSelecionarTipo={(tipo) => setFoco((f) => ({ tipo, n: (f?.n ?? 0) + 1 }))} />
           </div>
 
           {/* Lista expansível por tipo */}
@@ -760,7 +1059,8 @@ export default function InvestimentosPage() {
             {tipos.map((t) => (
               <LinhaTipoExpansivel key={t.tipo_ativo} t={t}
                 ativos={ativosRanking.filter((a) => a.tipo_ativo === t.tipo_ativo)}
-                catPorAtivo={catPorAtivo} />
+                catPorAtivo={catPorAtivo}
+                focoSinal={foco?.tipo === t.tipo_ativo ? foco.n : null} />
             ))}
           </div>
 

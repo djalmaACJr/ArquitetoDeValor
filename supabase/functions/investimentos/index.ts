@@ -16,7 +16,7 @@ import { logError, logRequest, logResponse, logSuccess } from "../_shared/logger
 type Db = ReturnType<typeof db>;
 
 const TIPOS_ATIVO = [
-  "ACOES", "ETF", "FII", "STOCKS",
+  "ACOES", "ETF", "FII", "REIT", "STOCKS",
   "ETF_INTERNACIONAL", "RENDA_FIXA", "CRIPTOMOEDAS", "TESOURO_DIRETO",
 ];
 const STATUS_POSICAO = ["ATIVA", "ENCERRADA"];
@@ -32,15 +32,22 @@ const SUBTIPOS_ACOES = ["ON", "PN", "UNIT", "BDR"];
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return corsPreFlight();
 
-  const auth = autenticar(req);
-  if (auth instanceof Response) return auth;
-  const userId = auth;
-
   const url     = new URL(req.url);
   const partes  = url.pathname.split("/").filter(Boolean);
   const idxBase = partes.indexOf("investimentos");
   const recurso = idxBase >= 0 ? (partes[idxBase + 1] ?? "") : "";
   const m       = req.method;
+
+  // Job do servidor: autentica por secret (header x-cron-secret), sem JWT
+  // de usuário. Tratado ANTES de autenticar() por isso.
+  if (recurso === "snapshot-cron") {
+    try { return await rotaSnapshotCron(req, m); }
+    catch (e) { logError("Handler snapshot-cron", e); return erro("Erro interno", 500); }
+  }
+
+  const auth = autenticar(req);
+  if (auth instanceof Response) return auth;
+  const userId = auth;
   const c       = db(req);
 
   try {
@@ -52,7 +59,10 @@ Deno.serve(async (req: Request) => {
       case "dividendos":      return await rotaDividendos(c, req, m, userId);
       case "tipos-dividendo": return await rotaTiposDividendo(c, req, m, userId);
       case "historico-mensal": return await rotaHistorico(c, req, m, userId);
+      case "snapshot-auto":   return await rotaSnapshotAuto(c, req, m, userId);
+      case "snapshot-backfill": return await rotaSnapshotBackfill(c, req, m, userId);
       case "importar":        return await rotaImportar(c, req, m, userId);
+      case "atualizar-ativos": return await rotaAtualizarAtivos(c, req, m, userId);
       case "restaurar":       return await rotaRestaurar(c, req, m, userId);
       case "dashboard":       return m === "GET" ? await dashboard(c, url.searchParams) : erro("Método não permitido", 405);
       case "ranking":         return m === "GET" ? await ranking(c, url.searchParams) : erro("Método não permitido", 405);
@@ -114,14 +124,23 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
     const body = await req.json();
     logRequest("POST", "/investimentos/ativos", body);
 
-    if (!body.ticker || !body.nome || !body.tipo_ativo) {
-      return erro("Campos obrigatórios: ticker, nome, tipo_ativo");
+    if (!body.ticker || !body.tipo_ativo) {
+      return erro("Campos obrigatórios: ticker, tipo_ativo");
     }
     if (!TIPOS_ATIVO.includes(String(body.tipo_ativo))) {
       return erro(`tipo_ativo inválido: ${TIPOS_ATIVO.join(" | ")}`);
     }
     const ticker = String(body.ticker).trim().toUpperCase();
     if (ticker.length < 1 || ticker.length > 20) return erro("ticker deve ter 1..20 caracteres");
+
+    // Nome: usa o informado; se vazio ou igual ao ticker, busca o oficial
+    // na fonte externa (a menos que não ache → cai no ticker).
+    let nome = String(body.nome ?? "").trim();
+    if (!nome || nome.toUpperCase() === ticker) {
+      const m = await resolverNomes([{ ticker, tipo_ativo: String(body.tipo_ativo) }]);
+      nome = m.get(ticker) ?? nome;
+    }
+    nome = (nome || ticker).slice(0, 120);
 
     const erroNota = validarNota(body.nota_usuario);
     if (erroNota) return erro(erroNota);
@@ -137,7 +156,7 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
     const { data, error } = await c.from("inv_ativos").insert({
       user_id:      userId,
       ticker,
-      nome:         String(body.nome).trim(),
+      nome,
       tipo_ativo:   body.tipo_ativo,
       moeda:        body.moeda ? String(body.moeda).toUpperCase().slice(0, 3) : "BRL",
       descricao:    body.descricao ?? null,
@@ -153,6 +172,7 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
       rf_isento_ir:    body.rf_isento_ir ?? null,
       fii_categoria:   body.fii_categoria ?? null,
       acoes_subtipo:   body.acoes_subtipo ?? null,
+      cotacao_automatica: body.cotacao_automatica ?? true,
     }).select().single();
 
     if (error) {
@@ -187,7 +207,7 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
       "questionario_respostas", "ativo_pai",
       "rf_subtipo", "rf_indexador", "rf_taxa", "rf_emissor",
       "rf_vencimento", "rf_garantia_fgc", "rf_isento_ir", "fii_categoria",
-      "acoes_subtipo",
+      "acoes_subtipo", "cotacao_automatica",
     ]);
     if (typeof campos.ticker === "string") campos.ticker = campos.ticker.trim().toUpperCase();
 
@@ -196,6 +216,9 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
       if (error.code === "23505") return erro("Já existe um ativo com este ticker", 409);
       logError("Editar ativo", error); return erro(error.message);
     }
+    // A propagação de tipo_ativo para inv_dividendos (cópia desnormalizada) é
+    // feita por trigger no banco (trg_sync_dividendo_tipo_ativo), cobrindo
+    // também SQL direto / importação — não precisa ser refeita aqui.
     return json({ dados: data });
   }
 
@@ -204,13 +227,12 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
     const naoEncontrado = await verificarExistencia(c, "inv_ativos", id, "Ativo não encontrado");
     if (naoEncontrado) return naoEncontrado;
 
-    // Bloqueia exclusão se houver posições vinculadas (evita órfãos de operações)
-    const { count } = await c.from("inv_posicoes").select("id", { count: "exact", head: true }).eq("ativo_id", id);
-    if ((count ?? 0) > 0) return erro("Não é possível excluir: o ativo possui posições vinculadas", 409);
-
+    // As FKs de posições, operações, dividendos e histórico têm ON DELETE
+    // CASCADE → excluir o ativo remove tudo junto. As transações de extrato
+    // de proventos permanecem (transacao_extrato_id é ON DELETE SET NULL).
     const { error } = await c.from("inv_ativos").delete().eq("id", id);
     if (error) { logError("Excluir ativo", error); return erro(error.message); }
-    return json({ mensagem: "Ativo excluído com sucesso" });
+    return json({ mensagem: "Ativo e dados vinculados excluídos com sucesso" });
   }
 
   return erro("Rota não encontrada", 404);
@@ -949,6 +971,845 @@ async function rotaHistorico(c: Db, req: Request, m: string, userId: string) {
 }
 
 // ============================================================
+// /investimentos/snapshot-auto — captura automática do valor de
+// mercado do MÊS CORRENTE (botão "Atualizar valores do mês" e
+// captura ao abrir a página). Para cada posição ATIVA:
+//   • cotados (ações/FII/ETF/BDR)    → preço atual da brapi
+//   • CRIPTOMOEDAS                   → preço atual da brapi (BRL)
+//   • STOCKS / ETF internacional USD → preço brapi × PTAX
+//   • Renda Fixa / Tesouro           → acúmulo pelo indexador/taxa
+// Faz upsert do snapshot do mês (reusa a lógica de histórico-mensal)
+// e devolve um resumo do que foi atualizado e do que foi ignorado.
+//
+// Observação: usa cotação ATUAL, então o snapshot reflete o preço do
+// momento em que roda (ideal: fim do mês). O backfill de meses passados
+// (séries históricas) é tratado por rota separada.
+// ============================================================
+
+const CDI_FALLBACK  = 0.105;  // % a.a. caso o BCB não responda
+const IPCA_FALLBACK = 0.045;
+
+// SGS/BCB: série 432 = Meta Selic (% a.a.); 13522 = IPCA acum. 12m (% a.a.)
+async function sgsUltimo(serie: number, fallback: number): Promise<number> {
+  try {
+    const arr = await fetchJson(
+      `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${serie}/dados/ultimos/1?formato=json`,
+    ) as { valor?: string }[];
+    const v = Number(arr?.[0]?.valor);
+    return Number.isFinite(v) && v > 0 ? v / 100 : fallback;
+  } catch { return fallback; }
+}
+
+// Primeira taxa percentual de um texto ("13,5% a.a." → 0.135)
+function primeiraTaxa(txt: string): number {
+  const m = String(txt ?? "").replace(",", ".").match(/-?\d+(\.\d+)?/);
+  return m ? Number(m[0]) / 100 : 0;
+}
+
+// Taxa anual efetiva do título conforme indexador/taxa
+function taxaAnualRF(indexador: string | null, taxa: string | null, cdi: number, ipca: number): number {
+  const t = String(taxa ?? "");
+  if (indexador === "PREFIXADO") return primeiraTaxa(t);
+  if (indexador === "POS_FIXADO") {
+    if (/cdi/i.test(t))   { const pct = primeiraTaxa(t); return (pct > 0 ? pct : 1) * cdi; } // "110% CDI"
+    if (/selic/i.test(t)) return cdi + primeiraTaxa(t.replace(/.*\+/, ""));                  // "SELIC + x"
+    return cdi;
+  }
+  if (indexador === "HIBRIDO") return ipca + primeiraTaxa(t.replace(/.*\+/, ""));            // "IPCA + x"
+  return 0; // sem indexador → mantém o custo
+}
+
+const DIA_MS = 86_400_000;
+// Valor acumulado de uma posição de renda fixa, do aporte até dataRef
+function valorRF(custo: number, dataCompra: string, dataRef: Date, taxaAa: number): number {
+  const ini  = new Date(`${String(dataCompra).slice(0, 10)}T12:00:00Z`).getTime();
+  const dias = Math.max(0, (dataRef.getTime() - ini) / DIA_MS);
+  if (taxaAa <= 0 || dias === 0) return custo;
+  return custo * Math.pow(1 + taxaAa, dias / 365);
+}
+
+// Tickers que mudaram de código (fusão, reorganização) → símbolo atual usado
+// para BUSCAR a cotação. O ticker cadastrado/exibido continua o original.
+// Adicione novos casos aqui conforme aparecerem.
+const ALIAS_TICKER: Record<string, string> = {
+  BIDI11: "INBR32",  // Banco Inter → Inter & Co (BDR na B3)
+  CPFF11: "CPTS11",  // FII Capitânia — migrou para CPTS11
+};
+// Símbolos a tentar para um ticker: ele e o alias (renomeado), cada um nas
+// formas B3 (.SA) e pura (EUA). Tenta TODOS até achar série/cotação — assim
+// um alias errado/desnecessário não quebra a busca do ticker original.
+function candidatosTicker(ticker: string): string[] {
+  const orig = (ticker ?? "").toUpperCase();
+  if (!orig) return [];
+  const bases = ALIAS_TICKER[orig] ? [orig, ALIAS_TICKER[orig]] : [orig];
+  const out: string[] = [];
+  for (const b of bases) {
+    for (const c of (/\d/.test(b) ? [`${b}.SA`, b] : [b, `${b}.SA`])) {
+      if (!out.includes(c)) out.push(c);
+    }
+  }
+  return out;
+}
+function basesTicker(ticker: string): string[] {
+  const orig = (ticker ?? "").toUpperCase();
+  return ALIAS_TICKER[orig] ? [orig, ALIAS_TICKER[orig]] : [orig];
+}
+
+// Cotação atual (brapi) p/ tickers da B3 / BDR / STOCKS → mapa ticker→{preco,moeda}
+async function precosBrapi(tickers: string[]): Promise<Map<string, { preco: number; moeda: string }>> {
+  const out = new Map<string, { preco: number; moeda: string }>();
+  if (tickers.length === 0) return out;
+  try {
+    const data = await fetchJson(
+      `https://brapi.dev/api/quote/${encodeURIComponent(tickers.join(","))}?range=1d&interval=1d${brapiToken()}`,
+    ) as { results?: { symbol?: string; regularMarketPrice?: number; currency?: string }[] };
+    for (const r of data.results ?? []) {
+      const sym = String(r.symbol ?? "").toUpperCase();
+      if (sym && r.regularMarketPrice != null) {
+        out.set(sym, { preco: Number(r.regularMarketPrice), moeda: String(r.currency ?? "BRL").toUpperCase() });
+      }
+    }
+  } catch (e) { logError("brapi quote", e); }
+  return out;
+}
+
+// Nome "oficial" de tickers da B3/BDR/STOCKS (brapi → longName/shortName)
+async function nomesBrapi(tickers: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (tickers.length === 0) return out;
+  try {
+    const data = await fetchJson(
+      `https://brapi.dev/api/quote/${encodeURIComponent(tickers.join(","))}?range=1d&interval=1d${brapiToken()}`,
+    ) as { results?: { symbol?: string; longName?: string; shortName?: string }[] };
+    for (const r of data.results ?? []) {
+      const sym  = String(r.symbol ?? "").toUpperCase();
+      const nome = String(r.longName ?? r.shortName ?? "").trim();
+      if (sym && nome) out.set(sym, nome.slice(0, 120));
+    }
+  } catch (e) { logError("brapi nomes", e); }
+  return out;
+}
+
+// Nome de criptomoedas (brapi → coinName)
+async function nomesCripto(tickers: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (tickers.length === 0) return out;
+  try {
+    const data = await fetchJson(
+      `https://brapi.dev/api/v2/crypto?coin=${encodeURIComponent(tickers.join(","))}&currency=BRL${brapiToken()}`,
+    ) as { coins?: { coin?: string; coinName?: string }[] };
+    for (const cc of data.coins ?? []) {
+      const sym  = String(cc.coin ?? "").toUpperCase();
+      const nome = String(cc.coinName ?? "").trim();
+      if (sym && nome) out.set(sym, nome.slice(0, 120));
+    }
+  } catch (e) { logError("brapi crypto nomes", e); }
+  return out;
+}
+
+// Resolve o nome oficial de uma lista de ativos pela fonte externa.
+// Tesouro Direto e renda fixa privada não têm fonte → ficam de fora
+// (mantém o que veio). Mapa: TICKER (upper) → nome.
+async function resolverNomes(itens: { ticker: string; tipo_ativo: string }[]): Promise<Map<string, string>> {
+  const cripto: string[] = [];
+  const cotados: string[] = [];
+  for (const it of itens) {
+    const tk = String(it.ticker).toUpperCase();
+    if (!tk) continue;
+    if (it.tipo_ativo === "CRIPTOMOEDAS") cripto.push(tk);
+    else if (it.tipo_ativo !== "TESOURO_DIRETO") cotados.push(tk);
+  }
+  const out = new Map<string, string>();
+  const [a, b] = await Promise.all([nomesBrapi(cotados), nomesCripto(cripto)]);
+  for (const [k, v] of a) out.set(k, v);
+  for (const [k, v] of b) out.set(k, v);
+  return out;
+}
+
+// Resolve nome + moeda oficiais de uma lista de ativos (brapi quote já
+// devolve longName/shortName + currency). Usado pela atualização em lote.
+// Mapa: TICKER (upper) → { nome?, moeda? }.
+//
+// IMPORTANTE: o plano GRATUITO da brapi aceita só 1 ativo por requisição
+// (erro QUOTES_PER_REQUEST_EXCEEDED com vírgula) → busca um ticker por vez,
+// em pequenos lotes paralelos para respeitar o limite de taxa do plano.
+async function resolverMeta(
+  itens: { ticker: string; tipo_ativo: string }[],
+): Promise<Map<string, { nome?: string; moeda?: string; logo?: string; setor?: string }>> {
+  const cripto: string[] = [];
+  const cotados: string[] = [];
+  for (const it of itens) {
+    const tk = String(it.ticker).toUpperCase();
+    if (!tk) continue;
+    if (it.tipo_ativo === "CRIPTOMOEDAS") cripto.push(tk);
+    else if (it.tipo_ativo !== "TESOURO_DIRETO") cotados.push(tk);
+  }
+  const out = new Map<string, { nome?: string; moeda?: string; logo?: string; setor?: string }>();
+
+  // Setor vem só do endpoint quote/list (?search=) — o quote padrão não traz.
+  async function setorDe(tk: string): Promise<string | undefined> {
+    try {
+      const data = await fetchJson(
+        `https://brapi.dev/api/quote/list?search=${encodeURIComponent(tk)}${brapiToken()}`,
+      ) as { stocks?: { stock?: string; sector?: string }[] };
+      const m = (data.stocks ?? []).find((s) => String(s.stock).toUpperCase() === tk);
+      const setor = String(m?.sector ?? "").trim();
+      return setor ? setor.slice(0, 80) : undefined;
+    } catch (e) { logError(`brapi setor ${tk}`, e); return undefined; }
+  }
+
+  async function umCotado(tk: string): Promise<void> {
+    try {
+      const [data, setor] = await Promise.all([
+        fetchJson(
+          `https://brapi.dev/api/quote/${encodeURIComponent(tk)}?range=1d&interval=1d${brapiToken()}`,
+        ) as Promise<{ results?: { longName?: string; shortName?: string; currency?: string; logourl?: string }[] }>,
+        setorDe(tk),
+      ]);
+      const r = data.results?.[0];
+      if (!r && !setor) return;
+      const nome  = String(r?.longName ?? r?.shortName ?? "").trim();
+      const moeda = String(r?.currency ?? "").trim().toUpperCase();
+      const logo  = String(r?.logourl ?? "").trim();
+      out.set(tk, {
+        nome: nome ? nome.slice(0, 120) : undefined,
+        moeda: moeda || undefined,
+        logo: logo && logo.startsWith("http") ? logo.slice(0, 300) : undefined,
+        setor,
+      });
+    } catch (e) { logError(`brapi meta ${tk}`, e); }
+  }
+
+  const LOTE = 3;
+  for (let i = 0; i < cotados.length; i += LOTE) {
+    await Promise.all(cotados.slice(i, i + LOTE).map(umCotado));
+  }
+  for (const tk of cripto) {
+    const nm = await nomesCripto([tk]);   // crypto: idem, 1 por requisição
+    const nome = nm.get(tk);
+    if (nome) out.set(tk, { nome, moeda: "BRL" });
+  }
+  return out;
+}
+
+async function precosCripto(tickers: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (tickers.length === 0) return out;
+  try {
+    const data = await fetchJson(
+      `https://brapi.dev/api/v2/crypto?coin=${encodeURIComponent(tickers.join(","))}&currency=BRL${brapiToken()}`,
+    ) as { coins?: { coin?: string; regularMarketPrice?: number }[] };
+    for (const cc of data.coins ?? []) {
+      const sym = String(cc.coin ?? "").toUpperCase();
+      if (sym && cc.regularMarketPrice != null) out.set(sym, Number(cc.regularMarketPrice));
+    }
+  } catch (e) { logError("brapi crypto", e); }
+  return out;
+}
+
+// Última PTAX (venda) — converte ativos em moeda estrangeira para BRL
+async function ptaxAtual(c: Db): Promise<number> {
+  const { data } = await c.from("cotacoes_ptax")
+    .select("cotacao_venda").order("data", { ascending: false }).limit(1).maybeSingle();
+  const v = Number((data as { cotacao_venda?: number } | null)?.cotacao_venda);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+// ── Cache COMPARTILHADO de cotações (arqvalor.cotacoes_ativos) ───
+// O preço de um ticker é igual para todos os usuários, então é cacheado
+// numa tabela sem user_id. Leitura via JWT (RLS libera SELECT); escrita
+// via service_role. Evita refetch externo por usuário e mantém o valor
+// consistente entre contas.
+const COTACAO_STALE_MS = 6 * 60 * 60 * 1000; // revalida o mês corrente a cada 6h
+
+interface CacheCotacao { preco: number; moeda: string; atualizadoEm: string }
+
+// Cotações cacheadas de vários tickers num mês específico
+async function lerCacheMes(c: Db, tickers: string[], mesAno: string): Promise<Map<string, CacheCotacao>> {
+  const out = new Map<string, CacheCotacao>();
+  if (tickers.length === 0) return out;
+  const { data } = await c.from("cotacoes_ativos")
+    .select("ticker, preco, moeda, atualizado_em").in("ticker", tickers).eq("mes_ano", mesAno);
+  for (const r of data ?? []) {
+    out.set(String(r.ticker).toUpperCase(), {
+      preco: Number(r.preco), moeda: String(r.moeda), atualizadoEm: String(r.atualizado_em),
+    });
+  }
+  return out;
+}
+
+// Toda a série mensal cacheada de um ticker (mes_ano → preço) + a moeda
+async function lerCacheTicker(c: Db, ticker: string): Promise<{ precos: Map<string, number>; moeda: string }> {
+  const precos = new Map<string, number>();
+  let moeda = "";
+  const { data } = await c.from("cotacoes_ativos")
+    .select("mes_ano, preco, moeda").eq("ticker", ticker.toUpperCase());
+  for (const r of data ?? []) { precos.set(String(r.mes_ano), Number(r.preco)); if (!moeda) moeda = String(r.moeda); }
+  return { precos, moeda };
+}
+
+// Grava/atualiza o cache (service_role — ignora RLS)
+async function gravarCache(rows: { ticker: string; mes_ano: string; preco: number; moeda: string }[]) {
+  if (rows.length === 0) return;
+  const admin = dbAdmin();
+  const linhas = rows
+    .filter((r) => r.ticker && Number.isFinite(r.preco) && r.preco >= 0)
+    .map((r) => ({ ticker: r.ticker.toUpperCase(), mes_ano: r.mes_ano, preco: r.preco, moeda: r.moeda, atualizado_em: new Date().toISOString() }));
+  if (linhas.length === 0) return;
+  const { error } = await admin.from("cotacoes_ativos").upsert(linhas, { onConflict: "ticker,mes_ano" });
+  if (error) logError("Upsert cotacoes_ativos", error);
+}
+
+// Cotação ATUAL via Yahoo (fallback p/ ativos que a brapi não cobre, ex.: EUA).
+// Tenta o símbolo puro (EUA) e o .SA (B3); devolve preço + moeda detectada.
+async function precoAtualYahoo(ticker: string): Promise<{ preco: number; moeda: string } | null> {
+  for (const sym of candidatosTicker(ticker)) {
+    try {
+      const res = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=1d&interval=1d`,
+        { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(8000) },
+      );
+      if (!res.ok) continue;
+      const data = await res.json() as { chart?: { result?: { meta?: { regularMarketPrice?: number; currency?: string } }[] } };
+      const meta = data.chart?.result?.[0]?.meta;
+      if (meta?.regularMarketPrice != null) {
+        return { preco: Number(meta.regularMarketPrice), moeda: String(meta.currency ?? "").toUpperCase() || (sym.endsWith(".SA") ? "BRL" : "USD") };
+      }
+    } catch (e) { logError("yahoo quote", e); }
+  }
+  return null;
+}
+
+// Preço ATUAL (snapshot do mês): usa o cache; busca externamente só o que
+// falta ou está vencido e regrava no cache. Devolve mapas por fonte.
+async function resolverPrecosAtuais(
+  c: Db, mesAno: string, ehAtual: boolean, cotados: string[], cripto: string[],
+): Promise<{ precos: Map<string, { preco: number; moeda: string }>; cripto: Map<string, number> }> {
+  const precos = new Map<string, { preco: number; moeda: string }>();
+  const criptoMap = new Map<string, number>();
+  const [cacheCot, cacheCr] = await Promise.all([lerCacheMes(c, cotados, mesAno), lerCacheMes(c, cripto, mesAno)]);
+
+  const agora = Date.now();
+  const vencido = (a?: CacheCotacao) => !a || (ehAtual && agora - new Date(a.atualizadoEm).getTime() > COTACAO_STALE_MS);
+
+  // cache válido entra direto
+  for (const t of cotados) { const a = cacheCot.get(t); if (a && !vencido(a)) precos.set(t, { preco: a.preco, moeda: a.moeda }); }
+  for (const t of cripto)  { const a = cacheCr.get(t);  if (a && !vencido(a)) criptoMap.set(t, a.preco); }
+
+  // busca externa só do que falta/venceu e regrava
+  const faltamCot = cotados.filter((t) => vencido(cacheCot.get(t)));
+  const faltamCr  = cripto.filter((t) => vencido(cacheCr.get(t)));
+  const [extCot, extCr] = await Promise.all([precosBrapi(faltamCot), precosCripto(faltamCr)]);
+  const novas: { ticker: string; mes_ano: string; preco: number; moeda: string }[] = [];
+  for (const [t, v] of extCot) { precos.set(t, v); novas.push({ ticker: t, mes_ano: mesAno, preco: v.preco, moeda: v.moeda }); }
+  for (const [t, p] of extCr)  { criptoMap.set(t, p); novas.push({ ticker: t, mes_ano: mesAno, preco: p, moeda: "BRL" }); }
+
+  // Fallback Yahoo p/ cotados que a brapi não cobriu (tipicamente ativos dos EUA)
+  for (const t of faltamCot) {
+    if (extCot.has(t)) continue;
+    const y = await precoAtualYahoo(t);
+    if (y) { precos.set(t, y); novas.push({ ticker: t, mes_ano: mesAno, preco: y.preco, moeda: y.moeda }); }
+  }
+  await gravarCache(novas);
+
+  // fallback: fonte externa falhou mas há cache (mesmo vencido) → usa o cache
+  for (const t of cotados) if (!precos.has(t))    { const a = cacheCot.get(t); if (a) precos.set(t, { preco: a.preco, moeda: a.moeda }); }
+  for (const t of cripto)  if (!criptoMap.has(t)) { const a = cacheCr.get(t);  if (a) criptoMap.set(t, a.preco); }
+
+  return { precos, cripto: criptoMap };
+}
+
+// Upsert do snapshot de um (ativo, conta, mês) reusando a lógica de
+// desempenho e o recálculo do mês seguinte de historico-mensal.
+async function gravarSnapshot(
+  c: Db, userId: string, ativoId: string, contaId: string, mesAno: string, valorMercado: number,
+  qtdOverride?: number, precoMedioOverride?: number,
+) {
+  let qtdTotal: number, precoMedio: number;
+  if (qtdOverride != null && precoMedioOverride != null) {
+    // Backfill: quantidade/preço-médio do mês informado (≠ posição atual)
+    qtdTotal = qtdOverride; precoMedio = precoMedioOverride;
+  } else {
+    const { data: pos } = await c.from("inv_posicoes")
+      .select("quantidade, valor_custo")
+      .eq("ativo_id", ativoId).eq("conta_id", contaId).eq("status", "ATIVA");
+    qtdTotal   = (pos ?? []).reduce((s, p) => s + Number(p.quantidade), 0);
+    const custoTotal = (pos ?? []).reduce((s, p) => s + Number(p.valor_custo), 0);
+    precoMedio = qtdTotal > 0 ? custoTotal / qtdTotal : 0;
+  }
+  const prev = await snapshotVizinho(c, ativoId, contaId, mesAno, "anterior");
+  const desempenho = calcularDesempenho(valorMercado, qtdTotal, precoMedio, prev);
+  const { error } = await c.from("inv_historico_mensal").upsert({
+    user_id: userId, ativo_id: ativoId, conta_id: contaId, mes_ano: mesAno,
+    valor_mercado: Number(valorMercado.toFixed(2)), quantidade: qtdTotal, preco_medio: precoMedio, ...desempenho,
+  }, { onConflict: "ativo_id,conta_id,mes_ano" });
+  if (error) throw error;
+  await recalcularSeguinte(c, ativoId, contaId, mesAno);
+}
+
+interface GrupoPosicao {
+  ativoId: string; contaId: string; ticker: string; tipo: string; moeda: string;
+  indexador: string | null; taxa: string | null;
+  posicoes: { quantidade: number; valor_custo: number; data_compra: string }[];
+}
+
+// Núcleo da captura do mês: agrupa posições ATIVAS do usuário, resolve os
+// preços (cache compartilhado) e grava o snapshot do mês. Serve tanto ao
+// client do usuário (RLS) quanto ao client admin do cron — por isso filtra
+// user_id explicitamente e passa qtd/preço-médio na hora de gravar.
+async function executarSnapshotMes(
+  client: Db, userId: string, mesAno: string, contaId?: string | null,
+): Promise<{ atualizados: number; ignorados: { ticker: string; motivo: string }[] }> {
+  const mesCorrente = new Date().toISOString().slice(0, 7);
+  const [ano, mes] = mesAno.split("-").map(Number);
+  const dataRef = mesAno === mesCorrente ? new Date() : new Date(Date.UTC(ano, mes, 0, 12));
+
+  let q = client.from("inv_posicoes")
+    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, tipo_ativo, moeda, rf_indexador, rf_taxa, cotacao_automatica)")
+    .eq("status", "ATIVA").eq("user_id", userId);
+  if (contaId) q = q.eq("conta_id", contaId);
+  const { data: posicoes, error } = await q;
+  if (error) { logError("snapshot posicoes", error); throw new Error(error.message); }
+
+  // Agrupa por (ativo, conta)
+  const grupos = new Map<string, GrupoPosicao>();
+  for (const p of posicoes ?? []) {
+    const raw = (p as { inv_ativos?: Record<string, unknown> | Record<string, unknown>[] }).inv_ativos;
+    const a   = (Array.isArray(raw) ? raw[0] : raw) ?? {};
+    if (a.cotacao_automatica === false) continue; // ativo opta por não buscar cotação
+    const key = `${p.ativo_id}|${p.conta_id}`;
+    if (!grupos.has(key)) {
+      grupos.set(key, {
+        ativoId: String(p.ativo_id), contaId: String(p.conta_id),
+        ticker: String(a.ticker ?? "").toUpperCase(), tipo: String(a.tipo_ativo ?? ""),
+        moeda: String(a.moeda ?? "BRL").toUpperCase(),
+        indexador: (a.rf_indexador as string | null) ?? null, taxa: (a.rf_taxa as string | null) ?? null,
+        posicoes: [],
+      });
+    }
+    grupos.get(key)!.posicoes.push({
+      quantidade: Number(p.quantidade) || 0, valor_custo: Number(p.valor_custo) || 0,
+      data_compra: String(p.data_compra),
+    });
+  }
+
+  const ehCripto = (t: string) => t === "CRIPTOMOEDAS";
+  const ehRF     = (t: string) => t === "RENDA_FIXA" || t === "TESOURO_DIRETO";
+  const ehCotado = (t: string) => !ehCripto(t) && !ehRF(t);
+  const lista = [...grupos.values()];
+  const tickersCotados = [...new Set(lista.filter((g) => ehCotado(g.tipo)).map((g) => g.ticker).filter(Boolean))];
+  const tickersCripto  = [...new Set(lista.filter((g) => ehCripto(g.tipo)).map((g) => g.ticker).filter(Boolean))];
+
+  const { precos, cripto: precosCr } = await resolverPrecosAtuais(
+    client, mesAno, mesAno === mesCorrente, tickersCotados, tickersCripto,
+  );
+  // a moeda real (USD) só é conhecida após a cotação, então carrega PTAX se
+  // houver qualquer cotado (não dá pra confiar só na moeda cadastrada)
+  const temCotado = lista.some((g) => ehCotado(g.tipo));
+  if (temCotado) { try { await garantirSincronizado(client); } catch (e) { logError("snapshot ptax sync", e); } }
+  const ptax = temCotado ? await ptaxAtual(client) : 0;
+  const temRF = lista.some((g) => ehRF(g.tipo));
+  const cdi  = temRF ? await sgsUltimo(432, CDI_FALLBACK) : CDI_FALLBACK;
+  const ipca = temRF ? await sgsUltimo(13522, IPCA_FALLBACK) : IPCA_FALLBACK;
+
+  let atualizados = 0;
+  const ignorados: { ticker: string; motivo: string }[] = [];
+
+  for (const g of lista) {
+    const qtd   = g.posicoes.reduce((s, p) => s + p.quantidade, 0);
+    const custo = g.posicoes.reduce((s, p) => s + p.valor_custo, 0);
+    const precoMedio = qtd > 0 ? custo / qtd : 0;
+    let valor: number | null = null;
+
+    if (ehCripto(g.tipo)) {
+      const preco = precosCr.get(g.ticker);
+      if (preco == null) { ignorados.push({ ticker: g.ticker, motivo: "cotação de cripto indisponível" }); continue; }
+      valor = preco * qtd;
+    } else if (ehRF(g.tipo)) {
+      const taxaAa = taxaAnualRF(g.indexador, g.taxa, cdi, ipca);
+      valor = g.posicoes.reduce((s, p) => s + valorRF(p.valor_custo, p.data_compra, dataRef, taxaAa), 0);
+    } else {
+      const cot = precos.get(g.ticker);
+      if (cot == null) { ignorados.push({ ticker: g.ticker, motivo: "cotação indisponível" }); continue; }
+      let preco = cot.preco;
+      if (cot.moeda !== "BRL") {
+        if (ptax <= 0) { ignorados.push({ ticker: g.ticker, motivo: "PTAX indisponível p/ conversão" }); continue; }
+        preco *= ptax;
+      }
+      valor = preco * qtd;
+    }
+
+    try {
+      await gravarSnapshot(client, userId, g.ativoId, g.contaId, mesAno, valor ?? 0, qtd, precoMedio);
+      atualizados++;
+    } catch (e) {
+      logError("snapshot gravar", e);
+      ignorados.push({ ticker: g.ticker, motivo: "falha ao gravar snapshot" });
+    }
+  }
+  return { atualizados, ignorados };
+}
+
+async function rotaSnapshotAuto(c: Db, req: Request, m: string, userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  const body = await req.json().catch(() => ({})) as { mes_ano?: string; conta_id?: string };
+  const mesCorrente = new Date().toISOString().slice(0, 7);
+  const mesAno = body.mes_ano && RE_MES_ANO.test(body.mes_ano) ? body.mes_ano : mesCorrente;
+  logRequest("POST", "/investimentos/snapshot-auto", { mesAno, conta_id: body.conta_id ?? null });
+  try {
+    const { atualizados, ignorados } = await executarSnapshotMes(c, userId, mesAno, body.conta_id ?? null);
+    logSuccess("Snapshot automático", { mesAno, atualizados, ignorados: ignorados.length });
+    return json({ dados: { mes_ano: mesAno, atualizados, ignorados } });
+  } catch (e) {
+    logError("snapshot-auto", e);
+    return erro((e as Error).message ?? "Erro ao atualizar valores");
+  }
+}
+
+// ============================================================
+// /investimentos/snapshot-cron — JOB DIÁRIO do servidor. Roda a captura
+// do mês corrente para TODOS os usuários com posições ativas, via
+// service_role. NÃO usa JWT de usuário: é protegido pelo secret no header
+// `x-cron-secret` (= secret CRON_SECRET). Agende com pg_cron + pg_net
+// (ver migration 20260613000002). Reusa o cache compartilhado de cotações,
+// então cada ticker é buscado uma vez só, não por usuário.
+// ============================================================
+async function rotaSnapshotCron(req: Request, m: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  const esperado = Deno.env.get("CRON_SECRET") ?? "";
+  if (!esperado || (req.headers.get("x-cron-secret") ?? "") !== esperado) return erro("Não autorizado", 401);
+
+  const admin = dbAdmin();
+  const mesAno = new Date().toISOString().slice(0, 7);
+  logRequest("POST", "/investimentos/snapshot-cron", { mesAno });
+
+  const { data: users, error } = await admin.from("inv_posicoes").select("user_id").eq("status", "ATIVA");
+  if (error) { logError("snapshot-cron users", error); return erro(error.message); }
+  const uids = [...new Set((users ?? []).map((u) => String(u.user_id)))];
+
+  let usuariosOk = 0, totalAtualizados = 0;
+  for (const uid of uids) {
+    try {
+      const { atualizados } = await executarSnapshotMes(admin, uid, mesAno, null);
+      totalAtualizados += atualizados; usuariosOk++;
+    } catch (e) { logError("snapshot-cron usuario", e); }
+  }
+  logSuccess("Snapshot cron", { mesAno, usuarios: uids.length, usuariosOk, totalAtualizados });
+  return json({ dados: { mes_ano: mesAno, usuarios: uids.length, usuarios_ok: usuariosOk, atualizados: totalAtualizados } });
+}
+
+// ============================================================
+// /investimentos/snapshot-backfill — preenche o histórico de meses
+// PASSADOS (itens importados que o usuário tem há anos). Para cada
+// (ativo, conta), varre de data_compra até o mês informado e grava só
+// os meses que ainda NÃO têm snapshot (não sobrescreve):
+//   • cotados (B3/BDR/STOCKS) → Yahoo Finance (range mensal) c/ brapi de
+//     fallback; STOCKS em USD convertidos pela PTAX histórica do mês
+//   • CRIPTOMOEDAS            → CoinGecko (market_chart, série longa)
+//   • Renda Fixa / Tesouro    → acúmulo pelo indexador desde o aporte
+//
+// Aproximações (v1): quantidade/custo de cada mês = posições ATIVAS já
+// compradas até aquele mês (vendas/encerramentos não são reconstruídos);
+// RF usa a taxa anual atual constante. Refinável depois com séries
+// históricas de índice (BCB/SGS) e Tesouro Transparente.
+// ============================================================
+
+function mesesEntre(ini: string, fim: string): string[] {
+  const out: string[] = [];
+  let [y, mo] = ini.split("-").map(Number);
+  const [yf, mf] = fim.split("-").map(Number);
+  let guard = 0;
+  while ((y < yf || (y === yf && mo <= mf)) && guard++ < 1200) {
+    out.push(`${y}-${String(mo).padStart(2, "0")}`);
+    mo++; if (mo > 12) { mo = 1; y++; }
+  }
+  return out;
+}
+
+// Histórico mensal de cotação no Yahoo Finance. Devolve a série (mês→preço)
+// e a MOEDA detectada (meta.currency) — B3 usa sufixo .SA (BRL); papéis dos
+// EUA usam o ticker puro (USD). Yahoo bloqueia sem User-Agent.
+async function historicoYahoo(symbol: string): Promise<{ precos: Map<string, number>; moeda: string }> {
+  const precos = new Map<string, number>();
+  let moeda = "";
+  try {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=10y&interval=1mo`,
+      { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(10000) },
+    );
+    if (!res.ok) return { precos, moeda };
+    const data = await res.json() as {
+      chart?: { result?: { meta?: { currency?: string }; timestamp?: number[]; indicators?: { quote?: { close?: (number | null)[] }[] } }[] };
+    };
+    const r  = data.chart?.result?.[0];
+    moeda = String(r?.meta?.currency ?? "").toUpperCase();
+    const ts = r?.timestamp ?? [];
+    const cl = r?.indicators?.quote?.[0]?.close ?? [];
+    for (let i = 0; i < ts.length; i++) {
+      const px = cl[i];
+      if (px == null) continue;
+      precos.set(new Date(ts[i] * 1000).toISOString().slice(0, 7), Number(px));
+    }
+  } catch (e) { logError("yahoo hist", e); }
+  return { precos, moeda };
+}
+
+async function historicoBrapiHist(ticker: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  try {
+    const data = await fetchJson(
+      `https://brapi.dev/api/quote/${encodeURIComponent(ticker)}?range=10y&interval=1mo${brapiToken()}`,
+    ) as { results?: { historicalDataPrice?: { date?: number; close?: number }[] }[] };
+    for (const h of data.results?.[0]?.historicalDataPrice ?? []) {
+      if (h.date == null || h.close == null) continue;
+      out.set(new Date(h.date * 1000).toISOString().slice(0, 7), Number(h.close));
+    }
+  } catch (e) { logError("brapi hist", e); }
+  return out;
+}
+
+// Cotação histórica (mês→preço + moeda). Tenta os dois símbolos no Yahoo —
+// .SA (B3) e puro (EUA) — independentemente da moeda cadastrada, pois ativos
+// importados podem vir com a moeda errada. brapi (B3) como último fallback.
+async function historicoCotado(ticker: string, moedaHint: string): Promise<{ precos: Map<string, number>; moeda: string }> {
+  for (const sym of candidatosTicker(ticker)) {
+    const y = await historicoYahoo(sym);
+    if (y.precos.size > 0) {
+      return { precos: y.precos, moeda: y.moeda || (sym.endsWith(".SA") ? "BRL" : (moedaHint || "USD")) };
+    }
+  }
+  // brapi (B3) como fallback — tenta o ticker e seu alias
+  for (const b of basesTicker(ticker)) {
+    const precos = await historicoBrapiHist(b);
+    if (precos.size > 0) return { precos, moeda: "BRL" };
+  }
+  return { precos: new Map<string, number>(), moeda: "BRL" };
+}
+
+// CoinGecko: mapeia símbolo→id (cache por instância) e baixa a série longa
+let _cgList: Map<string, string> | null = null;
+async function coingeckoId(symbol: string): Promise<string | null> {
+  if (!_cgList) {
+    try {
+      const list = await fetchJson("https://api.coingecko.com/api/v3/coins/list") as { id?: string; symbol?: string }[];
+      _cgList = new Map();
+      for (const cc of list) {
+        const s = cc.symbol?.toLowerCase();
+        if (s && cc.id && !_cgList.has(s)) _cgList.set(s, cc.id);
+      }
+    } catch (e) { logError("coingecko list", e); return null; }
+  }
+  return _cgList.get(symbol.toLowerCase()) ?? null;
+}
+
+async function historicoCripto(ticker: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const id = await coingeckoId(ticker);
+  if (!id) return out;
+  try {
+    const data = await fetchJson(
+      `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=brl&days=max&interval=daily`,
+    ) as { prices?: [number, number][] };
+    for (const [ts, px] of data.prices ?? []) {
+      out.set(new Date(ts).toISOString().slice(0, 7), Number(px)); // ordem asc → último do mês prevalece
+    }
+  } catch (e) { logError("coingecko hist", e); }
+  return out;
+}
+
+// Histórico mensal de cotação com cache COMPARTILHADO: usa o cache se ele
+// já cobre desde 'inicio'; senão busca a série externa, grava no cache e
+// devolve a série mesclada. (cotados → Yahoo/brapi; cripto → CoinGecko)
+async function resolverHistoricoCotado(c: Db, ticker: string, moedaHint: string, inicio: string): Promise<{ precos: Map<string, number>; moeda: string }> {
+  const cache = await lerCacheTicker(c, ticker);
+  const maisAntigo = [...cache.precos.keys()].sort()[0];
+  if (cache.precos.size > 0 && maisAntigo && maisAntigo <= inicio) {
+    return { precos: cache.precos, moeda: cache.moeda || moedaHint };
+  }
+  const ext = await historicoCotado(ticker, moedaHint);
+  if (ext.precos.size > 0) {
+    await gravarCache([...ext.precos].map(([mes, preco]) => ({ ticker, mes_ano: mes, preco, moeda: ext.moeda || "BRL" })));
+    for (const [mes, preco] of ext.precos) cache.precos.set(mes, preco);
+    return { precos: cache.precos, moeda: ext.moeda || cache.moeda || moedaHint };
+  }
+  return { precos: cache.precos, moeda: cache.moeda || moedaHint };
+}
+
+async function resolverHistoricoCripto(c: Db, ticker: string, inicio: string): Promise<Map<string, number>> {
+  const cache = await lerCacheTicker(c, ticker);
+  const maisAntigo = [...cache.precos.keys()].sort()[0];
+  if (cache.precos.size > 0 && maisAntigo && maisAntigo <= inicio) return cache.precos;
+  const ext = await historicoCripto(ticker);
+  if (ext.size > 0) {
+    await gravarCache([...ext].map(([mes, preco]) => ({ ticker, mes_ano: mes, preco, moeda: "BRL" })));
+    for (const [mes, preco] of ext) cache.precos.set(mes, preco);
+  }
+  return cache.precos;
+}
+
+// PTAX (venda) por mês (último dia útil do mês), a partir de desdeISO
+async function ptaxPorMesMap(c: Db, desdeISO: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const { data } = await c.from("cotacoes_ptax")
+    .select("data, cotacao_venda").gte("data", desdeISO).order("data", { ascending: true });
+  for (const r of data ?? []) out.set(String(r.data).slice(0, 7), Number(r.cotacao_venda));
+  return out;
+}
+
+async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  const body = await req.json().catch(() => ({})) as { conta_id?: string; ate?: string; ativo_id?: string };
+  const mesCorrente = new Date().toISOString().slice(0, 7);
+  // Backfill cobre só meses PASSADOS — para no mês anterior. O mês corrente é
+  // tarefa do "Atualizar cotação"/job diário (cotação ao vivo), e o fechamento
+  // mensal da fonte (Yahoo) só sai quando o mês termina.
+  const [yc, mc] = mesCorrente.split("-").map(Number);
+  const dPrev = new Date(Date.UTC(yc, mc - 2, 1));
+  const mesAnterior = `${dPrev.getUTCFullYear()}-${String(dPrev.getUTCMonth() + 1).padStart(2, "0")}`;
+  const mesFim = body.ate && RE_MES_ANO.test(body.ate) ? body.ate : mesAnterior;
+  logRequest("POST", "/investimentos/snapshot-backfill", { conta_id: body.conta_id ?? null, ativo_id: body.ativo_id ?? null, ate: mesFim });
+
+  let q = c.from("inv_posicoes")
+    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, tipo_ativo, moeda, rf_indexador, rf_taxa, cotacao_automatica)")
+    .eq("status", "ATIVA");
+  if (body.conta_id) q = q.eq("conta_id", body.conta_id);
+  if (body.ativo_id) q = q.eq("ativo_id", body.ativo_id);
+  const { data: posicoes, error } = await q;
+  if (error) { logError("backfill posicoes", error); return erro(error.message); }
+
+  const grupos = new Map<string, GrupoPosicao & { inicio: string }>();
+  for (const p of posicoes ?? []) {
+    const raw = (p as { inv_ativos?: Record<string, unknown> | Record<string, unknown>[] }).inv_ativos;
+    const a   = (Array.isArray(raw) ? raw[0] : raw) ?? {};
+    if (a.cotacao_automatica === false) continue; // ativo opta por não buscar cotação
+    const key = `${p.ativo_id}|${p.conta_id}`;
+    const mesCompra = String(p.data_compra).slice(0, 7);
+    if (!grupos.has(key)) {
+      grupos.set(key, {
+        ativoId: String(p.ativo_id), contaId: String(p.conta_id),
+        ticker: String(a.ticker ?? "").toUpperCase(), tipo: String(a.tipo_ativo ?? ""),
+        moeda: String(a.moeda ?? "BRL").toUpperCase(),
+        indexador: (a.rf_indexador as string | null) ?? null, taxa: (a.rf_taxa as string | null) ?? null,
+        posicoes: [], inicio: mesCompra,
+      });
+    }
+    const g = grupos.get(key)!;
+    g.posicoes.push({
+      quantidade: Number(p.quantidade) || 0, valor_custo: Number(p.valor_custo) || 0,
+      data_compra: String(p.data_compra),
+    });
+    if (mesCompra < g.inicio) g.inicio = mesCompra;
+  }
+
+  const ehCripto = (t: string) => t === "CRIPTOMOEDAS";
+  const ehRF     = (t: string) => t === "RENDA_FIXA" || t === "TESOURO_DIRETO";
+  const ehCotado = (t: string) => !ehCripto(t) && !ehRF(t);
+  const lista = [...grupos.values()];
+
+  const temRF = lista.some((g) => ehRF(g.tipo));
+  const cdi  = temRF ? await sgsUltimo(432, CDI_FALLBACK) : CDI_FALLBACK;
+  const ipca = temRF ? await sgsUltimo(13522, IPCA_FALLBACK) : IPCA_FALLBACK;
+
+  // sempre carrega PTAX se houver cotado — a moeda real (USD) só é descoberta
+  // ao buscar a série, então não dá pra confiar só na moeda cadastrada.
+  // Garante a PTAX sincronizada (backfill desde 2021) p/ converter USD.
+  const temCotado   = lista.some((g) => ehCotado(g.tipo));
+  if (temCotado) { try { await garantirSincronizado(c); } catch (e) { logError("backfill ptax sync", e); } }
+  const inicioGeral = lista.reduce((min, g) => (g.inicio < min ? g.inicio : min), mesFim);
+  const ptaxPorMes  = temCotado ? await ptaxPorMesMap(c, `${inicioGeral}-01`) : new Map<string, number>();
+  // Convenção PTAX: se o mês exato não tem cotação, usa a do último mês
+  // disponível ANTES dele (último dia útil ≤ alvo). Resolve o mês mais
+  // recente, que ainda não entrou na série, sem deixar buraco.
+  const ptaxMesesOrd = [...ptaxPorMes.keys()].sort();
+  const ptaxNoMes = (me: string): number | undefined => {
+    const exato = ptaxPorMes.get(me);
+    if (exato) return exato;
+    let val: number | undefined;
+    for (const k of ptaxMesesOrd) { if (k <= me) val = ptaxPorMes.get(k); else break; }
+    return val;
+  };
+
+  let mesesGravados = 0;
+  let ativosProcessados = 0;
+  const ignorados: { ticker: string; motivo: string }[] = [];
+  const diagnostico: Record<string, unknown>[] = [];
+
+  for (const g of lista) {
+    // meses que já têm snapshot — não sobrescreve
+    const { data: existentes } = await c.from("inv_historico_mensal")
+      .select("mes_ano").eq("ativo_id", g.ativoId).eq("conta_id", g.contaId);
+    const jaTem = new Set((existentes ?? []).map((e) => String(e.mes_ano)));
+    const faltantes = mesesEntre(g.inicio, mesFim).filter((me) => !jaTem.has(me));
+    if (faltantes.length === 0) continue;
+
+    // série de preços por mês (cotados/cripto) + moeda real detectada
+    let precoPorMes: Map<string, number> | null = null;
+    let moedaReal = g.moeda;
+    if (ehCotado(g.tipo)) {
+      const r = await resolverHistoricoCotado(c, g.ticker, g.moeda, g.inicio);
+      precoPorMes = r.precos; moedaReal = r.moeda || g.moeda;
+      if (precoPorMes.size === 0) {
+        ignorados.push({ ticker: g.ticker, motivo: "histórico de cotação indisponível" });
+        diagnostico.push({ ticker: g.ticker, inicio: g.inicio, faltantes: faltantes.length, fonte: 0, motivo: "fonte sem série (Yahoo/brapi não retornaram)" });
+        continue;
+      }
+    } else if (ehCripto(g.tipo)) {
+      precoPorMes = await resolverHistoricoCripto(c, g.ticker, g.inicio);
+      moedaReal = "BRL";
+      if (precoPorMes.size === 0) { ignorados.push({ ticker: g.ticker, motivo: "histórico de cripto indisponível" }); continue; }
+    }
+
+    const taxaAa = ehRF(g.tipo) ? taxaAnualRF(g.indexador, g.taxa, cdi, ipca) : 0;
+    let gravouAlgum = false;
+    let gravadosAtivo = 0, semCotacaoMes = 0, semPtax = 0;
+
+    for (const me of faltantes) {
+      // posições já compradas até este mês
+      const posMes = g.posicoes.filter((p) => p.data_compra.slice(0, 7) <= me);
+      if (posMes.length === 0) continue;
+      const qtdMes   = posMes.reduce((s, p) => s + p.quantidade, 0);
+      const custoMes = posMes.reduce((s, p) => s + p.valor_custo, 0);
+      if (qtdMes <= 0) continue;
+      const precoMedio = custoMes / qtdMes;
+      const dataRef = new Date(Date.UTC(Number(me.slice(0, 4)), Number(me.slice(5, 7)), 0, 12)); // último dia do mês
+
+      let valor: number;
+      if (ehRF(g.tipo)) {
+        valor = posMes.reduce((s, p) => s + valorRF(p.valor_custo, p.data_compra, dataRef, taxaAa), 0);
+      } else {
+        let preco = precoPorMes!.get(me);
+        if (preco == null) { semCotacaoMes++; continue; } // sem cotação naquele mês
+        if (ehCotado(g.tipo) && moedaReal !== "BRL") {
+          const px = ptaxNoMes(me);
+          if (!px) { semPtax++; continue; } // sem PTAX (mês anterior ao início da série)
+          preco *= px;
+        }
+        valor = preco * qtdMes;
+      }
+      if (!(valor > 0)) continue;
+
+      try {
+        await gravarSnapshot(c, userId, g.ativoId, g.contaId, me, valor, qtdMes, precoMedio);
+        mesesGravados++; gravadosAtivo++; gravouAlgum = true;
+      } catch (e) { logError("backfill gravar", e); }
+    }
+    if (gravouAlgum) ativosProcessados++;
+    // diagnóstico: só os cotados/cripto que NÃO preencheram tudo
+    if (!ehRF(g.tipo) && gravadosAtivo < faltantes.length) {
+      diagnostico.push({
+        ticker: g.ticker, moeda: moedaReal, inicio: g.inicio,
+        faltantes: faltantes.length, fonte_meses: precoPorMes?.size ?? 0,
+        gravados: gravadosAtivo, sem_cotacao_mes: semCotacaoMes, sem_ptax: semPtax,
+        ptax_meses: ptaxPorMes.size,
+      });
+    }
+  }
+
+  logSuccess("Backfill de histórico", { ate: mesFim, mesesGravados, ativosProcessados, ignorados: ignorados.length, diagnostico });
+  return json({ dados: { ate: mesFim, meses_gravados: mesesGravados, ativos_processados: ativosProcessados, ignorados, diagnostico } });
+}
+
+// ============================================================
 // /investimentos/importar — importação em lote (extrato + posição B3)
 //
 // O frontend faz o parsing dos dois arquivos da B3 e envia UM payload
@@ -994,6 +1855,65 @@ async function inserirEmLote(
     if (data) out.push(...(data as unknown as Record<string, unknown>[]));
   }
   return out;
+}
+
+// ============================================================
+// /investimentos/atualizar-ativos — re-busca nome/moeda oficiais
+//
+// Reaplica a fonte externa (brapi) a TODOS os ativos do usuário, para o
+// caso de a chamada ter falhado no cadastro/importação (ex.: BRAPI_TOKEN
+// ausente na época) e o ativo ter ficado só com o ticker. Conservador:
+//   • nome  → só preenche quando o atual está vazio ou é o próprio ticker
+//             (nunca sobrescreve um nome editado à mão);
+//   • moeda → a fonte é autoritativa; corrige quando diverge (ex.: STOCKS
+//             que ficaram em BRL devem virar USD).
+// Renda fixa privada e Tesouro Direto não têm fonte → são ignorados.
+// ============================================================
+async function rotaAtualizarAtivos(c: Db, _req: Request, m: string, _userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  logRequest("POST", "/investimentos/atualizar-ativos", {});
+
+  const { data, error } = await c.from("inv_ativos")
+    .select("id, ticker, nome, tipo_ativo, moeda, logo_url, setor");
+  if (error) { logError("Atualizar ativos — listar", error); return erro(error.message); }
+  const lista = (data ?? []) as
+    { id: string; ticker: string; nome: string; tipo_ativo: string; moeda: string; logo_url: string | null; setor: string | null }[];
+  if (lista.length === 0) {
+    return json({ dados: { processados: 0, atualizados: 0, ativos: [] } });
+  }
+
+  const meta = await resolverMeta(lista.map((a) =>
+    ({ ticker: a.ticker, tipo_ativo: a.tipo_ativo })));
+
+  const atualizados: { ticker: string; nome: string }[] = [];
+  for (const a of lista) {
+    const info = meta.get(String(a.ticker).toUpperCase());
+    if (!info) continue;
+    const tk = String(a.ticker).toUpperCase();
+    const campos: Record<string, unknown> = {};
+
+    const nomeEhTicker = !a.nome || a.nome.trim().toUpperCase() === tk;
+    if (info.nome && nomeEhTicker && info.nome.toUpperCase() !== tk) {
+      campos.nome = info.nome;
+    }
+    if (info.moeda && info.moeda.length <= 3 && info.moeda !== a.moeda) {
+      campos.moeda = info.moeda;
+    }
+    if (info.logo && info.logo !== a.logo_url) {
+      campos.logo_url = info.logo;
+    }
+    if (info.setor && info.setor !== a.setor) {
+      campos.setor = info.setor;
+    }
+    if (Object.keys(campos).length === 0) continue;
+
+    const { error: eUp } = await c.from("inv_ativos").update(campos).eq("id", a.id);
+    if (eUp) { logError(`Atualizar ativo ${tk}`, eUp); continue; }
+    atualizados.push({ ticker: a.ticker, nome: String(campos.nome ?? a.nome) });
+  }
+
+  logSuccess("Ativos atualizados", { processados: lista.length, atualizados: atualizados.length });
+  return json({ dados: { processados: lista.length, atualizados: atualizados.length, ativos: atualizados } });
 }
 
 async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
@@ -1057,6 +1977,20 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
         acoes_subtipo: SUBTIPOS_ACOES.includes(String(a.acoes_subtipo)) ? a.acoes_subtipo : null,
       });
     }
+    // Nome oficial via busca externa para os que vieram sem nome (= ticker)
+    if (novosPorTicker.size > 0) {
+      const semNome = [...novosPorTicker.values()].filter((r) =>
+        !r.nome || String(r.nome).toUpperCase() === String(r.ticker).toUpperCase());
+      if (semNome.length > 0) {
+        const nomes = await resolverNomes(semNome.map((r) =>
+          ({ ticker: String(r.ticker), tipo_ativo: String(r.tipo_ativo) })));
+        for (const r of semNome) {
+          const n = nomes.get(String(r.ticker).toUpperCase());
+          if (n) r.nome = n;
+        }
+      }
+    }
+
     let ativosCriados = 0;
     if (novosPorTicker.size > 0) {
       const criados = await inserirEmLote(c, "inv_ativos", [...novosPorTicker.values()], "id, ticker");
@@ -1368,6 +2302,8 @@ async function rotaRestaurar(c: Db, req: Request, m: string, userId: string) {
         rf_emissor: a.rf_emissor ?? null, rf_vencimento: a.rf_vencimento ?? null,
         rf_garantia_fgc: a.rf_garantia_fgc ?? null, rf_isento_ir: a.rf_isento_ir ?? null,
         fii_categoria: a.fii_categoria ?? null, acoes_subtipo: a.acoes_subtipo ?? null,
+        cotacao_automatica: a.cotacao_automatica ?? true,
+        logo_url: a.logo_url ?? null, setor: a.setor ?? null,
       });
     }
     if (novosAtivos.length) {
