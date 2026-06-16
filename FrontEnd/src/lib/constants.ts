@@ -251,3 +251,48 @@ export function setorLabel(setor: string | null | undefined): string | null {
   if (!setor) return null
   return SETOR_LABEL[setor] ?? setor
 }
+
+// ── Avaliação de ativos: critérios das questões ───────────────
+// Cada pergunta do questionário pertence a um destes 3 critérios.
+// A nota final é a média ponderada pelas notas de cada critério.
+export const CRITERIOS_QUESTAO = ['FUNDAMENTOS', 'CRESCIMENTO', 'DIVIDENDOS'] as const
+export type CriterioQuestao = typeof CRITERIOS_QUESTAO[number]
+
+export const CRITERIO_LABEL: Record<CriterioQuestao, string> = {
+  FUNDAMENTOS: 'Fundamentos',
+  CRESCIMENTO: 'Crescimento',
+  DIVIDENDOS:  'Pagadora de dividendos',
+}
+
+export const CRITERIO_DESCRICAO: Record<CriterioQuestao, string> = {
+  FUNDAMENTOS: 'Solidez do ativo: lucro, dívida, governança, qualidade do emissor/gestão.',
+  CRESCIMENTO: 'Potencial de valorização: expansão do negócio, setor, perspectivas futuras.',
+  DIVIDENDOS:  'Geração de renda: consistência e sustentabilidade da distribuição de proventos.',
+}
+
+// ── Perfil de investidor ──────────────────────────────────────
+export const PERFIS_INVESTIDOR = ['CONSERVADOR', 'MODERADO', 'ARROJADO'] as const
+export type PerfilInvestidorTipo = typeof PERFIS_INVESTIDOR[number]
+
+export const PERFIL_INVESTIDOR_LABEL: Record<PerfilInvestidorTipo, string> = {
+  CONSERVADOR: 'Conservador',
+  MODERADO:    'Moderado',
+  ARROJADO:    'Arrojado',
+}
+
+export const PERFIL_INVESTIDOR_DESCRICAO: Record<PerfilInvestidorTipo, string> = {
+  CONSERVADOR: 'Prioriza segurança e renda. Baixa tolerância a oscilações; foco em preservar capital.',
+  MODERADO:    'Equilibra segurança e crescimento. Aceita alguma volatilidade por retorno maior.',
+  ARROJADO:    'Busca crescimento e aceita volatilidade alta em troca de maior potencial de retorno.',
+}
+
+// Pesos por critério (somam 100) sugeridos para cada perfil. São apenas
+// sugestões — o usuário pode ajustar na tela de Configurações.
+//   Conservador → valoriza fundamentos e dividendos (renda/segurança).
+//   Moderado    → equilibrado.
+//   Arrojado    → valoriza crescimento.
+export const PESOS_SUGERIDOS_POR_PERFIL: Record<PerfilInvestidorTipo, Record<CriterioQuestao, number>> = {
+  CONSERVADOR: { FUNDAMENTOS: 45, CRESCIMENTO: 15, DIVIDENDOS: 40 },
+  MODERADO:    { FUNDAMENTOS: 40, CRESCIMENTO: 30, DIVIDENDOS: 30 },
+  ARROJADO:    { FUNDAMENTOS: 35, CRESCIMENTO: 50, DIVIDENDOS: 15 },
+}

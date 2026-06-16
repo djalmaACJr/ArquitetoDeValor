@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import {
   TrendingUp, TrendingDown, Wallet, Coins, PieChart, Percent, Trophy,
-  HandCoins, BarChart3, Calendar, Upload, Target, RefreshCw, History,
+  HandCoins, BarChart3, Calendar, Upload, Settings, RefreshCw, History,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
@@ -9,7 +9,7 @@ import {
   Chart as ChartJS, ArcElement, Tooltip, Legend,
   CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement,
 } from 'chart.js'
-import { useInvestimentosDashboard, useInvestimentosRanking, useInvestimentosAlocacao, type AlocacaoInput } from '../hooks/useInvestimentosDashboard'
+import { useInvestimentosDashboard, useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
 import { useInvestimentosHistorico, useAtualizarValoresMes, useBackfillHistorico, type ResumoBackfill } from '../hooks/useInvestimentosHistorico'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
@@ -17,7 +17,7 @@ import { useDividendos } from '../hooks/useDividendos'
 import { useContas } from '../hooks/useContas'
 import { useAuth } from '../hooks/useAuth'
 import LoadingMascote from '../components/ui/LoadingMascote'
-import { SelectDark, Drawer, Input, BtnSalvar, BtnCancelar, Toast } from '../components/ui/shared'
+import { SelectDark, Toast } from '../components/ui/shared'
 import QuadroTipoAtivos from '../components/ui/QuadroTipoAtivos'
 import { linhaDeRanking, type AtivoLinha } from '../lib/ativosLinha'
 import { formatBRL } from '../lib/utils'
@@ -489,7 +489,6 @@ function DividendosPorMes({ dividendos }: { dividendos: { data_pagamento: string
 
 export default function InvestimentosPage() {
   const [contaId, setContaId] = useState<string>('')
-  const [metasAberto, setMetasAberto] = useState(false)
   // Sinal de foco disparado ao clicar numa fatia do gráfico "Ativos na Carteira"
   const [foco, setFoco] = useState<{ tipo: TipoAtivoInvestimento; n: number } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -681,11 +680,11 @@ export default function InvestimentosPage() {
               {preenchendo ? 'Preenchendo…' : 'Preencher histórico'}
             </button>
           )}
-          <button onClick={() => setMetasAberto(true)}
+          <Link to="/investimentos/configuracoes"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
               text-[13px] text-white transition-all hover:border-white/25">
-            <Target size={15} /> Metas %
-          </button>
+            <Settings size={15} /> Configurações
+          </Link>
           <Link to="/investimentos/dividendos"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
               text-[13px] text-white transition-all hover:border-white/25">
@@ -807,78 +806,6 @@ export default function InvestimentosPage() {
       )}
 
       <Toast msg={toast} />
-      {metasAberto && <DrawerMetasAlocacao onClose={() => setMetasAberto(false)} onToast={showToast} />}
     </div>
-  )
-}
-
-// ── Drawer: metas de alocação (% ideal por tipo de ativo) ───────
-
-function DrawerMetasAlocacao({ onClose, onToast }: { onClose: () => void; onToast: (m: string) => void }) {
-  const { alocacoes, salvar } = useInvestimentosAlocacao()
-  // Mapa tipo → % atual salvo
-  // Edições do usuário (sobrepõem o que veio do servidor). Derivar em render
-  // — em vez de init no useState — garante carregar os valores salvos mesmo
-  // com o useQuery resolvendo de forma assíncrona (antes vinha tudo em branco).
-  const [edits, setEdits] = useState<Record<string, string>>({})
-  const valores = useMemo(() => {
-    const out: Record<string, string> = {}
-    for (const t of TIPOS_ATIVO_INV) {
-      if (t in edits) { out[t] = edits[t]; continue }
-      const a = alocacoes.find((x) => x.tipo_ativo === t)
-      out[t] = a && a.percentual_ideal > 0 ? String(a.percentual_ideal) : ''
-    }
-    return out
-  }, [alocacoes, edits])
-  const [salvando, setSalvando] = useState(false)
-
-  const total = TIPOS_ATIVO_INV.reduce((s, t) => s + (Number(valores[t]) || 0), 0)
-  const totalOk = Math.abs(total - 100) < 0.01 || total === 0
-
-  async function handleSalvar() {
-    if (!totalOk) { onToast('A soma das metas deve ser 100% (ou tudo zerado para limpar).'); return }
-    const itens: AlocacaoInput[] = TIPOS_ATIVO_INV
-      .map((t) => ({ tipo_ativo: t, percentual_ideal: Number(valores[t]) || 0 }))
-      .filter((x) => x.percentual_ideal > 0)
-    setSalvando(true)
-    const res = await salvar(itens)
-    setSalvando(false)
-    if (res.ok) { onToast('Metas de alocação salvas!'); onClose() }
-    else onToast(res.erro ?? 'Erro ao salvar metas')
-  }
-
-  return (
-    <Drawer open onClose={onClose} titulo="Metas de alocação"
-      subtitulo="Defina o % ideal de cada tipo de ativo na carteira (soma 100%)"
-      rodape={<><BtnCancelar onClick={onClose} /><BtnSalvar editando onClick={handleSalvar} salvando={salvando} labelSalvar="Salvar metas" /></>}>
-      <div className="space-y-2">
-        {TIPOS_ATIVO_INV.map((t) => (
-          <div key={t} className="flex items-center gap-3">
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: TIPO_ATIVO_COR[t] }} />
-            <span className="flex-1 text-[14px] text-white/85">{TIPO_ATIVO_LABEL[t]}</span>
-            <div className="w-28">
-              <Input type="number" min={0} max={100} step="any" value={valores[t] ?? ''}
-                onChange={(e) => setEdits((v) => ({ ...v, [t]: e.target.value }))} placeholder="0" />
-            </div>
-            <span className="text-[13px] w-4" style={{ color: MUTED }}>%</span>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 flex items-center justify-between text-[13px] px-1">
-        <span style={{ color: MUTED }}>Total</span>
-        <span className="font-semibold" style={{ color: totalOk ? '#00c896' : '#ffb74d' }}>
-          {total.toFixed(2).replace('.', ',')}%
-        </span>
-      </div>
-      {!totalOk && (
-        <p className="text-[12px] mt-1" style={{ color: '#ffb74d' }}>
-          A soma precisa ser 100% (ou deixe tudo em branco/zero para não usar metas).
-        </p>
-      )}
-      <p className="text-[12px] mt-3" style={{ color: MUTED }}>
-        As metas alimentam a barra "Meta %" nos quadros de tipo e a recomendação de compra
-        (que combina a nota do ativo com o desvio da meta).
-      </p>
-    </Drawer>
   )
 }

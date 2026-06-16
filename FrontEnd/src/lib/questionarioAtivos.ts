@@ -1,175 +1,168 @@
 // ============================================================
-// Questionário de avaliação de ativos — definições por tipo
+// Questionário de avaliação de ativos — definições PADRÃO por tipo
 //
-// Cada pergunta tem 5 opções (índice 0..4); quanto maior o índice,
-// mais favorável a resposta. A nota final (0..10) é a média dos
-// índices respondidos × 2.5. As respostas são persistidas em
-// inv_ativos.questionario_respostas e a nota em nota_usuario.
+// Cada pergunta pertence a um critério (Fundamentos / Crescimento /
+// Pagadora de dividendos) e tem 5 opções (índice 0..4); quanto maior o
+// índice, mais favorável a resposta. A nota final (0..10) é a média
+// PONDERADA por critério (pesos somam 100).
+//
+// Este arquivo é a SEMENTE (default). O usuário pode sobrepor por tipo
+// com um questionário customizado (manual ou gerado por IA) guardado em
+// arqvalor.inv_questionarios — ver useInvQuestionarios.
+//
+// Respostas são persistidas em inv_ativos.questionario_respostas
+// ({pergunta_id: indice 0..4}) e a nota em inv_ativos.nota_usuario.
 // ============================================================
 import type { TipoAtivoInvestimento } from './constants'
+import { CRITERIOS_QUESTAO, PESOS_SUGERIDOS_POR_PERFIL } from './constants'
+import type { PerguntaAvaliacao, PesosCriterio } from '../types'
 
-export interface PerguntaQuestionario {
-  id:       string
-  texto:    string
-  opcoes:   [string, string, string, string, string]  // índice 0 (pior) → 4 (melhor)
-}
+// Pesos padrão quando não há perfil/custom — perfil Moderado (equilibrado).
+export const PESOS_PADRAO: PesosCriterio = { ...PESOS_SUGERIDOS_POR_PERFIL.MODERADO }
 
-// Perguntas comuns a todos os tipos de ativo
-const PERGUNTAS_BASE: PerguntaQuestionario[] = [
+// ── Perguntas base (comuns a todos os tipos) ───────────────────
+// 10 perguntas cobrindo os 3 critérios. Garante o mínimo de 10 por tipo;
+// tipos com perguntas específicas as acrescentam.
+const PERGUNTAS_BASE: PerguntaAvaliacao[] = [
+  // Fundamentos
   {
-    id: 'horizonte',
-    texto: 'Qual o seu horizonte de investimento para este ativo?',
-    opcoes: ['Menos de 6 meses', '6 meses a 1 ano', '1 a 3 anos', '3 a 5 anos', 'Mais de 5 anos'],
+    id: 'f_solidez',
+    criterio: 'FUNDAMENTOS',
+    texto: 'Quão sólida é a saúde financeira do ativo/emissor (lucro, dívida, caixa)?',
+    opcoes: ['Muito fraca', 'Fraca', 'Razoável', 'Boa', 'Excelente'],
   },
   {
-    id: 'risco',
-    texto: 'Como você avalia o risco deste ativo em relação à sua tolerância?',
-    opcoes: ['Muito acima do que tolero', 'Acima', 'Compatível', 'Abaixo', 'Bem abaixo do que tolero'],
+    id: 'f_governanca',
+    criterio: 'FUNDAMENTOS',
+    texto: 'Como você avalia a governança, gestão e transparência?',
+    opcoes: ['Muito ruim', 'Ruim', 'Mediana', 'Boa', 'Excelente'],
   },
   {
-    id: 'retorno',
-    texto: 'Qual a sua expectativa de retorno frente a alternativas similares?',
-    opcoes: ['Bem pior', 'Pior', 'Na média', 'Melhor', 'Bem melhor'],
+    id: 'f_risco',
+    criterio: 'FUNDAMENTOS',
+    texto: 'O risco deste ativo é compatível com a sua tolerância?',
+    opcoes: ['Muito acima do que tolero', 'Acima', 'Compatível', 'Abaixo', 'Bem abaixo'],
   },
   {
-    id: 'liquidez',
-    texto: 'A liquidez deste ativo atende à sua necessidade?',
-    opcoes: ['Não atende', 'Atende mal', 'Atende parcialmente', 'Atende bem', 'Atende totalmente'],
+    id: 'f_liquidez',
+    criterio: 'FUNDAMENTOS',
+    texto: 'A liquidez do ativo atende à sua necessidade de resgate?',
+    opcoes: ['Não atende', 'Atende mal', 'Parcialmente', 'Atende bem', 'Atende totalmente'],
+  },
+  // Crescimento
+  {
+    id: 'c_perspectiva',
+    criterio: 'CRESCIMENTO',
+    texto: 'Qual a perspectiva de valorização no horizonte que pretende manter?',
+    opcoes: ['Em queda', 'Estagnada', 'Estável', 'Em alta', 'Em forte alta'],
   },
   {
-    id: 'volatilidade',
-    texto: 'Como você reagiria a uma queda forte (-20%) deste ativo?',
-    opcoes: ['Venderia tudo', 'Venderia parte', 'Manteria', 'Compraria um pouco', 'Compraria agressivamente'],
+    id: 'c_setor',
+    criterio: 'CRESCIMENTO',
+    texto: 'Como está o momento do setor/segmento deste ativo?',
+    opcoes: ['Em declínio', 'Estagnado', 'Estável', 'Em crescimento', 'Em forte expansão'],
+  },
+  {
+    id: 'c_vantagem',
+    criterio: 'CRESCIMENTO',
+    texto: 'O ativo tem diferencial competitivo frente a alternativas similares?',
+    opcoes: ['Nenhum', 'Pouco', 'Moderado', 'Forte', 'Muito forte'],
+  },
+  // Pagadora de dividendos
+  {
+    id: 'd_historico',
+    criterio: 'DIVIDENDOS',
+    texto: 'O histórico de distribuição de proventos é consistente?',
+    opcoes: ['Não distribui', 'Muito irregular', 'Irregular', 'Consistente', 'Muito consistente'],
+  },
+  {
+    id: 'd_sustentabilidade',
+    criterio: 'DIVIDENDOS',
+    texto: 'A distribuição é sustentável (não compromete o caixa/futuro do ativo)?',
+    opcoes: ['Insustentável', 'Frágil', 'Razoável', 'Sustentável', 'Muito sólida'],
+  },
+  {
+    id: 'd_yield',
+    criterio: 'DIVIDENDOS',
+    texto: 'O retorno em proventos (yield) é atrativo frente às alternativas?',
+    opcoes: ['Bem abaixo', 'Abaixo', 'Na média', 'Acima', 'Bem acima'],
   },
 ]
 
-// Perguntas adicionais por tipo de ativo
-const PERGUNTAS_POR_TIPO: Record<TipoAtivoInvestimento, PerguntaQuestionario[]> = {
+// Perguntas específicas adicionais por tipo (enriquecem o default).
+const PERGUNTAS_POR_TIPO: Partial<Record<TipoAtivoInvestimento, PerguntaAvaliacao[]>> = {
   ACOES: [
-    {
-      id: 'fundamentos',
-      texto: 'Como você avalia os fundamentos da empresa (lucro, dívida, governança)?',
-      opcoes: ['Muito fracos', 'Fracos', 'Razoáveis', 'Bons', 'Excelentes'],
-    },
-    {
-      id: 'setor',
-      texto: 'Qual a perspectiva do setor da empresa?',
-      opcoes: ['Em declínio', 'Estagnado', 'Estável', 'Em crescimento', 'Em forte expansão'],
-    },
-  ],
-  ETF: [
-    {
-      id: 'custo_taxa',
-      texto: 'Como a taxa de administração se compara a ETFs similares?',
-      opcoes: ['Muito mais cara', 'Mais cara', 'Na média', 'Mais barata', 'Muito mais barata'],
-    },
-    {
-      id: 'indice',
-      texto: 'Qual a sua confiança no índice que o ETF replica?',
-      opcoes: ['Nenhuma', 'Baixa', 'Média', 'Alta', 'Total'],
-    },
+    { id: 'a_valuation', criterio: 'FUNDAMENTOS', texto: 'O preço atual está atrativo frente aos fundamentos (valuation)?',
+      opcoes: ['Muito caro', 'Caro', 'Justo', 'Barato', 'Muito barato'] },
+    { id: 'a_lucro', criterio: 'CRESCIMENTO', texto: 'Qual a tendência de crescimento de lucros da empresa?',
+      opcoes: ['Em queda', 'Estagnado', 'Leve alta', 'Crescente', 'Forte crescimento'] },
   ],
   FII: [
-    {
-      id: 'vacancia',
-      texto: 'Como está a vacância/inadimplência dos imóveis do fundo?',
-      opcoes: ['Muito alta', 'Alta', 'Média', 'Baixa', 'Muito baixa'],
-    },
-    {
-      id: 'dividendos_fii',
-      texto: 'O histórico de distribuição de rendimentos é consistente?',
-      opcoes: ['Muito irregular', 'Irregular', 'Razoável', 'Consistente', 'Muito consistente'],
-    },
+    { id: 'fii_vacancia', criterio: 'FUNDAMENTOS', texto: 'Como está a vacância/inadimplência dos imóveis do fundo?',
+      opcoes: ['Muito alta', 'Alta', 'Média', 'Baixa', 'Muito baixa'] },
+    { id: 'fii_pvp', criterio: 'CRESCIMENTO', texto: 'O preço sobre valor patrimonial (P/VP) está favorável?',
+      opcoes: ['Muito acima', 'Acima', 'Em linha', 'Abaixo', 'Bem abaixo'] },
   ],
   REIT: [
-    {
-      id: 'ocupacao_reit',
-      texto: 'Como está a taxa de ocupação dos imóveis do REIT?',
-      opcoes: ['Muito baixa', 'Baixa', 'Média', 'Alta', 'Muito alta'],
-    },
-    {
-      id: 'dividendos_reit',
-      texto: 'O histórico de distribuição de dividendos é consistente?',
-      opcoes: ['Muito irregular', 'Irregular', 'Razoável', 'Consistente', 'Muito consistente'],
-    },
-  ],
-  STOCKS: [
-    {
-      id: 'gestao',
-      texto: 'Como você avalia a qualidade da gestão da empresa?',
-      opcoes: ['Muito ruim', 'Ruim', 'Mediana', 'Boa', 'Excelente'],
-    },
-    {
-      id: 'crescimento',
-      texto: 'Qual o potencial de crescimento do negócio?',
-      opcoes: ['Nenhum', 'Baixo', 'Moderado', 'Alto', 'Muito alto'],
-    },
-  ],
-  ETF_INTERNACIONAL: [
-    {
-      id: 'diversificacao_geo',
-      texto: 'A diversificação geográfica do ETF agrega à sua carteira?',
-      opcoes: ['Nada', 'Pouco', 'Moderadamente', 'Bastante', 'Muito'],
-    },
-    {
-      id: 'cambio',
-      texto: 'Como você avalia sua exposição cambial com este ativo?',
-      opcoes: ['Desconfortável', 'Pouco confortável', 'Neutra', 'Confortável', 'Desejada'],
-    },
+    { id: 'reit_ocupacao', criterio: 'FUNDAMENTOS', texto: 'Como está a taxa de ocupação dos imóveis do REIT?',
+      opcoes: ['Muito baixa', 'Baixa', 'Média', 'Alta', 'Muito alta'] },
   ],
   RENDA_FIXA: [
-    {
-      id: 'prazo_indexador',
-      texto: 'O prazo e o indexador (CDI/IPCA/pré) combinam com seu objetivo?',
-      opcoes: ['Não combinam', 'Combinam pouco', 'Parcialmente', 'Combinam bem', 'Perfeitamente'],
-    },
-    {
-      id: 'credito',
-      texto: 'Qual o risco de crédito do emissor?',
-      opcoes: ['Muito alto', 'Alto', 'Médio', 'Baixo', 'Muito baixo (ou garantido FGC)'],
-    },
-  ],
-  CRIPTOMOEDAS: [
-    {
-      id: 'adocao',
-      texto: 'Qual o nível de adoção e utilidade real do projeto?',
-      opcoes: ['Nenhum', 'Especulativo', 'Inicial', 'Crescente', 'Consolidado'],
-    },
-    {
-      id: 'volatilidade_cripto',
-      texto: 'O tamanho da posição é adequado para a volatilidade de cripto?',
-      opcoes: ['Muito exposto', 'Exposto', 'No limite', 'Adequado', 'Bem dimensionado'],
-    },
+    { id: 'rf_credito', criterio: 'FUNDAMENTOS', texto: 'Qual o risco de crédito do emissor?',
+      opcoes: ['Muito alto', 'Alto', 'Médio', 'Baixo', 'Muito baixo (ou FGC)'] },
+    { id: 'rf_indexador', criterio: 'CRESCIMENTO', texto: 'O indexador/taxa combina com o seu objetivo e o cenário?',
+      opcoes: ['Não combina', 'Combina pouco', 'Parcialmente', 'Combina bem', 'Perfeito'] },
   ],
   TESOURO_DIRETO: [
-    {
-      id: 'vencimento',
-      texto: 'O vencimento do título está alinhado ao seu objetivo?',
-      opcoes: ['Desalinhado', 'Pouco alinhado', 'Parcialmente', 'Alinhado', 'Perfeitamente alinhado'],
-    },
-    {
-      id: 'marcacao',
-      texto: 'Você entende e aceita a marcação a mercado até o vencimento?',
-      opcoes: ['Não entendo', 'Entendo pouco', 'Entendo', 'Entendo e aceito', 'Domino e uso a favor'],
-    },
+    { id: 'td_vencimento', criterio: 'FUNDAMENTOS', texto: 'O vencimento do título está alinhado ao seu objetivo?',
+      opcoes: ['Desalinhado', 'Pouco alinhado', 'Parcialmente', 'Alinhado', 'Perfeito'] },
+  ],
+  CRIPTOMOEDAS: [
+    { id: 'cripto_adocao', criterio: 'CRESCIMENTO', texto: 'Qual o nível de adoção e utilidade real do projeto?',
+      opcoes: ['Nenhum', 'Especulativo', 'Inicial', 'Crescente', 'Consolidado'] },
   ],
 }
 
-export function perguntasParaTipo(tipo: TipoAtivoInvestimento): PerguntaQuestionario[] {
+// Perguntas PADRÃO (semente) de um tipo: base + específicas. Sempre ≥10.
+export function perguntasPadrao(tipo: TipoAtivoInvestimento): PerguntaAvaliacao[] {
   return [...PERGUNTAS_BASE, ...(PERGUNTAS_POR_TIPO[tipo] ?? [])]
 }
 
-// Nota 0..10 = média dos índices respondidos × 2.5 (1 casa decimal).
-// Retorna null se nenhuma pergunta foi respondida.
-export function calcularNotaQuestionario(
-  tipo: TipoAtivoInvestimento,
+// ── Cálculo da nota (média ponderada por critério) ─────────────
+// Nota de cada critério = média dos índices respondidos × 2.5 (0..10).
+// Nota final = média ponderada pelos pesos dos critérios COM resposta.
+// Se nenhum critério com peso > 0 tiver resposta, cai para média simples.
+// Retorna null quando nenhuma pergunta foi respondida.
+export function calcularNota(
+  perguntas: PerguntaAvaliacao[],
+  pesos: PesosCriterio,
   respostas: Record<string, number>,
 ): number | null {
-  const perguntas = perguntasParaTipo(tipo)
-  const validas = perguntas.filter((p) => Number.isInteger(respostas[p.id]) && respostas[p.id] >= 0 && respostas[p.id] <= 4)
-  if (validas.length === 0) return null
-  const soma = validas.reduce((s, p) => s + respostas[p.id], 0)
-  return Math.round((soma / validas.length) * 2.5 * 10) / 10
+  const notasPorCriterio = new Map<string, number>()
+  for (const criterio of CRITERIOS_QUESTAO) {
+    const doCriterio = perguntas.filter(
+      (p) => p.criterio === criterio &&
+        Number.isInteger(respostas[p.id]) && respostas[p.id] >= 0 && respostas[p.id] <= 4,
+    )
+    if (doCriterio.length === 0) continue
+    const soma = doCriterio.reduce((s, p) => s + respostas[p.id], 0)
+    notasPorCriterio.set(criterio, (soma / doCriterio.length) * 2.5)
+  }
+  if (notasPorCriterio.size === 0) return null
+
+  let somaPond = 0
+  let somaPeso = 0
+  for (const [criterio, nota] of notasPorCriterio) {
+    const peso = Math.max(0, pesos[criterio as keyof PesosCriterio] ?? 0)
+    somaPond += nota * peso
+    somaPeso += peso
+  }
+  // Fallback: critérios respondidos têm peso 0 → média simples entre eles.
+  if (somaPeso === 0) {
+    const media = [...notasPorCriterio.values()].reduce((s, n) => s + n, 0) / notasPorCriterio.size
+    return Math.round(media * 10) / 10
+  }
+  return Math.round((somaPond / somaPeso) * 10) / 10
 }
 
 // ── Recomendação de compra ────────────────────────────────────

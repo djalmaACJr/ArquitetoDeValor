@@ -28,8 +28,7 @@ import {
   erro,
   json,
 } from "../_shared/utils.ts";
-import { decriptar, ehBlob } from "../_shared/cripto.ts";
-import { logError } from "../_shared/logger.ts";
+import { chamarProvedorIA, lerConfigIAAtiva, parsearImagem } from "../_shared/ia.ts";
 
 // ── Persona dos mascotes ──────────────────────────────────────────────
 // Mantido em sincronia com `Documentação/MASCOTES.md` e
@@ -194,235 +193,13 @@ ESTILO DA RESPOSTA:
 - Português do Brasil.`,
 };
 
-// Teto de tokens da RESPOSTA. 600 estava cortando explicações no meio
-// (especialmente Arquiteta com cálculos e Raposa com cenários). 2000 dá
-// margem para ~1500 palavras em pt-BR — suficiente sem inflar custo
-// significativamente (~US$ 0,002 por resposta no Claude Haiku 4.5).
-// As personas já pedem "2 a 5 frases" no system, então o modelo geralmente
-// fica abaixo do teto — só usa o espaço extra quando a pergunta exige.
-const MAX_TOKENS = 2000;
-
 interface HistoricoItem {
   role: "user" | "assistant";
   content: string;
 }
 
-// ── Adaptadores por provedor ──────────────────────────────────────────
-
-interface Imagem {
-  mediaType: string;  // ex: 'image/png', 'image/jpeg'
-  base64:    string;  // dados crus (sem prefixo `data:`)
-}
-
-interface ChamadaIA {
-  apiKey:    string;
-  persona:   string;
-  mensagens: Array<{ role: "user" | "assistant"; content: string }>;
-  /** Quando presente, é anexada à última mensagem do usuário. Adapter ignora se o modelo não suporta visão. */
-  imagem?:   Imagem;
-}
-
-/** Extrai mediaType + base64 puro de uma data URL ou aceita base64 puro (assume image/png). */
-function parsearImagem(s: string): Imagem | null {
-  if (!s) return null;
-  const m = s.match(/^data:(image\/[a-z]+);base64,(.+)$/i);
-  if (m) return { mediaType: m[1].toLowerCase(), base64: m[2] };
-  // Base64 puro (sem prefixo) — assume PNG
-  if (/^[A-Za-z0-9+/=]+$/.test(s.slice(0, 100))) return { mediaType: "image/png", base64: s };
-  return null;
-}
-
-async function chamarClaude({ apiKey, persona, mensagens, imagem }: ChamadaIA): Promise<string> {
-  // Se imagem vier, anexa à última mensagem do usuário (formato multimodal do Claude).
-  const msgs: unknown[] = mensagens.map((m, i) => {
-    if (imagem && i === mensagens.length - 1 && m.role === "user") {
-      return {
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: imagem.mediaType, data: imagem.base64 } },
-          { type: "text",  text: m.content },
-        ],
-      };
-    }
-    return m;
-  });
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key":         apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type":      "application/json",
-    },
-    body: JSON.stringify({
-      model:      "claude-haiku-4-5-20251001",
-      max_tokens: MAX_TOKENS,
-      system:     persona,
-      messages:   msgs,
-    }),
-  });
-  if (!resp.ok) throw new Error(`Claude ${resp.status}: ${await resp.text()}`);
-  const data = await resp.json() as { content?: Array<{ type: string; text: string }> };
-  return (data.content ?? [])
-    .filter(c => c.type === "text").map(c => c.text).join("\n").trim();
-}
-
-async function chamarOpenAICompat(url: string, model: string, { apiKey, persona, mensagens }: ChamadaIA): Promise<string> {
-  // OpenAI e DeepSeek usam o mesmo formato Chat Completions.
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type":  "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: MAX_TOKENS,
-      messages: [
-        { role: "system", content: persona },
-        ...mensagens,
-      ],
-    }),
-  });
-  if (!resp.ok) throw new Error(`${url} ${resp.status}: ${await resp.text()}`);
-  const data = await resp.json() as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  return (data.choices?.[0]?.message?.content ?? "").trim();
-}
-
-async function chamarGPT({ apiKey, persona, mensagens, imagem }: ChamadaIA): Promise<string> {
-  // Formato multimodal OpenAI: o content da última msg do usuário vira array com text + image_url.
-  const msgs: unknown[] = [
-    { role: "system", content: persona },
-    ...mensagens.map((m, i) => {
-      if (imagem && i === mensagens.length - 1 && m.role === "user") {
-        return {
-          role: "user",
-          content: [
-            { type: "text",      text: m.content },
-            { type: "image_url", image_url: { url: `data:${imagem.mediaType};base64,${imagem.base64}` } },
-          ],
-        };
-      }
-      return m;
-    }),
-  ];
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      max_tokens: MAX_TOKENS,
-      messages: msgs,
-    }),
-  });
-  if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${await resp.text()}`);
-  const data = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
-  return (data.choices?.[0]?.message?.content ?? "").trim();
-}
-
-async function chamarDeepSeek(c: ChamadaIA): Promise<string> {
-  return chamarOpenAICompat("https://api.deepseek.com/chat/completions", "deepseek-chat", c);
-}
-
-async function chamarOpenRouter(c: ChamadaIA): Promise<string> {
-  // OpenRouter usa formato OpenAI-compatível. ":free" no fim do modelo = sem custo.
-  return chamarOpenAICompat(
-    "https://openrouter.ai/api/v1/chat/completions",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    c,
-  );
-}
-
-async function chamarMistral(c: ChamadaIA): Promise<string> {
-  return chamarOpenAICompat(
-    "https://api.mistral.ai/v1/chat/completions",
-    "mistral-small-latest",
-    c,
-  );
-}
-
-async function chamarCohere({ apiKey, persona, mensagens }: ChamadaIA): Promise<string> {
-  // Cohere v2 — formato próximo ao OpenAI no REQUEST (messages com system),
-  // mas a RESPONSE vem como { message: { content: [{ type: 'text', text }] } }.
-  const resp = await fetch("https://api.cohere.com/v2/chat", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type":  "application/json",
-    },
-    body: JSON.stringify({
-      model: "command-r-08-2024",
-      max_tokens: MAX_TOKENS,
-      messages: [
-        { role: "system", content: persona },
-        ...mensagens,
-      ],
-    }),
-  });
-  if (!resp.ok) throw new Error(`Cohere ${resp.status}: ${await resp.text()}`);
-  const data = await resp.json() as {
-    message?: { content?: Array<{ type: string; text?: string }> };
-  };
-  return (data.message?.content ?? [])
-    .filter(c => c.type === "text").map(c => c.text ?? "").join("\n").trim();
-}
-
-// Modelos preferenciais do Gemini, em ordem. Como o Google mexe muito nos
-// nomes/disponibilidade dos modelos por região e tier, tentamos do mais
-// novo para o mais antigo até achar um que responda 200.
-const GEMINI_MODELOS = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-flash-latest",
-  "gemini-1.5-flash-latest",
-];
-
-/** Faz a chamada para um modelo específico do Gemini. Retorna o Response cru. */
-async function chamarGeminiModelo(modelo: string, apiKey: string, persona: string, contents: unknown[]): Promise<Response> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${apiKey}`;
-  return await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: persona }] },
-      contents,
-      generationConfig: { maxOutputTokens: MAX_TOKENS },
-    }),
-  });
-}
-
-async function chamarGemini({ apiKey, persona, mensagens, imagem }: ChamadaIA): Promise<string> {
-  // Gemini usa formato próprio: system_instruction + contents alternados.
-  // Mapeia "assistant" → "model" e "user" → "user". Imagem vai como inline_data
-  // nos `parts` da última mensagem do usuário.
-  const contents = mensagens.map((m, i) => {
-    const parts: unknown[] = [{ text: m.content }];
-    if (imagem && i === mensagens.length - 1 && m.role === "user") {
-      parts.unshift({ inline_data: { mime_type: imagem.mediaType, data: imagem.base64 } });
-    }
-    return { role: m.role === "assistant" ? "model" : "user", parts };
-  });
-
-  let ultimoErro = "";
-  for (const modelo of GEMINI_MODELOS) {
-    const resp = await chamarGeminiModelo(modelo, apiKey, persona, contents);
-    if (resp.ok) {
-      const data = await resp.json() as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      };
-      return (data.candidates?.[0]?.content?.parts ?? [])
-        .map(p => p.text ?? "").join("").trim();
-    }
-    const corpo = await resp.text();
-    ultimoErro = `${modelo} ${resp.status}: ${corpo.slice(0, 200)}`;
-    // 404 = modelo indisponível → tenta o próximo. Outros status (401, 429, 5xx) são erros reais, propaga.
-    if (resp.status !== 404) {
-      throw new Error(`Gemini ${ultimoErro}`);
-    }
-  }
-  throw new Error(`Gemini: nenhum modelo disponível para sua chave. Último erro: ${ultimoErro}`);
-}
+// Adaptadores por provedor, despacho e leitura da config ativa de IA
+// vivem em ../_shared/ia.ts (reaproveitados pelo módulo de investimentos).
 
 // ── Handler principal ────────────────────────────────────────────────
 
@@ -480,52 +257,11 @@ Deno.serve(async (req: Request) => {
     persona = `O usuário te deu o apelido "${apelido}". Sempre se apresente e se refira a si ${pronome} como "${apelido}" — esse é o seu nome agora. Sua função e personalidade continuam as mesmas do ${padrao}.\n\n${persona}`;
   }
 
-  // Lê configs de IA do próprio usuário (RLS garante isolamento) e
-  // resolve a config marcada como ATIVA.
+  // Lê a config de IA ATIVA do próprio usuário (RLS isola) e decripta a chave.
   const cliente = db(req);
-  const { data: prefs, error: errLeitura } = await cliente
-    .from("usuarios")
-    .select("ia_configs")
-    .eq("id", userId)
-    .single();
-
-  if (errLeitura || !prefs) {
-    return erro("Não foi possível ler suas preferências de IA.", 500);
-  }
-
-  interface IAConfig {
-    id: string;
-    provedor: string;
-    // Pode ser:
-    //   - objeto { v, cipher, iv }  (novo formato criptografado)
-    //   - string                    (formato legado, ignorado por segurança)
-    api_key: unknown;
-    nome?: string;
-  }
-  interface IAConfigsCol {
-    ativa: string | null;
-    configs: IAConfig[];
-  }
-  const col = (prefs.ia_configs as IAConfigsCol | null) ?? { ativa: null, configs: [] };
-  const ativa = col.configs.find(c => c.id === col.ativa);
-
-  if (!ativa || !ativa.provedor || !ehBlob(ativa.api_key)) {
-    return erro(
-      "Integração com IA não configurada (ou em formato antigo). Vá em Perfil → Integração com IA e cadastre uma chave.",
-      400,
-    );
-  }
-  const provedor = ativa.provedor;
-  let apiKey: string;
-  try {
-    apiKey = await decriptar(ativa.api_key);
-  } catch (e) {
-    logError("Decriptar api_key", e);
-    return erro(
-      "Falha ao decriptar a chave da API. Recadastre a configuração em Perfil → Integração com IA.",
-      500,
-    );
-  }
+  const cfg = await lerConfigIAAtiva(cliente, userId);
+  if (!cfg.ok) return erro(cfg.erro, cfg.status);
+  const { provedor, apiKey } = cfg.config;
 
   // Injeta contexto da página (texto) antes da pergunta do usuário, separado
   // por delimitador claro pra IA distinguir o que são DADOS e o que é PERGUNTA.
@@ -538,23 +274,11 @@ Deno.serve(async (req: Request) => {
     { role: "user", content: mensagemFinal },
   ];
 
-  // Screenshot opcional — só passado pros provedores com visão.
-  const imagem = parsearImagem(screenshot);
-  const PROVEDORES_VISAO = new Set(["claude", "gpt", "gemini"]);
-  const imagemSeAplicavel = imagem && PROVEDORES_VISAO.has(provedor) ? imagem : undefined;
+  // Screenshot opcional — chamarProvedorIA descarta para provedores sem visão.
+  const imagem = parsearImagem(screenshot) ?? undefined;
 
   try {
-    let resposta = "";
-    switch (provedor) {
-      case "claude":     resposta = await chamarClaude({     apiKey, persona, mensagens, imagem: imagemSeAplicavel }); break;
-      case "gpt":        resposta = await chamarGPT({        apiKey, persona, mensagens, imagem: imagemSeAplicavel }); break;
-      case "gemini":     resposta = await chamarGemini({     apiKey, persona, mensagens, imagem: imagemSeAplicavel }); break;
-      case "deepseek":   resposta = await chamarDeepSeek({   apiKey, persona, mensagens }); break;
-      case "openrouter": resposta = await chamarOpenRouter({ apiKey, persona, mensagens }); break;
-      case "mistral":    resposta = await chamarMistral({    apiKey, persona, mensagens }); break;
-      case "cohere":     resposta = await chamarCohere({     apiKey, persona, mensagens }); break;
-      default:           return erro(`Provedor desconhecido: ${provedor}`, 400);
-    }
+    const resposta = await chamarProvedorIA(provedor, { apiKey, persona, mensagens, imagem });
     if (!resposta) return erro("Resposta vazia da IA", 502);
     return json({ resposta });
   } catch (e) {

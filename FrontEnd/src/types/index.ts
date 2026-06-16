@@ -4,10 +4,12 @@
 // para preservar `import type { TipoConta } from '../types'` existentes.
 import type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia,
   TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento,
-  SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo } from '../lib/constants'
+  SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo,
+  CriterioQuestao, PerfilInvestidorTipo } from '../lib/constants'
 export type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia,
   TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento,
-  SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo }
+  SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo,
+  CriterioQuestao, PerfilInvestidorTipo }
 
 export interface CartaoVirtual {
   id:      string   // uuid local, gerado no front via crypto.randomUUID()
@@ -354,6 +356,43 @@ export interface InvestimentoAlocacaoTipo {
   percentual_ideal: number
   created_at:       string
   updated_at:       string
+}
+
+// ── Questionário de avaliação (configurável por tipo) ─────────
+// Pergunta com critério (Fundamentos/Crescimento/Dividendos) e 5 opções
+// ordenadas (pior → melhor). Usado tanto no default estático quanto no
+// questionário custom salvo em inv_questionarios.
+export interface PerguntaAvaliacao {
+  id:       string
+  texto:    string
+  criterio: CriterioQuestao
+  opcoes:   [string, string, string, string, string]
+}
+
+// Pesos por critério (somam 100). Nota final = média ponderada.
+export type PesosCriterio = Record<CriterioQuestao, number>
+
+// Questionário custom por tipo de ativo (linha de inv_questionarios).
+export interface InvQuestionario {
+  id?:          string
+  tipo_ativo:   TipoAtivoInvestimento
+  perguntas:    PerguntaAvaliacao[]
+  pesos:        PesosCriterio
+  origem:       'MANUAL' | 'IA'
+  ia_provedor:  string | null
+  ia_modelo:    string | null
+  ia_gerou_em:  string | null
+  created_at?:  string
+  updated_at?:  string
+}
+
+// Perfil de investidor (usuarios.inv_perfil — JSONB inline).
+export interface PerfilInvestidor {
+  perfil:              PerfilInvestidorTipo
+  idade:               number
+  idade_aposentadoria: number
+  suitability:         Record<string, number>
+  atualizado_em:       string
 }
 
 export interface InvestimentoHistoricoMensal {

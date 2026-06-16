@@ -12,6 +12,7 @@ import {
   verificarExistencia, camposParaAtualizar, corsPreFlight,
 } from "../_shared/utils.ts";
 import { logError, logRequest, logResponse, logSuccess } from "../_shared/logger.ts";
+import { chamarProvedorIA, lerConfigIAAtiva } from "../_shared/ia.ts";
 
 type Db = ReturnType<typeof db>;
 
@@ -19,6 +20,14 @@ const TIPOS_ATIVO = [
   "ACOES", "ETF", "FII", "REIT", "STOCKS",
   "ETF_INTERNACIONAL", "RENDA_FIXA", "CRIPTOMOEDAS", "TESOURO_DIRETO",
 ];
+// Critérios das perguntas do questionário de avaliação.
+const CRITERIOS_QUESTAO = ["FUNDAMENTOS", "CRESCIMENTO", "DIVIDENDOS"];
+const TIPO_ATIVO_LABEL_BR: Record<string, string> = {
+  ACOES: "Ações (Brasil)", ETF: "ETF (Brasil)", FII: "Fundos Imobiliários (FII)",
+  REIT: "REITs (fundos imobiliários dos EUA)", STOCKS: "Ações internacionais (Stocks)",
+  ETF_INTERNACIONAL: "ETF Internacional", RENDA_FIXA: "Renda Fixa (CDB/LCI/LCA/CRI/CRA/Debênture)",
+  CRIPTOMOEDAS: "Criptomoedas", TESOURO_DIRETO: "Tesouro Direto",
+};
 const STATUS_POSICAO = ["ATIVA", "ENCERRADA"];
 const TIPOS_OPERACAO = ["COMPRA", "VENDA", "APORTE", "RESGATE", "DIVIDENDO"];
 // Renda fixa / Tesouro Direto
@@ -68,6 +77,7 @@ Deno.serve(async (req: Request) => {
     switch (recurso) {
       case "ativos":          return await rotaAtivos(c, req, m, userId);
       case "alocacoes":       return await rotaAlocacoes(c, req, m, userId);
+      case "questionarios":   return await rotaQuestionarios(c, req, m, userId);
       case "posicoes":        return await rotaPosicoes(c, req, m, userId);
       case "operacoes":       return await rotaOperacoes(c, req, m, userId);
       case "dividendos":      return await rotaDividendos(c, req, m, userId);
@@ -358,6 +368,212 @@ async function rotaAlocacoes(c: Db, req: Request, m: string, userId: string) {
   }
 
   return erro("Método não permitido", 405);
+}
+
+// ============================================================
+// /investimentos/questionarios — questionário de avaliação custom
+// por tipo de ativo (sobrepõe o default do frontend).
+//   GET    /questionarios            → lista todos os custom do usuário
+//   GET    /questionarios/:tipo      → 1 tipo (404 se não houver custom)
+//   PUT    /questionarios/:tipo      → upsert (manual ou IA)
+//   DELETE /questionarios/:tipo      → remove (volta ao default)
+//   POST   /questionarios/:tipo/gerar → Mentor (IA) monta o questionário
+// ============================================================
+
+// Segmento após "questionarios" no path (o tipo_ativo). extrairId só
+// reconhece UUID, então parseamos manualmente.
+function segmentoTipo(req: Request): string | null {
+  const partes = new URL(req.url).pathname.split("/").filter(Boolean);
+  const idx = partes.indexOf("questionarios");
+  if (idx === -1 || idx + 1 >= partes.length) return null;
+  return decodeURIComponent(partes[idx + 1]);
+}
+
+// Valida o payload { perguntas, pesos } de um questionário. Retorna
+// string de erro ou null se válido.
+function validarQuestionario(perguntas: unknown, pesos: unknown): string | null {
+  if (!Array.isArray(perguntas) || perguntas.length < 10) {
+    return "perguntas deve ser um array com no mínimo 10 questões";
+  }
+  const ids = new Set<string>();
+  for (const p of perguntas as Array<Record<string, unknown>>) {
+    const id = String(p?.id ?? "").trim();
+    if (!id) return "cada pergunta precisa de um id";
+    if (ids.has(id)) return `id de pergunta duplicado: ${id}`;
+    ids.add(id);
+    if (!String(p?.texto ?? "").trim()) return `pergunta ${id} sem texto`;
+    if (!CRITERIOS_QUESTAO.includes(String(p?.criterio))) {
+      return `pergunta ${id} com critério inválido (use FUNDAMENTOS, CRESCIMENTO ou DIVIDENDOS)`;
+    }
+    const opcoes = p?.opcoes;
+    if (!Array.isArray(opcoes) || opcoes.length !== 5 || opcoes.some((o) => !String(o ?? "").trim())) {
+      return `pergunta ${id} precisa de exatamente 5 opções não vazias`;
+    }
+  }
+  // Cada critério deve ter ao menos 1 pergunta (questionário cobre os 3).
+  for (const cr of CRITERIOS_QUESTAO) {
+    if (!(perguntas as Array<Record<string, unknown>>).some((p) => String(p?.criterio) === cr)) {
+      return `o questionário precisa cobrir o critério ${cr}`;
+    }
+  }
+  const pe = pesos as Record<string, unknown> | null;
+  if (!pe || typeof pe !== "object") return "pesos é obrigatório";
+  let soma = 0;
+  for (const cr of CRITERIOS_QUESTAO) {
+    const v = Number(pe[cr]);
+    if (!Number.isFinite(v) || v < 0 || v > 100) return `peso inválido para ${cr}`;
+    soma += v;
+  }
+  if (Math.abs(soma - 100) > 0.5) return `a soma dos pesos deve ser 100 (atual: ${soma})`;
+  return null;
+}
+
+async function rotaQuestionarios(c: Db, req: Request, m: string, userId: string) {
+  const tipo = segmentoTipo(req);
+
+  // Lista todos os custom
+  if (m === "GET" && !tipo) {
+    logRequest("GET", "/investimentos/questionarios");
+    const { data, error } = await c.from("inv_questionarios").select("*").order("tipo_ativo");
+    if (error) { logError("Listar questionarios", error); return erro(error.message); }
+    return json({ dados: data });
+  }
+
+  if (tipo && !TIPOS_ATIVO.includes(tipo)) return erro(`tipo_ativo inválido: ${tipo}`);
+
+  // Geração por IA: POST /questionarios/:tipo/gerar
+  const acao = extrairAcao(req, "questionarios"); // 3º segmento após "questionarios"
+  if (m === "POST" && tipo && acao === "gerar") {
+    return await gerarQuestionarioIA(c, req, tipo!, userId);
+  }
+
+  if (m === "GET" && tipo) {
+    const { data, error } = await c.from("inv_questionarios").select("*").eq("tipo_ativo", tipo).maybeSingle();
+    if (error) { logError("Buscar questionario", error); return erro(error.message); }
+    if (!data) return erro("Sem questionário customizado para este tipo", 404);
+    return json({ dados: data });
+  }
+
+  if (m === "PUT" && tipo) {
+    const body = await req.json();
+    logRequest("PUT", `/investimentos/questionarios/${tipo}`);
+    const validacao = validarQuestionario(body?.perguntas, body?.pesos);
+    if (validacao) return erro(validacao);
+
+    const origem = body?.origem === "IA" ? "IA" : "MANUAL";
+    const linha = {
+      user_id:     userId,
+      tipo_ativo:  tipo,
+      perguntas:   body.perguntas,
+      pesos:       body.pesos,
+      origem,
+      ia_provedor: origem === "IA" ? (body?.ia_provedor ?? null) : null,
+      ia_modelo:   origem === "IA" ? (body?.ia_modelo ?? null) : null,
+      ia_gerou_em: origem === "IA" ? new Date().toISOString() : null,
+      updated_at:  new Date().toISOString(),
+    };
+    const { data, error } = await c
+      .from("inv_questionarios")
+      .upsert(linha, { onConflict: "user_id,tipo_ativo" })
+      .select()
+      .single();
+    if (error) { logError("Upsert questionario", error); return erro(error.message); }
+    logSuccess("Questionário salvo", { tipo, origem });
+    return json({ dados: data });
+  }
+
+  if (m === "DELETE" && tipo) {
+    const { error } = await c.from("inv_questionarios").delete().eq("tipo_ativo", tipo);
+    if (error) { logError("Excluir questionario", error); return erro(error.message); }
+    return json({ dados: { tipo_ativo: tipo, removido: true } });
+  }
+
+  return erro("Método não permitido", 405);
+}
+
+// Pede ao provedor de IA do usuário para montar o questionário. NÃO
+// persiste — devolve { perguntas, pesos, ia_provedor, ia_modelo } para
+// pré-visualização; o frontend salva via PUT (origem='IA').
+async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, userId: string) {
+  logRequest("POST", `/investimentos/questionarios/${tipo}/gerar`);
+
+  const cfg = await lerConfigIAAtiva(c, userId);
+  if (!cfg.ok) return erro(cfg.erro, cfg.status);
+  const { provedor, modelo, apiKey } = cfg.config;
+
+  // Contexto do perfil do investidor (se configurado).
+  const { data: perfilRow } = await c.from("usuarios").select("inv_perfil").eq("id", userId).maybeSingle();
+  const perfil = (perfilRow?.inv_perfil ?? null) as
+    | { perfil?: string; idade?: number; idade_aposentadoria?: number }
+    | null;
+  const ctxPerfil = perfil?.perfil
+    ? `Perfil do investidor: ${perfil.perfil}. Idade: ${perfil.idade ?? "?"}. ` +
+      `Idade de aposentadoria pretendida: ${perfil.idade_aposentadoria ?? "?"}.`
+    : "Perfil do investidor: não informado (use pesos equilibrados).";
+
+  const rotuloTipo = TIPO_ATIVO_LABEL_BR[tipo] ?? tipo;
+  const system =
+    "Você é um especialista em análise de investimentos. Monte um questionário de avaliação " +
+    "de ativos para o tipo informado, em português do Brasil. Responda SOMENTE com um JSON " +
+    "válido (sem markdown, sem comentários, sem texto fora do JSON) no formato exato:\n" +
+    '{ "perguntas": [ { "id": "slug_curto", "texto": "...", "criterio": "FUNDAMENTOS|CRESCIMENTO|DIVIDENDOS", ' +
+    '"opcoes": ["pior","...","...","...","melhor"] } ], "pesos": { "FUNDAMENTOS": int, "CRESCIMENTO": int, "DIVIDENDOS": int } }\n' +
+    "Regras: no MÍNIMO 10 perguntas; cobrir os 3 critérios (FUNDAMENTOS = solidez/qualidade do ativo; " +
+    "CRESCIMENTO = potencial de valorização; DIVIDENDOS = geração de renda/proventos); cada pergunta com " +
+    "EXATAMENTE 5 opções ordenadas da pior (índice 0) à melhor (índice 4); ids curtos, únicos, em snake_case; " +
+    "os pesos são inteiros que SOMAM 100 e devem refletir o perfil do investidor.";
+  const userMsg =
+    `Tipo de ativo: ${rotuloTipo} (código ${tipo}).\n${ctxPerfil}\n` +
+    "Gere o questionário agora.";
+
+  let bruto: string;
+  try {
+    bruto = await chamarProvedorIA(provedor, {
+      apiKey,
+      persona: system,
+      mensagens: [{ role: "user", content: userMsg }],
+      maxTokens: 4000,
+    });
+  } catch (e) {
+    logError("Gerar questionario IA", e);
+    const msg = e instanceof Error ? e.message : String(e);
+    return erro(`Falha ao falar com a IA (${provedor}): ${msg.slice(0, 200)}`, 502);
+  }
+
+  const parsed = extrairJson(bruto);
+  if (!parsed) return erro("A IA não retornou um JSON válido. Tente novamente.", 502);
+  const validacao = validarQuestionario(parsed.perguntas, parsed.pesos);
+  if (validacao) return erro(`A IA retornou um questionário inválido: ${validacao}`, 502);
+
+  return json({
+    dados: {
+      tipo_ativo:  tipo,
+      perguntas:   parsed.perguntas,
+      pesos:       parsed.pesos,
+      ia_provedor: provedor,
+      ia_modelo:   modelo,
+    },
+  });
+}
+
+// Extrai o primeiro objeto JSON do texto da IA (tolera cercas ```json e
+// texto ao redor). Retorna null se não conseguir parsear.
+function extrairJson(texto: string): { perguntas: unknown; pesos: unknown } | null {
+  if (!texto) return null;
+  let s = texto.trim();
+  // Remove cercas de código markdown se houver.
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+  // Recorta do primeiro { ao último }.
+  const ini = s.indexOf("{");
+  const fim = s.lastIndexOf("}");
+  if (ini === -1 || fim <= ini) return null;
+  try {
+    const obj = JSON.parse(s.slice(ini, fim + 1));
+    return { perguntas: obj?.perguntas, pesos: obj?.pesos };
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================
@@ -2799,7 +3015,7 @@ async function rotaRestaurar(c: Db, req: Request, m: string, userId: string) {
   };
 
   try {
-    const out = { tipos: 0, ativos: 0, posicoes: 0, operacoes: 0, dividendos: 0, historico: 0, alocacoes: 0 };
+    const out = { tipos: 0, ativos: 0, posicoes: 0, operacoes: 0, dividendos: 0, historico: 0, alocacoes: 0, questionarios: 0 };
 
     // ── 1) Tipos de dividendo (por nome) ──
     const tiposIn = arr(body.tipos_dividendo);
@@ -2959,6 +3175,25 @@ async function rotaRestaurar(c: Db, req: Request, m: string, userId: string) {
       const linhas = alocIn.map((a) => ({ user_id: userId, tipo_ativo: a.tipo_ativo, percentual_ideal: Number(a.percentual_ideal) || 0, updated_at: new Date().toISOString() }));
       const { error } = await c.from("inv_alocacoes_tipo").upsert(linhas, { onConflict: "user_id,tipo_ativo" });
       if (error) avisos.push(`Alocações: ${error.message}`); else out.alocacoes = linhas.length;
+    }
+
+    // ── 8) Questionários de avaliação custom (upsert por tipo) ──
+    const questIn = arr(body.questionarios).filter((q) =>
+      TIPOS_ATIVO.includes(String(q.tipo_ativo)) && !validarQuestionario(q.perguntas, q.pesos));
+    if (questIn.length) {
+      const linhas = questIn.map((q) => ({
+        user_id:     userId,
+        tipo_ativo:  q.tipo_ativo,
+        perguntas:   q.perguntas,
+        pesos:       q.pesos,
+        origem:      q.origem === "IA" ? "IA" : "MANUAL",
+        ia_provedor: q.origem === "IA" ? (q.ia_provedor ?? null) : null,
+        ia_modelo:   q.origem === "IA" ? (q.ia_modelo ?? null) : null,
+        ia_gerou_em: q.origem === "IA" ? (q.ia_gerou_em ?? new Date().toISOString()) : null,
+        updated_at:  new Date().toISOString(),
+      }));
+      const { error } = await c.from("inv_questionarios").upsert(linhas, { onConflict: "user_id,tipo_ativo" });
+      if (error) avisos.push(`Questionários: ${error.message}`); else out.questionarios = linhas.length;
     }
 
     logSuccess("Investimentos restaurados", out);

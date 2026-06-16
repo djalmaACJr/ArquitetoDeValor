@@ -21,10 +21,11 @@ import {
   INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO, SUBTIPO_RF_INFO, FII_CATEGORIA_INFO,
   setorLabel,
 } from '../lib/constants'
-import {
-  perguntasParaTipo, calcularNotaQuestionario, recomendacaoCompra,
-} from '../lib/questionarioAtivos'
-import type { InvestimentoAtivo, QuestionarioRespostas } from '../types'
+import { calcularNota, recomendacaoCompra } from '../lib/questionarioAtivos'
+import { CRITERIOS_QUESTAO, CRITERIO_LABEL } from '../lib/constants'
+import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
+import { useInvPerfil } from '../hooks/useInvPerfil'
+import type { InvestimentoAtivo, QuestionarioRespostas, PerguntaAvaliacao, CriterioQuestao } from '../types'
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement)
 
@@ -503,12 +504,20 @@ function DrawerQuestionario({ ativo, onClose, onToast }: {
   ativo: InvestimentoAtivo; onClose: () => void; onToast: (m: string) => void
 }) {
   const { editar } = useInvestimentosAtivos()
-  const perguntas = perguntasParaTipo(ativo.tipo_ativo)
+  const { perfil } = useInvPerfil()
+  const { questionarioEfetivo } = useInvQuestionarios()
+  // Questionário efetivo (custom do banco ou padrão) + pesos por critério.
+  const ef = questionarioEfetivo(ativo.tipo_ativo, perfil?.perfil ?? null)
+  const perguntas = ef.perguntas
   const [respostas, setRespostas] = useState<QuestionarioRespostas>(ativo.questionario_respostas ?? {})
   const [salvando, setSalvando] = useState(false)
 
-  const nota = calcularNotaQuestionario(ativo.tipo_ativo, respostas)
+  const nota = calcularNota(perguntas, ef.pesos, respostas)
   const respondidas = perguntas.filter((p) => respostas[p.id] != null).length
+
+  // Agrupa por critério para exibir junto do peso de cada bloco.
+  const porCriterio: Record<CriterioQuestao, PerguntaAvaliacao[]> = { FUNDAMENTOS: [], CRESCIMENTO: [], DIVIDENDOS: [] }
+  for (const p of perguntas) (porCriterio[p.criterio] ?? porCriterio.FUNDAMENTOS).push(p)
 
   async function salvar() {
     if (nota == null) { onToast('Responda pelo menos uma pergunta'); return }
@@ -521,7 +530,7 @@ function DrawerQuestionario({ ativo, onClose, onToast }: {
 
   return (
     <Drawer open onClose={onClose} titulo={`Avaliar · ${ativo.ticker}`}
-      subtitulo={`Questionário de ${TIPO_ATIVO_LABEL[ativo.tipo_ativo]} — a nota é derivada das respostas`}
+      subtitulo={`Questionário de ${TIPO_ATIVO_LABEL[ativo.tipo_ativo]} — a nota é a média ponderada por critério`}
       rodape={<><BtnCancelar onClick={onClose} /><BtnSalvar editando onClick={salvar} salvando={salvando} labelSalvar="Salvar avaliação" /></>}>
 
       {/* Nota ao vivo */}
@@ -534,23 +543,31 @@ function DrawerQuestionario({ ativo, onClose, onToast }: {
         </span>
       </div>
 
-      {perguntas.map((p) => (
-        <div key={p.id} className="space-y-1.5">
-          <p className="text-[13px] font-medium text-white">{p.texto}</p>
-          <div className="space-y-1">
-            {p.opcoes.map((opcao, idx) => {
-              const ativa = respostas[p.id] === idx
-              return (
-                <button key={idx} type="button"
-                  onClick={() => setRespostas({ ...respostas, [p.id]: idx })}
-                  className={`w-full text-left px-3 py-1.5 rounded-md border text-[13px] transition-colors ${
-                    ativa ? 'border-blue-400/60 bg-blue-500/15 text-white' : 'border-white/10 text-white/70 hover:border-white/25'
-                  }`}>
-                  {opcao}
-                </button>
-              )
-            })}
+      {CRITERIOS_QUESTAO.map((c) => porCriterio[c].length === 0 ? null : (
+        <div key={c} className="space-y-2">
+          <div className="flex items-baseline gap-2 mt-1">
+            <h3 className="text-[13.5px] font-semibold text-white">{CRITERIO_LABEL[c]}</h3>
+            <span className="text-[11.5px]" style={{ color: MUTED }}>peso {ef.pesos[c] ?? 0}%</span>
           </div>
+          {porCriterio[c].map((p) => (
+            <div key={p.id} className="space-y-1.5">
+              <p className="text-[13px] font-medium text-white">{p.texto}</p>
+              <div className="space-y-1">
+                {p.opcoes.map((opcao, idx) => {
+                  const ativa = respostas[p.id] === idx
+                  return (
+                    <button key={idx} type="button"
+                      onClick={() => setRespostas({ ...respostas, [p.id]: idx })}
+                      className={`w-full text-left px-3 py-1.5 rounded-md border text-[13px] transition-colors ${
+                        ativa ? 'border-blue-400/60 bg-blue-500/15 text-white' : 'border-white/10 text-white/70 hover:border-white/25'
+                      }`}>
+                      {opcao}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       ))}
     </Drawer>

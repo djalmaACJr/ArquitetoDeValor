@@ -12,6 +12,7 @@ import {
 } from 'chart.js'
 import { useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, extrairLista } from '../lib/api'
+import { supabase } from '../lib/supabase'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
 import { log as logDev } from '../lib/logger'
 import { mesAtual as mesAtualLocal, hojeLocal, dataParaYMD } from '../lib/utils'
@@ -86,6 +87,8 @@ interface InvestimentosBackup {
   historico:       Record<string, unknown>[]
   tipos_dividendo: Record<string, unknown>[]
   alocacoes:       Record<string, unknown>[]
+  questionarios?:  Record<string, unknown>[]
+  perfil?:         Record<string, unknown> | null
 }
 
 interface LembreteBackup {
@@ -327,6 +330,7 @@ const ROTULO_ENTIDADE: Record<string, string> = {
   inv_posicoes:          'Posições',
   inv_ativos:            'Ativos',
   inv_alocacoes_tipo:    'Alocações',
+  inv_questionarios:     'Questionários de avaliação',
   inv_tipos_dividendo:   'Tipos de provento',
   transacoes_dividendos: 'Dividendos no extrato',
   transacoes:            'Transações',
@@ -2999,6 +3003,8 @@ function SecaoImport({ modo, setModo }: { modo: ModoImport; setModo: (m: ModoImp
 function SecaoBackup() {
   const { contas } = useContas()
   const { categorias } = useCategorias()
+  const { session } = useAuth()
+  const userId = session?.user?.id ?? null
   const [loading, setLoading] = useState(false)
   useOperacaoLonga(loading) // suspende auto-logout durante o backup
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro'; msg: string }[]>([])
@@ -3050,7 +3056,7 @@ function SecaoBackup() {
 
       // 5. Investimentos (ativos, posições, operações, dividendos, histórico, tipos, alocações)
       addLog('ok', 'Buscando investimentos...')
-      const [rAtivos, rPos, rOps, rDiv, rHist, rTipos, rAloc] = await Promise.all([
+      const [rAtivos, rPos, rOps, rDiv, rHist, rTipos, rAloc, rQuest] = await Promise.all([
         apiFetch('/investimentos/ativos'),
         apiFetch('/investimentos/posicoes'),
         apiFetch('/investimentos/operacoes'),
@@ -3058,7 +3064,15 @@ function SecaoBackup() {
         apiFetch('/investimentos/historico-mensal'),
         apiFetch('/investimentos/tipos-dividendo'),
         apiFetch('/investimentos/alocacoes'),
+        apiFetch('/investimentos/questionarios'),
       ])
+      // Perfil de investidor (usuarios.inv_perfil — preferência JSONB inline).
+      let perfilInv: Record<string, unknown> | null = null
+      if (userId) {
+        const { data: pRow } = await supabase.schema('arqvalor').from('usuarios')
+          .select('inv_perfil').eq('id', userId).single()
+        perfilInv = (pRow?.inv_perfil ?? null) as Record<string, unknown> | null
+      }
       const investimentos: InvestimentosBackup = {
         ativos:          extrairLista<Record<string, unknown>>(rAtivos.dados),
         posicoes:        extrairLista<Record<string, unknown>>(rPos.dados),
@@ -3067,6 +3081,8 @@ function SecaoBackup() {
         historico:       extrairLista<Record<string, unknown>>(rHist.dados),
         tipos_dividendo: extrairLista<Record<string, unknown>>(rTipos.dados),
         alocacoes:       extrairLista<Record<string, unknown>>(rAloc.dados),
+        questionarios:   extrairLista<Record<string, unknown>>(rQuest.dados),
+        perfil:          perfilInv,
       }
       addLog('ok', `Investimentos: ${investimentos.ativos.length} ativos, ${investimentos.posicoes.length} posições, ${investimentos.operacoes.length} operações, ${investimentos.dividendos.length} dividendos`)
 
@@ -3132,6 +3148,7 @@ function SecaoBackup() {
               'Todas as transações (sem limite de período)',
               'Todas as transferências',
               'Investimentos (ativos, posições, operações, dividendos, histórico)',
+              'Configurações de investimentos (metas, perfil e questionários de avaliação)',
               'Lembretes (avulsos e vinculados a lançamentos)',
               'Objetivos (metas, sonhos e projetos)',
             ].map((item, i) => (
@@ -3173,6 +3190,8 @@ function SecaoRestore() {
   const qc = useQueryClient()
   const { contas } = useContas()
   const { categorias } = useCategorias()
+  const { session } = useAuth()
+  const userId = session?.user?.id ?? null
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [etapa, setEtapa] = useState<'idle' | 'confirmando' | 'restaurando' | 'concluido'>('idle')
@@ -3465,15 +3484,28 @@ function SecaoRestore() {
           ativos: inv.ativos, posicoes: inv.posicoes, operacoes: inv.operacoes,
           dividendos: inv.dividendos, historico: inv.historico,
           tipos_dividendo: inv.tipos_dividendo, alocacoes: inv.alocacoes,
+          questionarios: inv.questionarios ?? [],
         })
         if (res.ok) {
-          const d = res.dados as { ativos?: number; posicoes?: number; operacoes?: number; dividendos?: number; historico?: number; avisos?: string[] } | null
-          addLog('ok', `Investimentos: ${d?.ativos ?? 0} ativos, ${d?.posicoes ?? 0} posições, ${d?.operacoes ?? 0} operações, ${d?.dividendos ?? 0} dividendos, ${d?.historico ?? 0} snapshots restaurados`)
+          const d = res.dados as { ativos?: number; posicoes?: number; operacoes?: number; dividendos?: number; historico?: number; questionarios?: number; avisos?: string[] } | null
+          addLog('ok', `Investimentos: ${d?.ativos ?? 0} ativos, ${d?.posicoes ?? 0} posições, ${d?.operacoes ?? 0} operações, ${d?.dividendos ?? 0} dividendos, ${d?.historico ?? 0} snapshots, ${d?.questionarios ?? 0} questionários restaurados`)
           for (const a of d?.avisos ?? []) addLog('aviso', a)
-          for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo'], ['inv-alocacoes']]) {
+          for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo'], ['inv-alocacoes'], ['inv-questionarios']]) {
             qc.invalidateQueries({ queryKey: k })
           }
         } else addLog('erro', `Investimentos: ${res.erro}`)
+
+        // Perfil de investidor (usuarios.inv_perfil) — restaura se ausente.
+        if (inv.perfil && userId) {
+          const { data: atual } = await supabase.schema('arqvalor').from('usuarios')
+            .select('inv_perfil').eq('id', userId).single()
+          if (!atual?.inv_perfil) {
+            const { error } = await supabase.schema('arqvalor').from('usuarios')
+              .update({ inv_perfil: inv.perfil }).eq('id', userId)
+            addLog(error ? 'erro' : 'ok', error ? `Perfil de investidor: ${error.message}` : 'Perfil de investidor restaurado')
+            qc.invalidateQueries({ queryKey: ['inv-perfil'] })
+          } else addLog('aviso', 'Perfil de investidor já existente — mantido')
+        }
       }
 
       // ── 9. Objetivos (modo "Tudo") — remapeia conta/categoria e recria ──

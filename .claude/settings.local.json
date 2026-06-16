@@ -77,7 +77,10 @@
       "WebFetch(domain:hgbrasil.com)",
       "Bash(npx eslint *)",
       "Bash(grep -nE \"brapi\\\\.dev/api/quote/\\\\$\\\\{encodeURIComponent\\\\\\(tickers\" supabase/functions/investimentos/index.ts)",
-      "Bash(cd c:/Pessoal/ArquitetoDeValor/FrontEnd *)"
+      "Bash(cd c:/Pessoal/ArquitetoDeValor/FrontEnd *)",
+      "PowerShell(cd FrontEnd; npm run build 2>&1 | Select-Object -Last 4; \"EXIT=$LASTEXITCODE\")",
+      "PowerShell(npm run lint 2>&1 | Select-Object -Last 40; \"EXIT=$LASTEXITCODE\")",
+      "PowerShell(\"--- log:\")"
     ],
     "additionalDirectories": [
       "C:\\Pessoal\\ArquitetoDeValor\\scripts",
