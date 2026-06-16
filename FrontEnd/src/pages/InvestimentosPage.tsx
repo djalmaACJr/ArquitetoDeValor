@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import {
   TrendingUp, TrendingDown, Wallet, Coins, PieChart, Percent, Trophy,
-  HandCoins, BarChart3, ChevronDown, ChevronUp, ChevronRight, Calendar, Upload, Target, RefreshCw, History,
+  HandCoins, BarChart3, Calendar, Upload, Target, RefreshCw, History,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
@@ -18,28 +18,15 @@ import { useContas } from '../hooks/useContas'
 import { useAuth } from '../hooks/useAuth'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { SelectDark, Drawer, Input, BtnSalvar, BtnCancelar, Toast } from '../components/ui/shared'
+import QuadroTipoAtivos from '../components/ui/QuadroTipoAtivos'
+import { linhaDeRanking, type AtivoLinha } from '../lib/ativosLinha'
 import { formatBRL } from '../lib/utils'
-import { recomendacaoCompra } from '../lib/questionarioAtivos'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
-  FII_CATEGORIA_INFO, ACOES_SUBTIPO_LABEL, SUBTIPO_RF_INFO,
 } from '../lib/constants'
 import type {
   InvestimentoDashboardTipo, InvestimentoRankingAtivo, TipoAtivoInvestimento,
-  InvestimentoAtivo,
 } from '../types'
-
-// Rótulo da categoria/subtipo de um ativo (FII: Tijolo/Papel…; Ações:
-// ON/PN/BDR; Renda Fixa/Tesouro: CDB/LCI/Tesouro…). null = sem categoria.
-function rotuloCategoriaAtivo(meta?: InvestimentoAtivo): string | null {
-  if (!meta) return null
-  if (meta.tipo_ativo === 'FII' && meta.fii_categoria) return FII_CATEGORIA_INFO[meta.fii_categoria].label
-  if (meta.tipo_ativo === 'ACOES' && meta.acoes_subtipo) return ACOES_SUBTIPO_LABEL[meta.acoes_subtipo]
-  // Tesouro Direto tem subtipo único ("Tesouro Direto"), que duplicaria o
-  // título do quadro — só subdividimos Renda Fixa (CDB/LCI/CRI/…).
-  if (meta.tipo_ativo === 'RENDA_FIXA' && meta.rf_subtipo) return SUBTIPO_RF_INFO[meta.rf_subtipo].label
-  return null
-}
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement)
 
@@ -410,277 +397,6 @@ function AtivosNaCarteira({ tipos, onSelecionarTipo }: {
   )
 }
 
-// ── Lista expansível por tipo ─────────────────────────────────
-
-const COR_REC = { COMPRAR: '#00c896', NEUTRO: '#8b92a8', AGUARDAR: '#ffb74d' } as const
-const LABEL_REC = { COMPRAR: 'Comprar', NEUTRO: 'Neutro', AGUARDAR: 'Aguardar' } as const
-// Tolerante a undefined/null (ranking pode vir sem alguns campos se a edge
-// function ainda não foi redeployada).
-const pct2 = (v: number | null | undefined) => `${(Number(v) || 0).toFixed(2).replace('.', ',')}%`
-
-// Tabela detalhada dos ativos de um tipo (Quant., preço médio/atual,
-// variação, saldo, nota, % carteira, comprar? — e DY/Yield on Cost p/ FII).
-// Colunas ordenáveis ao clicar no cabeçalho.
-type SortKey = 'ticker' | 'nome' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart'
-function precoMedio(a: InvestimentoRankingAtivo) { const q = Number(a.quantidade) || 0; return q > 0 ? a.valor_custo / q : 0 }
-function precoAtual(a: InvestimentoRankingAtivo) { const q = Number(a.quantidade) || 0; return q > 0 ? a.valor_mercado / q : 0 }
-function valorOrdenacao(a: InvestimentoRankingAtivo, k: SortKey): number | string {
-  switch (k) {
-    case 'ticker':     return a.ticker
-    case 'nome':       return a.nome ?? ''
-    case 'quantidade': return Number(a.quantidade) || 0
-    case 'pm':         return precoMedio(a)
-    case 'pa':         return precoAtual(a)
-    case 'rent':       return a.rentabilidade_pct
-    case 'dy':         return Number(a.dividend_yield_pct) || 0
-    case 'yoc':        return Number(a.yield_on_cost_pct) || 0
-    case 'saldo':      return a.valor_mercado
-    case 'nota':       return a.nota_usuario ?? -1
-    case 'cart':       return a.participacao_pct
-  }
-}
-
-function TabelaAtivos({ ativos, t }: { ativos: InvestimentoRankingAtivo[]; t: InvestimentoDashboardTipo }) {
-  const ehFII = t.tipo_ativo === 'FII'
-  const idealRef = t.percentual_ideal > 0 ? t.desvio_pct : null
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'saldo', dir: 'desc' })
-  const clickSort = (key: SortKey) => setSort((s) =>
-    s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'ticker' ? 'asc' : 'desc' })
-
-  const ordenados = useMemo(() => {
-    const arr = [...ativos]
-    arr.sort((x, y) => {
-      const vx = valorOrdenacao(x, sort.key), vy = valorOrdenacao(y, sort.key)
-      const cmp = typeof vx === 'string' ? vx.localeCompare(String(vy)) : (vx as number) - (vy as number)
-      return sort.dir === 'asc' ? cmp : -cmp
-    })
-    return arr
-  }, [ativos, sort])
-
-  const cols: { k: SortKey; label: string; align: 'left' | 'right' | 'center'; fii?: boolean; title?: string }[] = [
-    { k: 'ticker',     label: 'Ativo',       align: 'left' },
-    { k: 'nome',       label: 'Nome',        align: 'left' },
-    { k: 'quantidade', label: 'Quant.',      align: 'right' },
-    { k: 'pm',         label: 'Preço médio', align: 'right' },
-    { k: 'pa',         label: 'Preço atual', align: 'right' },
-    { k: 'rent',       label: 'Variação',    align: 'right' },
-    { k: 'dy',         label: 'DY',          align: 'right', fii: true, title: 'Dividend Yield (12m)' },
-    { k: 'yoc',        label: 'YoC',         align: 'right', fii: true, title: 'Yield on Cost (12m)' },
-    { k: 'saldo',      label: 'Saldo',       align: 'right' },
-    { k: 'nota',       label: 'Nota',        align: 'center' },
-    { k: 'cart',       label: '% Cart.',     align: 'right' },
-  ]
-  const alinhar = (a: 'left' | 'right' | 'center') => a === 'left' ? 'text-left' : a === 'center' ? 'text-center' : 'text-right'
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-[12px]" style={{ minWidth: ehFII ? 880 : 760 }}>
-        <thead>
-          <tr style={{ color: MUTED }}>
-            {cols.filter((c) => !c.fii || ehFII).map((c) => (
-              <th key={c.k} title={c.title} onClick={() => clickSort(c.k)}
-                className={`px-2 py-1.5 font-medium cursor-pointer select-none hover:text-white/80 ${alinhar(c.align)}`}>
-                {c.label}{sort.key === c.k ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
-              </th>
-            ))}
-            <th className="px-2 py-1.5 font-medium text-center">Comprar?</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ordenados.map((a) => {
-            const qtd = Number(a.quantidade) || 0
-            const pm = qtd > 0 ? a.valor_custo / qtd : 0
-            const pa = qtd > 0 ? a.valor_mercado / qtd : 0
-            const nota = a.nota_usuario ?? null
-            const rec = recomendacaoCompra(nota, idealRef)
-            return (
-              <tr key={a.ativo_id} className="border-t border-white/5 hover:bg-white/[0.03]">
-                <td className="px-2 py-1.5">
-                  <Link to={`/investimentos/ativos/${a.ativo_id}`} className="text-white font-semibold hover:underline">{a.ticker}</Link>
-                </td>
-                <td className="px-2 py-1.5 text-left text-white/70 max-w-[220px] truncate" title={a.nome ?? ''}>
-                  {a.nome && a.nome.toUpperCase() !== a.ticker.toUpperCase() ? a.nome : '—'}
-                </td>
-                <td className="px-2 py-1.5 text-right text-white/80">{qtd.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</td>
-                <td className="px-2 py-1.5 text-right text-white/80">{formatBRL(pm)}</td>
-                <td className="px-2 py-1.5 text-right text-white/80">{formatBRL(pa)}</td>
-                <td className="px-2 py-1.5 text-right" style={{ color: corValor(a.rentabilidade_pct) }}>{fmtPct(a.rentabilidade_pct)}</td>
-                {ehFII && <td className="px-2 py-1.5 text-right" style={{ color: a.dividend_yield_pct > 0 ? VERDE : MUTED }}>{pct2(a.dividend_yield_pct)}</td>}
-                {ehFII && <td className="px-2 py-1.5 text-right text-white/70">{pct2(a.yield_on_cost_pct)}</td>}
-                <td className="px-2 py-1.5 text-right text-white font-medium">{formatBRL(a.valor_mercado)}</td>
-                <td className="px-2 py-1.5 text-center">
-                  {nota != null
-                    ? <span className="inline-block px-1.5 rounded bg-white/10 text-white text-[11px] font-semibold">{nota}</span>
-                    : <span style={{ color: MUTED }}>—</span>}
-                </td>
-                <td className="px-2 py-1.5 text-right text-white/80">{pct2(a.participacao_pct)}</td>
-                <td className="px-2 py-1.5 text-center">
-                  {rec
-                    ? <span className="text-[11px] px-1.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: `${COR_REC[rec.recomendacao]}22`, color: COR_REC[rec.recomendacao] }} title={rec.motivo}>{LABEL_REC[rec.recomendacao]}</span>
-                    : <span style={{ color: MUTED }}>—</span>}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function LinhaTipoExpansivel({ t, ativos, catPorAtivo, focoSinal }: {
-  t: InvestimentoDashboardTipo; ativos: InvestimentoRankingAtivo[]
-  catPorAtivo: Record<string, string>
-  focoSinal?: number | null
-}) {
-  const [aberto, setAberto] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  // Foco vindo do gráfico "Ativos na Carteira": abre e rola até o quadro
-  useEffect(() => {
-    if (focoSinal == null) return
-    const id = requestAnimationFrame(() => {
-      setAberto(true)
-      requestAnimationFrame(() =>
-        ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
-    })
-    return () => cancelAnimationFrame(id)
-  }, [focoSinal])
-  const [agrupar, setAgrupar] = useState(true)
-  const [catsAbertas, setCatsAbertas] = useState<Set<string>>(new Set())
-  const toggleCat = (cat: string) => setCatsAbertas((s) => {
-    const n = new Set(s)
-    if (n.has(cat)) n.delete(cat); else n.add(cat)
-    return n
-  })
-  const cor = TIPO_ATIVO_COR[t.tipo_ativo]
-  const variacaoPct = t.valor_custo > 0 ? (t.ganho_perda / t.valor_custo) * 100 : 0
-
-  // Subdivisão por categoria/subtipo (ordenada por valor)
-  const grupos = useMemo(() => {
-    const map = new Map<string, InvestimentoRankingAtivo[]>()
-    for (const a of ativos) {
-      const cat = catPorAtivo[a.ativo_id] ?? 'Sem categoria'
-      if (!map.has(cat)) map.set(cat, [])
-      map.get(cat)!.push(a)
-    }
-    return [...map.entries()]
-      .map(([cat, lista]) => ({ cat, lista, total: lista.reduce((s, a) => s + a.valor_mercado, 0) }))
-      .sort((a, b) => b.total - a.total)
-  }, [ativos, catPorAtivo])
-  const subdividir = grupos.length > 1 || (grupos.length === 1 && grupos[0].cat !== 'Sem categoria')
-
-  return (
-    <div ref={ref} className="rounded-xl border border-white/10 bg-white/[0.02] scroll-mt-4">
-      <button onClick={() => setAberto(!aberto)} className="w-full px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-3 items-center text-left">
-        {/* Tipo + contagem */}
-        <div>
-          <p className="font-semibold text-[15px]" style={{ color: cor }}>{TIPO_ATIVO_LABEL[t.tipo_ativo]}</p>
-          <p className="text-[12px]" style={{ color: MUTED }}>{ativos.length} {ativos.length === 1 ? 'Ativo' : 'Ativos'}</p>
-        </div>
-
-        {/* Variação total */}
-        <div className="text-right md:text-center">
-          <p className="text-[12px] inline-flex items-center gap-1" style={{ color: corValor(t.ganho_perda) }}>
-            <SetaVariacao v={t.ganho_perda} size={11} /> Variação Total
-          </p>
-          <p className="text-[13px] font-medium" style={{ color: corValor(t.ganho_perda) }}>
-            {fmtPct(variacaoPct)} ({formatBRL(t.ganho_perda)})
-          </p>
-        </div>
-
-        {/* Dividendos do tipo */}
-        <div className="hidden md:block text-center">
-          <p className="text-[12px]" style={{ color: MUTED }}>Dividendos</p>
-          <p className="text-[13px] font-medium" style={{ color: t.dividendos > 0 ? VERDE : MUTED }}>
-            {formatBRL(t.dividendos)}
-          </p>
-        </div>
-
-        {/* Valor + participação */}
-        <div className="flex items-center justify-end gap-2">
-          <div className="text-right">
-            <p className="text-[13px] font-semibold text-white">{formatBRL(t.valor_mercado)}</p>
-            <div className="flex items-center gap-1.5 justify-end">
-              <div className="w-20 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${Math.min(100, t.percentual_atual)}%`, background: cor }} />
-              </div>
-              <span className="text-[12px] font-semibold text-white">{t.percentual_atual.toFixed(2).replace('.', ',')}%</span>
-            </div>
-          </div>
-          {aberto ? <ChevronUp size={15} style={{ color: MUTED }} /> : <ChevronDown size={15} style={{ color: MUTED }} />}
-        </div>
-      </button>
-
-      {aberto && (
-        <div className="border-t border-white/5 px-4 py-3 space-y-3">
-          {/* Alocação atual × meta */}
-          {t.percentual_ideal > 0 && (
-            <div>
-              <div className="flex justify-between text-[12px] mb-1" style={{ color: MUTED }}>
-                <span>Alocação atual {t.percentual_atual}%</span>
-                <span>Meta {t.percentual_ideal}%
-                  <span style={{ color: corValor(-t.desvio_pct) }}> ({t.desvio_pct >= 0 ? '+' : ''}{t.desvio_pct}%)</span>
-                </span>
-              </div>
-              <div className="relative h-2 rounded-full bg-white/10 overflow-hidden">
-                <div className="absolute inset-y-0 left-0 rounded-full"
-                     style={{ width: `${Math.min(100, t.percentual_atual)}%`, background: cor }} />
-                <div className="absolute inset-y-0 w-0.5 bg-white/70"
-                     style={{ left: `${Math.min(100, t.percentual_ideal)}%` }} title={`Meta ${t.percentual_ideal}%`} />
-              </div>
-            </div>
-          )}
-
-          {/* Alternar entre lista agrupada por categoria e lista única */}
-          {ativos.length > 0 && subdividir && (
-            <div className="flex justify-end">
-              <button onClick={() => setAgrupar((a) => !a)}
-                className="text-[12px] px-2.5 py-1 rounded-lg border border-white/10 hover:border-white/25 transition-colors"
-                style={{ color: MUTED }}>
-                {agrupar ? 'Agrupar por categoria: ligado' : 'Agrupar por categoria: desligado'}
-              </button>
-            </div>
-          )}
-
-          {/* Ativos do tipo — subdivididos por categoria/subtipo */}
-          {ativos.length === 0 ? (
-            <p className="text-[13px] text-center py-2" style={{ color: MUTED }}>Nenhum ativo com posição ativa neste tipo.</p>
-          ) : subdividir && agrupar ? (
-            <div className="space-y-1.5">
-              {grupos.map((g) => {
-                const catAberta = catsAbertas.has(g.cat)
-                return (
-                  <div key={g.cat}>
-                    {/* Cabeçalho da categoria — expansível, estilo Relatório */}
-                    <button onClick={() => toggleCat(g.cat)}
-                      className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] transition-colors">
-                      <div className="flex items-center gap-2 min-w-0">
-                        {catAberta ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
-                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: cor }} />
-                        <span className="text-[13px] font-semibold" style={{ color: '#c5cad8' }}>{g.cat}</span>
-                        <span className="text-[12px] shrink-0" style={{ color: MUTED }}>· {g.lista.length}</span>
-                      </div>
-                      <span className="text-[13px] font-medium shrink-0" style={{ color: '#e8eaf0' }}>{formatBRL(g.total)}</span>
-                    </button>
-                    {/* Ativos da categoria — tabela detalhada */}
-                    {catAberta && (
-                      <div className="pl-3 ml-2 border-l border-white/5 mt-1">
-                        <TabelaAtivos ativos={g.lista} t={t} />
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          ) : (
-            <TabelaAtivos ativos={ativos} t={t} />
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Destaques da carteira (ranking por ativo) ─────────────────
 
 function CardRanking({ titulo, icone, itens, metrica }: {
@@ -883,12 +599,33 @@ export default function InvestimentosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, histMesLoading, dashboard, histMes.length, uid])
 
-  // Categoria/subtipo por ativo (para subdividir os tipos no quadro)
-  const catPorAtivo = useMemo(() => {
-    const m: Record<string, string> = {}
-    for (const a of ativosMeta) { const r = rotuloCategoriaAtivo(a); if (r) m[a.id] = r }
+  // Metadado (logo, setor, categoria) por ativo — junta-se ao ranking no quadro
+  const metaPorAtivo = useMemo(() => new Map(ativosMeta.map((a) => [a.id, a])), [ativosMeta])
+
+  // Contas (de investimento) onde cada ativo tem posição ATIVA
+  const contasPorAtivo = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const p of todasPosicoes) {
+      if (p.status !== 'ATIVA') continue
+      const nome = p.contas?.nome
+      if (!nome) continue
+      const lista = m.get(p.ativo_id) ?? []
+      if (!lista.includes(nome)) lista.push(nome)
+      m.set(p.ativo_id, lista)
+    }
     return m
-  }, [ativosMeta])
+  }, [todasPosicoes])
+
+  // Linhas unificadas por tipo de ativo (ranking + metadado)
+  const linhasPorTipo = useMemo(() => {
+    const m = new Map<TipoAtivoInvestimento, AtivoLinha[]>()
+    for (const a of ranking?.ativos ?? []) {
+      const lista = m.get(a.tipo_ativo) ?? []
+      lista.push(linhaDeRanking(a, metaPorAtivo.get(a.ativo_id), contasPorAtivo.get(a.ativo_id) ?? []))
+      m.set(a.tipo_ativo, lista)
+    }
+    return m
+  }, [ranking, metaPorAtivo, contasPorAtivo])
 
   // Proventos recebidos nos últimos 12 meses
   const proventos12m = useMemo(() => {
@@ -1057,9 +794,8 @@ export default function InvestimentosPage() {
           {/* Lista expansível por tipo */}
           <div className="space-y-2">
             {tipos.map((t) => (
-              <LinhaTipoExpansivel key={t.tipo_ativo} t={t}
-                ativos={ativosRanking.filter((a) => a.tipo_ativo === t.tipo_ativo)}
-                catPorAtivo={catPorAtivo}
+              <QuadroTipoAtivos key={t.tipo_ativo} tipo={t.tipo_ativo} dados={t}
+                linhas={linhasPorTipo.get(t.tipo_ativo) ?? []}
                 focoSinal={foco?.tipo === t.tipo_ativo ? foco.n : null} />
             ))}
           </div>

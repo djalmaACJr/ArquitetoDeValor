@@ -106,7 +106,7 @@ export default function DividendosPage() {
   if (loading) return <LoadingMascote />
 
   return (
-    <div className="p-4 md:p-6 max-w-5xl mx-auto">
+    <div className="p-5">
       {/* Header */}
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="flex items-center gap-3">
@@ -250,15 +250,16 @@ function ProventosPorCategoria({ dividendos }: { dividendos: InvestimentoDividen
 // e Provisionado (projeções ainda não recebidas). As linhas abaixo trazem
 // os 4 totais por categoria e expandem para o detalhamento por ativo.
 
-type PeriodoGraf = '6m' | '12m' | '24m' | 'prov'
+type PeriodoGraf = '6m' | '12m' | '24m' | 'todos' | 'prov'
 const PERIODOS_GRAF: { value: PeriodoGraf; label: string }[] = [
-  { value: '6m',   label: 'Últ. 6 meses' },
-  { value: '12m',  label: 'Últ. 12 meses' },
-  { value: '24m',  label: 'Últ. 24 meses' },
-  { value: 'prov', label: 'Provisionado' },
+  { value: '6m',    label: 'Últ. 6 meses' },
+  { value: '12m',   label: 'Últ. 12 meses' },
+  { value: '24m',   label: 'Últ. 24 meses' },
+  { value: 'todos', label: 'Todos recebidos' },
+  { value: 'prov',  label: 'Provisionado' },
 ]
-const IDX_GRAF: Record<PeriodoGraf, number> = { '6m': 0, '12m': 1, '24m': 2, prov: 3 }
-const COLS_GRAF = ['Total últ. 6 meses', 'Total últ. 12 meses', 'Total últ. 24 meses', 'Provisionado']
+const IDX_GRAF: Record<PeriodoGraf, number> = { '6m': 0, '12m': 1, '24m': 2, prov: 3, todos: 4 }
+const COLS_GRAF = ['Total últ. 6 meses', 'Total últ. 12 meses', 'Total últ. 24 meses', 'Provisionado', 'Total recebido']
 // Fatores de brilho (sólidos) que diferenciam os ativos dentro da cor do
 // tipo. Usamos cor sólida — não alpha — porque alpha sobre fundo escuro/claro
 // faz a fatia "sumir" no fundo (some no modo noite e no dia). A faixa é
@@ -292,7 +293,7 @@ const COR_SUAVE: Record<TipoAtivoInvestimento, string> = {
 
 interface LinhaGraf {
   tipo: TipoAtivoInvestimento
-  totais: number[]                                   // [6m, 12m, 24m, prov]
+  totais: number[]                                   // [6m, 12m, 24m, prov, todos recebidos]
   ativos: { ticker: string; totais: number[] }[]
 }
 
@@ -314,6 +315,10 @@ function useModoEscuro(): boolean {
 function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[] }) {
   const dark = useModoEscuro() // rótulos do canvas precisam contrastar com o fundo
   const [periodo, setPeriodo] = useState<PeriodoGraf>('12m')
+  // Ordenação do resumo por categoria: 'nome' ou o índice de uma coluna de
+  // total (0..4). Default acompanha o período escolhido (sincronizado abaixo).
+  const [sortResumo, setSortResumo] = useState<{ key: 'nome' | number; dir: 'asc' | 'desc' }>(
+    { key: IDX_GRAF['12m'], dir: 'desc' })
   // Drill-down: clicar numa categoria foca o gráfico só nela
   const [tipoFoco, setTipoFoco] = useState<TipoAtivoInvestimento | null>(null)
   const [abertos, setAbertos] = useState<Set<TipoAtivoInvestimento>>(new Set())
@@ -337,6 +342,7 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
       const idxs: number[] = []
       if (ehProvisionado(d)) idxs.push(3)
       else {
+        idxs.push(4) // "Todos recebidos": todo provento recebido, sem corte de data
         if (dt >= ini6)  idxs.push(0)
         if (dt >= ini12) idxs.push(1)
         if (dt >= ini24) idxs.push(2)
@@ -345,18 +351,21 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
       const ticker = d.inv_ativos?.ticker ?? '—'
       if (!porTipo.has(d.tipo_ativo)) porTipo.set(d.tipo_ativo, new Map())
       const porAtivo = porTipo.get(d.tipo_ativo)!
-      if (!porAtivo.has(ticker)) porAtivo.set(ticker, [0, 0, 0, 0])
+      if (!porAtivo.has(ticker)) porAtivo.set(ticker, [0, 0, 0, 0, 0])
       const tot = porAtivo.get(ticker)!
       for (const i of idxs) tot[i] += d.valor
     }
     return [...porTipo.entries()].map(([tipo, porAtivo]) => {
       const ativos = [...porAtivo.entries()].map(([ticker, totais]) => ({ ticker, totais }))
-      const totais = [0, 1, 2, 3].map((i) => ativos.reduce((s, a) => s + a.totais[i], 0))
+      const totais = [0, 1, 2, 3, 4].map((i) => ativos.reduce((s, a) => s + a.totais[i], 0))
       return { tipo, totais, ativos }
     })
   }, [dividendos])
 
   const sel = IDX_GRAF[periodo]
+  // Trocar o período reordena o resumo pela coluna correspondente (mantém o
+  // gráfico e a tabela coerentes); o usuário ainda pode clicar outro cabeçalho.
+  useEffect(() => { setSortResumo({ key: sel, dir: 'desc' }) }, [sel])
   // Tipos/ativos com valor no período escolhido, do maior p/ o menor
   const tipos = useMemo(() =>
     linhas.filter((l) => l.totais[sel] > 0)
@@ -495,8 +504,27 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
 
   if (linhas.length === 0) return null
 
-  // Linhas de resumo abaixo do gráfico seguem a ordem do período escolhido
-  const linhasOrd = [...linhas].sort((a, b) => b.totais[sel] - a.totais[sel])
+  // Resumo abaixo do gráfico, ordenado pela coluna escolhida no cabeçalho.
+  const linhasOrd = [...linhas].sort((a, b) => {
+    const c = sortResumo.key === 'nome'
+      ? TIPO_ATIVO_LABEL[a.tipo].localeCompare(TIPO_ATIVO_LABEL[b.tipo], 'pt-BR')
+      : a.totais[sortResumo.key] - b.totais[sortResumo.key]
+    return sortResumo.dir === 'asc' ? c : -c
+  })
+  const clickSortResumo = (k: 'nome' | number) =>
+    setSortResumo((s) => (s.key === k
+      ? { key: k, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+      : { key: k, dir: k === 'nome' ? 'asc' : 'desc' }))
+  const setaR = (k: 'nome' | number) =>
+    sortResumo.key === k ? (sortResumo.dir === 'asc' ? ' ▲' : ' ▼') : ''
+  // Cabeçalho clicável. A coluna do período selecionado aparece também no
+  // mobile; as demais só em telas ≥ sm (como antes).
+  const ThR = ({ k, label, cls }: { k: 'nome' | number; label: string; cls?: string }) => (
+    <th onClick={() => clickSortResumo(k)}
+      className={`px-3 py-2.5 font-medium cursor-pointer select-none hover:text-white ${cls ?? ''}`}>
+      {label}{setaR(k)}
+    </th>
+  )
 
   return (
     <div className="rounded-xl border border-white/10 p-4 mb-4">
@@ -582,59 +610,65 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
         </div>
       )}
 
-      {/* Resumo por categoria (expansível → detalhamento por ativo) */}
-      <div className="space-y-2">
-        {linhasOrd.map((l) => {
-          const aberto = abertos.has(l.tipo)
-          return (
-            <div key={l.tipo} className="rounded-lg border border-white/10">
-              <button onClick={() => toggleAberto(l.tipo)}
-                className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left">
-                <span className="font-semibold text-[14px]" style={{ color: COR_SUAVE[l.tipo] }}>
-                  {TIPO_ATIVO_LABEL[l.tipo]}
-                </span>
-                <span className="flex items-center gap-5 flex-wrap justify-end">
+      {/* Resumo por categoria (expansível → detalhamento por ativo).
+          Cabeçalho clicável ordena por qualquer coluna. */}
+      <div className="overflow-x-auto rounded-lg border border-white/10">
+        <table className="w-full text-[13px] whitespace-nowrap">
+          <thead>
+            <tr style={{ color: MUTED }}>
+              <ThR k="nome" label="Categoria" cls="text-left" />
+              {COLS_GRAF.map((c, i) => (
+                <ThR key={i} k={i} label={c}
+                  cls={`text-right ${i === sel ? 'table-cell' : 'hidden sm:table-cell'}`} />
+              ))}
+              <th className="px-2 py-2.5 w-6"></th>
+            </tr>
+          </thead>
+          {linhasOrd.map((l) => {
+            const aberto = abertos.has(l.tipo)
+            // Detalhamento e % usam a coluna ordenada (ou o período, se for por nome)
+            const colAtivo = typeof sortResumo.key === 'number' ? sortResumo.key : sel
+            return (
+              <tbody key={l.tipo}>
+                <tr onClick={() => toggleAberto(l.tipo)}
+                  className="border-t border-white/10 cursor-pointer select-none hover:bg-white/[0.03]">
+                  <td className="px-3 py-3 font-semibold text-[14px]" style={{ color: COR_SUAVE[l.tipo] }}>
+                    {TIPO_ATIVO_LABEL[l.tipo]}
+                  </td>
                   {l.totais.map((v, i) => (
-                    <span key={i} className="text-right hidden sm:block">
-                      <span className="block text-[13px] font-semibold text-white">{formatBRL(v)}</span>
-                      <span className="block text-[11px]" style={{ color: MUTED }}>{COLS_GRAF[i]}</span>
-                    </span>
+                    <td key={i}
+                      className={`px-3 py-3 text-right font-semibold text-white ${i === sel ? 'table-cell' : 'hidden sm:table-cell'}`}>
+                      {formatBRL(v)}
+                    </td>
                   ))}
-                  <span className="text-right sm:hidden">
-                    <span className="block text-[13px] font-semibold text-white">{formatBRL(l.totais[sel])}</span>
-                    <span className="block text-[11px]" style={{ color: MUTED }}>{COLS_GRAF[sel]}</span>
-                  </span>
-                  {aberto ? <ChevronDown size={15} style={{ color: MUTED }} /> : <ChevronRight size={15} style={{ color: MUTED }} />}
-                </span>
-              </button>
-              {aberto && (
-                <div className="border-t border-white/10 px-4 py-2">
-                  {[...l.ativos].sort((a, b) => b.totais[sel] - a.totais[sel]).map((a) => (
-                    <div key={a.ticker} className="flex items-center justify-between gap-3 py-1.5 border-b border-white/5 last:border-b-0">
-                      <span className="flex items-baseline gap-2">
+                  <td className="px-2 py-3 text-right">
+                    {aberto ? <ChevronDown size={15} style={{ color: MUTED }} /> : <ChevronRight size={15} style={{ color: MUTED }} />}
+                  </td>
+                </tr>
+                {aberto && [...l.ativos]
+                  .sort((a, b) => b.totais[colAtivo] - a.totais[colAtivo])
+                  .map((a) => (
+                    <tr key={a.ticker} className="border-t border-white/5">
+                      <td className="px-3 py-1.5">
                         <span className="text-[13px] font-medium text-white">{a.ticker}</span>
-                        <span className="text-[11px]" style={{ color: MUTED }}>
-                          {l.totais[sel] > 0 ? Math.round((a.totais[sel] / l.totais[sel]) * 100) : 0}% da categoria
+                        <span className="text-[11px] ml-2" style={{ color: MUTED }}>
+                          {l.totais[colAtivo] > 0 ? Math.round((a.totais[colAtivo] / l.totais[colAtivo]) * 100) : 0}% da categoria
                         </span>
-                      </span>
-                      <span className="flex items-center gap-5 flex-wrap justify-end">
-                        {a.totais.map((v, i) => (
-                          <span key={i} className="text-[12px] text-right min-w-[90px] hidden sm:block"
-                            style={{ color: v > 0 ? 'rgba(255,255,255,.8)' : MUTED }}>
-                            {formatBRL(v)}
-                          </span>
-                        ))}
-                        <span className="text-[12px] text-right sm:hidden" style={{ color: 'rgba(255,255,255,.8)' }}>
-                          {formatBRL(a.totais[sel])}
-                        </span>
-                      </span>
-                    </div>
+                      </td>
+                      {a.totais.map((v, i) => (
+                        <td key={i}
+                          className={`px-3 py-1.5 text-[12px] text-right ${i === sel ? 'table-cell' : 'hidden sm:table-cell'}`}
+                          style={{ color: v > 0 ? 'rgba(255,255,255,.8)' : MUTED }}>
+                          {formatBRL(v)}
+                        </td>
+                      ))}
+                      <td className="px-2 py-1.5"></td>
+                    </tr>
                   ))}
-                </div>
-              )}
-            </div>
-          )
-        })}
+              </tbody>
+            )
+          })}
+        </table>
       </div>
     </div>
   )
@@ -658,7 +692,9 @@ function ObjetivosAtivos() {
         {vigentes.map((o) => {
           const pct = Math.min(Math.max(o.percentual, 0), 100)
           return (
-            <div key={o.id} className="flex-1 min-w-[240px] rounded-lg border border-white/10 bg-white/[0.02] p-3">
+            <Link key={o.id} to={`/objetivos/${o.id}`}
+              className="flex-1 min-w-[240px] rounded-lg border border-white/10 bg-white/[0.02] p-3 hover:border-white/25 hover:bg-white/[0.04] transition-colors"
+              title="Ver detalhes do objetivo">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[13px] font-medium text-white truncate">{o.icone} {o.nome}</span>
                 <span className="text-[11px] shrink-0" style={{ color: MUTED }}>{TIPO_OBJETIVO_LABEL[o.tipo]}</span>
@@ -674,7 +710,7 @@ function ObjetivosAtivos() {
                 <span className="font-medium" style={{ color: o.cor }}>{formatBRL(o.valor_atingido)}</span>
                 <span style={{ color: MUTED }}>meta {formatBRL(o.valor_meta)}</span>
               </div>
-            </div>
+            </Link>
           )
         })}
       </div>

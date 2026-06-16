@@ -38,3 +38,27 @@ export function usePtax(datas: string[] = [], enabled = true) {
     taxaEm: (d?: string | null): number | null => (d && byDate[d] != null ? byDate[d] : atual),
   }
 }
+
+// Série diária do PTAX (USD/BRL) desde `desde` (YYYY-MM-DD), para o gráfico
+// de evolução. Busca a maior janela uma vez; o componente fatia por período.
+export interface PontoPtax { data: string; valor: number }
+export function usePtaxSerie(desde: string, enabled = true) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['ptax-serie', desde],
+    queryFn: async (): Promise<{ serie: PontoPtax[]; atual: number | null; atual_data: string | null }> => {
+      const res = await apiFetch<{ serie?: PontoPtax[]; atual: number | null; atual_data: string | null }>(
+        `/investimentos/ptax?serie=1&desde=${encodeURIComponent(desde)}`)
+      if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar PTAX')
+      return { serie: res.dados?.serie ?? [], atual: res.dados?.atual ?? null, atual_data: res.dados?.atual_data ?? null }
+    },
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    enabled,
+  })
+  return {
+    loading: isLoading,
+    serie: data?.serie ?? [],
+    atual: data?.atual ?? null,
+    atualData: data?.atual_data ?? null,
+  }
+}

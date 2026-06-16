@@ -3,8 +3,13 @@ import { useState, useRef, useMemo, useEffect } from 'react'
 import {
   Trash2, Download, Upload, AlertTriangle, CheckCircle2,
   FileSpreadsheet, ChevronDown, ChevronUp, X, Loader2, RefreshCw,
-  DatabaseBackup, RotateCcw, Save, DollarSign,
+  DatabaseBackup, RotateCcw, Save, DollarSign, TrendingUp, Landmark, Percent,
 } from 'lucide-react'
+import { Line } from 'react-chartjs-2'
+import {
+  Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement,
+  Tooltip as ChartTooltip, Filler,
+} from 'chart.js'
 import { useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, extrairLista } from '../lib/api'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
@@ -13,8 +18,10 @@ import { mesAtual as mesAtualLocal, hojeLocal, dataParaYMD } from '../lib/utils'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { useAuth } from '../hooks/useAuth'
-import { usePtax } from '../hooks/usePtax'
+import { usePtaxSerie } from '../hooks/usePtax'
+import { useIndicesEconomicos, type IndiceNome, type PontoIndice } from '../hooks/useIndicesEconomicos'
 import { useBackfillHistorico } from '../hooks/useInvestimentosHistorico'
+import { useOperacaoLonga } from '../hooks/useOperacaoLonga'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import type { Conta, CartaoVirtual } from '../types'
 import {
@@ -27,6 +34,8 @@ import {
   fiiCategoriaPorTicker,
   type PosicaoB3, type MovB3, type AcaoMov, type AtivoB3, type XlsxLike,
 } from '../lib/importB3'
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ChartTooltip, Filler)
 
 // ── Tipos internos ──────────────────────────────────────────────
 
@@ -222,13 +231,13 @@ function parseCartoesVirtuais(raw: unknown): CartaoVirtual[] {
 }
 
 // ── Componentes auxiliares ──────────────────────────────────────
-function Section({ titulo, subtitulo, icon: Icon, cor, children, defaultOpen = true }: {
+function Section({ titulo, subtitulo, icon: Icon, cor, children, defaultOpen = true, fill = false }: {
   titulo: string; subtitulo: string; icon: React.ElementType; cor: string
-  children: React.ReactNode; defaultOpen?: boolean
+  children: React.ReactNode; defaultOpen?: boolean; fill?: boolean
 }) {
   const [aberto, setAberto] = useState(defaultOpen)
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+    <div className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden ${fill ? 'h-full flex flex-col' : ''}`}>
       <button
         onClick={() => setAberto(a => !a)}
         className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
@@ -244,7 +253,7 @@ function Section({ titulo, subtitulo, icon: Icon, cor, children, defaultOpen = t
         </div>
         {aberto ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
       </button>
-      {aberto && <div className="px-5 pb-5 border-t border-gray-100 dark:border-gray-700 pt-4">{children}</div>}
+      {aberto && <div className={`px-5 pb-5 border-t border-gray-100 dark:border-gray-700 pt-4 ${fill ? 'flex-1' : ''}`}>{children}</div>}
     </div>
   )
 }
@@ -512,6 +521,7 @@ function SecaoExport() {
   const [exportarTransacoes, setExportarTransacoes] = useState(true)
   const [exportarInvestimentos, setExportarInvestimentos] = useState(false)
   const [loading, setLoading] = useState(false)
+  useOperacaoLonga(loading) // suspende auto-logout durante a exportação
 
   const exportar = async () => {
     setLoading(true)
@@ -983,6 +993,7 @@ function ImportInvestimentos({ contas }: { contas: Conta[] }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [etapa, setEtapa] = useState<'idle' | 'revisando' | 'importando' | 'concluido'>('idle')
   const [carregando, setCarregando] = useState(false)
+  useOperacaoLonga(etapa === 'importando' || carregando) // suspende auto-logout durante import de investimentos
   const [erroArq, setErroArq] = useState('')
   const [posicoes, setPosicoes] = useState<PosicaoB3[]>([])
   const [movsRaw, setMovsRaw] = useState<MovB3[]>([])
@@ -1526,6 +1537,7 @@ function SecaoImport({ modo, setModo }: { modo: ModoImport; setModo: (m: ModoImp
 
   const inputRef = useRef<HTMLInputElement>(null)
   const [etapa, setEtapa] = useState<'idle' | 'analisando' | 'revisando' | 'importando' | 'concluido'>('idle')
+  useOperacaoLonga(etapa === 'analisando' || etapa === 'importando') // suspende auto-logout durante análise/import
   const [dragOver, setDragOver] = useState(false)
   const [grid, setGrid] = useState<LinhaGrid[]>([])
   const [paginaAtual, setPaginaAtual] = useState(0)
@@ -2122,6 +2134,8 @@ function SecaoImport({ modo, setModo }: { modo: ModoImport; setModo: (m: ModoImp
               tipo: l.tipo, data: l.data, descricao: l.descricao,
               valor: l.valor, conta_id, categoria_id,
               status: l.status, observacao: l.observacao || undefined,
+              // Import em massa do extrato: não replicar proventos (evita bloqueio por descrição).
+              replicar_investimento: false,
             })
             if (r.ok) ok++
             else { addLog('erro', `"${l.descricao}" (${l.data}): ${r.erro}`); erros++ }
@@ -2986,6 +3000,7 @@ function SecaoBackup() {
   const { contas } = useContas()
   const { categorias } = useCategorias()
   const [loading, setLoading] = useState(false)
+  useOperacaoLonga(loading) // suspende auto-logout durante o backup
   const [log, setLog] = useState<{ tipo: 'ok' | 'erro'; msg: string }[]>([])
 
   const fazerBackup = async () => {
@@ -3161,6 +3176,7 @@ function SecaoRestore() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [etapa, setEtapa] = useState<'idle' | 'confirmando' | 'restaurando' | 'concluido'>('idle')
+  useOperacaoLonga(etapa === 'restaurando') // suspende auto-logout durante o restore
   const [payload, setPayload] = useState<BackupPayload | null>(null)
   const [escopo, setEscopo] = useState<'tudo' | 'extrato' | 'investimentos' | 'lembretes' | 'objetivos'>('tudo')
   const [progresso, setProgresso] = useState(0)
@@ -3371,6 +3387,8 @@ function SecaoRestore() {
             const r = await apiComRetry('/transacoes', 'POST', {
               tipo: t.tipo, data: t.data, descricao: t.descricao, valor: t.valor,
               conta_id, categoria_id, status: t.status, observacao: t.observacao,
+              // Dividendos têm restore próprio (módulo de investimentos): não replicar aqui.
+              replicar_investimento: false,
             })
             if (r.ok) { okTx++; const nid = (r.dados as { id?: string } | null)?.id; if (nid) txIdPorKey.set(txKey(t.data, t.valor, t.tipo, t.descricao, conta_id), String(nid)) }
             else { addLog('erro', `"${t.descricao}" (${t.data}): ${r.erro}`); errTx++ }
@@ -3672,76 +3690,204 @@ function SecaoRestore() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// SEÇÃO — COTAÇÃO DO DÓLAR (PTAX)
+// SEÇÃO — INDICADORES ECONÔMICOS (PTAX · IPCA · SELIC), 3 quadros lado a lado
 // ══════════════════════════════════════════════════════════════════
-function SecaoCotacaoDolar() {
-  const qc = useQueryClient()
-  const [data, setData] = useState(hojeLocal())
-  const { atual, atualData, taxaEm } = usePtax([data])
-  const [sincronizando, setSincronizando] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
 
-  const fmtTaxa = (v: number | null) =>
-    v == null ? '—' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
+// Controle de período compacto (segmented), reutilizado pelos 3 quadros.
+function PeriodoSeg<T extends string>({ value, onChange, opcoes, cor }: {
+  value: T; onChange: (v: T) => void; opcoes: { value: T; label: string }[]; cor: string
+}) {
+  return (
+    <div className="inline-flex rounded-lg border border-gray-200 dark:border-white/10 overflow-hidden text-[12px]">
+      {opcoes.map((o) => {
+        const ativo = o.value === value
+        return (
+          <button key={o.value} onClick={() => onChange(o.value)}
+            className={`px-2.5 py-1 font-medium transition-colors ${ativo ? 'text-white' : 'text-gray-400 hover:text-gray-200'}`}
+            style={ativo ? { background: cor } : undefined}>
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// Gráfico de linha (evolução) genérico — recebe rótulos, valores, cor e o
+// formatador usado nos eixos e no tooltip.
+function LinhaEvolucao({ labels, valores, cor, fmt }: {
+  labels: string[]; valores: number[]; cor: string; fmt: (v: number) => string
+}) {
+  if (valores.length === 0) {
+    return <div className="h-[150px] flex items-center justify-center text-[13px] text-gray-400">Sem dados no período.</div>
+  }
+  return (
+    <div className="h-[150px]">
+      <Line
+        data={{
+          labels,
+          datasets: [{
+            data: valores, borderColor: cor, backgroundColor: `${cor}22`,
+            fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 3, borderWidth: 2,
+          }],
+        }}
+        options={{
+          maintainAspectRatio: false,
+          interaction: { intersect: false, mode: 'index' },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: (ctx) => ` ${fmt(Number(ctx.parsed.y))}` } },
+          },
+          scales: {
+            x: { ticks: { color: '#8b92a8', maxTicksLimit: 6, maxRotation: 0, font: { size: 10 } }, grid: { display: false } },
+            y: { ticks: { color: '#8b92a8', maxTicksLimit: 5, font: { size: 10 }, callback: (v) => fmt(Number(v)) }, grid: { color: 'rgba(148,163,184,.15)' } },
+          },
+        }}
+      />
+    </div>
+  )
+}
+
+function recuarDiasISO(iso: string, n: number): string {
+  const dt = new Date(`${iso}T12:00:00`)
+  dt.setDate(dt.getDate() - n)
+  return dt.toISOString().slice(0, 10)
+}
+
+// ── Quadro do dólar (PTAX) — período 7 dias / 1 mês / ano ────────
+type PeriodoPtax = '7d' | '1m' | 'ano'
+const PERIODOS_PTAX: { value: PeriodoPtax; label: string }[] = [
+  { value: '7d', label: '7 dias' }, { value: '1m', label: '1 mês' }, { value: 'ano', label: 'Ano' },
+]
+
+function CardPtax() {
+  const [periodo, setPeriodo] = useState<PeriodoPtax>('1m')
+  const desdeAno = useMemo(() => recuarDiasISO(hojeLocal(), 366), [])  // busca 1 ano; fatia no cliente
+  const { serie, atual, atualData } = usePtaxSerie(desdeAno)
+
+  const dias = periodo === '7d' ? 7 : periodo === '1m' ? 31 : 366
+  const corte = recuarDiasISO(hojeLocal(), dias)
+  const pts = serie.filter((p) => p.data >= corte)
+  const labels = pts.map((p) => p.data.slice(5).split('-').reverse().join('/'))  // DD/MM
+  const valores = pts.map((p) => p.valor)
+
+  const fmtBRL = (v: number) => `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
   const fmtData = (d?: string | null) => (d ? d.split('-').reverse().join('/') : '')
 
-  const taxaData = taxaEm(data)
-  const estimada = !!atualData && data > atualData   // data futura/hoje ainda sem PTAX publicado
+  return (
+    <Section titulo="Dólar (PTAX)" subtitulo="USD → BRL · Banco Central" icon={DollarSign} cor="#10b981" defaultOpen fill>
+      <div className="space-y-3">
+        <div>
+          <p className="text-[13px] text-gray-400">Cotação mais recente (venda)</p>
+          <p className="text-[24px] font-bold text-gray-800 dark:text-gray-100 leading-tight">{atual != null ? fmtBRL(atual) : '—'}</p>
+          {atualData && <p className="text-[12px] text-gray-400">Referente a {fmtData(atualData)}</p>}
+        </div>
+        <div className="flex justify-end">
+          <PeriodoSeg value={periodo} onChange={setPeriodo} opcoes={PERIODOS_PTAX} cor="#10b981" />
+        </div>
+        <LinhaEvolucao labels={labels} valores={valores} cor="#10b981" fmt={(v) => `R$ ${v.toFixed(4)}`} />
+      </div>
+    </Section>
+  )
+}
+
+// ── Quadros IPCA / SELIC — período trimestre / 1 ano / 5 anos ────
+type PeriodoIndice = 'tri' | 'ano' | '5anos'
+const PERIODOS_INDICE: { value: PeriodoIndice; label: string }[] = [
+  { value: 'tri', label: 'Trimestre' }, { value: 'ano', label: '1 ano' }, { value: '5anos', label: '5 anos' },
+]
+const MESES_LABEL = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+const labelComp = (comp: string) => {
+  const [y, m] = comp.split('-')
+  return `${MESES_LABEL[Number(m) - 1]}/${y.slice(2)}`
+}
+
+// Taxa acumulada em 12 meses (o "valor", em % a.a.), derivada da série de
+// taxas mensais por composição: ∏(1 + taxa_i/100) − 1. Cada ponto exige os
+// 12 meses anteriores, então os primeiros meses da série ficam de fora.
+function acumulado12m(pts: PontoIndice[]): PontoIndice[] {
+  const out: PontoIndice[] = []
+  for (let i = 11; i < pts.length; i++) {
+    let fator = 1
+    for (let j = i - 11; j <= i; j++) fator *= 1 + pts[j].valor / 100
+    out.push({ competencia: pts[i].competencia, valor: (fator - 1) * 100 })
+  }
+  return out
+}
+
+function CardIndice({ indice, titulo, subtitulo, cor, icon }: {
+  indice: IndiceNome; titulo: string; subtitulo: string; cor: string; icon: React.ElementType
+}) {
+  const [periodo, setPeriodo] = useState<PeriodoIndice>('ano')
+  // Os cards compartilham a mesma query (dedup pelo React Query).
+  const { serie, loading } = useIndicesEconomicos(['IPCA', 'SELIC', 'CDI'])
+
+  // Exibe o VALOR (taxa acumulada 12 meses), não a variação mensal.
+  const serie12m = acumulado12m(serie(indice))
+  const n = periodo === 'tri' ? 3 : periodo === 'ano' ? 12 : 60
+  const pts = serie12m.slice(-n)
+  const labels = pts.map((p) => labelComp(p.competencia))
+  const valores = pts.map((p) => p.valor)
+  const atual = serie12m.length ? serie12m[serie12m.length - 1] : null
+  const fmtPct = (v: number) => `${v.toFixed(2).replace('.', ',')}%`
+
+  return (
+    <Section titulo={titulo} subtitulo={subtitulo} icon={icon} cor={cor} defaultOpen fill>
+      <div className="space-y-3">
+        <div>
+          <p className="text-[13px] text-gray-400">Acumulado 12 meses (% a.a.)</p>
+          <p className="text-[24px] font-bold text-gray-800 dark:text-gray-100 leading-tight">
+            {atual ? fmtPct(atual.valor) : (loading ? '…' : '—')}
+          </p>
+          {atual && <p className="text-[12px] text-gray-400">Até {labelComp(atual.competencia)}</p>}
+        </div>
+        <div className="flex justify-end">
+          <PeriodoSeg value={periodo} onChange={setPeriodo} opcoes={PERIODOS_INDICE} cor={cor} />
+        </div>
+        <LinhaEvolucao labels={labels} valores={valores} cor={cor} fmt={fmtPct} />
+      </div>
+    </Section>
+  )
+}
+
+// Os 3 quadros na mesma linha (empilham em telas estreitas), com um único
+// botão que sincroniza PTAX + índices (IPCA/SELIC) de uma vez.
+function SecaoIndicadores() {
+  const qc = useQueryClient()
+  const [sincronizando, setSincronizando] = useState(false)
+  useOperacaoLonga(sincronizando) // suspende auto-logout durante a sincronização
+  const [msg, setMsg] = useState<string | null>(null)
 
   const sincronizar = async () => {
     setSincronizando(true); setMsg(null)
-    const res = await apiMutate<{ inseridos: number; desde: string; ate: string }>('/investimentos/ptax', 'POST')
+    const [rp, ri] = await Promise.all([
+      apiMutate<{ inseridos: number }>('/investimentos/ptax', 'POST'),
+      apiMutate<{ inseridos: number }>('/investimentos/indices', 'POST'),
+    ])
     setSincronizando(false)
-    if (res.ok) {
-      setMsg(`Sincronizado: ${(res.dados as { inseridos?: number } | null)?.inseridos ?? 0} cotação(ões) atualizada(s).`)
+    if (rp.ok && ri.ok) {
+      const np = (rp.dados as { inseridos?: number } | null)?.inseridos ?? 0
+      const ni = (ri.dados as { inseridos?: number } | null)?.inseridos ?? 0
+      setMsg(`Atualizado (novos/revisados): ${np} cotação(ões) PTAX e ${ni} mês(es) de IPCA/SELIC/CDI.`)
       qc.invalidateQueries({ queryKey: ['ptax'] })
-    } else setMsg(`Erro: ${res.erro}`)
+      qc.invalidateQueries({ queryKey: ['ptax-serie'] })
+      qc.invalidateQueries({ queryKey: ['indices-economicos'] })
+    } else setMsg(`Erro: ${rp.erro ?? ri.erro ?? 'falha na sincronização'}`)
   }
 
   return (
-    <Section titulo="Cotação do dólar (PTAX)" subtitulo="Consulta o dólar de referência do Banco Central (USD → BRL)" icon={DollarSign} cor="#10b981" defaultOpen>
-      <div className="space-y-4">
-        {/* Cotação mais recente */}
-        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-          <p className="text-[14px] text-gray-400">Cotação mais recente (PTAX de venda)</p>
-          <p className="text-[22px] font-bold text-gray-800 dark:text-gray-100">{fmtTaxa(atual)}</p>
-          {atualData && <p className="text-[13px] text-gray-400">Referente a {fmtData(atualData)}</p>}
-        </div>
-
-        {/* Consulta por data */}
-        <div>
-          <p className="text-[15px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Consultar por data</p>
-          <div className="flex items-end gap-4 flex-wrap">
-            <div>
-              <p className="text-[14px] text-gray-400 mb-1">Data</p>
-              <input type="date" value={data} onChange={(e) => setData(e.target.value)}
-                className="bg-[#1a1f2e] border border-white/10 rounded-lg px-3 py-2 text-[15px] text-gray-200 outline-none" />
-            </div>
-            <div>
-              <p className="text-[14px] text-gray-400 mb-1">Cotação</p>
-              <p className="text-[20px] font-bold text-gray-800 dark:text-gray-100">{fmtTaxa(taxaData)}</p>
-            </div>
-          </div>
-          {estimada && (
-            <p className="text-[13px] text-amber-400 mt-1.5">
-              Data ainda sem PTAX publicado — exibindo a cotação do último dia útil (estimativa).
-            </p>
-          )}
-          <p className="text-[13px] text-gray-400 mt-1">
-            Fins de semana e feriados usam a cotação do último dia útil anterior.
-          </p>
-        </div>
-
-        {/* Sincronizar */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <Btn onClick={sincronizar} loading={sincronizando} cor="#10b981"><RefreshCw size={14} /> Sincronizar agora</Btn>
-          {msg && <span className="text-[14px]" style={{ color: msg.startsWith('Erro') ? '#f87171' : '#10b981' }}>{msg}</span>}
-        </div>
-        <p className="text-[13px] text-gray-400">
-          Histórico desde 01/01/2021, sincronizado automaticamente com o Banco Central. Usado para converter ativos em dólar.
-        </p>
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        <Btn onClick={sincronizar} loading={sincronizando} cor="#10b981"><RefreshCw size={14} /> Sincronizar indicadores</Btn>
+        {msg && <span className="text-[14px]" style={{ color: msg.startsWith('Erro') ? '#f87171' : '#10b981' }}>{msg}</span>}
       </div>
-    </Section>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <CardPtax />
+        <CardIndice indice="IPCA"  titulo="IPCA (inflação)" subtitulo="Acum. 12 meses · IBGE/BCB" cor="#f59e0b" icon={TrendingUp} />
+        <CardIndice indice="SELIC" titulo="SELIC"           subtitulo="Acum. 12 meses · BCB"      cor="#3b82f6" icon={Landmark} />
+        <CardIndice indice="CDI"   titulo="CDI"             subtitulo="Acum. 12 meses · BCB"      cor="#8b5cf6" icon={Percent} />
+      </div>
+    </div>
   )
 }
 
@@ -3761,7 +3907,7 @@ export default function ImportExportPage() {
     <div className="p-5 max-w-[1200px]">
       <div className="mb-5">
         <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Gerenciar dados</h1>
-        <p className="text-[16px] text-gray-400 mt-0.5">Importação, exportação, backup, cotação do dólar e limpeza de dados</p>
+        <p className="text-[16px] text-gray-400 mt-0.5">Importação, exportação, backup, indicadores econômicos e limpeza de dados</p>
       </div>
 
       <div className="mb-4">
@@ -3769,8 +3915,8 @@ export default function ImportExportPage() {
       </div>
 
       <div className="space-y-3">
-        {/* Cotação do dólar (consulta PTAX) — em primeiro lugar */}
-        <SecaoCotacaoDolar />
+        {/* Indicadores econômicos (PTAX · IPCA · SELIC) — em primeiro lugar */}
+        <SecaoIndicadores />
 
         {/* Linha 1 — Exportar | Importar (XLSX, uso humano).
             No modo "investimentos" a importação ocupa a largura total

@@ -89,6 +89,39 @@ async function buscarPorId(c: ReturnType<typeof db>, id: string) {
   return json(data);
 }
 
+// ── Vínculo com investimentos (proventos) ────────────────────
+// Uma categoria mapeada a um tipo de provento (inv_tipos_dividendo.categoria_id)
+// — ou cuja categoria-pai esteja mapeada — torna o lançamento "de investimento".
+// Retorna o tipo_dividendo apenas quando o vínculo é único (senão null).
+async function vinculoProvento(
+  c: ReturnType<typeof db>,
+  categoriaId: string | null,
+): Promise<{ vinculado: boolean; tipoDividendoId: string | null }> {
+  if (!categoriaId) return { vinculado: false, tipoDividendoId: null };
+  const { data: cat } = await c.from("categorias").select("id_pai").eq("id", categoriaId).maybeSingle();
+  const ids = [categoriaId];
+  if (cat?.id_pai) ids.push(String(cat.id_pai));
+  const { data: tipos } = await c.from("inv_tipos_dividendo")
+    .select("id").in("categoria_id", ids).eq("ativo", true);
+  if (!tipos || tipos.length === 0) return { vinculado: false, tipoDividendoId: null };
+  return { vinculado: true, tipoDividendoId: tipos.length === 1 ? String(tipos[0].id) : null };
+}
+
+// O ticker é o primeiro segmento da descrição (formato "TICKER - Nome").
+function tickerDaDescricao(descricao: string): string {
+  return String(descricao).split(" - ")[0].trim();
+}
+
+async function ativoPorTicker(
+  c: ReturnType<typeof db>,
+  ticker: string,
+): Promise<{ id: string; tipo_ativo: string } | null> {
+  const t = ticker.trim();
+  if (!t) return null;
+  const { data } = await c.from("inv_ativos").select("id, tipo_ativo").ilike("ticker", t).limit(1);
+  return data && data.length ? { id: String(data[0].id), tipo_ativo: String(data[0].tipo_ativo) } : null;
+}
+
 async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string) {
   logRequest("POST", "/transacoes", body);
 
@@ -114,6 +147,24 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
       .select("ativa").eq("id", String(body.categoria_id)).maybeSingle();
     if (!cat)       return erro("RV-005: categoria não encontrada", 422);
     if (!cat.ativa) return erro("RV-005: categoria inativa não pode ser usada em novos lançamentos", 422);
+  }
+
+  // ── Replicação para investimentos (proventos) ──────────────
+  // RECEITA numa categoria de provento deve referenciar um ativo cadastrado;
+  // cada transação criada espelha um inv_dividendos vinculado.
+  // Restore/import passam replicar_investimento=false: os dividendos têm
+  // restore próprio (módulo de investimentos), então não se replica aqui.
+  let proventoAtivo: { id: string; tipo_ativo: string } | null = null;
+  let proventoTipoDividendoId: string | null = null;
+  const replicarInvestimento = body.replicar_investimento !== false;
+  const vinc = replicarInvestimento
+    ? await vinculoProvento(c, body.categoria_id ? String(body.categoria_id) : null)
+    : { vinculado: false, tipoDividendoId: null };
+  if (vinc.vinculado && String(body.tipo) === "RECEITA") {
+    proventoAtivo = await ativoPorTicker(c, tickerDaDescricao(String(body.descricao)));
+    if (!proventoAtivo)
+      return erro("RV-010: lançamento de provento deve começar pelo ticker de um ativo cadastrado (ex.: PETR4 - ...)", 422);
+    proventoTipoDividendoId = vinc.tipoDividendoId;
   }
 
   const statusOriginal = String(body.status);
@@ -172,6 +223,26 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
       if (error.message.includes("CATEGORIA_INVALIDA")) return erro("categoria inexistente ou inativa", 422);
       return erro(error.message);
     }
+    // Espelhar provento em investimentos (atômico: rollback da transação se falhar)
+    if (proventoAtivo) {
+      const { error: eDiv } = await c.from("inv_dividendos").insert({
+        user_id:              userId,
+        ativo_id:             proventoAtivo.id,
+        conta_id:             body.conta_id,
+        valor:                body.valor,
+        data_pagamento:       dataBase,
+        tipo_ativo:           proventoAtivo.tipo_ativo,
+        descricao:            body.descricao,
+        tipo_dividendo_id:    proventoTipoDividendoId,
+        transacao_extrato_id: data.id,
+      });
+      if (eDiv) {
+        logError("Replicar provento (simples)", eDiv);
+        await c.from("transacoes").delete().eq("id", data.id);
+        return erro("Falha ao replicar o provento em investimentos: " + eDiv.message, 500);
+      }
+    }
+
     logSuccess("Transação criada", { id: data.id });
     return json(data, 201);
   }
@@ -221,6 +292,27 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
     if (error.message.includes("CONTA_INVALIDA"))    return erro("RV-004: conta inexistente ou inativa", 422);
     if (error.message.includes("CATEGORIA_INVALIDA")) return erro("categoria inexistente ou inativa", 422);
     return erro(error.message);
+  }
+
+  // Espelhar provento em investimentos — um inv_dividendos por parcela criada
+  if (proventoAtivo) {
+    const divs = (data as Record<string, unknown>[]).map(tx => ({
+      user_id:              userId,
+      ativo_id:             proventoAtivo!.id,
+      conta_id:             tx.conta_id,
+      valor:                tx.valor,
+      data_pagamento:       tx.data,
+      tipo_ativo:           proventoAtivo!.tipo_ativo,
+      descricao:            tx.descricao,
+      tipo_dividendo_id:    proventoTipoDividendoId,
+      transacao_extrato_id: tx.id,
+    }));
+    const { error: eDiv } = await c.from("inv_dividendos").insert(divs);
+    if (eDiv) {
+      logError("Replicar provento (recorrência)", eDiv);
+      await c.from("transacoes").delete().eq("id_recorrencia", idRecorrencia);
+      return erro("Falha ao replicar os proventos em investimentos: " + eDiv.message, 500);
+    }
   }
 
   logSuccess("Recorrência criada", { id_recorrencia: idRecorrencia, parcelas: totalParcelas });
@@ -494,6 +586,20 @@ async function excluir(c: ReturnType<typeof db>, id: string, escopo: string) {
     ids = (rec ?? []).map((r: { id: string }) => r.id);
     logDebug(`Escopo ${escopo}: excluindo ${ids.length} transações`);
   }
+
+  // Excluir um lançamento no extrato REFLETE em investimentos: se a
+  // transação espelha um provento (inv_dividendos.transacao_extrato_id),
+  // o dividendo é removido junto. Feito ANTES de apagar a transação (depois
+  // o FK ON DELETE SET NULL zeraria o vínculo e perderíamos a referência).
+  //
+  // Isto vale só para a exclusão individual pela UI do extrato. A rotina de
+  // limpeza (/limpar) NÃO passa por aqui: ela apaga transações direto e
+  // preserva os dividendos (apenas desvincula via SET NULL). Por isso a
+  // propagação fica na Edge Function, não num trigger de DELETE em transacoes
+  // (um trigger dispararia também na limpeza e apagaria os dividendos).
+  const { error: eDiv } = await c.from("inv_dividendos")
+    .delete().in("transacao_extrato_id", ids);
+  if (eDiv) { logError("Excluir dividendos vinculados", eDiv); return erro(eDiv.message); }
 
   const { error } = await c.from("transacoes").delete().in("id", ids);
   if (error) { logError("Excluir transação", error); return erro(error.message); }

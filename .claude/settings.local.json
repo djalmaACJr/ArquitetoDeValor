@@ -66,7 +66,12 @@
       "Bash(Test-Path \"c:\\\\Pessoal\\\\ArquitetoDeValor\\\\node_modules\\\\.bin\\\\jest.cmd\")",
       "Bash(python -c \"import sys,json; p=json.load\\(sys.stdin\\); [print\\(k,':',v\\) for k,v in p.get\\('scripts',{}\\).items\\(\\) if 'e2e' in k or 'dev' in k]\")",
       "Bash(node -e \"const p=require\\('./package.json'\\); Object.entries\\(p.scripts||{}\\).filter\\(\\([k]\\)=>k.includes\\('e2e'\\)||k.includes\\('dev'\\)\\).forEach\\(\\([k,v]\\)=>console.log\\(k,':',v\\)\\)\")",
-      "PowerShell(supabase projects list)"
+      "PowerShell(supabase projects list)",
+      "PowerShell($d = \\(Get-Command deno -ErrorAction SilentlyContinue\\); if \\($d\\) { deno check supabase/functions/investimentos/index.ts } else { \"deno not installed\" })",
+      "PowerShell(deno check C:/Pessoal/ArquitetoDeValor/supabase/functions/investimentos/index.ts)",
+      "WebSearch",
+      "WebFetch(domain:brapi.dev)",
+      "WebFetch(domain:finnhub.io)"
     ],
     "additionalDirectories": [
       "C:\\Pessoal\\ArquitetoDeValor\\scripts",

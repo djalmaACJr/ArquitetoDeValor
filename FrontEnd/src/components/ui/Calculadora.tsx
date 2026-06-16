@@ -31,6 +31,37 @@ function terminaComOp(expr: string) {
   return /[+\-×÷*/]$/.test(expr)
 }
 
+// Converte um segmento numérico formatado (ex.: "1.234,56") na quantidade de centavos (123456)
+function segmentoCents(seg: string): number {
+  const digits = seg.replace(/\D/g, '')
+  return digits ? parseInt(digits, 10) : 0
+}
+
+// Formata centavos como moeda BR (12345 → "123,45")
+function formatCents(cents: number): string {
+  return (cents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+// Índice do último operador "real" (ignora o sinal de menos no início da expressão)
+function ultimoOpIndex(expr: string): number {
+  for (let i = expr.length - 1; i >= 0; i--) {
+    if ('+-×÷'.includes(expr[i])) {
+      if (i === 0) continue
+      return i
+    }
+  }
+  return -1
+}
+
+// Separa a expressão em [prefixo, último número] — onde o número é tudo após o último operador
+function separarUltimo(expr: string): [string, string] {
+  const idx = ultimoOpIndex(expr)
+  let prefixo = idx >= 0 ? expr.slice(0, idx + 1) : ''
+  let seg = idx >= 0 ? expr.slice(idx + 1) : expr
+  if (idx < 0 && seg.startsWith('-')) { prefixo = '-'; seg = seg.slice(1) }
+  return [prefixo, seg]
+}
+
 const BTN = 'flex items-center justify-center rounded-xl text-[19px] font-semibold transition-all active:scale-95 select-none cursor-pointer'
 const BTN_NUM  = `${BTN} bg-[#252d42] hover:bg-[#2e3955]`
 const BTN_OP   = `${BTN} bg-[#1e2940] hover:bg-[#28354d] text-[#60a5fa]`
@@ -57,36 +88,37 @@ function Btn({ label, onClick, className = BTN_NUM, style }: BotaoProps) {
 
 export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Props) {
   const inicialStr = valorInicial > 0
-    ? valorInicial.toFixed(2).replace('.', ',')
+    ? formatCents(Math.round(valorInicial * 100))
     : ''
 
   const [expr,        setExpr]        = useState(inicialStr)
   const [resultado,   setResultado]   = useState<number | null>(null)
   const [acabouIgual, setAcabouIgual] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  // Foca o container ao montar para capturar teclado imediatamente
+  // Foca o input oculto ao montar para capturar teclado e colagem imediatamente
   useEffect(() => {
-    containerRef.current?.focus()
+    inputRef.current?.focus()
   }, [])
 
   // ── Ações ──────────────────────────────────────────────────
+  // Digitação em modo centavos: cada dígito desloca o número uma casa (123 → "1,23")
   function pressDigito(d: string) {
-    if (acabouIgual) { setExpr(d); setAcabouIgual(false); return }
-    setExpr(e => e + d)
+    if (acabouIgual) { setExpr(formatCents(parseInt(d, 10))); setResultado(null); setAcabouIgual(false); return }
+    setExpr(e => {
+      const [prefixo, seg] = separarUltimo(e)
+      const cents = segmentoCents(seg) * 10 + parseInt(d, 10)
+      return prefixo + formatCents(cents)
+    })
   }
 
   function pressDuplo() {
-    if (acabouIgual) { setExpr('00'); setAcabouIgual(false); return }
-    setExpr(e => e + '00')
-  }
-
-  function pressVirgula() {
-    if (acabouIgual) { setExpr('0,'); setAcabouIgual(false); return }
-    const segmentos = expr.split(/[+\-×÷]/)
-    const ultimo = segmentos[segmentos.length - 1]
-    if (ultimo.includes(',')) return
-    setExpr(e => (e === '' ? '0,' : e + ','))
+    if (acabouIgual) { setExpr(formatCents(0)); setResultado(null); setAcabouIgual(false); return }
+    setExpr(e => {
+      const [prefixo, seg] = separarUltimo(e)
+      const cents = segmentoCents(seg) * 100
+      return prefixo + formatCents(cents)
+    })
   }
 
   function pressOp(op: '+' | '-' | '×' | '÷') {
@@ -106,7 +138,14 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
 
   function pressBackspace() {
     setAcabouIgual(false)
-    setExpr(e => e.slice(0, -1))
+    setExpr(e => {
+      if (!e) return ''
+      const last = e[e.length - 1]
+      if ('+-×÷'.includes(last)) return e.slice(0, -1)
+      const [prefixo, seg] = separarUltimo(e)
+      const cents = Math.floor(segmentoCents(seg) / 10)
+      return cents === 0 ? prefixo : prefixo + formatCents(cents)
+    })
   }
 
   function pressClear() {
@@ -122,23 +161,24 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
   }
 
   // ── Colagem ────────────────────────────────────────────────
+  // Cola apenas o valor numérico (ignora qualquer texto), substituindo o número atual.
   function aplicarColagem(texto: string) {
     const limpo = texto
       .replace(/\s/g, '')
       .replace(/\./g, '')
       .replace(/,/g, '.')
-      .replace(/[^0-9+\-*/.]/g, '')
+      .replace(/[^0-9.]/g, '')
     if (!limpo) return
     const valor = parseFloat(limpo)
     if (isNaN(valor)) return
-    const formatado = valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    if (acabouIgual) {
-      setExpr(formatado)
-      setAcabouIgual(false)
-    } else {
-      setExpr(e => e + formatado)
-    }
+    const formatado = formatCents(Math.round(valor * 100))
+    setExpr(e => {
+      if (acabouIgual) return formatado
+      const [prefixo] = separarUltimo(e)
+      return prefixo + formatado
+    })
     setResultado(null)
+    setAcabouIgual(false)
   }
 
   // ── Teclado ────────────────────────────────────────────────
@@ -146,18 +186,12 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
     // Não propaga para o drawer nem para outros handlers
     e.stopPropagation()
 
-    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-      e.preventDefault()
-      navigator.clipboard.readText().then(aplicarColagem).catch(() => {})
-      return
-    }
+    // Ctrl/Cmd+V é tratado pelo evento nativo onPaste do input (sem prompt de permissão)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return
 
     if (e.key >= '0' && e.key <= '9') { e.preventDefault(); pressDigito(e.key); return }
 
     switch (e.key) {
-      case ',':
-      case '.':
-        e.preventDefault(); pressVirgula(); break
       case '+':
         e.preventDefault(); pressOp('+'); break
       case '-':
@@ -203,13 +237,21 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
 
   return (
     <div
-      ref={containerRef}
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-      onPaste={handlePaste}
-      className="rounded-2xl border border-white/10 overflow-hidden mt-2 outline-none"
+      onClick={() => inputRef.current?.focus()}
+      className="rounded-2xl border border-white/10 overflow-hidden mt-2 outline-none relative"
       style={{ background: '#141b2e' }}
     >
+      {/* Input oculto: mantém o foco para capturar teclado e colagem nativa (sem prompt de permissão) */}
+      <input
+        ref={inputRef}
+        autoFocus
+        inputMode="numeric"
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        className="absolute opacity-0 pointer-events-none"
+        style={{ width: 1, height: 1, left: 0, top: 0 }}
+      />
+
       {/* Display */}
       <div className="px-4 pt-3 pb-2 text-right select-none" style={{ minHeight: '64px' }}>
         {previewStr && (
@@ -261,10 +303,9 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
           =
         </button>
 
-        {/* Linha 5 */}
-        <Btn label="0"  onClick={() => pressDigito('0')} />
+        {/* Linha 5 — sem vírgula: no modo centavos as casas decimais são automáticas */}
+        <Btn label="0"  onClick={() => pressDigito('0')} style={{ gridColumn: 'span 2' }} />
         <Btn label="00" onClick={pressDuplo} />
-        <Btn label=","  onClick={pressVirgula} />
       </div>
 
       {/* Confirmar / Cancelar */}

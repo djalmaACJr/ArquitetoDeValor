@@ -6,6 +6,8 @@ import { useState, useEffect, useRef } from 'react'
 import { Repeat2, Trash2, Zap, Sparkles } from 'lucide-react'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
+import { useTiposDividendo } from '../../hooks/useTiposDividendo'
+import { useInvestimentosAtivos } from '../../hooks/useInvestimentosAtivos'
 import { apiFetch, apiMutate } from '../../lib/api'
 import { formatBRL, parsearValorBR, hojeLocal, dataParaYMD } from '../../lib/utils'
 import { buscarSugestoes, buscarTodasSugestoes, salvarSugestao, type SugestaoLancamento } from '../../hooks/useAssistente'
@@ -192,6 +194,10 @@ export default function DrawerLancamento({
 }: DrawerLancamentoProps) {
   const { contas }     = useContas()
   const { categorias } = useCategorias()
+  // Categorias mapeadas a tipos de provento são "vinculadas a investimentos":
+  // nesses lançamentos a descrição deve referenciar preferencialmente um ativo.
+  const { tipos: tiposDividendo } = useTiposDividendo()
+  const { ativos }                = useInvestimentosAtivos()
 
   const [editando,            setEditando]            = useState<Lancamento | null>(null)
   const [form,                setForm]                = useState<FormState>(FORM_VAZIO)
@@ -446,6 +452,24 @@ export default function DrawerLancamento({
         }))
       ])
   ]
+
+  // ── Vínculo com investimentos ──────────────────────────────
+  // Conjunto de categorias mapeadas a algum tipo de provento. Um lançamento
+  // nessas categorias (ou em subcategoria delas) é considerado "de investimento".
+  const catsInvestimento = new Set(
+    tiposDividendo.filter(t => t.ativo).map(t => t.categoria_id).filter((id): id is string => !!id),
+  )
+  const ehCatInvestimento = (catId: string): boolean => {
+    if (!catId) return false
+    if (catsInvestimento.has(catId)) return true
+    const cat = categorias.find(c => c.id === catId)
+    return !!cat?.id_pai && catsInvestimento.has(cat.id_pai)
+  }
+  const modoInvestimento = form.tipo !== 'TRANSFERENCIA' && ehCatInvestimento(form.categoria_id)
+  // Sugestões de descrição = ativos (TICKER - Nome), para manter consistência
+  const opcoesAtivos = modoInvestimento
+    ? ativos.map(a => `${a.ticker}${a.nome ? ` - ${a.nome}` : ''}`)
+    : []
 
   // ── Salvar ─────────────────────────────────────────────────
   const salvar = async (criarNovo = false) => {
@@ -805,6 +829,18 @@ export default function DrawerLancamento({
           <Input ref={dataRef} type="date" value={form.data} onChange={e => set({ data: e.target.value })} />
         </Field>
 
+        {/* Categoria — logo abaixo da data para orientar o preenchimento da descrição */}
+        {form.tipo !== 'TRANSFERENCIA' && (
+          <Field label="Categoria" data-tutorial="drawer-categoria">
+            <SearchableSelect
+              opcoes={opcoesCategorias}
+              value={form.categoria_id}
+              onChange={id => set({ categoria_id: id })}
+              placeholder="Sem categoria"
+            />
+          </Field>
+        )}
+
         {/* Descrição */}
         <Field label="Descrição *" data-tutorial="drawer-descricao">
           <div className="relative">
@@ -860,7 +896,13 @@ export default function DrawerLancamento({
                   if (escolhida) { e.preventDefault(); aplicarSugestao(escolhida) }
                 }
               }}
-              placeholder="Ex: Conta de luz, Salário..." maxLength={200} />
+              list={modoInvestimento ? 'ativos-investimento' : undefined}
+              placeholder={modoInvestimento ? 'Selecione um ativo (ex: PETR4)...' : 'Ex: Conta de luz, Salário...'} maxLength={200} />
+            {modoInvestimento && (
+              <datalist id="ativos-investimento">
+                {opcoesAtivos.map(label => <option key={label} value={label} />)}
+              </datalist>
+            )}
             <span className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[14px]"
               style={{ color: '#8b92a8' }}>
               {sugestaoAplicada && !editando && (
@@ -870,8 +912,8 @@ export default function DrawerLancamento({
               {form.descricao.length}/200
             </span>
 
-            {/* Dropdown de sugestões (mais recente primeiro) */}
-            {!editando && sugestoesAbertas && sugestoes.length > 0 && (
+            {/* Dropdown de sugestões (mais recente primeiro) — desligado no modo investimento, que usa a lista de ativos */}
+            {!editando && !modoInvestimento && sugestoesAbertas && sugestoes.length > 0 && (
               <div
                 className="absolute left-0 right-0 mt-1 z-50 rounded-lg shadow-xl border"
                 style={{ background: '#1a1f2e', borderColor: 'rgba(167,139,250,0.35)', maxHeight: 240, overflowY: 'auto' }}
@@ -933,9 +975,15 @@ export default function DrawerLancamento({
               </div>
             )}
           </div>
-          {sugestaoAplicada && !editando && (
+          {sugestaoAplicada && !editando && !modoInvestimento && (
             <p className="text-[14px] mt-1" style={{ color: '#a78bfa' }}>
               Sugestão aplicada — confira os campos antes de salvar.
+            </p>
+          )}
+          {modoInvestimento && (
+            <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>
+              Categoria de investimento — descreva preferencialmente com um ativo
+              {opcoesAtivos.length === 0 ? ' (nenhum ativo cadastrado ainda).' : '.'}
             </p>
           )}
         </Field>
@@ -984,18 +1032,6 @@ export default function DrawerLancamento({
               value={form.conta_destino_id}
               onChange={id => set({ conta_destino_id: id })}
               placeholder="Selecione a conta destino..."
-            />
-          </Field>
-        )}
-
-        {/* Categoria */}
-        {form.tipo !== 'TRANSFERENCIA' && (
-          <Field label="Categoria" data-tutorial="drawer-categoria">
-            <SearchableSelect
-              opcoes={opcoesCategorias}
-              value={form.categoria_id}
-              onChange={id => set({ categoria_id: id })}
-              placeholder="Sem categoria"
             />
           </Field>
         )}

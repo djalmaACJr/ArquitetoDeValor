@@ -24,6 +24,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import { usePageState } from '../context/PageStateContext'
 import { salvarRetornoPosExpiracao } from '../lib/retornoPosExpiracao'
+import { temOperacaoLongaAtiva } from '../lib/operacaoLonga'
 
 const EVENTOS_INTERACAO = [
   'mousemove',
@@ -88,6 +89,12 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
     lastActivityRef.current = Date.now()
 
     function marcarAtividade() {
+      // Só conta como atividade se a JANELA do app está em foco. Sem isso, o
+      // mero movimento do mouse passando por cima da aba (visível mas sem foco,
+      // com o usuário trabalhando em outro app/janela) resetava o timer e o
+      // logout ocioso nunca disparava. Interações reais (clique/tecla/scroll)
+      // trazem foco, então o uso normal segue contando normalmente.
+      if (!document.hasFocus()) return
       lastActivityRef.current = Date.now()
     }
 
@@ -101,6 +108,10 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
     // de ociosidade (usado quando a aba já passou do limite escondida).
     async function checarExpiracao(forcar = false) {
       if (expiradoRef.current) return
+      // Operação longa em andamento (backup/restore/import/sincronização):
+      // suspende o logout e empurra o relógio de atividade, para a contagem
+      // de inatividade recomeçar só quando a operação terminar.
+      if (temOperacaoLongaAtiva()) { lastActivityRef.current = Date.now(); return }
       if (!forcar && Date.now() - lastActivityRef.current < limiteMs) return
 
       expiradoRef.current = true

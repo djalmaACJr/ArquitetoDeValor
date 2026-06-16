@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, Fragment } from 'react'
-import { Plus, Pencil, Trash2, Layers, ArrowLeft, LineChart, Search, RefreshCw, ChevronDown, ChevronUp, ChevronRight, TrendingUp, TrendingDown } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { Plus, Trash2, ArrowLeft, Search, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js'
@@ -9,11 +9,13 @@ import {
 } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes, type CriarPosicaoInput } from '../hooks/useInvestimentosPosicoes'
 import { useInvestimentosHistorico, useBackfillHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
-import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
+import { useInvestimentosDashboard, useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
 import { useContas } from '../hooks/useContas'
 import {
-  Drawer, Field, Input, SelectDark, BtnSalvar, BtnCancelar, Toast, LogoAtivo,
+  Drawer, Field, Input, SelectDark, BtnSalvar, BtnCancelar, Toast,
 } from '../components/ui/shared'
+import QuadroTipoAtivos from '../components/ui/QuadroTipoAtivos'
+import { linhaDeMeta, type AtivoLinha } from '../lib/ativosLinha'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL, formatData } from '../lib/utils'
 import {
@@ -22,39 +24,15 @@ import {
   SUBTIPO_RF_INFO, subtiposParaTipo,
   CATEGORIAS_FII, FII_CATEGORIA_INFO,
   ACOES_SUBTIPOS, ACOES_SUBTIPO_LABEL, ACOES_SUBTIPO_DESCRICAO,
-  setorLabel,
 } from '../lib/constants'
 import type {
   InvestimentoAtivo, TipoAtivoInvestimento, SubtipoRF, IndexadorRF, CategoriaFII,
-  AcoesSubtipo, ResultadoBuscaAtivo, InvestimentoDashboardTipo,
+  AcoesSubtipo, ResultadoBuscaAtivo, InvestimentoDashboardTipo, InvestimentoRankingAtivo,
 } from '../types'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 
 const MUTED = '#8b92a8'
-const VERDE = '#00c896'
-const VERMELHO = '#ff5c7a'
-
-function corValor(v: number): string {
-  if (v > 0) return VERDE
-  if (v < 0) return VERMELHO
-  return MUTED
-}
-function fmtPct(v: number): string {
-  return `${v >= 0 ? '+' : ''}${v.toFixed(2).replace('.', ',')}%`
-}
-function SetaVariacao({ v, size = 11 }: { v: number; size?: number }) {
-  return v >= 0 ? <TrendingUp size={size} /> : <TrendingDown size={size} />
-}
-
-// Rótulo da categoria/subtipo de um ativo (FII: Tijolo/Papel…; Ações:
-// ON/PN/BDR; Renda Fixa/Tesouro: CDB/LCI/Tesouro…). null = sem categoria.
-function rotuloCategoriaAtivo(a: InvestimentoAtivo): string | null {
-  if (a.tipo_ativo === 'FII' && a.fii_categoria) return FII_CATEGORIA_INFO[a.fii_categoria].label
-  if (a.tipo_ativo === 'ACOES' && a.acoes_subtipo) return ACOES_SUBTIPO_LABEL[a.acoes_subtipo]
-  if ((a.tipo_ativo === 'RENDA_FIXA' || a.tipo_ativo === 'TESOURO_DIRETO') && a.rf_subtipo) return SUBTIPO_RF_INFO[a.rf_subtipo].label
-  return null
-}
 
 const FORM_VAZIO: CriarAtivoInput = {
   ticker: '', nome: '', tipo_ativo: 'ACOES', moeda: 'BRL', descricao: '', nota_usuario: null,
@@ -177,51 +155,48 @@ export default function AtivosInvestimentosPage() {
     return m
   }, [dashboard])
 
-  // Categorias colapsadas (expansível). Vazio = todas abertas.
-  const [catsFechadas, setCatsFechadas] = useState<Set<string>>(new Set())
-  const toggleCat = (key: string) => setCatsFechadas((s) => {
-    const n = new Set(s)
-    if (n.has(key)) n.delete(key); else n.add(key)
-    return n
-  })
+  // Métricas por ativo (quant., preços, variação, % carteira) — junta-se ao
+  // metadado para preencher as colunas financeiras do quadro compartilhado.
+  const { ranking } = useInvestimentosRanking(null)
+  const rankingPorAtivo = useMemo(() => {
+    const m = new Map<string, InvestimentoRankingAtivo>()
+    for (const a of ranking?.ativos ?? []) m.set(a.ativo_id, a)
+    return m
+  }, [ranking])
 
   // Contas (de investimento) onde cada ativo tem posição ATIVA — para
   // mostrar a conta do ativo e sinalizar os que ficaram sem posição.
   const { posicoes: todasPosicoes } = useInvestimentosPosicoes({})
   const contasPorAtivo = useMemo(() => {
-    const m = new Map<string, Set<string>>()
+    const m = new Map<string, string[]>()
     for (const p of todasPosicoes) {
       if (p.status !== 'ATIVA') continue
       const nome = p.contas?.nome
       if (!nome) continue
-      if (!m.has(p.ativo_id)) m.set(p.ativo_id, new Set())
-      m.get(p.ativo_id)!.add(nome)
+      const lista = m.get(p.ativo_id) ?? []
+      if (!lista.includes(nome)) lista.push(nome)
+      m.set(p.ativo_id, lista)
     }
     return m
   }, [todasPosicoes])
 
-  // Agrupa por Tipo → Categoria/subtipo (mesmo estilo do Relatório por categoria)
+  // Agrupa por tipo de ativo e monta as linhas unificadas (metadado + ranking).
+  // O agrupamento por categoria/segmento fica a cargo do quadro compartilhado.
   const grupos = useMemo(() => {
     const termo = pesquisa.trim().toLowerCase()
     const filtrados = termo
       ? ativos.filter((a) => a.ticker.toLowerCase().includes(termo) || a.nome.toLowerCase().includes(termo))
       : ativos
-    const porTipo = new Map<TipoAtivoInvestimento, Map<string, InvestimentoAtivo[]>>()
+    const porTipo = new Map<TipoAtivoInvestimento, AtivoLinha[]>()
     for (const a of filtrados) {
-      if (!porTipo.has(a.tipo_ativo)) porTipo.set(a.tipo_ativo, new Map())
-      const cats = porTipo.get(a.tipo_ativo)!
-      const cat = rotuloCategoriaAtivo(a) ?? 'Sem categoria'
-      if (!cats.has(cat)) cats.set(cat, [])
-      cats.get(cat)!.push(a)
+      const lista = porTipo.get(a.tipo_ativo) ?? []
+      lista.push(linhaDeMeta(a, rankingPorAtivo.get(a.id), contasPorAtivo.get(a.id) ?? []))
+      porTipo.set(a.tipo_ativo, lista)
     }
     return [...porTipo.entries()]
       .sort((x, y) => TIPOS_ATIVO_INV.indexOf(x[0]) - TIPOS_ATIVO_INV.indexOf(y[0]))
-      .map(([tipo, cats]) => ({
-        tipo,
-        total: [...cats.values()].reduce((s, l) => s + l.length, 0),
-        categorias: [...cats.entries()].sort((a, b) => b[1].length - a[1].length).map(([cat, lista]) => ({ cat, lista })),
-      }))
-  }, [ativos, pesquisa])
+      .map(([tipo, linhas]) => ({ tipo, linhas }))
+  }, [ativos, pesquisa, rankingPorAtivo, contasPorAtivo])
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
@@ -338,7 +313,7 @@ export default function AtivosInvestimentosPage() {
   if (loading) return <LoadingMascote />
 
   return (
-    <div className="p-4 md:p-6 max-w-6xl mx-auto">
+    <div className="p-5">
       {/* Header */}
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="flex items-center gap-3">
@@ -399,11 +374,9 @@ export default function AtivosInvestimentosPage() {
           ) : (
             <div className="space-y-3">
               {grupos.map((g) => (
-                <CardTipoAtivos key={g.tipo} grupo={g} dados={dadosPorTipo.get(g.tipo) ?? null}
-                  contasPorAtivo={contasPorAtivo}
-                  catsFechadas={catsFechadas} toggleCat={toggleCat}
-                  onPosicoes={setPosicoesDe} onHistorico={setHistoricoDe}
-                  onEditar={abrirEditar} />
+                <QuadroTipoAtivos key={g.tipo} tipo={g.tipo} dados={dadosPorTipo.get(g.tipo) ?? null}
+                  linhas={g.linhas} defaultAberto
+                  acoes={{ onPosicoes: setPosicoesDe, onHistorico: setHistoricoDe, onEditar: abrirEditar }} />
               ))}
             </div>
           )}
@@ -643,156 +616,6 @@ export default function AtivosInvestimentosPage() {
         <DrawerHistorico ativo={historicoDe} onClose={() => setHistoricoDe(null)} onToast={showToast} />
       )}
 
-    </div>
-  )
-}
-
-// ── Card de um tipo de ativo (mesmo estilo da página de Investimentos) ──
-
-type GrupoTipo = { tipo: TipoAtivoInvestimento; total: number; categorias: { cat: string; lista: InvestimentoAtivo[] }[] }
-
-function CardTipoAtivos({
-  grupo, dados, contasPorAtivo, catsFechadas, toggleCat, onPosicoes, onHistorico, onEditar,
-}: {
-  grupo: GrupoTipo
-  dados: InvestimentoDashboardTipo | null
-  contasPorAtivo: Map<string, Set<string>>
-  catsFechadas: Set<string>
-  toggleCat: (key: string) => void
-  onPosicoes: (a: InvestimentoAtivo) => void
-  onHistorico: (a: InvestimentoAtivo) => void
-  onEditar: (a: InvestimentoAtivo) => void
-}) {
-  const [aberto, setAberto] = useState(true)
-  const cor = TIPO_ATIVO_COR[grupo.tipo]
-  const variacaoPct = dados && dados.valor_custo > 0 ? (dados.ganho_perda / dados.valor_custo) * 100 : 0
-
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02]">
-      {/* Cabeçalho do tipo — colapsável (mesmo layout da página de Investimentos) */}
-      <button onClick={() => setAberto(!aberto)}
-        className="w-full px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-3 items-center text-left">
-        {/* Tipo + contagem */}
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: cor }} />
-          <div className="min-w-0">
-            <p className="font-semibold text-[15px]" style={{ color: cor }}>{TIPO_ATIVO_LABEL[grupo.tipo]}</p>
-            <p className="text-[12px]" style={{ color: MUTED }}>{grupo.total} {grupo.total === 1 ? 'ativo' : 'ativos'}</p>
-          </div>
-        </div>
-
-        {/* Variação total */}
-        <div className="text-right md:text-center">
-          <p className="text-[12px] inline-flex items-center gap-1" style={{ color: corValor(dados?.ganho_perda ?? 0) }}>
-            <SetaVariacao v={dados?.ganho_perda ?? 0} size={11} /> Variação Total
-          </p>
-          <p className="text-[13px] font-medium" style={{ color: corValor(dados?.ganho_perda ?? 0) }}>
-            {dados ? `${fmtPct(variacaoPct)} (${formatBRL(dados.ganho_perda)})` : '—'}
-          </p>
-        </div>
-
-        {/* Dividendos do tipo */}
-        <div className="hidden md:block text-center">
-          <p className="text-[12px]" style={{ color: MUTED }}>Dividendos</p>
-          <p className="text-[13px] font-medium" style={{ color: dados && dados.dividendos > 0 ? VERDE : MUTED }}>
-            {dados ? formatBRL(dados.dividendos) : '—'}
-          </p>
-        </div>
-
-        {/* Valor + participação */}
-        <div className="flex items-center justify-end gap-2">
-          <div className="text-right">
-            <p className="text-[13px] font-semibold text-white">{dados ? formatBRL(dados.valor_mercado) : '—'}</p>
-            {dados && (
-              <div className="flex items-center gap-1.5 justify-end">
-                <div className="w-20 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, dados.percentual_atual)}%`, background: cor }} />
-                </div>
-                <span className="text-[12px] font-semibold text-white">{dados.percentual_atual.toFixed(2).replace('.', ',')}%</span>
-              </div>
-            )}
-          </div>
-          {aberto ? <ChevronUp size={15} style={{ color: MUTED }} /> : <ChevronDown size={15} style={{ color: MUTED }} />}
-        </div>
-      </button>
-
-      {aberto && (
-        <div className="border-t border-white/5 overflow-x-auto">
-          <table className="w-full text-[14px]">
-            <thead>
-              <tr className="text-left" style={{ color: MUTED }}>
-                <th className="px-4 py-2 font-medium">Ticker</th>
-                <th className="px-4 py-2 font-medium">Nome</th>
-                <th className="px-4 py-2 font-medium text-center">Nota</th>
-                <th className="px-4 py-2 font-medium text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {grupo.categorias.map((c) => {
-                const temHeader = grupo.categorias.length > 1 || c.cat !== 'Sem categoria'
-                const key = `${grupo.tipo}|${c.cat}`
-                const catAberta = !temHeader || !catsFechadas.has(key)
-                return (
-                  <Fragment key={c.cat}>
-                    {/* Cabeçalho da categoria (sub) — expansível */}
-                    {temHeader && (
-                      <tr className="border-t border-white/[0.03] cursor-pointer hover:bg-white/[0.02]" onClick={() => toggleCat(key)}>
-                        <td colSpan={4} className="px-4 py-1.5">
-                          <span className="inline-flex items-center gap-2 pl-1">
-                            {catAberta ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: cor }} />
-                            <span className="text-[12px] font-semibold" style={{ color: '#c5cad8' }}>{c.cat}</span>
-                            <span className="text-[11px]" style={{ color: MUTED }}>· {c.lista.length}</span>
-                          </span>
-                        </td>
-                      </tr>
-                    )}
-                    {catAberta && c.lista.map((a) => (
-                      <tr key={a.id} className="border-t border-white/5">
-                        <td className="px-4 py-2.5">
-                          <Link to={`/investimentos/ativos/${a.id}`} className="inline-flex items-center gap-2 font-semibold text-white hover:underline">
-                            <LogoAtivo url={a.logo_url} />
-                            {a.ticker}
-                          </Link>
-                        </td>
-                        <td className="px-4 py-2.5 text-white/80">
-                          {a.nome}
-                          {setorLabel(a.setor) && (
-                            <span className="block text-[11px]" style={{ color: MUTED }}>{setorLabel(a.setor)}</span>
-                          )}
-                          {(() => {
-                            const cs = contasPorAtivo.get(a.id)
-                            return cs && cs.size > 0
-                              ? <span className="block text-[11px]" style={{ color: MUTED }}>{[...cs].join(', ')}</span>
-                              : <span className="block text-[11px]" style={{ color: '#ffb74d' }}>Sem posição em conta</span>
-                          })()}
-                        </td>
-                        <td className="px-4 py-2.5 text-center text-white/80">{a.nota_usuario ?? '—'}</td>
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center justify-end gap-1">
-                            <button onClick={() => onPosicoes(a)} title="Posições"
-                              className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
-                              <Layers size={13} />
-                            </button>
-                            <button onClick={() => onHistorico(a)} title="Valor de mercado"
-                              className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
-                              <LineChart size={13} />
-                            </button>
-                            <button onClick={() => onEditar(a)} title="Editar"
-                              className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
-                              <Pencil size={13} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </Fragment>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   )
 }

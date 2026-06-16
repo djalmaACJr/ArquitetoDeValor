@@ -45,6 +45,13 @@ Deno.serve(async (req: Request) => {
     catch (e) { logError("Handler snapshot-cron", e); return erro("Erro interno", 500); }
   }
 
+  // Job do servidor: provisiona proventos de ativos em USD (Polygon.io).
+  // Também sem JWT — protegido pelo x-cron-secret.
+  if (recurso === "dividendos-cron") {
+    try { return await rotaDividendosCron(req, m); }
+    catch (e) { logError("Handler dividendos-cron", e); return erro("Erro interno", 500); }
+  }
+
   const auth = autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;
@@ -70,6 +77,14 @@ Deno.serve(async (req: Request) => {
       case "ptax":
         if (m === "GET")  return await rotaPtax(c, url.searchParams);
         if (m === "POST") return await sincronizarPtaxResposta(c);
+        return erro("Método não permitido", 405);
+      case "indices":
+        if (m === "GET")  return await rotaIndices(c, url.searchParams);
+        if (m === "POST") return await sincronizarIndicesResposta(c);
+        return erro("Método não permitido", 405);
+      case "tesouro":
+        if (m === "GET")  return await rotaTesouro(c, url.searchParams);
+        if (m === "POST") return await sincronizarTesouroResposta();
         return erro("Método não permitido", 405);
       default:                return erro("Rota não encontrada", 404);
     }
@@ -1348,8 +1363,8 @@ async function gravarSnapshot(
 }
 
 interface GrupoPosicao {
-  ativoId: string; contaId: string; ticker: string; tipo: string; moeda: string;
-  indexador: string | null; taxa: string | null;
+  ativoId: string; contaId: string; ticker: string; nome: string; tipo: string; moeda: string;
+  indexador: string | null; taxa: string | null; vencimento: string | null;
   posicoes: { quantidade: number; valor_custo: number; data_compra: string }[];
 }
 
@@ -1365,7 +1380,7 @@ async function executarSnapshotMes(
   const dataRef = mesAno === mesCorrente ? new Date() : new Date(Date.UTC(ano, mes, 0, 12));
 
   let q = client.from("inv_posicoes")
-    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, tipo_ativo, moeda, rf_indexador, rf_taxa, cotacao_automatica)")
+    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, moeda, rf_indexador, rf_taxa, rf_vencimento, cotacao_automatica)")
     .eq("status", "ATIVA").eq("user_id", userId);
   if (contaId) q = q.eq("conta_id", contaId);
   const { data: posicoes, error } = await q;
@@ -1381,9 +1396,10 @@ async function executarSnapshotMes(
     if (!grupos.has(key)) {
       grupos.set(key, {
         ativoId: String(p.ativo_id), contaId: String(p.conta_id),
-        ticker: String(a.ticker ?? "").toUpperCase(), tipo: String(a.tipo_ativo ?? ""),
+        ticker: String(a.ticker ?? "").toUpperCase(), nome: String(a.nome ?? ""), tipo: String(a.tipo_ativo ?? ""),
         moeda: String(a.moeda ?? "BRL").toUpperCase(),
         indexador: (a.rf_indexador as string | null) ?? null, taxa: (a.rf_taxa as string | null) ?? null,
+        vencimento: (a.rf_vencimento as string | null) ?? null,
         posicoes: [],
       });
     }
@@ -1411,6 +1427,11 @@ async function executarSnapshotMes(
   const temRF = lista.some((g) => ehRF(g.tipo));
   const cdi  = temRF ? await sgsUltimo(432, CDI_FALLBACK) : CDI_FALLBACK;
   const ipca = temRF ? await sgsUltimo(13522, IPCA_FALLBACK) : IPCA_FALLBACK;
+  // Marcação a mercado do Tesouro (prefixado/IPCA+). No mês corrente, busca o
+  // PU de resgate atual no feed da B3 (demand-driven + cache), como nas ações.
+  const vencsTesouro = lista.filter((g) => g.tipo === "TESOURO_DIRETO").map((g) => g.vencimento ?? "");
+  if (mesAno === mesCorrente) await garantirTesouroMesCorrente(client, vencsTesouro, mesCorrente);
+  const mtmTesouro = await carregarTesouroMtM(client, vencsTesouro);
 
   let atualizados = 0;
   const ignorados: { ticker: string; motivo: string }[] = [];
@@ -1427,7 +1448,7 @@ async function executarSnapshotMes(
       valor = preco * qtd;
     } else if (ehRF(g.tipo)) {
       const taxaAa = taxaAnualRF(g.indexador, g.taxa, cdi, ipca);
-      valor = g.posicoes.reduce((s, p) => s + valorRF(p.valor_custo, p.data_compra, dataRef, taxaAa), 0);
+      valor = valorRFPosicoes(g.posicoes, g.tipo, g.indexador, g.vencimento, g.nome, mesAno, dataRef, taxaAa, mtmTesouro);
     } else {
       const cot = precos.get(g.ticker);
       if (cot == null) { ignorados.push({ ticker: g.ticker, motivo: "cotação indisponível" }); continue; }
@@ -1496,6 +1517,194 @@ async function rotaSnapshotCron(req: Request, m: string) {
   }
   logSuccess("Snapshot cron", { mesAno, usuarios: uids.length, usuariosOk, totalAtualizados });
   return json({ dados: { mes_ano: mesAno, usuarios: uids.length, usuarios_ok: usuariosOk, atualizados: totalAtualizados } });
+}
+
+// ============================================================
+// /investimentos/dividendos-cron — JOB diário: provisiona proventos
+// FUTUROS de ativos em USD a partir da Polygon.io, para TODOS os
+// usuários. Sem JWT — protegido pelo secret no header x-cron-secret
+// (= CRON_SECRET). Agende com pg_cron + pg_net (migration 20260615000004).
+//
+// Regras (definidas com o usuário):
+//   • 1 requisição Polygon por ticker, com pausa aleatória curta entre
+//     elas (folga no limite de 5 req/min do plano free, num job de manhã).
+//   • Só proventos futuros (pay_date >= hoje) → lançados como PROJECAO
+//     ("provisionado"). Vários do mesmo tipo no MESMO pay_date são somados
+//     e lançados 1x.
+//   • Valor por POSIÇÃO ATIVA: cash_amount × quantidade na conta × PTAX
+//     (venda). Como o pagamento é futuro e ainda não há PTAX da data, usa
+//     a última PTAX disponível — corrigida quando a data chega.
+//   • Reconciliação: se já existe uma PROJECAO do mesmo ativo+conta+tipo
+//     no MESMO mês, corrige valor e data (não duplica).
+//   • Tipo de provento: usa o inv_tipos_dividendo "Dividendos" do usuário.
+//     Sem categoria mapeada → pula o usuário/ativo (não lança sem extrato).
+// ============================================================
+async function rotaDividendosCron(req: Request, m: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  const esperado = Deno.env.get("CRON_SECRET") ?? "";
+  if (!esperado || (req.headers.get("x-cron-secret") ?? "") !== esperado) return erro("Não autorizado", 401);
+  const apiKey = Deno.env.get("POLYGON_API_KEY") ?? "";
+  if (!apiKey) { logError("dividendos-cron", "POLYGON_API_KEY ausente"); return erro("POLYGON_API_KEY não configurada", 500); }
+
+  const admin = dbAdmin();
+  const hoje  = hojeISO();
+  logRequest("POST", "/investimentos/dividendos-cron", { hoje });
+
+  // PTAX recente para conversão USD→BRL (mesma fonte/convenção do resto)
+  try { await garantirSincronizado(admin); } catch (e) { logError("dividendos-cron ptax", e); }
+  if (!(await ptaxVendaAte(admin, hoje))) { logError("dividendos-cron", "PTAX indisponível"); return erro("PTAX indisponível", 500); }
+
+  // Ativos em USD (Polygon cobre papéis das bolsas americanas)
+  const { data: ativos, error } = await admin.from("inv_ativos")
+    .select("id, user_id, ticker, tipo_ativo").eq("moeda", "USD");
+  if (error) { logError("dividendos-cron ativos", error); return erro(error.message); }
+
+  let processados = 0, criados = 0, atualizados = 0, pulados = 0;
+  for (const ativo of (ativos ?? []) as { id: string; user_id: string; ticker: string; tipo_ativo: string }[]) {
+    try {
+      // Posições ATIVAS desse ativo, por conta
+      const { data: posicoes } = await admin.from("inv_posicoes")
+        .select("conta_id, quantidade").eq("ativo_id", ativo.id).eq("status", "ATIVA");
+      if (!posicoes || posicoes.length === 0) continue;
+
+      // Tipo "Dividendos" do usuário, com categoria mapeada
+      const { data: tipoDiv } = await admin.from("inv_tipos_dividendo")
+        .select("id, categoria_id").eq("user_id", ativo.user_id).eq("nome", "Dividendos").maybeSingle();
+      if (!tipoDiv?.categoria_id) { pulados++; continue; }
+
+      // Pausa aleatória curta (250–1250ms) antes de cada requisição
+      await new Promise((r) => setTimeout(r, 250 + Math.floor(Math.random() * 1000)));
+      const divs = await buscarDividendosPolygon(ativo.ticker, apiKey);
+      processados++;
+
+      // Soma por pay_date (mesmo tipo, mesmo dia → 1x); só futuros
+      const porData = new Map<string, number>();
+      for (const d of divs) {
+        if (d.pay_date < hoje) continue;
+        porData.set(d.pay_date, (porData.get(d.pay_date) ?? 0) + d.cash_amount);
+      }
+
+      for (const payDate of [...porData.keys()].sort()) {
+        const cashPorAcao = porData.get(payDate)!;
+        const ptax = (await ptaxVendaAte(admin, payDate)) ?? 0;
+        if (ptax <= 0) continue;
+        for (const pos of posicoes as { conta_id: string; quantidade: number }[]) {
+          const valorBRL = Number((cashPorAcao * Number(pos.quantidade) * ptax).toFixed(2));
+          if (valorBRL <= 0) continue;
+          const r = await upsertDividendoProvisionado(admin, {
+            userId: ativo.user_id, ativoId: ativo.id, contaId: pos.conta_id,
+            tipoAtivo: ativo.tipo_ativo, tipoDivId: String(tipoDiv.id),
+            categoriaId: String(tipoDiv.categoria_id), ticker: ativo.ticker,
+            valor: valorBRL, payDate,
+          });
+          if (r === "criado") criados++; else if (r === "atualizado") atualizados++;
+        }
+      }
+    } catch (e) { logError("dividendos-cron ativo", e); }
+  }
+
+  logSuccess("Dividendos cron", { processados, criados, atualizados, pulados });
+  return json({ dados: { processados, criados, atualizados, pulados } });
+}
+
+// Última PTAX (venda) com data <= alvo (último dia útil). Para datas
+// futuras retorna a cotação mais recente disponível (estimativa).
+async function ptaxVendaAte(admin: Db, dataAlvo: string): Promise<number | null> {
+  const { data } = await admin.from("cotacoes_ptax")
+    .select("cotacao_venda").lte("data", dataAlvo)
+    .order("data", { ascending: false }).limit(1).maybeSingle();
+  const v = Number((data as { cotacao_venda?: number } | null)?.cotacao_venda);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+// Primeiro dia do mês seguinte a "YYYY-MM" (limite exclusivo da janela do mês).
+function primeiroDiaProximoMes(payDate: string): string {
+  let [y, mo] = payDate.slice(0, 7).split("-").map(Number);
+  mo++; if (mo > 12) { mo = 1; y++; }
+  return `${y}-${String(mo).padStart(2, "0")}-01`;
+}
+
+// Cria ou corrige uma provisão (PROJECAO) de provento. Reconcilia pela
+// chave (user, ativo, conta, tipo) dentro do MÊS do pay_date: se já houver
+// uma PROJECAO, atualiza valor/data (na dívida e na transação); senão cria
+// o par dividendo + transação RECEITA PROJECAO vinculados.
+async function upsertDividendoProvisionado(admin: Db, p: {
+  userId: string; ativoId: string; contaId: string; tipoAtivo: string;
+  tipoDivId: string; categoriaId: string; ticker: string; valor: number; payDate: string;
+}): Promise<"criado" | "atualizado" | "ignorado"> {
+  const mesIni = `${p.payDate.slice(0, 7)}-01`;
+  const mesFim = primeiroDiaProximoMes(p.payDate);
+
+  const { data: candidatos } = await admin.from("inv_dividendos")
+    .select("id, transacao_extrato_id, valor, data_pagamento, transacoes(status)")
+    .eq("user_id", p.userId).eq("ativo_id", p.ativoId).eq("conta_id", p.contaId)
+    .eq("tipo_dividendo_id", p.tipoDivId)
+    .gte("data_pagamento", mesIni).lt("data_pagamento", mesFim);
+
+  const existente = (candidatos ?? []).find(
+    (d) => (d as { transacoes?: { status?: string } }).transacoes?.status === "PROJECAO",
+  ) as { id: string; transacao_extrato_id: string | null; valor: number; data_pagamento: string } | undefined;
+
+  if (existente) {
+    const mudou = Number(existente.valor) !== p.valor || String(existente.data_pagamento).slice(0, 10) !== p.payDate;
+    if (!mudou) return "ignorado";
+    await admin.from("inv_dividendos")
+      .update({ valor: p.valor, data_pagamento: p.payDate }).eq("id", existente.id);
+    if (existente.transacao_extrato_id) {
+      await admin.from("transacoes")
+        .update({ valor: p.valor, data: p.payDate, valor_projetado: p.valor })
+        .eq("id", existente.transacao_extrato_id);
+    }
+    return "atualizado";
+  }
+
+  // Cria o dividendo (sem vínculo ainda)
+  const { data: div, error: errDiv } = await admin.from("inv_dividendos").insert({
+    user_id: p.userId, ativo_id: p.ativoId, conta_id: p.contaId,
+    valor: p.valor, data_pagamento: p.payDate, tipo_ativo: p.tipoAtivo,
+    tipo_dividendo_id: p.tipoDivId, descricao: null,
+  }).select("id").single();
+  if (errDiv || !div) { logError("dividendos-cron criar div", errDiv); return "ignorado"; }
+
+  const desc = `${p.ticker} - Dividendos`.slice(0, 200);
+  const { data: tx, error: errTx } = await admin.from("transacoes").insert({
+    user_id: p.userId, conta_id: p.contaId, categoria_id: p.categoriaId,
+    data: p.payDate, descricao: desc.length >= 2 ? desc : `Dividendo ${desc}`.slice(0, 200),
+    valor: p.valor, tipo: "RECEITA", status: "PROJECAO", valor_projetado: p.valor,
+  }).select("id").single();
+  if (errTx || !tx) {
+    await admin.from("inv_dividendos").delete().eq("id", div.id); // rollback
+    logError("dividendos-cron criar tx", errTx);
+    return "ignorado";
+  }
+
+  await admin.from("inv_dividendos").update({ transacao_extrato_id: tx.id }).eq("id", div.id);
+  return "criado";
+}
+
+// Proventos da Polygon.io (v3 reference dividends; incluído no plano free).
+// Campos usados: pay_date, cash_amount (por ação, em USD), dividend_type.
+async function buscarDividendosPolygon(
+  ticker: string, apiKey: string,
+): Promise<{ pay_date: string; cash_amount: number; dividend_type: string }[]> {
+  const t = ticker.trim().toUpperCase();
+  if (!t) return [];
+  const url =
+    `https://api.polygon.io/v3/reference/dividends?ticker=${encodeURIComponent(t)}` +
+    `&limit=50&order=desc&sort=pay_date&apiKey=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!res.ok) { logError("Polygon dividends", `${t}: ${res.status}`); return []; }
+  const data = await res.json() as {
+    results?: { pay_date?: string; cash_amount?: number; dividend_type?: string }[];
+  };
+  const out: { pay_date: string; cash_amount: number; dividend_type: string }[] = [];
+  for (const d of data.results ?? []) {
+    const pay  = String(d.pay_date ?? "").slice(0, 10);
+    const cash = Number(d.cash_amount);
+    if (!RE_DATA.test(pay) || !Number.isFinite(cash) || cash <= 0) continue;
+    out.push({ pay_date: pay, cash_amount: cash, dividend_type: String(d.dividend_type ?? "") });
+  }
+  return out;
 }
 
 // ============================================================
@@ -1670,7 +1879,7 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
   logRequest("POST", "/investimentos/snapshot-backfill", { conta_id: body.conta_id ?? null, ativo_id: body.ativo_id ?? null, ate: mesFim });
 
   let q = c.from("inv_posicoes")
-    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, tipo_ativo, moeda, rf_indexador, rf_taxa, cotacao_automatica)")
+    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, moeda, rf_indexador, rf_taxa, rf_vencimento, cotacao_automatica)")
     .eq("status", "ATIVA");
   if (body.conta_id) q = q.eq("conta_id", body.conta_id);
   if (body.ativo_id) q = q.eq("ativo_id", body.ativo_id);
@@ -1687,9 +1896,10 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
     if (!grupos.has(key)) {
       grupos.set(key, {
         ativoId: String(p.ativo_id), contaId: String(p.conta_id),
-        ticker: String(a.ticker ?? "").toUpperCase(), tipo: String(a.tipo_ativo ?? ""),
+        ticker: String(a.ticker ?? "").toUpperCase(), nome: String(a.nome ?? ""), tipo: String(a.tipo_ativo ?? ""),
         moeda: String(a.moeda ?? "BRL").toUpperCase(),
         indexador: (a.rf_indexador as string | null) ?? null, taxa: (a.rf_taxa as string | null) ?? null,
+        vencimento: (a.rf_vencimento as string | null) ?? null,
         posicoes: [], inicio: mesCompra,
       });
     }
@@ -1709,6 +1919,16 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
   const temRF = lista.some((g) => ehRF(g.tipo));
   const cdi  = temRF ? await sgsUltimo(432, CDI_FALLBACK) : CDI_FALLBACK;
   const ipca = temRF ? await sgsUltimo(13522, IPCA_FALLBACK) : IPCA_FALLBACK;
+  // Marcação a mercado do Tesouro (prefixado/IPCA+). O histórico por título só
+  // existe no CSV do STN — baixado UMA vez (lazy) quando ainda não há cache;
+  // depois é reusado. Mês corrente vem do feed da B3 (garantido no snapshot).
+  const vencsTesouro = [...new Set(lista.filter((g) => g.tipo === "TESOURO_DIRETO").map((g) => g.vencimento ?? "").filter(Boolean))];
+  if (vencsTesouro.length) {
+    const { count } = await c.from("cotacoes_tesouro")
+      .select("*", { count: "exact", head: true }).in("vencimento", vencsTesouro);
+    if (!count) { try { await sincronizarTesouro(TESOURO_DATA_CORTE); } catch (e) { logError("backfill tesouro CSV", e); } }
+  }
+  const mtmTesouro = await carregarTesouroMtM(c, vencsTesouro);
 
   // sempre carrega PTAX se houver cotado — a moeda real (USD) só é descoberta
   // ao buscar a série, então não dá pra confiar só na moeda cadastrada.
@@ -1775,7 +1995,7 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
 
       let valor: number;
       if (ehRF(g.tipo)) {
-        valor = posMes.reduce((s, p) => s + valorRF(p.valor_custo, p.data_compra, dataRef, taxaAa), 0);
+        valor = valorRFPosicoes(posMes, g.tipo, g.indexador, g.vencimento, g.nome, me, dataRef, taxaAa, mtmTesouro);
       } else {
         let preco = precoPorMes!.get(me);
         if (preco == null) { semCotacaoMes++; continue; } // sem cotação naquele mês
@@ -2853,9 +3073,23 @@ async function sincronizarPtax(desde: string, ate: string): Promise<number> {
       linhas = await buscarPtaxBCB(inicio, fim);
     } catch (e) { logError("PTAX BCB janela", e); break; }
     if (linhas.length > 0) {
-      const { error } = await admin.from("cotacoes_ptax").upsert(linhas, { onConflict: "data" });
-      if (error) { logError("Upsert cotacoes_ptax", error); break; }
-      total += linhas.length;
+      // grava só datas novas ou com cotação revisada (e conta só essas),
+      // evitando recontar a janela de reconfirmação a cada sync.
+      const { data: ex } = await admin.from("cotacoes_ptax")
+        .select("data, cotacao_compra, cotacao_venda").gte("data", inicio).lte("data", fim);
+      const existentes = new Map<string, { c: number; v: number }>();
+      for (const r of (ex ?? []) as { data: string; cotacao_compra: number; cotacao_venda: number }[]) {
+        existentes.set(r.data, { c: Number(r.cotacao_compra), v: Number(r.cotacao_venda) });
+      }
+      const novas = linhas.filter((l) => {
+        const e = existentes.get(l.data);
+        return !e || Math.abs(e.c - l.cotacao_compra) > 5e-5 || Math.abs(e.v - l.cotacao_venda) > 5e-5;
+      });
+      if (novas.length > 0) {
+        const { error } = await admin.from("cotacoes_ptax").upsert(novas, { onConflict: "data" });
+        if (error) { logError("Upsert cotacoes_ptax", error); break; }
+        total += novas.length;
+      }
     }
     inicio = deslocarDias(fim, 1);
   }
@@ -2891,7 +3125,12 @@ async function rotaPtax(c: Db, params: URLSearchParams) {
     if (RE_DATA.test(t)) pedidas.add(t);
   }
   const lista = [...pedidas].sort();
-  const janelaIni = recuarDias(lista[0], 15);
+  // `desde` (YYYY-MM-DD) + `serie=1` → devolve também a série diária para o
+  // gráfico de evolução. A janela engloba `desde` e a base de 15 dias.
+  const desdeSerie = (params.get("desde") ?? "").trim();
+  const querSerie  = params.get("serie") === "1" || RE_DATA.test(desdeSerie);
+  const baseIni    = recuarDias(lista[0], 15);
+  const janelaIni  = RE_DATA.test(desdeSerie) ? menorData(desdeSerie, baseIni) : baseIni;
 
   const { data } = await c.from("cotacoes_ptax")
     .select("data, cotacao_venda")
@@ -2906,13 +3145,17 @@ async function rotaPtax(c: Db, params: URLSearchParams) {
     if (aplicavel != null) byDate[d] = aplicavel;
   }
   const atualRow = rows.length ? rows[rows.length - 1] : null;
-  return json({
-    dados: {
-      byDate,
-      atual:      atualRow ? Number(atualRow.cotacao_venda) : null,
-      atual_data: atualRow?.data ?? null,
-    },
-  });
+  const dados: Record<string, unknown> = {
+    byDate,
+    atual:      atualRow ? Number(atualRow.cotacao_venda) : null,
+    atual_data: atualRow?.data ?? null,
+  };
+  if (querSerie) {
+    const ini = RE_DATA.test(desdeSerie) ? desdeSerie : janelaIni;
+    dados.serie = rows.filter((r) => r.data >= ini)
+      .map((r) => ({ data: r.data, valor: Number(r.cotacao_venda) }));
+  }
+  return json({ dados });
 }
 
 // POST /investimentos/ptax — sincronização explícita (agendador/cron).
@@ -2924,4 +3167,418 @@ async function sincronizarPtaxResposta(c: Db) {
   const inseridos = await sincronizarPtax(desde, hoje);
   logSuccess("PTAX sincronizado", { desde, ate: hoje, inseridos });
   return json({ dados: { inseridos, desde, ate: hoje } });
+}
+
+// ============================================================
+// /investimentos/indices — IPCA e SELIC (séries do Banco Central)
+//
+// Tabela COMPARTILHADA (arqvalor.indices_economicos) sincronizada com o
+// SGS/BCB, com data de corte 2020-01. Mesma mecânica do PTAX:
+//
+//   GET  /investimentos/indices?indices=IPCA,SELIC,CDI&desde=2020-01
+//        → { series: { IPCA: [{competencia,valor}], SELIC: [...], CDI: [...] }, ultimo }
+//   POST /investimentos/indices  → força sincronização (agendador/cron)
+//
+// Séries SGS: 433 = IPCA variação mensal (%); 4390 = Selic acum. no mês (%);
+// 4391 = CDI acum. no mês (%).
+// A cada GET, se vazia faz backfill desde o corte; senão re-busca os últimos
+// meses (o BCB pode revisar valores recentes) até o mês corrente.
+//
+// Leitura via JWT do usuário; gravação via service_role.
+// ============================================================
+
+const INDICES_DATA_CORTE = "2020-01"; // competência mínima (YYYY-MM)
+const RE_COMP = /^\d{4}-(0[1-9]|1[0-2])$/;
+const SGS_SERIES = { IPCA: 433, SELIC: 4390, CDI: 4391 } as const;
+type IndiceNome = keyof typeof SGS_SERIES;
+const INDICES_NOMES = Object.keys(SGS_SERIES) as IndiceNome[];
+
+const maiorComp = (a: string, b: string) => (a > b ? a : b);
+function recuarMeses(comp: string, n: number): string {
+  let [y, m] = comp.split("-").map(Number);
+  m -= n;
+  while (m <= 0) { m += 12; y--; }
+  return `${y}-${String(m).padStart(2, "0")}`;
+}
+
+// Busca uma série mensal do SGS na janela [desdeComp .. ateISO]. O SGS
+// devolve [{ data: "DD/MM/YYYY", valor: "0,21" }] com data no 1º do mês.
+async function buscarSgsMensal(
+  serie: number, desdeComp: string, ateISO: string,
+): Promise<{ competencia: string; valor: number }[]> {
+  const [ay, am]       = desdeComp.split("-");
+  const [fy, fm, fd]   = ateISO.split("-");
+  const dataInicial    = `01/${am}/${ay}`;
+  const dataFinal      = `${fd}/${fm}/${fy}`;
+  const url =
+    `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${serie}/dados` +
+    `?formato=json&dataInicial=${dataInicial}&dataFinal=${dataFinal}`;
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`BCB SGS ${serie} respondeu ${res.status}`);
+  const arr = await res.json() as { data?: string; valor?: string }[];
+  const out: { competencia: string; valor: number }[] = [];
+  for (const it of arr ?? []) {
+    const mm = String(it.data ?? "").match(/^\d{2}\/(\d{2})\/(\d{4})$/); // DD/MM/YYYY
+    if (!mm) continue;
+    const valor = Number(String(it.valor ?? "").replace(",", "."));
+    if (Number.isFinite(valor)) out.push({ competencia: `${mm[2]}-${mm[1]}`, valor });
+  }
+  return out;
+}
+
+// Sincroniza uma série [desdeComp..ateISO]. Idempotente (upsert pela PK
+// composta indice+competencia). Devolve o nº de linhas gravadas.
+async function sincronizarIndice(indice: IndiceNome, desdeComp: string, ateISO: string): Promise<number> {
+  let linhas: { competencia: string; valor: number }[];
+  try {
+    linhas = await buscarSgsMensal(SGS_SERIES[indice], desdeComp, ateISO);
+  } catch (e) { logError(`SGS ${indice}`, e); return 0; }
+  if (linhas.length === 0) return 0;
+  const admin = dbAdmin();
+  // O que já está gravado na janela → grava só meses novos ou revisados pelo
+  // BCB (e conta só esses), evitando reescrever a série toda a cada sync.
+  const { data: existentesData } = await admin.from("indices_economicos")
+    .select("competencia, valor").eq("indice", indice).gte("competencia", desdeComp);
+  const existentes = new Map<string, number>();
+  for (const r of (existentesData ?? []) as { competencia: string; valor: number }[]) {
+    existentes.set(r.competencia, Number(r.valor));
+  }
+  const novas = linhas.filter((l) => {
+    const v = existentes.get(l.competencia);
+    return v === undefined || Math.abs(v - l.valor) > 5e-7; // novo ou revisado
+  });
+  if (novas.length === 0) return 0;
+  const agora = new Date().toISOString();
+  const rows = novas.map((l) => ({ indice, competencia: l.competencia, valor: l.valor, atualizado_em: agora }));
+  const { error } = await admin.from("indices_economicos").upsert(rows, { onConflict: "indice,competencia" });
+  if (error) { logError(`Upsert indices ${indice}`, error); return 0; }
+  return rows.length;
+}
+
+async function ultimaCompetencia(c: Db, indice: IndiceNome): Promise<string | null> {
+  const { data } = await c.from("indices_economicos")
+    .select("competencia").eq("indice", indice)
+    .order("competencia", { ascending: false }).limit(1).maybeSingle();
+  return (data as { competencia?: string } | null)?.competencia ?? null;
+}
+
+// Backfill desde o corte quando vazia; senão re-busca os 2 últimos meses
+// (o BCB revisa valores recentes) até o mês corrente, para cada índice.
+async function garantirIndicesSincronizados(c: Db): Promise<void> {
+  const hoje      = hojeISO();
+  const compAtual = hoje.slice(0, 7);
+  for (const indice of INDICES_NOMES) {
+    const ultima = await ultimaCompetencia(c, indice);
+    if (!ultima) { await sincronizarIndice(indice, INDICES_DATA_CORTE, hoje); continue; }
+    if (ultima < compAtual) {
+      await sincronizarIndice(indice, maiorComp(INDICES_DATA_CORTE, recuarMeses(ultima, 1)), hoje);
+    }
+  }
+}
+
+async function rotaIndices(c: Db, params: URLSearchParams) {
+  try { await garantirIndicesSincronizados(c); } catch (e) { logError("Sincronizar índices", e); }
+
+  const pedidos = (params.get("indices") ?? "").split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter((s): s is IndiceNome => (INDICES_NOMES as string[]).includes(s));
+  const nomes = pedidos.length ? [...new Set(pedidos)] : INDICES_NOMES;
+
+  const dParam = (params.get("desde") ?? "").trim();
+  const desde  = RE_COMP.test(dParam) ? maiorComp(dParam, INDICES_DATA_CORTE) : INDICES_DATA_CORTE;
+
+  const { data } = await c.from("indices_economicos")
+    .select("indice, competencia, valor")
+    .in("indice", nomes)
+    .gte("competencia", desde)
+    .order("competencia", { ascending: true });
+  const rows = (data ?? []) as { indice: IndiceNome; competencia: string; valor: number }[];
+
+  const series: Record<string, { competencia: string; valor: number }[]> = {};
+  const ultimo: Record<string, { competencia: string; valor: number } | null> = {};
+  for (const n of nomes) { series[n] = []; ultimo[n] = null; }
+  for (const r of rows) {
+    const item = { competencia: r.competencia, valor: Number(r.valor) };
+    series[r.indice].push(item);
+    ultimo[r.indice] = item; // ordenado asc → último vence
+  }
+  return json({ dados: { series, ultimo, desde } });
+}
+
+// POST /investimentos/indices — sincronização explícita (agendador/cron).
+async function sincronizarIndicesResposta(c: Db) {
+  logRequest("POST", "/investimentos/indices");
+  const hoje = hojeISO();
+  const detalhe: Record<string, number> = {};
+  let total = 0;
+  // POST explícito sempre rebaixa do corte (série mensal pequena, upsert
+  // idempotente) — garante a história completa e fecha eventuais buracos.
+  for (const indice of INDICES_NOMES) {
+    const n = await sincronizarIndice(indice, INDICES_DATA_CORTE, hoje);
+    detalhe[indice] = n; total += n;
+  }
+  logSuccess("Índices sincronizados", detalhe);
+  return json({ dados: { inseridos: total, detalhe } });
+}
+
+// ============================================================
+// /investimentos/tesouro — marcação a mercado do Tesouro Direto
+//
+// Tabela COMPARTILHADA (arqvalor.cotacoes_tesouro) com o PU de resgate
+// (venda) MENSAL dos títulos prefixados e IPCA+, da fonte oficial Tesouro
+// Transparente (dados abertos do STN), com data de corte 2020-01.
+//
+//   GET  /investimentos/tesouro?desde=2020-01[&tipo=...][&vencimento=YYYY-MM-DD]
+//        → { cotacoes: [{ tipo_titulo, vencimento, mes_ano, data_base, pu_venda, taxa_venda }] }
+//   POST /investimentos/tesouro  → baixa o CSV do STN e popula o cache mensal
+//                                   (operação pesada — só por ação/cron)
+//
+// O GET é só leitura (não dispara o download); a sincronização é explícita
+// via POST. Leitura via JWT; gravação via service_role.
+// ============================================================
+
+const TESOURO_DATA_CORTE = "2020-01"; // competência mínima (YYYY-MM)
+// CSV oficial de preços e taxas (todos os títulos, desde 2002).
+const TESOURO_CSV_URL =
+  "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/" +
+  "resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/PrecoTaxaTesouroDireto.csv";
+// Famílias com marcação a mercado relevante (prefixado e IPCA+); inclui as
+// variações "com Juros Semestrais". Tesouro Selic fica de fora (pós-fixado).
+const TESOURO_FAMILIAS = ["Tesouro Prefixado", "Tesouro IPCA+"];
+
+// "DD/MM/YYYY" → "YYYY-MM-DD" (ou "" se inválido)
+function brDataISO(d: string): string {
+  const mm = d.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return mm ? `${mm[3]}-${mm[2]}-${mm[1]}` : "";
+}
+// "1.234,56" → 1234.56
+function brNumero(s: string): number {
+  return Number(String(s ?? "").trim().replace(/\./g, "").replace(",", "."));
+}
+
+interface CotacaoTesouro {
+  tipo_titulo: string; vencimento: string; mes_ano: string;
+  data_base: string; pu_venda: number; taxa_venda: number | null;
+}
+
+// Baixa e processa o CSV em streaming, guardando por (tipo, vencimento, mês)
+// a linha do ÚLTIMO dia útil disponível no mês (fechamento). Filtra pelas
+// famílias prefixado/IPCA+ e por Data Base >= corte. Mantém um mapa pequeno.
+async function baixarTesouroMensal(desdeComp: string): Promise<CotacaoTesouro[]> {
+  const res = await fetch(TESOURO_CSV_URL, { signal: AbortSignal.timeout(120000) });
+  if (!res.ok || !res.body) throw new Error(`Tesouro Transparente respondeu ${res.status}`);
+
+  const reader = res.body.pipeThrough(new TextDecoderStream("latin1")).getReader();
+  const mapa = new Map<string, CotacaoTesouro>(); // chave: tipo|venc|mes_ano
+  let buf = "";
+  let cabecalho = true;
+
+  const processar = (linha: string) => {
+    if (!linha) return;
+    if (cabecalho) { cabecalho = false; return; }     // pula o header
+    const col = linha.split(";");
+    if (col.length < 7) return;
+    const tipo = col[0].trim();
+    if (!TESOURO_FAMILIAS.some((f) => tipo.startsWith(f))) return;
+    const venc = brDataISO(col[1]);
+    const base = brDataISO(col[2]);
+    if (!venc || !base) return;
+    const ym = base.slice(0, 7);
+    if (ym < desdeComp) return;
+    const puVenda = brNumero(col[6]); // PU Venda Manha
+    if (!Number.isFinite(puVenda) || puVenda <= 0) return;
+    const taxaVenda = brNumero(col[4]);
+    const chave = `${tipo}|${venc}|${ym}`;
+    const atual = mapa.get(chave);
+    if (!atual || base > atual.data_base) {
+      mapa.set(chave, {
+        tipo_titulo: tipo, vencimento: venc, mes_ano: ym, data_base: base,
+        pu_venda: puVenda, taxa_venda: Number.isFinite(taxaVenda) ? taxaVenda : null,
+      });
+    }
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      processar(buf.slice(0, nl).replace(/\r$/, ""));
+      buf = buf.slice(nl + 1);
+    }
+  }
+  processar(buf.replace(/\r$/, ""));
+  return [...mapa.values()];
+}
+
+// Sincroniza o cache mensal (upsert pela PK tipo_titulo+vencimento+mes_ano).
+async function sincronizarTesouro(desdeComp: string): Promise<number> {
+  const linhas = await baixarTesouroMensal(desdeComp);
+  if (linhas.length === 0) return 0;
+  const admin = dbAdmin();
+  const agora = new Date().toISOString();
+  let total = 0;
+  for (let i = 0; i < linhas.length; i += 500) {
+    const lote = linhas.slice(i, i + 500).map((l) => ({ ...l, atualizado_em: agora }));
+    const { error } = await admin.from("cotacoes_tesouro")
+      .upsert(lote, { onConflict: "tipo_titulo,vencimento,mes_ano" });
+    if (error) { logError("Upsert cotacoes_tesouro", error); break; }
+    total += lote.length;
+  }
+  return total;
+}
+
+async function rotaTesouro(c: Db, params: URLSearchParams) {
+  const dParam = (params.get("desde") ?? "").trim();
+  const desde  = RE_COMP.test(dParam) ? maiorComp(dParam, TESOURO_DATA_CORTE) : TESOURO_DATA_CORTE;
+
+  let q = c.from("cotacoes_tesouro")
+    .select("tipo_titulo, vencimento, mes_ano, data_base, pu_venda, taxa_venda")
+    .gte("mes_ano", desde)
+    .order("mes_ano", { ascending: true });
+  const tipo = params.get("tipo");
+  const venc = params.get("vencimento");
+  if (tipo) q = q.eq("tipo_titulo", tipo);
+  if (venc && RE_DATA.test(venc)) q = q.eq("vencimento", venc);
+
+  const { data } = await q;
+  return json({ dados: { cotacoes: data ?? [] } });
+}
+
+// POST /investimentos/tesouro — baixa o CSV do STN e popula (pesado).
+async function sincronizarTesouroResposta() {
+  logRequest("POST", "/investimentos/tesouro");
+  try {
+    const inseridos = await sincronizarTesouro(TESOURO_DATA_CORTE);
+    logSuccess("Tesouro sincronizado", { inseridos });
+    return json({ dados: { inseridos } });
+  } catch (e) {
+    logError("Sincronizar Tesouro", e);
+    return erro("Falha ao sincronizar Tesouro Direto", 502);
+  }
+}
+
+// Feed de preços ATUAIS do Tesouro Direto (B3): um único JSON com todos os
+// títulos ofertados e o PU de resgate (marcação a mercado) do dia. É a fonte
+// "como nas ações" para o mês corrente — leve e sem o CSV.
+const TESOURO_B3_URL =
+  "https://www.tesourodireto.com.br/json/br/com/b3/tesourodireto/service/api/treasurybondsinfo.json";
+
+async function buscarTesouroAtualB3(mesCorrente: string): Promise<CotacaoTesouro[]> {
+  const res = await fetch(TESOURO_B3_URL, { signal: AbortSignal.timeout(15000), headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`Tesouro Direto (B3) respondeu ${res.status}`);
+  const j = await res.json() as { response?: { TrsrBdTradgList?: { TrsrBd?: Record<string, unknown> }[] } };
+  const out: CotacaoTesouro[] = [];
+  for (const it of j.response?.TrsrBdTradgList ?? []) {
+    const bd = it.TrsrBd ?? {};
+    const nm = String(bd.nm ?? "").trim();
+    if (!TESOURO_FAMILIAS.some((f) => nm.startsWith(f))) continue;
+    const venc = String(bd.mtrtyDt ?? "").slice(0, 10);             // "YYYY-MM-DD..."
+    if (!RE_DATA.test(venc)) continue;
+    const pu = Number(bd.untrRedVal);                               // PU de resgate (venda)
+    if (!Number.isFinite(pu) || pu <= 0) continue;
+    const taxa = Number(bd.anulRedRate);
+    out.push({
+      tipo_titulo: nm.replace(/\s+\d{4}$/, "").trim(),              // remove o ano → casa com o CSV
+      vencimento: venc, mes_ano: mesCorrente, data_base: hojeISO(),
+      pu_venda: pu, taxa_venda: Number.isFinite(taxa) ? taxa : null,
+    });
+  }
+  return out;
+}
+
+// Garante o PU do MÊS CORRENTE para os vencimentos informados, revalidando a
+// cada COTACAO_STALE_MS (igual ao cache de cotações de ações). Demand-driven:
+// só busca o feed da B3 quando algum vencimento está faltando/stale.
+async function garantirTesouroMesCorrente(c: Db, vencimentos: string[], mesCorrente: string): Promise<void> {
+  const vencs = [...new Set(vencimentos.filter(Boolean))];
+  if (vencs.length === 0) return;
+  const limite = new Date(Date.now() - COTACAO_STALE_MS).toISOString();
+  const { data } = await c.from("cotacoes_tesouro")
+    .select("vencimento").in("vencimento", vencs).eq("mes_ano", mesCorrente).gte("atualizado_em", limite);
+  const frescos = new Set((data ?? []).map((r) => String((r as { vencimento: string }).vencimento)));
+  if (vencs.every((v) => frescos.has(v))) return; // tudo fresco → nada a fazer
+  try {
+    const linhas = await buscarTesouroAtualB3(mesCorrente);
+    if (linhas.length) {
+      const agora = new Date().toISOString();
+      const { error } = await dbAdmin().from("cotacoes_tesouro")
+        .upsert(linhas.map((l) => ({ ...l, atualizado_em: agora })), { onConflict: "tipo_titulo,vencimento,mes_ano" });
+      if (error) logError("Upsert tesouro atual", error);
+    }
+  } catch (e) { logError("Tesouro B3 atual", e); }
+}
+
+// ── Marcação a mercado do Tesouro na valoração de renda fixa ─────
+// Família do título (rótulo do STN) conforme o indexador. Só prefixado e
+// IPCA+ têm marcação a mercado relevante; demais → null (acúmulo).
+function familiaTesouro(indexador: string | null): string | null {
+  if (indexador === "PREFIXADO") return "Tesouro Prefixado";
+  if (indexador === "HIBRIDO")   return "Tesouro IPCA+";
+  return null;
+}
+
+// Carrega o PU (venda) dos vencimentos informados → mapa
+// `tipo_titulo|venc` → [{ mes, pu }] ordenado por mês asc.
+type SerieMtM = Map<string, { mes: string; pu: number }[]>;
+async function carregarTesouroMtM(c: Db, vencimentos: string[]): Promise<SerieMtM> {
+  const out: SerieMtM = new Map();
+  const vencs = [...new Set(vencimentos.filter(Boolean))];
+  if (vencs.length === 0) return out;
+  const { data } = await c.from("cotacoes_tesouro")
+    .select("tipo_titulo, vencimento, mes_ano, pu_venda")
+    .in("vencimento", vencs)
+    .order("mes_ano", { ascending: true });
+  for (const r of (data ?? []) as { tipo_titulo: string; vencimento: string; mes_ano: string; pu_venda: number }[]) {
+    const k = `${r.tipo_titulo}|${r.vencimento}`;
+    if (!out.has(k)) out.set(k, []);
+    out.get(k)!.push({ mes: r.mes_ano, pu: Number(r.pu_venda) });
+  }
+  return out;
+}
+
+// PU de resgate (marcação a mercado) de um título num mês, com fallback para
+// o último mês disponível <= alvo. Escolhe entre principal e "com Juros
+// Semestrais" pelo nome/ticker do ativo. null → sem MtM (cai p/ acúmulo).
+function puTesouro(
+  mtm: SerieMtM, indexador: string | null, venc: string | null, nome: string, mes: string,
+): number | null {
+  const familia = familiaTesouro(indexador);
+  if (!familia || !venc) return null;
+  const s = nome.toLowerCase();
+  const semestral = /semestr|ntn-?f/.test(s) || (/ntn-?b/.test(s) && !/princ/.test(s));
+  const chaves = [...mtm.keys()].filter((k) => {
+    const [tt, v] = k.split("|");
+    return v === venc && tt.startsWith(familia);
+  });
+  if (chaves.length === 0) return null;
+  const escolha = (semestral
+    ? chaves.find((k) => /semestrais/i.test(k))
+    : chaves.find((k) => !/semestrais/i.test(k))) ?? chaves[0];
+  let pu: number | null = null;
+  for (const p of mtm.get(escolha)!) { if (p.mes <= mes) pu = p.pu; else break; }
+  return pu;
+}
+
+// Valor de um conjunto de posições de renda fixa num mês: para Tesouro
+// prefixado/IPCA+ usa a marcação a mercado escalando o custo pela razão
+// PU_alvo / PU_compra (robusto a como a quantidade foi cadastrada); sem PU
+// disponível, cai para o acúmulo pelo indexador (valorRF).
+function valorRFPosicoes(
+  posicoes: { valor_custo: number; data_compra: string }[],
+  tipo: string, indexador: string | null, venc: string | null, nome: string,
+  mes: string, dataRef: Date, taxaAa: number, mtm: SerieMtM,
+): number {
+  return posicoes.reduce((soma, p) => {
+    if (tipo === "TESOURO_DIRETO") {
+      const puAlvo   = puTesouro(mtm, indexador, venc, nome, mes);
+      const puCompra = puAlvo != null ? puTesouro(mtm, indexador, venc, nome, p.data_compra.slice(0, 7)) : null;
+      if (puAlvo != null && puCompra != null && puCompra > 0) {
+        return soma + p.valor_custo * (puAlvo / puCompra);
+      }
+    }
+    return soma + valorRF(p.valor_custo, p.data_compra, dataRef, taxaAa);
+  }, 0);
 }
