@@ -25,15 +25,16 @@ ChartJS.register(ArcElement, ChartTooltip)
 
 // Opção customizada do gráfico de dividendos: dados que o plugin de rótulos
 // lê de chart.options (em vez de closure, que o react-chartjs-2 não recria).
+interface CfgRotulos {
+  externos: { label: string; pct: number; cor: string }[]
+  tiposVis: { tipo: TipoAtivoInvestimento; pct: number }[]
+  corTexto: string
+  corLinha: string
+}
 declare module 'chart.js' {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface PluginOptionsByType<TType extends ChartType> {
-    rotulosDividendos?: {
-      externos: { label: string; pct: number }[]
-      tiposVis: { tipo: TipoAtivoInvestimento; pct: number }[]
-      corTexto: string
-      corLinha: string
-    }
+    rotulosDividendos?: CfgRotulos
   }
 }
 
@@ -351,6 +352,7 @@ const COR_SUAVE: Record<TipoAtivoInvestimento, string> = {
   ACOES:             '#f08da4',
   ETF:               '#7dd6e8',
   FII:               '#7aa7f7',
+  REIT:              '#5fcab3',
   STOCKS:            '#b79df5',
   ETF_INTERNACIONAL: '#eda4d4',
   RENDA_FIXA:        '#f2c98a',
@@ -470,7 +472,7 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
       // Lê os rótulos de chart.options (atualizado a cada render). NÃO usar
       // closure: o react-chartjs-2 captura o plugin na criação do gráfico e
       // não o recria no drill-down — o closure ficaria com dados defasados.
-      const cfg = chart.options.plugins?.rotulosDividendos
+      const cfg = chart.options.plugins?.rotulosDividendos as unknown as CfgRotulos | undefined
       if (!cfg) return
       const { externos, tiposVis, corTexto, corLinha } = cfg
       const { ctx, chartArea } = chart

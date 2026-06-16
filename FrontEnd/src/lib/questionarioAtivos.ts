@@ -81,6 +81,18 @@ const PERGUNTAS_POR_TIPO: Record<TipoAtivoInvestimento, PerguntaQuestionario[]> 
       opcoes: ['Muito irregular', 'Irregular', 'Razoável', 'Consistente', 'Muito consistente'],
     },
   ],
+  REIT: [
+    {
+      id: 'ocupacao_reit',
+      texto: 'Como está a taxa de ocupação dos imóveis do REIT?',
+      opcoes: ['Muito baixa', 'Baixa', 'Média', 'Alta', 'Muito alta'],
+    },
+    {
+      id: 'dividendos_reit',
+      texto: 'O histórico de distribuição de dividendos é consistente?',
+      opcoes: ['Muito irregular', 'Irregular', 'Razoável', 'Consistente', 'Muito consistente'],
+    },
+  ],
   STOCKS: [
     {
       id: 'gestao',
