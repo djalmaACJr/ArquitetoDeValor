@@ -1,13 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiFetch, apiMutate } from '../lib/api'
+import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import type {
   InvestimentoAtivo, QuestionarioRespostas, TipoAtivoInvestimento,
   SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo,
 } from '../types'
-
-interface OpResult<T = void> { ok: boolean; dados: T | null; erro: string | null }
 
 export interface CriarAtivoInput {
   ticker:        string
@@ -68,7 +66,7 @@ export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
     enabled: !!uid,
   })
 
-  const invalidar = () => qc.invalidateQueries({ queryKey: ['inv-ativos', uid] })
+  const invalidar = () => qc.invalidateQueries({ queryKey: qk.invAtivosPref(uid) })
 
   const criar = async (payload: CriarAtivoInput): Promise<OpResult<InvestimentoAtivo>> => {
     const res = await apiMutate<InvestimentoAtivo>('/investimentos/ativos', 'POST', payload)

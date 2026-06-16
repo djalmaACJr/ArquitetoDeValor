@@ -10,6 +10,7 @@ import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
 import { useUsuarioPerfil } from '../../hooks/useUsuarioPerfil'
 import AppVersion from '../ui/AppVersion'
+import ContagemLogout from '../ui/ContagemLogout'
 
 const Logo = () => (
   <svg width="36" height="36" viewBox="210 30 260 260" xmlns="http://www.w3.org/2000/svg">
@@ -392,6 +393,8 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
       {/* Rodapé - fixo no fundo, sempre visível */}
       <div className={`pt-3 border-t border-blue-400/30 bg-av-dark ${colapsado ? 'flex flex-col items-center gap-2' : ''}`}>
+        {/* Aviso de logout iminente (último minuto) — só aparece quando perto de expirar */}
+        <ContagemLogout colapsado={colapsado} />
         {!colapsado && (
           <div className="w-full mb-2 px-1 py-1">
             <p className="text-[16px] font-semibold text-white truncate">{nome}</p>

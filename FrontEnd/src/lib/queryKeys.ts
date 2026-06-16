@@ -60,8 +60,22 @@ export const qk = {
   invOperacoes:  (uid: Uid, f?: unknown) => ['inv-operacoes', uid, f ?? null]  as const,
   invDividendos: (uid: Uid, f?: unknown) => ['inv-dividendos', uid, f ?? null] as const,
   invTiposDividendo: (uid: Uid)          => ['inv-tipos-dividendo', uid]       as const,
+  invAvisosDividendos: (uid: Uid)        => ['inv-avisos-dividendos', uid]     as const,
+  invNovidadesProventos: (uid: Uid)      => ['inv-novidades-proventos', uid]   as const,
   invAlocacoes:  (uid: Uid)              => ['inv-alocacoes', uid]             as const,
   invHistorico:  (uid: Uid, f?: unknown) => ['inv-historico', uid, f ?? null]  as const,
   invDashboard:  (uid: Uid, contaId?: string | null) => ['inv-dashboard', uid, contaId ?? null] as const,
   invRanking:    (uid: Uid, contaId?: string | null) => ['inv-ranking', uid, contaId ?? null]   as const,
+
+  // Prefixos para INVALIDAÇÃO — chave de 2 elementos que casa (por prefixo)
+  // todas as variações de parâmetro da mesma família, sem repetir strings
+  // cruas nos hooks. (As famílias sem parâmetro acima já servem de prefixo.)
+  invAtivosPref:     (uid: Uid) => ['inv-ativos', uid]     as const,
+  invPosicoesPref:   (uid: Uid) => ['inv-posicoes', uid]   as const,
+  invOperacoesPref:  (uid: Uid) => ['inv-operacoes', uid]  as const,
+  invDividendosPref: (uid: Uid) => ['inv-dividendos', uid] as const,
+  invHistoricoPref:  (uid: Uid) => ['inv-historico', uid]  as const,
+  invDashboardPref:  (uid: Uid) => ['inv-dashboard', uid]  as const,
+  invRankingPref:    (uid: Uid) => ['inv-ranking', uid]    as const,
+  transacoesMesPref: (uid: Uid) => ['transacoes-mes', uid] as const,
 }

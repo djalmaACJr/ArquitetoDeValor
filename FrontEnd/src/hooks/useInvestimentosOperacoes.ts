@@ -1,10 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiFetch, apiMutate } from '../lib/api'
+import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import type { InvestimentoOperacao, TipoOperacaoInvestimento } from '../types'
-
-interface OpResult<T = void> { ok: boolean; dados: T | null; erro: string | null }
 
 export interface CriarOperacaoInput {
   posicao_id:      string
@@ -44,7 +42,7 @@ export function useInvestimentosOperacoes(filtros: FiltrosOperacoes = {}) {
 
   const criar = async (payload: CriarOperacaoInput): Promise<OpResult<InvestimentoOperacao>> => {
     const res = await apiMutate<InvestimentoOperacao>('/investimentos/operacoes', 'POST', payload)
-    if (res.ok) await qc.invalidateQueries({ queryKey: ['inv-operacoes', uid] })
+    if (res.ok) await qc.invalidateQueries({ queryKey: qk.invOperacoesPref(uid) })
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 

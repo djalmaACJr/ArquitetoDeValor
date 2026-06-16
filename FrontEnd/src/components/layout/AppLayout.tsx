@@ -3,6 +3,7 @@ import { Outlet, useLocation, Navigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Menu } from 'lucide-react'
 import Sidebar from './Sidebar'
+import NovidadesProventos from '../ui/NovidadesProventos'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useAutoLogout } from '../../hooks/useAutoLogout'
@@ -120,6 +121,9 @@ export default function AppLayout() {
       <main ref={mainRef} className="flex-1 overflow-auto min-w-0">
         <Outlet />
       </main>
+
+      {/* Aviso de login: proventos provisionados pelo job BRL */}
+      <NovidadesProventos />
     </div>
   )
 }

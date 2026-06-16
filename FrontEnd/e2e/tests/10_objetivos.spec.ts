@@ -47,10 +47,10 @@ test.describe('Objetivos Financeiros', () => {
     const drawer = page.getByRole('dialog')
     await expect(drawer).toBeVisible({ timeout: 5_000 })
 
-    // Seletor de tipo com os 3 options
-    await expect(drawer.getByText(/💭 sonho/i)).toBeVisible()
-    await expect(drawer.getByText(/🎯 objetivo/i)).toBeVisible()
-    await expect(drawer.getByText(/📦 projeto/i)).toBeVisible()
+    // Seletor de tipo com os tipos disponíveis (PROJETO está oculto por ora)
+    await expect(drawer.getByText(/💰 patrim[ôo]nio/i)).toBeVisible()
+    await expect(drawer.getByText(/🎯 renda recorrente/i)).toBeVisible()
+    await expect(drawer.getByText(/📈 evolu[çc][ãa]o anual/i)).toBeVisible()
 
     // Campos obrigatórios visíveis
     await expect(drawer.getByPlaceholder(/fundo de emergência/i)).toBeVisible()
@@ -61,61 +61,58 @@ test.describe('Objetivos Financeiros', () => {
   })
 
   // ── E2E-OBJ04 ───────────────────────────────────────────────
-  test('E2E-OBJ04 — selecionar tipo OBJETIVO no drawer exibe campo de categoria', async ({ page }) => {
+  test('E2E-OBJ04 — selecionar tipo Renda Recorrente no drawer exibe campo de categoria', async ({ page }) => {
     await page.getByRole('button', { name: /novo objetivo/i }).click()
     const drawer = page.getByRole('dialog')
     await expect(drawer).toBeVisible({ timeout: 5_000 })
 
-    // Clica no tab "OBJETIVO"
-    await drawer.getByText(/🎯 objetivo/i).click()
+    // Clica no tab "Renda Recorrente" (tipo OBJETIVO)
+    await drawer.getByText(/🎯 renda recorrente/i).click()
     await page.waitForTimeout(200)
 
-    // Campo "Categoria de receita" aparece
-    await expect(drawer.getByText(/categoria de receita/i)).toBeVisible()
+    // Campo "Categorias de receita" aparece
+    await expect(drawer.getByText(/categorias? de receita/i)).toBeVisible()
 
     // Fechar
     await page.keyboard.press('Escape')
   })
 
-  test('E2E-OBJ04b — selecionar tipo PROJETO no drawer exibe campo de contas do projeto', async ({ page }) => {
+  test('E2E-OBJ04b — selecionar tipo Patrimônio no drawer exibe campo de contas', async ({ page }) => {
     await page.getByRole('button', { name: /novo objetivo/i }).click()
     const drawer = page.getByRole('dialog')
     await expect(drawer).toBeVisible({ timeout: 5_000 })
 
-    // Clica no tab "PROJETO"
-    await drawer.getByText(/📦 projeto/i).click()
+    // Clica no tab "Patrimônio" (tipo SONHO)
+    await drawer.getByText(/💰 patrim[ôo]nio/i).click()
     await page.waitForTimeout(200)
 
-    // Campo "Contas do projeto" aparece
-    await expect(drawer.getByText(/contas do projeto/i)).toBeVisible()
-
-    // Campo conta individual NÃO aparece (é para SONHO)
-    await expect(drawer.getByText(/conta monitorada/i)).not.toBeVisible()
+    // Campo "Contas monitoradas" aparece
+    await expect(drawer.getByText(/contas monitoradas/i)).toBeVisible()
 
     await page.keyboard.press('Escape')
   })
 
   // ── E2E-OBJ05 ───────────────────────────────────────────────
-  test('E2E-OBJ05 — tabs de filtro de tipo funcionam (SONHO, OBJETIVO, PROJETO, Todos)', async ({ page }) => {
-    const tabSonho    = page.getByRole('button', { name: /💭 sonhos?/i }).first()
-    const tabObjetivo = page.getByRole('button', { name: /🎯 objetivos?/i }).first()
-    const tabProjeto  = page.getByRole('button', { name: /📦 projetos?/i }).first()
-    const tabTodos    = page.getByRole('button', { name: /^todos$/i }).first()
+  test('E2E-OBJ05 — tabs de filtro de tipo funcionam (Patrimônio, Renda Recorrente, Evolução Anual, Todos)', async ({ page }) => {
+    const tabPatrimonio = page.getByRole('button', { name: /💰 patrim[ôo]nio/i }).first()
+    const tabRenda      = page.getByRole('button', { name: /🎯 renda recorrente/i }).first()
+    const tabEvolucao   = page.getByRole('button', { name: /📈 evolu[çc][ãa]o anual/i }).first()
+    const tabTodos      = page.getByRole('button', { name: /^todos$/i }).first()
 
-    // Tabs existem
-    await expect(tabSonho).toBeVisible()
-    await expect(tabObjetivo).toBeVisible()
-    await expect(tabProjeto).toBeVisible()
+    // Tabs existem (PROJETO está oculto por ora)
+    await expect(tabPatrimonio).toBeVisible()
+    await expect(tabRenda).toBeVisible()
+    await expect(tabEvolucao).toBeVisible()
     await expect(tabTodos).toBeVisible()
 
     // Clicando em cada tab não gera erro (navegação sem crash)
-    await tabSonho.click()
+    await tabPatrimonio.click()
     await page.waitForTimeout(300)
 
-    await tabObjetivo.click()
+    await tabRenda.click()
     await page.waitForTimeout(300)
 
-    await tabProjeto.click()
+    await tabEvolucao.click()
     await page.waitForTimeout(300)
 
     // Volta para "Todos"

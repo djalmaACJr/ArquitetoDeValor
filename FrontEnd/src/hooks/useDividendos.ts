@@ -1,10 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiFetch, apiMutate } from '../lib/api'
+import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import type { InvestimentoDividendo, TipoAtivoInvestimento } from '../types'
-
-interface OpResult<T = void> { ok: boolean; dados: T | null; erro: string | null }
 
 export interface CriarDividendoInput {
   ativo_id:          string
@@ -66,10 +64,10 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
 
   // dividendos entram no extrato (Fase 5) e no dashboard → invalida tudo relacionado
   const invalidar = async () => {
-    await qc.invalidateQueries({ queryKey: ['inv-dividendos', uid] })
-    await qc.invalidateQueries({ queryKey: ['inv-dashboard', uid] })
-    await qc.invalidateQueries({ queryKey: ['inv-ranking', uid] })
-    await qc.invalidateQueries({ queryKey: ['transacoes-mes', uid] })
+    await qc.invalidateQueries({ queryKey: qk.invDividendosPref(uid) })
+    await qc.invalidateQueries({ queryKey: qk.invDashboardPref(uid) })
+    await qc.invalidateQueries({ queryKey: qk.invRankingPref(uid) })
+    await qc.invalidateQueries({ queryKey: qk.transacoesMesPref(uid) })
   }
 
   const criar = async (payload: CriarDividendoInput): Promise<OpResult<InvestimentoDividendo>> => {
@@ -109,6 +107,18 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     return { ok: res.ok, dados: null, erro: res.erro }
   }
 
+  // Dispara a busca de proventos BRL (B3) só para o usuário logado — mesma
+  // rotina do cron, mas autenticada (não precisa do CRON_SECRET).
+  const buscarBrl = async (): Promise<OpResult<ResultadoBuscaProventos>> => {
+    const res = await apiMutate<ResultadoBuscaProventos>('/investimentos/dividendos-buscar-br', 'POST')
+    if (res.ok) {
+      await invalidar()
+      await qc.invalidateQueries({ queryKey: qk.invAvisosDividendos(uid) })
+      await qc.invalidateQueries({ queryKey: qk.invNovidadesProventos(uid) })
+    }
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   return {
     dividendos,
     loading,
@@ -118,6 +128,14 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     associar,
     confirmar,
     excluir,
+    buscarBrl,
     invalidar,
   }
+}
+
+export interface ResultadoBuscaProventos {
+  processados: number
+  criados:     number
+  atualizados: number
+  pulados:     number
 }

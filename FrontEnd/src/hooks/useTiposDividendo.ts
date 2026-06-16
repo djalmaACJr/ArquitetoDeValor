@@ -36,7 +36,7 @@ export function useTiposDividendo() {
     enabled: !!uid,
   })
 
-  const invalidar = () => qc.invalidateQueries({ queryKey: ['inv-tipos-dividendo', uid] })
+  const invalidar = () => qc.invalidateQueries({ queryKey: qk.invTiposDividendo(uid) })
 
   const criar = async (payload: CriarTipoDividendoInput): Promise<OpResult<InvestimentoTipoDividendo>> => {
     const res = await apiMutate<InvestimentoTipoDividendo>('/investimentos/tipos-dividendo', 'POST', payload)

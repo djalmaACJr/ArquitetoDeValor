@@ -3,18 +3,20 @@
 // Auto-logout por inatividade. Padrão de app financeiro:
 //   - Após N minutos sem interação do usuário, desloga e redireciona
 //     para /login com o flag `?expirado=1` (LoginPage exibe banner).
-//   - Eventos que resetam o timer: mousemove, mousedown, keydown,
-//     touchstart, scroll, click.
+//   - Eventos que resetam o timer: mousedown, keydown, wheel,
+//     touchstart, scroll, click. `mousemove` foi removido de propósito
+//     (ver EVENTOS_INTERACAO) — em multi-monitor o cursor só passando
+//     por cima da janela resetava o timer e o logout nunca disparava.
 //
 // Uso: montar dentro do AppLayout (só rotas autenticadas).
 //
 //   useAutoLogout(15)  // 15 minutos
 //
 // Notas de implementação:
-//   - Usa um único setTimeout + lastActivityRef. Eventos só atualizam
-//     o timestamp (custo O(1)); o timer é re-armado apenas após um
-//     intervalo de checagem (1 min), evitando milhares de
-//     clearTimeout/setTimeout durante scroll/mousemove.
+//   - Usa um único setInterval (1s) + lastActivityRef. Eventos só atualizam
+//     o timestamp (custo O(1)); o tick apenas compara Date.now(), evitando
+//     milhares de clearTimeout/setTimeout durante scroll. No último minuto o
+//     tick publica a contagem regressiva no store `autoLogoutAviso` (Sidebar).
 //   - Eventos no document, com `{ passive: true }` para não bloquear
 //     scroll. `capture: false` (default) pois não precisamos interceptar.
 
@@ -25,17 +27,28 @@ import { useAuth } from './useAuth'
 import { usePageState } from '../context/PageStateContext'
 import { salvarRetornoPosExpiracao } from '../lib/retornoPosExpiracao'
 import { temOperacaoLongaAtiva } from '../lib/operacaoLonga'
+import { setAviso, registrarResetInatividade } from '../lib/autoLogoutAviso'
 
+// IMPORTANTE: `mousemove` foi DELIBERADAMENTE removido. Em setups
+// multi-monitor, o cursor apenas CRUZANDO a janela visível (no outro
+// monitor) faz o SO ativar a janela — `document.hasFocus()` vira true e o
+// mousemove resetava o timer de inatividade, então o logout ocioso nunca
+// disparava enquanto o usuário trabalhava em outro app. Mover o cursor por
+// cima NÃO é "usar o app". Só contam interações deliberadas:
 const EVENTOS_INTERACAO = [
-  'mousemove',
   'mousedown',
   'keydown',
+  'wheel',
   'touchstart',
   'scroll',
   'click',
 ] as const
 
-const INTERVALO_CHECK_MS = 60_000 // confere a cada 1 min
+// Tick de 1s: barato (uma subtração) e necessário para a contagem regressiva
+// fluida no último minuto. O custo real (signOut) só roda uma vez na expiração.
+const INTERVALO_CHECK_MS = 1_000
+// Janela final em que a Sidebar exibe a contagem regressiva chamando atenção.
+const AVISO_MS = 60_000
 
 export function useAutoLogout(timeoutMinutos: number = 15): void {
   const navigate = useNavigate()
@@ -88,13 +101,21 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
     const limiteMs = timeoutMinutos * 60_000
     lastActivityRef.current = Date.now()
 
-    function marcarAtividade() {
-      // Só conta como atividade se a JANELA do app está em foco. Sem isso, o
-      // mero movimento do mouse passando por cima da aba (visível mas sem foco,
-      // com o usuário trabalhando em outro app/janela) resetava o timer e o
-      // logout ocioso nunca disparava. Interações reais (clique/tecla/scroll)
-      // trazem foco, então o uso normal segue contando normalmente.
+    function marcarAtividade(e: Event) {
+      // Defesa adicional: só conta atividade com a janela em foco. O reset
+      // real foi resolvido removendo `mousemove` de EVENTOS_INTERACAO (cursor
+      // cruzando a janela em multi-monitor ATIVA a janela, então hasFocus()
+      // vira true e o guard sozinho não bastava). Aqui fica como reforço para
+      // eventos que cheguem com a janela em segundo plano.
       if (!document.hasFocus()) return
+      // Alt+Tab / Cmd+Tab / Super (troca de janela): o usuário está SAINDO para
+      // outro app, não usando este. O keydown dispara enquanto a janela ainda
+      // tem foco — sem este guard, "trocar de app" resetava o relógio e a
+      // contagem regressiva sumia/zerava em vez de seguir até o logout.
+      if (e.type === 'keydown') {
+        const ke = e as KeyboardEvent
+        if (ke.key === 'Tab' || ke.key === 'Alt' || ke.key === 'Meta' || ke.altKey || ke.metaKey) return
+      }
       lastActivityRef.current = Date.now()
     }
 
@@ -115,6 +136,7 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       if (!forcar && Date.now() - lastActivityRef.current < limiteMs) return
 
       expiradoRef.current = true
+      setAviso(false, 0) // some com a contagem ao deslogar
       // Guarda rota + filtros para retomar após o próximo login do
       // mesmo usuário nesta aba (LoginPage e PageStateProvider consomem).
       const snap = snapshotRef.current
@@ -129,7 +151,34 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       navigateRef.current('/login?expirado=1', { replace: true })
     }
 
-    const intervalId = window.setInterval(() => { checarExpiracao() }, INTERVALO_CHECK_MS)
+    // Tick de 1s: atualiza a contagem regressiva (último minuto) e dispara a
+    // expiração quando o tempo zera. Durante operação longa, empurra o relógio
+    // (mesma regra do checarExpiracao) e esconde a contagem.
+    function tick() {
+      if (expiradoRef.current) return
+      if (temOperacaoLongaAtiva()) {
+        lastActivityRef.current = Date.now()
+        setAviso(false, 0)
+        return
+      }
+      const restanteMs = limiteMs - (Date.now() - lastActivityRef.current)
+      if (restanteMs <= 0) {
+        setAviso(false, 0)
+        checarExpiracao()
+        return
+      }
+      // Só publica/limpa o aviso no último minuto (o store ignora no-ops).
+      if (restanteMs <= AVISO_MS) setAviso(true, Math.ceil(restanteMs / 1000))
+      else setAviso(false, 0)
+    }
+    const intervalId = window.setInterval(tick, INTERVALO_CHECK_MS)
+
+    // Clique na contagem (Sidebar) zera o relógio e esconde o aviso.
+    function resetarInatividade() {
+      lastActivityRef.current = Date.now()
+      setAviso(false, 0)
+    }
+    registrarResetInatividade(resetarInatividade)
 
     // Ciclo de visibilidade: ao voltar a uma aba que ficou oculta além do
     // limite, desloga IMEDIATAMENTE — antes que um mousemove resete o timer.
@@ -154,6 +203,8 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       window.clearInterval(intervalId)
       document.removeEventListener('visibilitychange', onVisibilidade)
       window.removeEventListener('focus', onFoco)
+      registrarResetInatividade(() => {}) // evita reset apontando p/ hook desmontado
+      setAviso(false, 0)
     }
   }, [timeoutMinutos])
 }

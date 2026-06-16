@@ -52,6 +52,13 @@ Deno.serve(async (req: Request) => {
     catch (e) { logError("Handler dividendos-cron", e); return erro("Erro interno", 500); }
   }
 
+  // Job do servidor: provisiona proventos de ativos em BRL (ACOES/ETF/FII)
+  // a partir dos dados públicos da B3. Sem JWT — protegido pelo x-cron-secret.
+  if (recurso === "dividendos-cron-br") {
+    try { return await rotaDividendosCronBr(req, m); }
+    catch (e) { logError("Handler dividendos-cron-br", e); return erro("Erro interno", 500); }
+  }
+
   const auth = autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;
@@ -64,6 +71,7 @@ Deno.serve(async (req: Request) => {
       case "posicoes":        return await rotaPosicoes(c, req, m, userId);
       case "operacoes":       return await rotaOperacoes(c, req, m, userId);
       case "dividendos":      return await rotaDividendos(c, req, m, userId);
+      case "dividendos-buscar-br": return await rotaDividendosBuscarBr(req, m, userId);
       case "tipos-dividendo": return await rotaTiposDividendo(c, req, m, userId);
       case "historico-mensal": return await rotaHistorico(c, req, m, userId);
       case "snapshot-auto":   return await rotaSnapshotAuto(c, req, m, userId);
@@ -1076,7 +1084,7 @@ async function precosBrapi(tickers: string[]): Promise<Map<string, { preco: numb
   if (tickers.length === 0) return out;
   try {
     const data = await fetchJson(
-      `https://brapi.dev/api/quote/${encodeURIComponent(tickers.join(","))}?range=1d&interval=1d${brapiToken()}`,
+      brapiUrl(`quote/${encodeURIComponent(tickers.join(","))}?range=1d&interval=1d`),
     ) as { results?: { symbol?: string; regularMarketPrice?: number; currency?: string }[] };
     for (const r of data.results ?? []) {
       const sym = String(r.symbol ?? "").toUpperCase();
@@ -1094,7 +1102,7 @@ async function nomesBrapi(tickers: string[]): Promise<Map<string, string>> {
   if (tickers.length === 0) return out;
   try {
     const data = await fetchJson(
-      `https://brapi.dev/api/quote/${encodeURIComponent(tickers.join(","))}?range=1d&interval=1d${brapiToken()}`,
+      brapiUrl(`quote/${encodeURIComponent(tickers.join(","))}?range=1d&interval=1d`),
     ) as { results?: { symbol?: string; longName?: string; shortName?: string }[] };
     for (const r of data.results ?? []) {
       const sym  = String(r.symbol ?? "").toUpperCase();
@@ -1111,7 +1119,7 @@ async function nomesCripto(tickers: string[]): Promise<Map<string, string>> {
   if (tickers.length === 0) return out;
   try {
     const data = await fetchJson(
-      `https://brapi.dev/api/v2/crypto?coin=${encodeURIComponent(tickers.join(","))}&currency=BRL${brapiToken()}`,
+      brapiUrl(`v2/crypto?coin=${encodeURIComponent(tickers.join(","))}&currency=BRL`),
     ) as { coins?: { coin?: string; coinName?: string }[] };
     for (const cc of data.coins ?? []) {
       const sym  = String(cc.coin ?? "").toUpperCase();
@@ -1165,7 +1173,7 @@ async function resolverMeta(
   async function setorDe(tk: string): Promise<string | undefined> {
     try {
       const data = await fetchJson(
-        `https://brapi.dev/api/quote/list?search=${encodeURIComponent(tk)}${brapiToken()}`,
+        brapiUrl(`quote/list?search=${encodeURIComponent(tk)}`),
       ) as { stocks?: { stock?: string; sector?: string }[] };
       const m = (data.stocks ?? []).find((s) => String(s.stock).toUpperCase() === tk);
       const setor = String(m?.sector ?? "").trim();
@@ -1177,7 +1185,7 @@ async function resolverMeta(
     try {
       const [data, setor] = await Promise.all([
         fetchJson(
-          `https://brapi.dev/api/quote/${encodeURIComponent(tk)}?range=1d&interval=1d${brapiToken()}`,
+          brapiUrl(`quote/${encodeURIComponent(tk)}?range=1d&interval=1d`),
         ) as Promise<{ results?: { longName?: string; shortName?: string; currency?: string; logourl?: string }[] }>,
         setorDe(tk),
       ]);
@@ -1212,7 +1220,7 @@ async function precosCripto(tickers: string[]): Promise<Map<string, number>> {
   if (tickers.length === 0) return out;
   try {
     const data = await fetchJson(
-      `https://brapi.dev/api/v2/crypto?coin=${encodeURIComponent(tickers.join(","))}&currency=BRL${brapiToken()}`,
+      brapiUrl(`v2/crypto?coin=${encodeURIComponent(tickers.join(","))}&currency=BRL`),
     ) as { coins?: { coin?: string; regularMarketPrice?: number }[] };
     for (const cc of data.coins ?? []) {
       const sym = String(cc.coin ?? "").toUpperCase();
@@ -1631,6 +1639,7 @@ function primeiroDiaProximoMes(payDate: string): string {
 async function upsertDividendoProvisionado(admin: Db, p: {
   userId: string; ativoId: string; contaId: string; tipoAtivo: string;
   tipoDivId: string; categoriaId: string; ticker: string; valor: number; payDate: string;
+  rotulo?: string;
 }): Promise<"criado" | "atualizado" | "ignorado"> {
   const mesIni = `${p.payDate.slice(0, 7)}-01`;
   const mesFim = primeiroDiaProximoMes(p.payDate);
@@ -1666,7 +1675,7 @@ async function upsertDividendoProvisionado(admin: Db, p: {
   }).select("id").single();
   if (errDiv || !div) { logError("dividendos-cron criar div", errDiv); return "ignorado"; }
 
-  const desc = `${p.ticker} - Dividendos`.slice(0, 200);
+  const desc = `${p.ticker} - ${p.rotulo ?? "Dividendos"}`.slice(0, 200);
   const { data: tx, error: errTx } = await admin.from("transacoes").insert({
     user_id: p.userId, conta_id: p.contaId, categoria_id: p.categoriaId,
     data: p.payDate, descricao: desc.length >= 2 ? desc : `Dividendo ${desc}`.slice(0, 200),
@@ -1706,6 +1715,312 @@ async function buscarDividendosPolygon(
   }
   return out;
 }
+
+// ============================================================
+// /investimentos/dividendos-cron-br — JOB diário: provisiona proventos
+// FUTUROS de ativos em BRL (ACOES / ETF / FII) a partir dos dados
+// PÚBLICOS e GRATUITOS da B3. Sem JWT — protegido pelo x-cron-secret
+// (= CRON_SECRET). Agende com pg_cron + pg_net (migration própria).
+//
+// Regras (espelham a rotina USD, definidas com o usuário):
+//   • Fonte: endpoints públicos da B3 (não precisa de API key).
+//       - ACOES/ETF → listedCompaniesProxy/GetListedSupplementCompany
+//       - FII       → fundsProxy/GetListedSupplementFunds
+//   • 1 requisição por ativo, com pausa aleatória curta entre elas.
+//   • Só proventos FUTUROS (paymentDate >= hoje) → PROJECAO
+//     ("provisionado"). BRL não usa PTAX.
+//   • Valor por POSIÇÃO ATIVA: rate (por ação/cota) × quantidade.
+//   • Tipo do provento mapeado pelo `label` da B3 → inv_tipos_dividendo:
+//       DIVIDENDO        → "Dividendos"
+//       JRS CAP PROPRIO  → "JSCP"
+//       RENDIMENTO + FII → "Aluguel de FII"
+//       RENDIMENTO + ação→ "Rend. Trib."
+//     Sem categoria mapeada no tipo → pula (não lança sem extrato).
+//   • Reconciliação: reusa upsertDividendoProvisionado (mesma chave
+//     user+ativo+conta+tipo dentro do mês do pay_date).
+// ============================================================
+// JOB (todos os usuários) — protegido pelo x-cron-secret.
+async function rotaDividendosCronBr(req: Request, m: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  const esperado = Deno.env.get("CRON_SECRET") ?? "";
+  if (!esperado || (req.headers.get("x-cron-secret") ?? "") !== esperado) return erro("Não autorizado", 401);
+  logRequest("POST", "/investimentos/dividendos-cron-br", {});
+  return json({ dados: await provisionarProventosBrl(dbAdmin(), null) });
+}
+
+// Disparo MANUAL pelo usuário logado (botão "Buscar proventos agora").
+// Autenticado por JWT — roda a MESMA rotina, escopada só ao próprio usuário,
+// então NÃO precisa do CRON_SECRET.
+async function rotaDividendosBuscarBr(_req: Request, m: string, userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  logRequest("POST", "/investimentos/dividendos-buscar-br", { userId });
+  return json({ dados: await provisionarProventosBrl(dbAdmin(), userId) });
+}
+
+// Núcleo compartilhado: provisiona proventos BRL. filtroUserId = null processa
+// TODOS os usuários (cron); um id processa só aquele usuário (disparo manual).
+async function provisionarProventosBrl(
+  admin: Db, filtroUserId: string | null,
+): Promise<{ processados: number; criados: number; atualizados: number; pulados: number }> {
+  const hoje = hojeISO();
+
+  // Ativos BRL cotados que a B3 cobre com proventos
+  let consulta = admin.from("inv_ativos")
+    .select("id, user_id, ticker, tipo_ativo, acoes_subtipo")
+    .eq("moeda", "BRL").in("tipo_ativo", ["ACOES", "ETF", "FII"]);
+  if (filtroUserId) consulta = consulta.eq("user_id", filtroUserId);
+  const { data: ativos, error } = await consulta;
+  if (error) { logError("dividendos-br ativos", error); throw new Error(error.message); }
+
+  // Cache dos tipos de dividendo por usuário (nome → {id, categoria_id})
+  const tiposPorUser = new Map<string, Map<string, { id: string; categoria_id: string | null }>>();
+  async function tiposDoUsuario(userId: string) {
+    if (tiposPorUser.has(userId)) return tiposPorUser.get(userId)!;
+    const { data } = await admin.from("inv_tipos_dividendo")
+      .select("id, nome, categoria_id").eq("user_id", userId);
+    const mapa = new Map<string, { id: string; categoria_id: string | null }>();
+    for (const t of (data ?? []) as { id: string; nome: string; categoria_id: string | null }[]) {
+      mapa.set(t.nome, { id: String(t.id), categoria_id: t.categoria_id });
+    }
+    tiposPorUser.set(userId, mapa);
+    return mapa;
+  }
+
+  // Pendências de mapeamento por usuário: tipo → {motivo, tickers}. Quando
+  // um provento FUTURO não pode ser lançado por falta de categoria mapeada,
+  // registramos aqui para avisar o usuário (ver persistência no fim).
+  const pend = new Map<string, Map<string, { motivo: string; tickers: Set<string> }>>();
+  const usuariosTocados = new Set<string>();
+  // Novidades por usuário (criados/atualizados) para o aviso de login.
+  const nov = new Map<string, { criados: number; atualizados: number; itens: NovidadeItem[] }>();
+
+  let processados = 0, criados = 0, atualizados = 0, pulados = 0;
+  for (const ativo of (ativos ?? []) as AtivoBrl[]) {
+    try {
+      const { data: posicoes } = await admin.from("inv_posicoes")
+        .select("conta_id, quantidade").eq("ativo_id", ativo.id).eq("status", "ATIVA");
+      if (!posicoes || posicoes.length === 0) continue;
+      usuariosTocados.add(ativo.user_id);
+
+      // Pausa aleatória curta (250–1250ms) — cordialidade com a B3
+      await new Promise((r) => setTimeout(r, 250 + Math.floor(Math.random() * 1000)));
+      const proventos = await coletarProventosB3(ativo);
+      processados++;
+
+      const tipos = await tiposDoUsuario(ativo.user_id);
+      for (const pv of proventos) {
+        if (pv.payDate < hoje) continue; // só futuros (PROJECAO)
+        const nomeTipo = tipoNomePorLabelB3(pv.label, ativo.tipo_ativo);
+        const tipo = tipos.get(nomeTipo);
+        if (!tipo?.categoria_id) {
+          // Sem categoria → não lança; registra pendência para avisar.
+          pulados++;
+          registrarPendencia(pend, ativo.user_id, nomeTipo,
+            tipo ? "sem_categoria" : "tipo_inexistente", ativo.ticker);
+          continue;
+        }
+
+        for (const pos of posicoes as { conta_id: string; quantidade: number }[]) {
+          const valorBRL = Number((pv.rate * Number(pos.quantidade)).toFixed(2));
+          if (valorBRL <= 0) continue;
+          const r = await upsertDividendoProvisionado(admin, {
+            userId: ativo.user_id, ativoId: ativo.id, contaId: pos.conta_id,
+            tipoAtivo: ativo.tipo_ativo, tipoDivId: tipo.id,
+            categoriaId: String(tipo.categoria_id), ticker: ativo.ticker,
+            valor: valorBRL, payDate: pv.payDate, rotulo: nomeTipo,
+          });
+          if (r === "criado" || r === "atualizado") {
+            if (r === "criado") criados++; else atualizados++;
+            registrarNovidade(nov, ativo.user_id, {
+              ticker: ativo.ticker, tipo: nomeTipo, data_pagamento: pv.payDate,
+              valor: valorBRL, acao: r,
+            });
+          }
+        }
+      }
+    } catch (e) { logError("dividendos-cron-br ativo", e); }
+  }
+
+  // Persiste (ou limpa) o aviso por usuário processado. Sobrescreve sempre:
+  // ao mapear a categoria que faltava, a próxima execução zera o aviso.
+  for (const userId of usuariosTocados) {
+    const m = pend.get(userId);
+    const tiposAviso = m && m.size > 0
+      ? [...m.entries()].map(([tipo, info]) => ({
+          tipo, motivo: info.motivo, tickers: [...info.tickers].slice(0, 30),
+        }))
+      : [];
+    const aviso = tiposAviso.length > 0 ? { atualizado_em: hoje, tipos: tiposAviso } : null;
+    await admin.from("usuarios").update({ inv_dividendos_avisos: aviso }).eq("id", userId);
+  }
+
+  // Persiste novidades p/ exibir no login. Mescla com o que ainda não foi
+  // visto (o frontend zera ao visualizar) para não perder avisos antigos.
+  for (const [userId, info] of nov) {
+    const { data: cur } = await admin.from("usuarios")
+      .select("inv_dividendos_novidades").eq("id", userId).single();
+    const prev = (cur?.inv_dividendos_novidades ?? null) as NovidadesPayload | null;
+    const payload: NovidadesPayload = {
+      gerado_em:   new Date().toISOString(),
+      criados:     info.criados + (prev?.criados ?? 0),
+      atualizados: info.atualizados + (prev?.atualizados ?? 0),
+      itens:       [...info.itens, ...(prev?.itens ?? [])].slice(0, 25),
+    };
+    await admin.from("usuarios").update({ inv_dividendos_novidades: payload }).eq("id", userId);
+  }
+
+  logSuccess("Dividendos BR", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados });
+  return { processados, criados, atualizados, pulados };
+}
+
+interface NovidadeItem {
+  ticker: string; tipo: string; data_pagamento: string; valor: number;
+  acao: "criado" | "atualizado";
+}
+interface NovidadesPayload {
+  gerado_em: string; criados: number; atualizados: number; itens: NovidadeItem[];
+}
+
+// Acumula um provento criado/atualizado para o aviso de login.
+function registrarNovidade(
+  nov: Map<string, { criados: number; atualizados: number; itens: NovidadeItem[] }>,
+  userId: string, item: NovidadeItem,
+) {
+  let n = nov.get(userId);
+  if (!n) { n = { criados: 0, atualizados: 0, itens: [] }; nov.set(userId, n); }
+  if (item.acao === "criado") n.criados++; else n.atualizados++;
+  if (n.itens.length < 25) n.itens.push(item);
+}
+
+// Acumula uma pendência de mapeamento (tipo sem categoria / inexistente).
+function registrarPendencia(
+  pend: Map<string, Map<string, { motivo: string; tickers: Set<string> }>>,
+  userId: string, tipo: string, motivo: string, ticker: string,
+) {
+  let m = pend.get(userId);
+  if (!m) { m = new Map(); pend.set(userId, m); }
+  const cur = m.get(tipo);
+  if (cur) cur.tickers.add(ticker);
+  else m.set(tipo, { motivo, tickers: new Set([ticker]) });
+}
+
+interface AtivoBrl {
+  id: string; user_id: string; ticker: string;
+  tipo_ativo: string; acoes_subtipo: string | null;
+}
+interface ProventoB3 { payDate: string; rate: number; label: string }
+
+// Identificador B3 = ticker sem os dígitos finais (PETR4→PETR, HGLG11→HGLG).
+function emissorB3(ticker: string): string {
+  return ticker.trim().toUpperCase().replace(/\d+$/, "");
+}
+
+// Mapeia o label da B3 + tipo do ativo para o nome do inv_tipos_dividendo.
+function tipoNomePorLabelB3(label: string, tipoAtivo: string): string {
+  const l = label.trim().toUpperCase();
+  if (l.includes("JRS") || l.includes("JCP") || l.includes("JURO")) return "JSCP";
+  if (l.includes("DIVIDENDO")) return "Dividendos";
+  // RENDIMENTO (e demais): FII = aluguel; ação/ETF = rendimento tributável
+  return tipoAtivo === "FII" ? "Aluguel de FII" : "Rend. Trib.";
+}
+
+// Coleta proventos FUTUROS-inclusos da B3 e deduplica. Para ações filtra
+// a classe (ON/PN/UNIT) do papel; para FII junta as séries de mesma data.
+async function coletarProventosB3(ativo: AtivoBrl): Promise<ProventoB3[]> {
+  const brutos = ativo.tipo_ativo === "FII"
+    ? await buscarProventosFundoB3(emissorB3(ativo.ticker))
+    : await buscarProventosCompanhiaB3(emissorB3(ativo.ticker));
+  if (brutos.length === 0) return [];
+
+  const classeAlvo = classeDoTicker(ativo.ticker, ativo.acoes_subtipo);
+  // Dedup por (payDate|label): para ações prioriza o ISIN da classe certa.
+  const escolhido = new Map<string, ProventoB3 & { classe: "ON" | "PN" | null }>();
+  for (const b of brutos) {
+    const chave = `${b.payDate}|${b.label}`;
+    const atual = escolhido.get(chave);
+    if (!atual) { escolhido.set(chave, b); continue; }
+    if (ativo.tipo_ativo !== "FII" && classeAlvo) {
+      // Substitui se o novo casa com a classe e o atual não
+      if (b.classe === classeAlvo && atual.classe !== classeAlvo) escolhido.set(chave, b);
+    }
+  }
+  return [...escolhido.values()].map(({ payDate, rate, label }) => ({ payDate, rate, label }));
+}
+
+// Classe-alvo do papel: prioriza acoes_subtipo; senão deduz do sufixo
+// numérico (3=ON, 4/5/6=PN, 11=UNIT). null = indeterminado (ex.: ETF/FII).
+function classeDoTicker(ticker: string, subtipo: string | null): "ON" | "PN" | "UNIT" | null {
+  if (subtipo === "ON" || subtipo === "PN" || subtipo === "UNIT") return subtipo;
+  const m = ticker.trim().match(/(\d+)$/);
+  if (!m) return null;
+  const suf = m[1];
+  if (suf === "3") return "ON";
+  if (suf === "4" || suf === "5" || suf === "6") return "PN";
+  if (suf === "11") return "UNIT";
+  return null;
+}
+
+// Classe a partir do ISIN da B3 (…OR<dig> = ON, …PR<dig> = PN).
+function classeDoIsin(isin: string): "ON" | "PN" | null {
+  const s = (isin ?? "").toUpperCase();
+  if (/OR\d$/.test(s)) return "ON";
+  if (/PR\d$/.test(s)) return "PN";
+  return null;
+}
+
+// Proventos de COMPANHIA (ações/ETF) — GetListedSupplementCompany.
+async function buscarProventosCompanhiaB3(issuer: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null })[]> {
+  if (!issuer) return [];
+  const params = btoa(JSON.stringify({ issuingCompany: issuer, language: "pt-br" }));
+  const url = `https://sistemaswebb3-listados.b3.com.br/listedCompaniesProxy/CompanyCall/GetListedSupplementCompany/${params}`;
+  const data = await fetchB3<{ cashDividends?: B3CashDividend[] }[]>(url, issuer);
+  const reg = Array.isArray(data) ? data[0] : data;
+  return mapearCashDividends(reg?.cashDividends);
+}
+
+// Proventos de FUNDO (FII) — GetListedSupplementFunds.
+async function buscarProventosFundoB3(identifier: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null })[]> {
+  if (!identifier) return [];
+  const params = btoa(JSON.stringify({ typeFund: 7, identifierFund: identifier }));
+  const url = `https://sistemaswebb3-listados.b3.com.br/fundsProxy/fundsCall/GetListedSupplementFunds/${params}`;
+  const data = await fetchB3<{ cashDividends?: B3CashDividend[] }>(url, identifier);
+  const reg = Array.isArray(data) ? data[0] : data;
+  return mapearCashDividends(reg?.cashDividends);
+}
+
+interface B3CashDividend {
+  paymentDate?: string; rate?: string; label?: string; isinCode?: string; assetIssued?: string;
+}
+
+function mapearCashDividends(lista?: B3CashDividend[]): (ProventoB3 & { classe: "ON" | "PN" | null })[] {
+  const out: (ProventoB3 & { classe: "ON" | "PN" | null })[] = [];
+  for (const d of lista ?? []) {
+    const payDate = brDataISO(String(d.paymentDate ?? ""));
+    const rate    = brNumero(String(d.rate ?? ""));
+    if (!RE_DATA.test(payDate) || !Number.isFinite(rate) || rate <= 0) continue;
+    out.push({
+      payDate, rate, label: String(d.label ?? ""),
+      classe: classeDoIsin(String(d.isinCode ?? d.assetIssued ?? "")),
+    });
+  }
+  return out;
+}
+
+// GET JSON na B3 com timeout e tratamento tolerante (igual Polygon/Yahoo).
+async function fetchB3<T>(url: string, ref: string): Promise<T | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) { logError("B3 proventos", `${ref}: ${res.status}`); return null; }
+    const txt = await res.text();
+    if (!txt || txt === '""' || txt === "null") return null;
+    return JSON.parse(txt) as T;
+  } catch (e) { logError("B3 proventos", `${ref}: ${e}`); return null; }
+}
+// Parsing de data/numero no formato BR ("dd/mm/yyyy", "1.234,56") está
+// centralizado em brDataISO/brNumero (definidos junto do bloco do Tesouro).
 
 // ============================================================
 // /investimentos/snapshot-backfill — preenche o histórico de meses
@@ -1767,7 +2082,7 @@ async function historicoBrapiHist(ticker: string): Promise<Map<string, number>> 
   const out = new Map<string, number>();
   try {
     const data = await fetchJson(
-      `https://brapi.dev/api/quote/${encodeURIComponent(ticker)}?range=10y&interval=1mo${brapiToken()}`,
+      brapiUrl(`quote/${encodeURIComponent(ticker)}?range=10y&interval=1mo`),
     ) as { results?: { historicalDataPrice?: { date?: number; close?: number }[] }[] };
     for (const h of data.results?.[0]?.historicalDataPrice ?? []) {
       if (h.date == null || h.close == null) continue;
@@ -2661,6 +2976,16 @@ async function rotaRestaurar(c: Db, req: Request, m: string, userId: string) {
 // cai para o valor de custo.
 // ============================================================
 
+// Mapa "ativo|conta" → valor_mercado, a partir das linhas da view
+// vw_inv_ultimo_mercado (já 1 por par). Compartilhado por dashboard e ranking.
+function mapaUltimoMercado(
+  rows: { ativo_id: string; conta_id: string; valor_mercado: number }[],
+): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const h of rows) m.set(`${h.ativo_id}|${h.conta_id}`, Number(h.valor_mercado));
+  return m;
+}
+
 async function dashboard(c: Db, params: URLSearchParams) {
   logRequest("GET", "/investimentos/dashboard", { params: Object.fromEntries(params) });
   const contaFiltro = params.get("conta_id");
@@ -2674,7 +2999,7 @@ async function dashboard(c: Db, params: URLSearchParams) {
       return q;
     })(),
     c.from("inv_alocacoes_tipo").select("tipo_ativo, percentual_ideal"),
-    c.from("inv_historico_mensal").select("ativo_id, conta_id, mes_ano, valor_mercado"),
+    c.from("vw_inv_ultimo_mercado").select("ativo_id, conta_id, valor_mercado"),
     c.from("inv_dividendos").select("tipo_ativo, valor"),
   ]);
 
@@ -2683,17 +3008,8 @@ async function dashboard(c: Db, params: URLSearchParams) {
   if (histRes.error) { logError("Dashboard historico", histRes.error); return erro(histRes.error.message); }
   if (divRes.error)  { logError("Dashboard dividendos", divRes.error); return erro(divRes.error.message); }
 
-  // Último valor_mercado por ativo+conta (compara mes_ano lexicograficamente)
-  const ultimoMercado = new Map<string, number>();
-  const ultimoMes     = new Map<string, string>();
-  for (const h of histRes.data ?? []) {
-    const k   = `${h.ativo_id}|${h.conta_id}`;
-    const mes = String(h.mes_ano);
-    if (!ultimoMes.has(k) || mes > ultimoMes.get(k)!) {
-      ultimoMes.set(k, mes);
-      ultimoMercado.set(k, Number(h.valor_mercado));
-    }
-  }
+  // Último valor_mercado por ativo+conta (view já entrega 1 linha por par)
+  const ultimoMercado = mapaUltimoMercado(histRes.data ?? []);
 
   // Acumula por tipo
   type Agg = { tipo_ativo: string; valor_custo: number; valor_mercado: number; dividendos: number };
@@ -2784,7 +3100,7 @@ async function ranking(c: Db, params: URLSearchParams) {
       if (contaFiltro) q = q.eq("conta_id", contaFiltro);
       return q;
     })(),
-    c.from("inv_historico_mensal").select("ativo_id, conta_id, mes_ano, valor_mercado"),
+    c.from("vw_inv_ultimo_mercado").select("ativo_id, conta_id, valor_mercado"),
     c.from("inv_dividendos").select("ativo_id, valor").gte("data_pagamento", corteISO),
   ]);
 
@@ -2792,17 +3108,8 @@ async function ranking(c: Db, params: URLSearchParams) {
   if (histRes.error) { logError("Ranking historico", histRes.error); return erro(histRes.error.message); }
   if (divRes.error)  { logError("Ranking dividendos", divRes.error); return erro(divRes.error.message); }
 
-  // Último valor_mercado por ativo+conta
-  const ultimoMercado = new Map<string, number>();
-  const ultimoMes     = new Map<string, string>();
-  for (const h of histRes.data ?? []) {
-    const k   = `${h.ativo_id}|${h.conta_id}`;
-    const mes = String(h.mes_ano);
-    if (!ultimoMes.has(k) || mes > ultimoMes.get(k)!) {
-      ultimoMes.set(k, mes);
-      ultimoMercado.set(k, Number(h.valor_mercado));
-    }
-  }
+  // Último valor_mercado por ativo+conta (view já entrega 1 linha por par)
+  const ultimoMercado = mapaUltimoMercado(histRes.data ?? []);
 
   type AggAtivo = {
     ativo_id: string; ticker: string; nome: string; tipo_ativo: string;
@@ -2896,6 +3203,12 @@ function brapiToken(): string {
   return t ? `&token=${encodeURIComponent(t)}` : "";
 }
 
+// Monta uma URL da brapi anexando o token. `path` já inclui a query (todas
+// as chamadas têm `?...`), então o token entra como `&token=...`.
+function brapiUrl(path: string): string {
+  return `https://brapi.dev/api/${path}${brapiToken()}`;
+}
+
 async function fetchJson(url: string): Promise<unknown> {
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`fonte externa respondeu ${res.status}`);
@@ -2947,12 +3260,12 @@ async function buscaTesouro(q: string): Promise<ResultadoBusca[]> {
 
 async function buscaCripto(q: string): Promise<ResultadoBusca[]> {
   const disp = await fetchJson(
-    `https://brapi.dev/api/v2/crypto/available?search=${encodeURIComponent(q)}${brapiToken()}`,
+    brapiUrl(`v2/crypto/available?search=${encodeURIComponent(q)}`),
   ) as { coins?: string[] };
   const coins = (disp.coins ?? []).slice(0, 8);
   if (coins.length === 0) return [];
   const cot = await fetchJson(
-    `https://brapi.dev/api/v2/crypto?coin=${encodeURIComponent(coins.join(","))}&currency=BRL${brapiToken()}`,
+    brapiUrl(`v2/crypto?coin=${encodeURIComponent(coins.join(","))}&currency=BRL`),
   ) as { coins?: { coin?: string; coinName?: string; regularMarketPrice?: number }[] };
   return (cot.coins ?? []).map((c) => ({
     ticker: String(c.coin ?? "").toUpperCase().slice(0, 20),
@@ -2964,7 +3277,7 @@ async function buscaCripto(q: string): Promise<ResultadoBusca[]> {
 
 async function buscaB3(q: string): Promise<ResultadoBusca[]> {
   const data = await fetchJson(
-    `https://brapi.dev/api/quote/list?search=${encodeURIComponent(q)}&limit=10${brapiToken()}`,
+    brapiUrl(`quote/list?search=${encodeURIComponent(q)}&limit=10`),
   ) as { stocks?: { stock?: string; name?: string; close?: number }[] };
   return (data.stocks ?? []).map((s) => ({
     ticker: String(s.stock ?? "").toUpperCase().slice(0, 20),

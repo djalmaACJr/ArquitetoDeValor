@@ -71,11 +71,18 @@
       "PowerShell(deno check C:/Pessoal/ArquitetoDeValor/supabase/functions/investimentos/index.ts)",
       "WebSearch",
       "WebFetch(domain:brapi.dev)",
-      "WebFetch(domain:finnhub.io)"
+      "WebFetch(domain:finnhub.io)",
+      "WebFetch(domain:www.okanebox.com.br)",
+      "WebFetch(domain:docs.fintz.com.br)",
+      "WebFetch(domain:hgbrasil.com)",
+      "Bash(npx eslint *)",
+      "Bash(grep -nE \"brapi\\\\.dev/api/quote/\\\\$\\\\{encodeURIComponent\\\\\\(tickers\" supabase/functions/investimentos/index.ts)",
+      "Bash(cd c:/Pessoal/ArquitetoDeValor/FrontEnd *)"
     ],
     "additionalDirectories": [
       "C:\\Pessoal\\ArquitetoDeValor\\scripts",
-      "C:\\Pessoal\\ArquitetoDeValor\\FrontEnd\\scripts"
+      "C:\\Pessoal\\ArquitetoDeValor\\FrontEnd\\scripts",
+      "\\tmp"
     ]
   }
 }

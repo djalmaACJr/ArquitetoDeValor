@@ -12,6 +12,15 @@ export interface ApiResult<T = unknown> {
   status: number
 }
 
+// Resultado enxuto de uma mutação (sem `status`), usado pelos hooks de
+// domínio ao expor criar/editar/excluir para a UI. Centralizado aqui para
+// não ser redefinido em cada hook.
+export interface OpResult<T = void> {
+  ok: boolean
+  dados: T | null
+  erro: string | null
+}
+
 async function getSession() {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.access_token) throw new Error('Não autenticado')

@@ -1,11 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiFetch, apiMutate } from '../lib/api'
+import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import type { InvestimentoHistoricoMensal } from '../types'
-
-interface OpResult<T = void> { ok: boolean; dados: T | null; erro: string | null }
 
 export interface ResumoSnapshotAuto {
   mes_ano:     string
@@ -67,9 +65,9 @@ export function useInvestimentosHistorico(filtros: FiltrosHistorico = {}) {
 
   // snapshots alimentam o valor de mercado do dashboard → invalida ambos
   const invalidar = async () => {
-    await qc.invalidateQueries({ queryKey: ['inv-historico', uid] })
-    await qc.invalidateQueries({ queryKey: ['inv-dashboard', uid] })
-    await qc.invalidateQueries({ queryKey: ['inv-ranking', uid] })
+    await qc.invalidateQueries({ queryKey: qk.invHistoricoPref(uid) })
+    await qc.invalidateQueries({ queryKey: qk.invDashboardPref(uid) })
+    await qc.invalidateQueries({ queryKey: qk.invRankingPref(uid) })
   }
 
   const registrar = async (payload: RegistrarHistoricoInput): Promise<OpResult<InvestimentoHistoricoMensal>> => {
@@ -108,9 +106,9 @@ export function useAtualizarValoresMes() {
       '/investimentos/snapshot-auto', 'POST', mesAno ? { mes_ano: mesAno } : {},
     )
     if (res.ok) {
-      await qc.invalidateQueries({ queryKey: ['inv-historico', uid] })
-      await qc.invalidateQueries({ queryKey: ['inv-dashboard', uid] })
-      await qc.invalidateQueries({ queryKey: ['inv-ranking', uid] })
+      await qc.invalidateQueries({ queryKey: qk.invHistoricoPref(uid) })
+      await qc.invalidateQueries({ queryKey: qk.invDashboardPref(uid) })
+      await qc.invalidateQueries({ queryKey: qk.invRankingPref(uid) })
     }
     setExecutando(false)
     return { ok: res.ok, dados: res.dados, erro: res.erro }
@@ -130,9 +128,9 @@ export function useBackfillHistorico() {
   const [executando, setExecutando] = useState(false)
 
   const invalidar = async () => {
-    await qc.invalidateQueries({ queryKey: ['inv-historico', uid] })
-    await qc.invalidateQueries({ queryKey: ['inv-dashboard', uid] })
-    await qc.invalidateQueries({ queryKey: ['inv-ranking', uid] })
+    await qc.invalidateQueries({ queryKey: qk.invHistoricoPref(uid) })
+    await qc.invalidateQueries({ queryKey: qk.invDashboardPref(uid) })
+    await qc.invalidateQueries({ queryKey: qk.invRankingPref(uid) })
   }
 
   const preencher = async (opts: { conta_id?: string; ativo_id?: string; ate?: string } = {}): Promise<OpResult<ResumoBackfill>> => {

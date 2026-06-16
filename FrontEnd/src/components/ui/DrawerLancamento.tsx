@@ -353,6 +353,9 @@ export default function DrawerLancamento({
   // garantindo controle quando há mais de um padrão. Só ativo em criação.
   useEffect(() => {
     if (editando) { setSugestoes([]); setSugestoesAbertas(false); return }
+    // Transferências não usam o assistente (categoria fixa, sem padrão por
+    // descrição). Evita que o dropdown de sugestões cubra o campo Valor.
+    if (form.tipo === 'TRANSFERENCIA') { setSugestoes([]); setSugestoesAbertas(false); return }
     const termo = form.descricao.trim()
     if (termo.length < 2) { setSugestoes([]); setSugestoesAbertas(false); setSugestaoAplicada(false); return }
 
@@ -370,7 +373,7 @@ export default function DrawerLancamento({
         .catch(() => { /* aborto ou erro silencioso */ })
     }, 400)
     return () => { clearTimeout(timer); ctrl.abort() }
-  }, [form.descricao, editando])
+  }, [form.descricao, form.tipo, editando])
 
   // Aplica uma sugestão escolhida pelo usuário: copia descricao + campos
   // (categoria/conta/destino) e marca o indicador visual. Move o foco para o

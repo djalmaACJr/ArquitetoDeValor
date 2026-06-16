@@ -1,11 +1,12 @@
 import { useState, useMemo, useEffect, type ReactNode } from 'react'
-import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, ChevronDown, ChevronRight, Layers } from 'lucide-react'
+import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, ChevronDown, ChevronRight, Layers, AlertTriangle, RefreshCw } from 'lucide-react'
 import { Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, type Plugin, type ChartType } from 'chart.js'
 import { Link } from 'react-router-dom'
 import { useDividendos, type CriarDividendoInput } from '../hooks/useDividendos'
 import { useObjetivos } from '../hooks/useObjetivos'
 import { useTiposDividendo } from '../hooks/useTiposDividendo'
+import { useAvisosDividendos, type AvisoTipoDividendo } from '../hooks/useAvisosDividendos'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useCategorias } from '../hooks/useCategorias'
 import { useContas } from '../hooks/useContas'
@@ -87,11 +88,23 @@ export default function DividendosPage() {
   const [excluindo,    setExcluindo]    = useState<InvestimentoDividendo | null>(null)
   const [confirmando,  setConfirmando]  = useState<InvestimentoDividendo | null>(null)
   const [salvando,     setSalvando]     = useState(false)
+  const [buscando,     setBuscando]     = useState(false)
   const [toast,        setToast]        = useState<string | null>(null)
 
-  const { dividendos, loading, excluir } = useDividendos()
+  const { dividendos, loading, excluir, buscarBrl } = useDividendos()
 
-  function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 3000) }
+  function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 4000) }
+
+  async function buscarProventos() {
+    setBuscando(true)
+    const res = await buscarBrl()
+    setBuscando(false)
+    if (!res.ok) { showToast(res.erro ?? 'Erro ao buscar proventos'); return }
+    const d = res.dados
+    const mudou = (d?.criados ?? 0) + (d?.atualizados ?? 0)
+    if (mudou === 0) showToast('Busca concluída — nenhum provento novo na B3.')
+    else showToast(`Busca concluída — ${d?.criados ?? 0} novo(s), ${d?.atualizados ?? 0} atualizado(s).`)
+  }
 
   async function confirmarExclusao() {
     if (!excluindo) return
@@ -119,6 +132,11 @@ export default function DividendosPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={buscarProventos} disabled={buscando}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
+            title="Busca proventos na B3 e provisiona os futuros (ações e FIIs em BRL)">
+            <RefreshCw size={15} className={buscando ? 'animate-spin' : ''} /> {buscando ? 'Buscando…' : 'Buscar proventos'}
+          </button>
           <button onClick={() => setDrawerConfig(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
             <Settings size={15} /> Configurar tipos
@@ -135,6 +153,8 @@ export default function DividendosPage() {
       </div>
 
       <Toast msg={toast} />
+
+      <AvisoMapeamento onConfigurar={() => setDrawerConfig(true)} />
 
       <ProventosPorCategoria dividendos={dividendos} />
       <AtivosPorCategoria dividendos={dividendos} />
@@ -163,6 +183,53 @@ export default function DividendosPage() {
           mensagem="A transação vinculada no extrato também será removida."
           onConfirmar={confirmarExclusao} onCancelar={() => setExcluindo(null)} salvando={salvando} />
       )}
+    </div>
+  )
+}
+
+// ── Banner: proventos não provisionados por falta de mapeamento ──
+// Alimentado pelo job de proventos BRL (dividendos-cron-br), que registra
+// em usuarios.inv_dividendos_avisos os tipos sem categoria mapeada. Ao
+// mapear (botão "Configurar tipos"), a próxima execução do job limpa o
+// aviso automaticamente.
+
+const MOTIVO_AVISO: Record<AvisoTipoDividendo['motivo'], string> = {
+  sem_categoria:    'sem categoria mapeada',
+  tipo_inexistente: 'tipo não encontrado',
+}
+
+function AvisoMapeamento({ onConfigurar }: { onConfigurar: () => void }) {
+  const { avisos } = useAvisosDividendos()
+  if (!avisos) return null
+
+  return (
+    <div className="rounded-xl border p-4 mb-4" style={{ borderColor: 'rgba(255,183,77,0.4)', background: 'rgba(255,183,77,0.06)' }}>
+      <div className="flex items-start gap-3">
+        <AlertTriangle size={18} className="shrink-0 mt-0.5" style={{ color: '#ffb74d' }} />
+        <div className="flex-1 min-w-0">
+          <p className="text-[14px] font-semibold text-white">Proventos não provisionados</p>
+          <p className="text-[13px] mt-0.5" style={{ color: MUTED }}>
+            A busca automática encontrou proventos futuros, mas não pôde lançá-los por falta de
+            mapeamento. Mapeie a categoria de cada tipo e eles entram na próxima execução.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {avisos.tipos.map((t) => (
+              <li key={t.tipo} className="text-[13px] text-white">
+                <span className="font-medium">{t.tipo}</span>
+                <span style={{ color: '#ffb74d' }}> — {MOTIVO_AVISO[t.motivo]}</span>
+                {t.tickers.length > 0 && (
+                  <span style={{ color: MUTED }}> · {t.tickers.join(', ')}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <button onClick={onConfigurar}
+          className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] text-white hover:border-white/40"
+          style={{ borderColor: 'rgba(255,183,77,0.5)' }}>
+          <Settings size={15} /> Configurar tipos
+        </button>
+      </div>
     </div>
   )
 }

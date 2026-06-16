@@ -179,8 +179,18 @@ test.describe('Lembretes', () => {
     amanha.setDate(amanha.getDate() + 1)
     const dataStr = amanha.toISOString().split('T')[0]
 
+    // No Firefox controlado, `.fill()` num <input type="date"> nem sempre
+    // propaga para o estado do React (chega a limpar o valor). Setamos via
+    // setter nativo + dispatch para garantir que o onChange dispare.
     const inputData = drawer.locator('input[type="date"]').first()
-    await inputData.fill(dataStr)
+    await inputData.evaluate((el: HTMLInputElement, value: string) => {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value',
+      )?.set
+      setter?.call(el, value)
+      el.dispatchEvent(new Event('input',  { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    }, dataStr)
     await page.waitForTimeout(300)
 
     // Checkbox "Criar lembrete" deve aparecer

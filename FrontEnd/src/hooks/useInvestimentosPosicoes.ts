@@ -1,10 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiFetch, apiMutate } from '../lib/api'
+import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import type { InvestimentoPosicao, StatusPosicaoInvestimento } from '../types'
-
-interface OpResult<T = void> { ok: boolean; dados: T | null; erro: string | null }
 
 export interface CriarPosicaoInput {
   ativo_id:    string
@@ -49,9 +47,9 @@ export function useInvestimentosPosicoes(filtros: FiltrosPosicoes = {}) {
 
   // posições afetam o dashboard → invalida ambos
   const invalidar = async () => {
-    await qc.invalidateQueries({ queryKey: ['inv-posicoes', uid] })
-    await qc.invalidateQueries({ queryKey: ['inv-dashboard', uid] })
-    await qc.invalidateQueries({ queryKey: ['inv-ranking', uid] })
+    await qc.invalidateQueries({ queryKey: qk.invPosicoesPref(uid) })
+    await qc.invalidateQueries({ queryKey: qk.invDashboardPref(uid) })
+    await qc.invalidateQueries({ queryKey: qk.invRankingPref(uid) })
   }
 
   const criar = async (payload: CriarPosicaoInput): Promise<OpResult<InvestimentoPosicao>> => {

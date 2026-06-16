@@ -1,12 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiFetch, apiMutate } from '../lib/api'
+import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import type {
   InvestimentoDashboard, InvestimentoAlocacaoTipo, InvestimentoRanking, TipoAtivoInvestimento,
 } from '../types'
-
-interface OpResult<T = void> { ok: boolean; dados: T | null; erro: string | null }
 
 async function fetchDashboard(contaId?: string | null): Promise<InvestimentoDashboard> {
   const params = new URLSearchParams()
@@ -96,8 +94,8 @@ export function useInvestimentosAlocacao() {
   const salvar = async (itens: AlocacaoInput[]): Promise<OpResult<InvestimentoAlocacaoTipo[]>> => {
     const res = await apiMutate<InvestimentoAlocacaoTipo[]>('/investimentos/alocacoes', 'PUT', { alocacoes: itens })
     if (res.ok) {
-      await qc.invalidateQueries({ queryKey: ['inv-alocacoes', uid] })
-      await qc.invalidateQueries({ queryKey: ['inv-dashboard', uid] })
+      await qc.invalidateQueries({ queryKey: qk.invAlocacoes(uid) })
+      await qc.invalidateQueries({ queryKey: qk.invDashboardPref(uid) })
     }
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
