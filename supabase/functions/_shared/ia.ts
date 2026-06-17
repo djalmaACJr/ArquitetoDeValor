@@ -32,6 +32,25 @@ export interface ChamadaIA {
   imagem?:   Imagem;
   /** Teto de tokens da resposta (default 2000). */
   maxTokens?: number;
+  /** Modelo escolhido pelo usuário. Vazio → cada adapter usa seu padrão. */
+  modelo?:   string;
+}
+
+/** Modelo padrão por provedor — usado quando o usuário não escolheu um. */
+const MODELO_PADRAO: Record<string, string> = {
+  claude:     "claude-haiku-4-5-20251001",
+  gpt:        "gpt-4o-mini",
+  gemini:     "gemini-2.5-flash",
+  deepseek:   "deepseek-chat",
+  openrouter: "meta-llama/llama-3.3-70b-instruct:free",
+  mistral:    "mistral-small-latest",
+  cohere:     "command-r-08-2024",
+};
+
+/** Resolve o modelo a usar: o escolhido (se houver) ou o padrão do provedor. */
+function modeloDe(provedor: string, c: ChamadaIA): string {
+  const m = (c.modelo ?? "").trim();
+  return m || MODELO_PADRAO[provedor] || "";
 }
 
 /** Provedores com suporte a imagem (visão). */
@@ -47,6 +66,95 @@ export function parsearImagem(s: string): Imagem | null {
 }
 
 const tokens = (c: ChamadaIA) => c.maxTokens ?? DEFAULT_MAX_TOKENS;
+
+// ── Tradução de erros para mensagem amigável ──────────────────────────
+
+/** Rótulo amigável por provedor (usado nas mensagens de erro ao usuário). */
+const LABEL_PROVEDOR: Record<string, string> = {
+  claude:     "Claude (Anthropic)",
+  gpt:        "OpenAI (GPT)",
+  gemini:     "Google Gemini",
+  deepseek:   "DeepSeek",
+  openrouter: "OpenRouter",
+  mistral:    "Mistral",
+  cohere:     "Cohere",
+};
+
+/**
+ * Erro de chamada a um provedor de IA, já com mensagem pronta para o
+ * usuário final (em pt-BR) e o status HTTP que o backend deve devolver.
+ */
+export class ErroIA extends Error {
+  /** Status HTTP que a edge function deve devolver ao frontend. */
+  readonly statusResposta: number;
+  constructor(mensagem: string, statusResposta = 502) {
+    super(mensagem);
+    this.name = "ErroIA";
+    this.statusResposta = statusResposta;
+  }
+}
+
+/** Tenta extrair a mensagem crua que o provedor devolveu (best effort). */
+function detalheProvedor(corpo: string): string {
+  try {
+    const j = JSON.parse(corpo) as { error?: { message?: string } | string; message?: string };
+    const m = (typeof j.error === "object" ? j.error?.message : j.error) ?? j.message;
+    if (typeof m === "string" && m.trim()) return m.trim();
+  } catch { /* corpo não-JSON: ignora */ }
+  return "";
+}
+
+/**
+ * Converte uma resposta HTTP de erro de um provedor numa `ErroIA` com
+ * texto claro e acionável. Centraliza o tratamento para todos os
+ * adaptadores (chat do mascote e geração de questionário de investimento).
+ */
+export function erroHttpIA(provedor: string, status: number, corpo: string): ErroIA {
+  const nome = LABEL_PROVEDOR[provedor] ?? provedor;
+
+  if (status === 429) {
+    return new ErroIA(
+      `O ${nome} está sobrecarregado e limitou as requisições no momento (erro 429). ` +
+      `Aguarde alguns segundos e tente de novo. Se continuar, abra Perfil → Integração com IA e ` +
+      `troque o modelo ou o provedor — modelos gratuitos (":free") costumam atingir esse limite com frequência.`,
+      429,
+    );
+  }
+  if (status === 401 || status === 403) {
+    return new ErroIA(
+      `A chave da API do ${nome} foi recusada (não autorizada). Confira em Perfil → Integração com IA se ` +
+      `ela está correta, ativa e com permissão para o modelo escolhido.`,
+      400,
+    );
+  }
+  if (status === 402) {
+    return new ErroIA(
+      `Sua conta no ${nome} está sem saldo/créditos para esta chamada. Adicione saldo ou troque para um ` +
+      `modelo gratuito em Perfil → Integração com IA.`,
+      402,
+    );
+  }
+  if (status === 404) {
+    return new ErroIA(
+      `O modelo selecionado não foi encontrado no ${nome}. Edite a configuração em Perfil → Integração com IA ` +
+      `e escolha outro modelo.`,
+      400,
+    );
+  }
+  if (status === 408 || status === 504) {
+    return new ErroIA(`O ${nome} demorou demais para responder. Tente novamente em instantes.`, 504);
+  }
+  if (status >= 500) {
+    return new ErroIA(`O ${nome} está instável no momento (erro ${status}). Tente novamente em alguns instantes.`, 502);
+  }
+
+  // Demais casos: mensagem genérica + detalhe curto do provedor, se houver.
+  const detalhe = detalheProvedor(corpo);
+  return new ErroIA(
+    `O ${nome} recusou a requisição (erro ${status}).` + (detalhe ? ` Detalhe: ${detalhe.slice(0, 160)}` : ""),
+    502,
+  );
+}
 
 // ── Adaptadores por provedor ──────────────────────────────────────────
 
@@ -72,25 +180,26 @@ async function chamarClaude(c: ChamadaIA): Promise<string> {
       "content-type":      "application/json",
     },
     body: JSON.stringify({
-      model:      "claude-haiku-4-5-20251001",
+      model:      modeloDe("claude", c),
       max_tokens: tokens(c),
       system:     persona,
       messages:   msgs,
     }),
   });
-  if (!resp.ok) throw new Error(`Claude ${resp.status}: ${await resp.text()}`);
+  if (!resp.ok) throw erroHttpIA("claude", resp.status, await resp.text());
   const data = await resp.json() as { content?: Array<{ type: string; text: string }> };
   return (data.content ?? [])
     .filter(x => x.type === "text").map(x => x.text).join("\n").trim();
 }
 
-async function chamarOpenAICompat(url: string, model: string, c: ChamadaIA): Promise<string> {
+async function chamarOpenAICompat(provedor: string, url: string, model: string, c: ChamadaIA, extraHeaders?: Record<string, string>): Promise<string> {
   const { apiKey, persona, mensagens } = c;
   const resp = await fetch(url, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
       "Content-Type":  "application/json",
+      ...extraHeaders,
     },
     body: JSON.stringify({
       model,
@@ -101,7 +210,7 @@ async function chamarOpenAICompat(url: string, model: string, c: ChamadaIA): Pro
       ],
     }),
   });
-  if (!resp.ok) throw new Error(`${url} ${resp.status}: ${await resp.text()}`);
+  if (!resp.ok) throw erroHttpIA(provedor, resp.status, await resp.text());
   const data = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
   return (data.choices?.[0]?.message?.content ?? "").trim();
 }
@@ -127,32 +236,40 @@ async function chamarGPT(c: ChamadaIA): Promise<string> {
     method: "POST",
     headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: modeloDe("gpt", c),
       max_tokens: tokens(c),
       messages: msgs,
     }),
   });
-  if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${await resp.text()}`);
+  if (!resp.ok) throw erroHttpIA("gpt", resp.status, await resp.text());
   const data = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
   return (data.choices?.[0]?.message?.content ?? "").trim();
 }
 
 async function chamarDeepSeek(c: ChamadaIA): Promise<string> {
-  return chamarOpenAICompat("https://api.deepseek.com/chat/completions", "deepseek-chat", c);
+  return chamarOpenAICompat("deepseek", "https://api.deepseek.com/chat/completions", modeloDe("deepseek", c), c);
 }
 
 async function chamarOpenRouter(c: ChamadaIA): Promise<string> {
+  // OpenRouter recomenda estes headers para identificar o app (afeta
+  // ranking e disponibilidade de modelos :free).
   return chamarOpenAICompat(
+    "openrouter",
     "https://openrouter.ai/api/v1/chat/completions",
-    "meta-llama/llama-3.3-70b-instruct:free",
+    modeloDe("openrouter", c),
     c,
+    {
+      "HTTP-Referer": "https://arquitetodevalor.app",
+      "X-Title":      "Arquiteto de Valor",
+    },
   );
 }
 
 async function chamarMistral(c: ChamadaIA): Promise<string> {
   return chamarOpenAICompat(
+    "mistral",
     "https://api.mistral.ai/v1/chat/completions",
-    "mistral-small-latest",
+    modeloDe("mistral", c),
     c,
   );
 }
@@ -166,7 +283,7 @@ async function chamarCohere(c: ChamadaIA): Promise<string> {
       "Content-Type":  "application/json",
     },
     body: JSON.stringify({
-      model: "command-r-08-2024",
+      model: modeloDe("cohere", c),
       max_tokens: tokens(c),
       messages: [
         { role: "system", content: persona },
@@ -174,7 +291,7 @@ async function chamarCohere(c: ChamadaIA): Promise<string> {
       ],
     }),
   });
-  if (!resp.ok) throw new Error(`Cohere ${resp.status}: ${await resp.text()}`);
+  if (!resp.ok) throw erroHttpIA("cohere", resp.status, await resp.text());
   const data = await resp.json() as { message?: { content?: Array<{ type: string; text?: string }> } };
   return (data.message?.content ?? [])
     .filter(x => x.type === "text").map(x => x.text ?? "").join("\n").trim();
@@ -211,8 +328,14 @@ async function chamarGemini(c: ChamadaIA): Promise<string> {
     return { role: m.role === "assistant" ? "model" : "user", parts };
   });
 
+  // Modelo escolhido pelo usuário primeiro; depois os fallbacks (Google muda nomes).
+  const escolhido = (c.modelo ?? "").trim();
+  const ordem = escolhido
+    ? [escolhido, ...GEMINI_MODELOS.filter(m => m !== escolhido)]
+    : GEMINI_MODELOS;
+
   let ultimoErro = "";
-  for (const modelo of GEMINI_MODELOS) {
+  for (const modelo of ordem) {
     const resp = await chamarGeminiModelo(modelo, apiKey, persona, contents, tokens(c));
     if (resp.ok) {
       const data = await resp.json() as {
@@ -223,9 +346,15 @@ async function chamarGemini(c: ChamadaIA): Promise<string> {
     }
     const corpo = await resp.text();
     ultimoErro = `${modelo} ${resp.status}: ${corpo.slice(0, 200)}`;
-    if (resp.status !== 404) throw new Error(`Gemini ${ultimoErro}`);
+    // 404 = nome de modelo inexistente → tenta o próximo fallback. Demais
+    // erros (429, 401, 5xx…) são definitivos: devolve mensagem amigável.
+    if (resp.status !== 404) throw erroHttpIA("gemini", resp.status, corpo);
   }
-  throw new Error(`Gemini: nenhum modelo disponível para sua chave. Último erro: ${ultimoErro}`);
+  throw new ErroIA(
+    `Nenhum modelo do Google Gemini está disponível para a sua chave. Verifique em Perfil → Integração com IA ` +
+    `se a chave tem acesso à Generative Language API. (detalhe: ${ultimoErro.slice(0, 120)})`,
+    400,
+  );
 }
 
 // ── Despacho ──────────────────────────────────────────────────────────

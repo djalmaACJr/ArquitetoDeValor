@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowLeft, UserCog, Target, ClipboardList, Sparkles, RotateCcw, Save, Wand2,
+  ArrowLeft, UserCog, Target, ClipboardList, Sparkles, RotateCcw, Save, Wand2, PiggyBank,
 } from 'lucide-react'
 import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvQuestionarios, type QuestionarioEfetivo } from '../hooks/useInvQuestionarios'
 import { useInvestimentosAlocacao, type AlocacaoInput } from '../hooks/useInvestimentosDashboard'
-import { Input, BtnSalvar, Toast, SelectDark } from '../components/ui/shared'
+import { useUsuarioPerfil } from '../hooks/useUsuarioPerfil'
+import { useInvPesos } from '../hooks/useInvPesos'
+import { useResumoAposentadoria } from '../hooks/useResumoAposentadoria'
+import { estimarIdade, formatData, formatBRL } from '../lib/utils'
+import { Input, BtnSalvar, Toast } from '../components/ui/shared'
 import { PERGUNTAS_SUITABILITY, derivarPerfil } from '../lib/perfilInvestidor'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
@@ -37,6 +41,7 @@ export default function ConfiguracoesInvestimentosPage() {
       </div>
 
       <SecaoPerfil onToast={showToast} />
+      <SecaoMetaAposentadoria />
       <SecaoMetas onToast={showToast} />
       <SecaoQuestionarios onToast={showToast} />
 
@@ -66,32 +71,42 @@ function Secao({ icone, titulo, subtitulo, children }: {
 // ════════════════════════════════════════════════════════════
 function SecaoPerfil({ onToast }: { onToast: (m: string) => void }) {
   const { perfil, loading, salvar } = useInvPerfil()
-  const [idade, setIdade] = useState('')
+  const { dataNascimento, loading: loadingNasc } = useUsuarioPerfil()
   const [aposent, setAposent] = useState('')
   const [resp, setResp] = useState<Record<string, number>>({})
   const [salvando, setSalvando] = useState(false)
   const carregado = useRef(false)
 
+  // A idade é SEMPRE derivada da data de nascimento informada no Perfil — não
+  // se digita aqui (informar idade + data de nascimento seria redundante e
+  // ficaria desatualizada). Acompanha o passar dos anos automaticamente.
+  const idadeN = useMemo(() => estimarIdade(dataNascimento), [dataNascimento])
+
   // Carrega o perfil salvo (uma vez quando chegar).
   useEffect(() => {
     if (carregado.current || loading) return
     if (perfil) {
-      setIdade(perfil.idade ? String(perfil.idade) : '')
       setAposent(perfil.idade_aposentadoria ? String(perfil.idade_aposentadoria) : '')
       setResp(perfil.suitability ?? {})
     }
     carregado.current = true
   }, [perfil, loading])
 
-  const idadeN = idade ? Number(idade) : null
   const aposentN = aposent ? Number(aposent) : null
   const resultado = useMemo(() => derivarPerfil(resp, idadeN, aposentN), [resp, idadeN, aposentN])
   const respondidas = PERGUNTAS_SUITABILITY.filter((p) => resp[p.id] != null).length
 
   async function handleSalvar() {
-    if (!idadeN || idadeN < 14 || idadeN > 110) { onToast('Informe uma idade válida.'); return }
-    if (!aposentN || aposentN <= idadeN || aposentN > 110) { onToast('Idade de aposentadoria deve ser maior que a idade atual.'); return }
+    // O questionário é o único requisito — idade (data de nascimento) e idade de
+    // aposentadoria são opcionais e só refinam a estimativa de horizonte. Assim
+    // as respostas sempre são salvas, mesmo sem a data de nascimento informada.
     if (respondidas === 0) { onToast('Responda o questionário de perfil.'); return }
+    if (idadeN != null && (idadeN < 14 || idadeN > 110)) {
+      onToast('A idade calculada pela data de nascimento é inválida — revise no Perfil.'); return
+    }
+    if (aposentN != null && (aposentN > 110 || (idadeN != null && aposentN <= idadeN))) {
+      onToast('A idade de aposentadoria deve ser maior que a idade atual (e até 110).'); return
+    }
     const payload: PerfilInvestidor = {
       perfil: resultado.perfil,
       idade: idadeN,
@@ -107,12 +122,26 @@ function SecaoPerfil({ onToast }: { onToast: (m: string) => void }) {
 
   return (
     <Secao icone={<UserCog size={16} />} titulo="Perfil do investidor"
-      subtitulo="Informe sua idade e quando pretende se aposentar e responda o questionário. O perfil é derivado das respostas e do horizonte.">
+      subtitulo="A idade vem da sua data de nascimento (Perfil). Informe quando pretende se aposentar e responda o questionário. O perfil é derivado das respostas e do horizonte.">
       <div className="flex flex-wrap gap-3 mb-4">
-        <label className="flex-1 min-w-[140px]">
+        <div className="flex-1 min-w-[140px]">
           <span className="block text-[12.5px] mb-1" style={{ color: MUTED }}>Idade atual</span>
-          <Input type="number" min={14} max={110} value={idade} onChange={(e) => setIdade(e.target.value)} placeholder="Ex.: 38" />
-        </label>
+          {loadingNasc ? (
+            <p className="text-[12.5px] mt-1" style={{ color: MUTED }}>Carregando…</p>
+          ) : idadeN != null ? (
+            <>
+              <p className="text-[20px] font-bold text-white leading-tight">{idadeN} anos</p>
+              <span className="block text-[11.5px] mt-1" style={{ color: MUTED }}>
+                Calculada da data de nascimento{dataNascimento ? ` (${formatData(dataNascimento)})` : ''}.{' '}
+                <Link to="/perfil" className="underline hover:text-white" style={{ color: VERDE }}>Alterar</Link>
+              </span>
+            </>
+          ) : (
+            <span className="block text-[12.5px] mt-1" style={{ color: AMBAR }}>
+              Informe sua data de nascimento no <Link to="/perfil" className="underline hover:text-white" style={{ color: VERDE }}>Perfil</Link> para calcular a idade.
+            </span>
+          )}
+        </div>
         <label className="flex-1 min-w-[140px]">
           <span className="block text-[12.5px] mb-1" style={{ color: MUTED }}>Idade de aposentadoria</span>
           <Input type="number" min={15} max={110} value={aposent} onChange={(e) => setAposent(e.target.value)} placeholder="Ex.: 60" />
@@ -148,6 +177,84 @@ function SecaoPerfil({ onToast }: { onToast: (m: string) => void }) {
         </div>
         <BtnSalvar editando onClick={handleSalvar} salvando={salvando} labelSalvar="Salvar perfil" />
       </div>
+    </Secao>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// 1b) Meta de aposentadoria (regra dos 4%)
+// ════════════════════════════════════════════════════════════
+const TAXA_RETIRADA = 0.04  // 4% a.a. — taxa de retirada segura (regra dos 4% / FIRE)
+
+function StatMeta({ rotulo, valor, sufixo, destaque, dica }: {
+  rotulo: string; valor: string; sufixo?: string; destaque?: boolean; dica?: string
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 p-3">
+      <p className="text-[12px]" style={{ color: MUTED }}>{rotulo}</p>
+      <p className={`font-bold ${destaque ? 'text-[18px]' : 'text-[16px]'}`} style={{ color: destaque ? VERDE : '#fff' }}>
+        {valor}{sufixo && <span className="text-[12px] font-normal ml-1" style={{ color: MUTED }}>{sufixo}</span>}
+      </p>
+      {dica && <p className="text-[11px] mt-0.5" style={{ color: MUTED }}>{dica}</p>}
+    </div>
+  )
+}
+
+function SecaoMetaAposentadoria() {
+  const { rendaMensalMedia, patrimonioTotal, loading } = useResumoAposentadoria()
+
+  // Regra dos 4%: o patrimônio deve gerar, a 4% a.a., a renda que se quer
+  // substituir. Logo o patrimônio-alvo = renda anual / 4% (= 25× a renda anual).
+  const rendaAnual       = rendaMensalMedia * 12
+  const patrimonioAlvo   = rendaAnual / TAXA_RETIRADA
+  const rendaPassivaMes  = patrimonioTotal > 0 ? (patrimonioTotal * TAXA_RETIRADA) / 12 : 0
+  const progresso        = patrimonioAlvo > 0 ? Math.min(1, Math.max(0, patrimonioTotal / patrimonioAlvo)) : 0
+  const falta            = Math.max(0, patrimonioAlvo - patrimonioTotal)
+  const atingiu          = patrimonioAlvo > 0 && patrimonioTotal >= patrimonioAlvo
+
+  return (
+    <Secao icone={<PiggyBank size={16} />} titulo="Meta de aposentadoria (regra dos 4%)"
+      subtitulo="Estimativa pela regra dos 4%: você poderia sacar 4% do patrimônio por ano sem esgotá-lo. Baseada na renda média das suas receitas dos últimos 24 meses e no saldo total de todas as contas.">
+      {loading ? (
+        <p className="text-[12.5px]" style={{ color: MUTED }}>Calculando…</p>
+      ) : rendaMensalMedia <= 0 ? (
+        <p className="text-[12.5px]" style={{ color: AMBAR }}>
+          Sem receitas suficientes nos últimos 24 meses para estimar a renda média.
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-4">
+            <StatMeta rotulo="Renda média mensal" valor={formatBRL(rendaMensalMedia)} dica="receitas, últimos 24 meses" />
+            <StatMeta rotulo="Patrimônio total" valor={formatBRL(patrimonioTotal)} dica="saldo de todas as contas" />
+            <StatMeta rotulo="Renda passiva hoje" valor={formatBRL(rendaPassivaMes)} sufixo="/mês" dica="seu patrimônio a 4% a.a." />
+            <StatMeta destaque rotulo="Renda a substituir" valor={formatBRL(rendaMensalMedia)} sufixo="/mês"
+              dica="o que sua carteira precisa render" />
+            <StatMeta destaque rotulo="Patrimônio necessário" valor={formatBRL(patrimonioAlvo)}
+              dica="para gerar essa renda a 4% a.a." />
+            <StatMeta rotulo={atingiu ? 'Excedente' : 'Falta acumular'} valor={formatBRL(atingiu ? patrimonioTotal - patrimonioAlvo : falta)}
+              dica={atingiu ? 'você já atingiu a meta 🎉' : 'até o patrimônio-alvo'} />
+          </div>
+
+          {/* Barra de progresso rumo ao patrimônio-alvo */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[12.5px]" style={{ color: MUTED }}>Progresso até a independência</span>
+              <span className="text-[13px] font-semibold" style={{ color: atingiu ? VERDE : '#fff' }}>
+                {(progresso * 100).toFixed(1).replace('.', ',')}%
+              </span>
+            </div>
+            <div className="h-2.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+              <div className="h-full rounded-full transition-all"
+                style={{ width: `${progresso * 100}%`, background: atingiu ? VERDE : 'linear-gradient(90deg,#5b8cff,#00c896)' }} />
+            </div>
+          </div>
+
+          <p className="text-[11.5px] mt-3" style={{ color: MUTED }}>
+            Estimativa simplificada (regra dos 4%): não considera inflação, impostos nem aportes futuros.
+            Serve como referência de ordem de grandeza.
+          </p>
+        </>
+      )}
     </Secao>
   )
 }
@@ -199,14 +306,19 @@ function SecaoMetas({ onToast }: { onToast: (m: string) => void }) {
             <span className="text-[13px] w-4" style={{ color: MUTED }}>%</span>
           </div>
         ))}
-      </div>
-      <div className="mt-3 flex items-center justify-between">
-        <div className="text-[13px]">
-          <span style={{ color: MUTED }}>Total: </span>
-          <span className="font-semibold" style={{ color: totalOk ? VERDE : AMBAR }}>
-            {total.toFixed(2).replace('.', ',')}%
-          </span>
+        {/* Total alinhado sob a coluna dos valores */}
+        <div className="flex items-center gap-3 pt-2 mt-1 border-t border-white/10">
+          <span className="w-2 h-2 shrink-0" />
+          <span className="flex-1 text-[14px] font-semibold text-white">Total</span>
+          <div className="w-28 px-3">
+            <span className="text-[15px] font-bold" style={{ color: totalOk ? VERDE : AMBAR }}>
+              {total.toFixed(2).replace('.', ',')}
+            </span>
+          </div>
+          <span className="text-[13px] w-4" style={{ color: MUTED }}>%</span>
         </div>
+      </div>
+      <div className="mt-3 flex justify-end">
         <BtnSalvar editando onClick={handleSalvar} salvando={salvando} labelSalvar="Salvar metas" />
       </div>
       {!totalOk && (
@@ -223,29 +335,38 @@ function SecaoMetas({ onToast }: { onToast: (m: string) => void }) {
 // ════════════════════════════════════════════════════════════
 function SecaoQuestionarios({ onToast }: { onToast: (m: string) => void }) {
   const { perfil } = useInvPerfil()
+  const { pesos: pesosGlobais, loading: loadingPesos, salvar: salvarPesos } = useInvPesos()
   const { questionarios, questionarioEfetivo, salvar, excluir, gerarPorIA } = useInvQuestionarios()
 
   const [tipoSel, setTipoSel] = useState<TipoAtivoInvestimento>('ACOES')
   const [perguntas, setPerguntas] = useState<PerguntaAvaliacao[]>([])
-  const [pesos, setPesos] = useState<PesosCriterio>({ FUNDAMENTOS: 40, CRESCIMENTO: 30, DIVIDENDOS: 30 })
   const [info, setInfo] = useState<{ origem: QuestionarioEfetivo['origem']; provedor: string | null; modelo: string | null; custom: boolean }>(
     { origem: 'PADRAO', provedor: null, modelo: null, custom: false })
   const [gerando, setGerando] = useState(false)
   const [salvando, setSalvando] = useState(false)
+  const [salvandoPesos, setSalvandoPesos] = useState(false)
   const [pendenteIA, setPendenteIA] = useState<{ provedor: string | null; modelo: string | null } | null>(null)
+
+  // Pesos GLOBAIS (valem para todos os tipos). Editados localmente e
+  // ressincronizados quando o valor salvo chega (derived state on change).
+  const [pesos, setPesos] = useState<PesosCriterio>(pesosGlobais)
+  const [pesosPrev, setPesosPrev] = useState(pesosGlobais)
+  if (!loadingPesos && pesosPrev !== pesosGlobais) {
+    setPesosPrev(pesosGlobais)
+    setPesos(pesosGlobais)
+  }
 
   const custom = questionarios.find((q) => q.tipo_ativo === tipoSel)
   const loadedSig = useRef<string>('')
 
-  // (Re)carrega o questionário efetivo quando troca o tipo ou quando o custom
-  // daquele tipo muda (após salvar/excluir). Não reseta edições não relacionadas.
+  // (Re)carrega apenas as PERGUNTAS quando troca o tipo ou quando o custom
+  // daquele tipo muda. Os pesos são globais e não dependem da aba.
   useEffect(() => {
     const sig = `${tipoSel}:${custom?.updated_at ?? 'default'}:${perfil?.perfil ?? 'sem'}`
     if (sig === loadedSig.current) return
     loadedSig.current = sig
     const ef = questionarioEfetivo(tipoSel, perfil?.perfil ?? null)
     setPerguntas(ef.perguntas)
-    setPesos(ef.pesos)
     setInfo({ origem: ef.origem, provedor: ef.ia_provedor, modelo: ef.ia_modelo, custom: ef.custom })
     setPendenteIA(null)
   }, [tipoSel, custom?.updated_at, perfil?.perfil, questionarioEfetivo, perfil])
@@ -262,6 +383,15 @@ function SecaoQuestionarios({ onToast }: { onToast: (m: string) => void }) {
   function sugerirPesos() {
     if (!perfil?.perfil) { onToast('Defina o perfil acima para sugerir pesos.'); return }
     setPesos({ ...PESOS_SUGERIDOS_POR_PERFIL[perfil.perfil] })
+  }
+
+  // Persiste os pesos globais (valem para todos os tipos de ativo).
+  async function salvarPesosGlobais() {
+    if (!pesosOk) { onToast('A soma dos pesos deve ser 100.'); return }
+    setSalvandoPesos(true)
+    const res = await salvarPesos(pesos)
+    setSalvandoPesos(false)
+    onToast(res.ok ? 'Pesos salvos — valem para todos os tipos.' : (res.erro ?? 'Erro ao salvar pesos'))
   }
 
   async function pedirMentor() {
@@ -312,23 +442,42 @@ function SecaoQuestionarios({ onToast }: { onToast: (m: string) => void }) {
 
   return (
     <Secao icone={<ClipboardList size={16} />} titulo="Questionários de avaliação"
-      subtitulo="Configure o questionário usado para dar nota aos ativos de cada tipo. Sem customização, vale o padrão do app.">
+      subtitulo="Cada tipo de ativo tem o seu questionário (selecione na aba). O Mentor gera 10 questões para o tipo escolhido. Sem customização, vale o padrão do app.">
+      {/* Abas por tipo de ativo — cada tipo tem o seu próprio questionário */}
+      <div className="flex flex-wrap gap-1.5 mb-3 pb-3 border-b border-white/10">
+        {TIPOS_ATIVO_INV.map((t) => {
+          const ativo = t === tipoSel
+          return (
+            <button key={t} type="button" onClick={() => setTipoSel(t)}
+              className={`px-3 py-1.5 rounded-lg text-[12.5px] font-medium border transition-colors ${
+                ativo ? 'border-blue-400/60 bg-blue-500/15 text-white' : 'border-white/10 text-white/70 hover:border-white/25'
+              }`}>
+              {TIPO_ATIVO_LABEL[t]}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Ação principal: o Mentor (IA) monta o questionário do tipo selecionado */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <SelectDark value={tipoSel} onChange={(e) => setTipoSel(e.target.value as TipoAtivoInvestimento)}
-          style={{ width: 'auto' }} className="!text-[13px] !py-2">
-          {TIPOS_ATIVO_INV.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
-        </SelectDark>
+        <button onClick={pedirMentor} disabled={gerando}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50"
+          style={{ background: 'linear-gradient(135deg,#7c5cff,#5b8cff)' }}>
+          <Sparkles size={15} className={gerando ? 'animate-pulse' : ''} />
+          {gerando ? 'Gerando…' : `Pedir ao Mentor (${TIPO_ATIVO_LABEL[tipoSel]})`}
+        </button>
         <SeloOrigem origem={info.origem} provedor={info.provedor} modelo={info.modelo} />
       </div>
 
-      {/* Pesos por critério */}
+      {/* Pesos por critério — GLOBAIS (valem para todos os tipos de ativo) */}
       <div className="rounded-lg border border-white/10 p-3 mb-3">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
           <span className="text-[13px] font-medium text-white">Pesos por critério</span>
           <button onClick={sugerirPesos} className="flex items-center gap-1 text-[12px] text-blue-300 hover:text-blue-200">
             <Wand2 size={13} /> Sugerir pelo perfil
           </button>
         </div>
+        <p className="text-[11.5px] mb-2" style={{ color: MUTED }}>Valem para todos os tipos de ativo.</p>
         <div className="flex flex-wrap gap-3">
           {CRITERIOS_QUESTAO.map((c) => (
             <label key={c} className="flex-1 min-w-[120px]">
@@ -341,9 +490,16 @@ function SecaoQuestionarios({ onToast }: { onToast: (m: string) => void }) {
             </label>
           ))}
         </div>
-        <p className="text-[12px] mt-2" style={{ color: pesosOk ? MUTED : AMBAR }}>
-          Soma: {somaPesos}% {pesosOk ? '' : '— precisa somar 100'}
-        </p>
+        <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
+          <p className="text-[12px]" style={{ color: pesosOk ? MUTED : AMBAR }}>
+            Soma: {somaPesos}% {pesosOk ? '' : '— precisa somar 100'}
+          </p>
+          <button onClick={salvarPesosGlobais} disabled={salvandoPesos || !pesosOk}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[12.5px] disabled:opacity-50"
+            style={{ borderColor: 'rgba(0,200,150,0.5)', color: VERDE }}>
+            <Save size={14} /> {salvandoPesos ? 'Salvando…' : 'Salvar pesos'}
+          </button>
+        </div>
       </div>
 
       {/* Perguntas agrupadas por critério (editáveis) */}
@@ -378,12 +534,6 @@ function SecaoQuestionarios({ onToast }: { onToast: (m: string) => void }) {
 
       {/* Ações */}
       <div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-white/10">
-        <button onClick={pedirMentor} disabled={gerando}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white disabled:opacity-50"
-          style={{ background: 'linear-gradient(135deg,#7c5cff,#5b8cff)' }}>
-          <Sparkles size={15} className={gerando ? 'animate-pulse' : ''} />
-          {gerando ? 'Gerando…' : 'Pedir ao Mentor'}
-        </button>
         <button onClick={handleSalvar} disabled={salvando}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] text-white disabled:opacity-50"
           style={{ borderColor: 'rgba(0,200,150,0.5)', color: VERDE }}>

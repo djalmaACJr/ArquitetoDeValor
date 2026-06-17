@@ -89,6 +89,7 @@ interface InvestimentosBackup {
   alocacoes:       Record<string, unknown>[]
   questionarios?:  Record<string, unknown>[]
   perfil?:         Record<string, unknown> | null
+  pesos?:          Record<string, unknown> | null  // pesos globais dos critérios
 }
 
 interface LembreteBackup {
@@ -3066,12 +3067,14 @@ function SecaoBackup() {
         apiFetch('/investimentos/alocacoes'),
         apiFetch('/investimentos/questionarios'),
       ])
-      // Perfil de investidor (usuarios.inv_perfil — preferência JSONB inline).
+      // Perfil de investidor + pesos globais (usuarios.* — preferências JSONB inline).
       let perfilInv: Record<string, unknown> | null = null
+      let pesosInv: Record<string, unknown> | null = null
       if (userId) {
         const { data: pRow } = await supabase.schema('arqvalor').from('usuarios')
-          .select('inv_perfil').eq('id', userId).single()
+          .select('inv_perfil, inv_pesos_criterio').eq('id', userId).single()
         perfilInv = (pRow?.inv_perfil ?? null) as Record<string, unknown> | null
+        pesosInv  = (pRow?.inv_pesos_criterio ?? null) as Record<string, unknown> | null
       }
       const investimentos: InvestimentosBackup = {
         ativos:          extrairLista<Record<string, unknown>>(rAtivos.dados),
@@ -3083,6 +3086,7 @@ function SecaoBackup() {
         alocacoes:       extrairLista<Record<string, unknown>>(rAloc.dados),
         questionarios:   extrairLista<Record<string, unknown>>(rQuest.dados),
         perfil:          perfilInv,
+        pesos:           pesosInv,
       }
       addLog('ok', `Investimentos: ${investimentos.ativos.length} ativos, ${investimentos.posicoes.length} posições, ${investimentos.operacoes.length} operações, ${investimentos.dividendos.length} dividendos`)
 
@@ -3148,7 +3152,7 @@ function SecaoBackup() {
               'Todas as transações (sem limite de período)',
               'Todas as transferências',
               'Investimentos (ativos, posições, operações, dividendos, histórico)',
-              'Configurações de investimentos (metas, perfil e questionários de avaliação)',
+              'Configurações de investimentos (metas, perfil, pesos e questionários de avaliação)',
               'Lembretes (avulsos e vinculados a lançamentos)',
               'Objetivos (metas, sonhos e projetos)',
             ].map((item, i) => (
@@ -3495,16 +3499,22 @@ function SecaoRestore() {
           }
         } else addLog('erro', `Investimentos: ${res.erro}`)
 
-        // Perfil de investidor (usuarios.inv_perfil) — restaura se ausente.
-        if (inv.perfil && userId) {
+        // Perfil de investidor + pesos globais (usuarios.*) — restaura se ausentes.
+        if ((inv.perfil || inv.pesos) && userId) {
           const { data: atual } = await supabase.schema('arqvalor').from('usuarios')
-            .select('inv_perfil').eq('id', userId).single()
-          if (!atual?.inv_perfil) {
+            .select('inv_perfil, inv_pesos_criterio').eq('id', userId).single()
+          if (inv.perfil && !atual?.inv_perfil) {
             const { error } = await supabase.schema('arqvalor').from('usuarios')
               .update({ inv_perfil: inv.perfil }).eq('id', userId)
             addLog(error ? 'erro' : 'ok', error ? `Perfil de investidor: ${error.message}` : 'Perfil de investidor restaurado')
             qc.invalidateQueries({ queryKey: ['inv-perfil'] })
-          } else addLog('aviso', 'Perfil de investidor já existente — mantido')
+          } else if (inv.perfil) addLog('aviso', 'Perfil de investidor já existente — mantido')
+          if (inv.pesos && !atual?.inv_pesos_criterio) {
+            const { error } = await supabase.schema('arqvalor').from('usuarios')
+              .update({ inv_pesos_criterio: inv.pesos }).eq('id', userId)
+            addLog(error ? 'erro' : 'ok', error ? `Pesos dos critérios: ${error.message}` : 'Pesos dos critérios restaurados')
+            qc.invalidateQueries({ queryKey: ['inv-pesos'] })
+          } else if (inv.pesos) addLog('aviso', 'Pesos dos critérios já existentes — mantidos')
         }
       }
 

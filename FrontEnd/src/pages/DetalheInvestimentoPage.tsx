@@ -25,6 +25,7 @@ import { calcularNota, recomendacaoCompra } from '../lib/questionarioAtivos'
 import { CRITERIOS_QUESTAO, CRITERIO_LABEL } from '../lib/constants'
 import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
 import { useInvPerfil } from '../hooks/useInvPerfil'
+import { useInvPesos } from '../hooks/useInvPesos'
 import type { InvestimentoAtivo, QuestionarioRespostas, PerguntaAvaliacao, CriterioQuestao } from '../types'
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement)
@@ -505,9 +506,10 @@ function DrawerQuestionario({ ativo, onClose, onToast }: {
 }) {
   const { editar } = useInvestimentosAtivos()
   const { perfil } = useInvPerfil()
+  const { pesos: pesosGlobais } = useInvPesos()
   const { questionarioEfetivo } = useInvQuestionarios()
-  // Questionário efetivo (custom do banco ou padrão) + pesos por critério.
-  const ef = questionarioEfetivo(ativo.tipo_ativo, perfil?.perfil ?? null)
+  // Questionário efetivo (perguntas custom/padrão do tipo) + pesos GLOBAIS.
+  const ef = questionarioEfetivo(ativo.tipo_ativo, perfil?.perfil ?? null, pesosGlobais)
   const perguntas = ef.perguntas
   const [respostas, setRespostas] = useState<QuestionarioRespostas>(ativo.questionario_respostas ?? {})
   const [salvando, setSalvando] = useState(false)

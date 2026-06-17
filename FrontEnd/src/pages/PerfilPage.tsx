@@ -10,7 +10,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import Mascote, { type MascoteNome, type MascotePose } from '../components/ui/Mascote'
 import { useIAPreferencia } from '../hooks/useIAPreferencia'
-import { PROVEDORES, PROVEDOR_PADRAO } from '../lib/iaProvedores'
+import { PROVEDORES, PROVEDOR_PADRAO, modeloSugerido, rotuloModelo } from '../lib/iaProvedores'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -457,16 +457,30 @@ function SecaoIA() {
   const [provedorId,  setProvedorId]  = useState<string>(PROVEDOR_PADRAO)
   const [chave,       setChave]       = useState('')
   const [nome,        setNome]        = useState('')
+  const [modelo,      setModelo]      = useState('')
+  const [modeloCustom, setModeloCustom] = useState(false)  // provedor permiteCustom + id fora da lista
   const [expandido,   setExpandido]   = useState<string | null>(null)
   const [fb,          setFb]          = useState<Feedback | null>(null)
   const [confirmRemover, setConfirmRemover] = useState<string | null>(null)
 
   const provedorAtual = PROVEDORES.find(p => p.id === provedorId) ?? PROVEDORES[0]
 
+  /** Troca de provedor: reseta o modelo pro sugerido do novo provedor. */
+  const aoTrocarProvedor = (id: string) => {
+    setProvedorId(id)
+    const p = PROVEDORES.find(x => x.id === id) ?? PROVEDORES[0]
+    setModelo(modeloSugerido(p))
+    setModeloCustom(false)
+    setFb(null)
+  }
+
   const abrirNova = () => {
     setAdicionando(true)
     setEditando(null)
     setProvedorId(PROVEDOR_PADRAO)
+    const p = PROVEDORES.find(x => x.id === PROVEDOR_PADRAO) ?? PROVEDORES[0]
+    setModelo(modeloSugerido(p))
+    setModeloCustom(false)
     setChave('')
     setNome('')
     setFb(null)
@@ -475,9 +489,13 @@ function SecaoIA() {
   const abrirEditar = (configId: string) => {
     const c = configs.find(x => x.id === configId)
     if (!c) return
+    const p = PROVEDORES.find(x => x.id === c.provedor) ?? PROVEDORES[0]
+    const mod = c.modelo ?? modeloSugerido(p)
     setAdicionando(false)
     setEditando(configId)
     setProvedorId(c.provedor)
+    setModelo(mod)
+    setModeloCustom(!!(p.permiteCustom && !p.modelos.some(m => m.id === mod)))
     setChave('')
     setNome(c.nome ?? '')
     setFb(null)
@@ -492,11 +510,12 @@ function SecaoIA() {
   const aoSalvar = async (e: FormEvent) => {
     e.preventDefault()
     setFb(null)
+    const modeloFinal = modelo.trim() || null
     let r: { ok: boolean; erro?: string }
     if (editando) {
-      r = await atualizar(editando, { provedor: provedorId, api_key: chave, nome })
+      r = await atualizar(editando, { provedor: provedorId, api_key: chave, nome, modelo: modeloFinal })
     } else {
-      r = await adicionar(provedorId, chave, nome)
+      r = await adicionar(provedorId, chave, nome, modeloFinal)
     }
     if (r.ok) {
       setFb({ tipo: 'ok', msg: 'Configuração salva.' })
@@ -594,11 +613,9 @@ function SecaoIA() {
                         </div>
                         <p className="text-[13px] mt-0.5 font-mono" style={{ color: 'var(--text-faint)' }}>
                           {c.mascara || 'chave criptografada'}
-                          {p && (
-                            <span className="ml-2" style={{ color: 'var(--text-muted)' }}>
-                              · {p.modelo}
-                            </span>
-                          )}
+                          <span className="ml-2" style={{ color: 'var(--text-muted)' }}>
+                            · {rotuloModelo(p ?? null, c.modelo)}
+                          </span>
                         </p>
                       </div>
                       <div className="flex gap-1.5 flex-wrap">
@@ -707,7 +724,7 @@ function SecaoIA() {
                 </label>
                 <select
                   value={provedorId}
-                  onChange={e => { setProvedorId(e.target.value); setFb(null) }}
+                  onChange={e => aoTrocarProvedor(e.target.value)}
                   disabled={salvando}
                   className="w-full rounded-lg px-3 py-2.5 text-[16px] focus:outline-none focus:border-av-green/50 disabled:opacity-50"
                   style={{
@@ -740,14 +757,69 @@ function SecaoIA() {
                       $ Pago · precisa de cartão
                     </span>
                   )}
-                  <span
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-mono"
-                    style={{ background: 'var(--tint-2)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
-                    title="Modelo utilizado pelo chat do mentor"
-                  >
-                    {provedorAtual.modelo}
-                  </span>
                 </div>
+              </div>
+
+              {/* Seleção de modelo — com recomendação para finanças */}
+              <div>
+                <label className="block text-[14px] mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Qual modelo usar?
+                  <span className="text-[12px] ml-1" style={{ color: 'var(--text-faint)' }}>
+                    ⭐ = melhor para finanças
+                  </span>
+                </label>
+                <select
+                  value={modeloCustom ? '__custom__' : modelo}
+                  onChange={e => {
+                    const v = e.target.value
+                    if (v === '__custom__') { setModeloCustom(true); setModelo('') }
+                    else { setModeloCustom(false); setModelo(v) }
+                    setFb(null)
+                  }}
+                  disabled={salvando}
+                  className="w-full rounded-lg px-3 py-2.5 text-[16px] focus:outline-none focus:border-av-green/50 disabled:opacity-50"
+                  style={{
+                    background:  'var(--bg-input)',
+                    color:       'var(--text-primary)',
+                    border:      '1px solid var(--border-subtle)',
+                    colorScheme: 'auto',
+                  }}
+                >
+                  {provedorAtual.modelos.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.financas ? '⭐ ' : ''}{m.label}{m.gratuito ? ' — grátis' : ''}{m.nota ? ` · ${m.nota}` : ''}
+                    </option>
+                  ))}
+                  {provedorAtual.permiteCustom && (
+                    <option value="__custom__">Outro modelo (digitar o ID)…</option>
+                  )}
+                </select>
+
+                {modeloCustom && (
+                  <input
+                    type="text"
+                    value={modelo}
+                    onChange={e => { setModelo(e.target.value); setFb(null) }}
+                    disabled={salvando}
+                    placeholder="ex.: deepseek/deepseek-chat (veja em openrouter.ai/models)"
+                    className="w-full mt-2 rounded-lg px-3 py-2.5 text-[15px] font-mono focus:outline-none disabled:opacity-50"
+                    style={{
+                      background: 'var(--bg-input)',
+                      color:      'var(--text-primary)',
+                      border:     '1px solid var(--border-subtle)',
+                    }}
+                    autoComplete="off"
+                  />
+                )}
+
+                {!modeloCustom && (() => {
+                  const m = provedorAtual.modelos.find(x => x.id === modelo)
+                  return m?.nota ? (
+                    <p className="text-[12px] mt-1.5 leading-relaxed" style={{ color: 'var(--text-faint)' }}>
+                      {m.financas ? '⭐ Recomendado para finanças. ' : ''}{m.nota}.
+                    </p>
+                  ) : null
+                })()}
               </div>
 
               <div>
@@ -877,9 +949,11 @@ export default function PerfilPage() {
   // Lê de arqvalor.usuarios (fonte da verdade) em vez do JWT.
   // Se os dois espelhos divergirem (auth.users.raw_user_meta_data vs
   // arqvalor.usuarios), confiamos no espelho da tabela arqvalor.
-  const { nome: nomePerfil, email: emailPerfil } = useUsuarioPerfil()
+  const { nome: nomePerfil, email: emailPerfil, dataNascimento: nascAtual } = useUsuarioPerfil()
   const nomeAtual  = nomePerfil
   const emailAtual = emailPerfil
+  // arqvalor.usuarios.data_nascimento é "YYYY-MM-DD" — formato direto do input type="date".
+  const nascDataAtual = nascAtual ?? ''
 
   // ── Nome ────────────────────────────────────────────────────
   // Padrão React 19 "derived state on prop change": quando o fetch
@@ -890,8 +964,17 @@ export default function PerfilPage() {
     setNomeAtualPrev(nomeAtual)
     setNome(nomeAtual)
   }
+  // Data de nascimento — mesmo padrão de derived state que o nome.
+  const [nascimento, setNascimento]           = useState(nascDataAtual)
+  const [nascAtualPrev, setNascAtualPrev]     = useState(nascDataAtual)
+  if (nascAtualPrev !== nascDataAtual) {
+    setNascAtualPrev(nascDataAtual)
+    setNascimento(nascDataAtual)
+  }
   const [fbNome, setFbNome]     = useState<Feedback | null>(null)
   const [loadNome, setLoadNome] = useState(false)
+
+  const dadosAlterados = nome.trim() !== nomeAtual || nascimento !== nascDataAtual
 
   const salvarNome = async (e: FormEvent) => {
     e.preventDefault()
@@ -899,11 +982,14 @@ export default function PerfilPage() {
     setFbNome(null)
     setLoadNome(true)
 
+    // Data completa "YYYY-MM-DD" direto do input type="date". Vazio = null.
+    const dataNasc = nascimento || null
+
     // Atualiza arqvalor.usuarios PRIMEIRO (fonte da verdade da UI).
     // Depois atualiza auth.users.raw_user_meta_data como espelho.
     // Se um falhar, mostramos erro visível e não confirmamos sucesso.
     const { error: errArqv } = await supabase.schema('arqvalor').from('usuarios')
-      .update({ nome: nome.trim() }).eq('id', user!.id)
+      .update({ nome: nome.trim(), data_nascimento: dataNasc }).eq('id', user!.id)
 
     const { error: errAuth } = errArqv
       ? { error: null }   // já vai falhar — não atualiza o espelho do auth
@@ -914,8 +1000,8 @@ export default function PerfilPage() {
 
     setLoadNome(false)
     setFbNome(errArqv || errAuth
-      ? { tipo: 'erro', msg: 'Não foi possível atualizar o nome.' }
-      : { tipo: 'ok',   msg: 'Nome atualizado com sucesso.' }
+      ? { tipo: 'erro', msg: 'Não foi possível atualizar os dados.' }
+      : { tipo: 'ok',   msg: 'Dados atualizados com sucesso.' }
     )
   }
 
@@ -1174,10 +1260,19 @@ export default function PerfilPage() {
                   className={`${input} opacity-40 cursor-not-allowed`}/>
                 <p className="text-[15px] text-white/25 mt-1">O e-mail não pode ser alterado por aqui.</p>
               </div>
+              <div>
+                <label className={label}>Data de nascimento</label>
+                <input type="date" value={nascimento} max="9999-12-31"
+                  onChange={e => setNascimento(e.target.value)}
+                  className={input} style={{ colorScheme: 'dark' }}/>
+                <p className="text-[15px] text-white/25 mt-1">
+                  Usada para estimar sua idade nas Configurações de Investimentos.
+                </p>
+              </div>
               <div className="flex justify-end pt-1">
-                <button type="submit" disabled={loadNome || nome.trim() === nomeAtual}
+                <button type="submit" disabled={loadNome || !dadosAlterados}
                   className={`${btn} bg-av-green text-av-dark hover:bg-av-green/90`}>
-                  {loadNome ? 'Salvando...' : 'Salvar nome'}
+                  {loadNome ? 'Salvando...' : 'Salvar'}
                 </button>
               </div>
               <Alerta fb={fbNome}/>

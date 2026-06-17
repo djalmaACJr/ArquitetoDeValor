@@ -21,6 +21,7 @@ export interface IAConfig {
   provedor: string
   mascara:  string         // ex.: "sk-ant-...f4a2"
   nome?:    string | null
+  modelo?:  string | null  // modelo escolhido (null → padrão do provedor)
 }
 
 interface IAConfigsCol {
@@ -65,6 +66,7 @@ export function useIAPreferencia() {
     provedor: string,
     api_key:  string,
     nome?:    string,
+    modelo?:  string | null,
   ): Promise<{ ok: boolean; erro?: string }> => {
     const p = provedorPorId(provedor)
     if (!p) return { ok: false, erro: 'Provedor inválido.' }
@@ -77,6 +79,7 @@ export function useIAPreferencia() {
       provedor: p.id,
       api_key:  api_key.trim(),
       nome:     nome?.trim() || null,
+      modelo:   modelo?.trim() || null,
     })
     setSalvando(false)
     if (!r.ok || !r.dados) return { ok: false, erro: r.erro ?? 'Falha ao salvar.' }
@@ -87,7 +90,7 @@ export function useIAPreferencia() {
   /** Atualiza uma config existente. `api_key` vazia mantém a anterior. */
   const atualizar = useCallback(async (
     configId: string,
-    patch: { provedor?: string; api_key?: string; nome?: string | null },
+    patch: { provedor?: string; api_key?: string; nome?: string | null; modelo?: string | null },
   ): Promise<{ ok: boolean; erro?: string }> => {
     if (patch.provedor) {
       const p = provedorPorId(patch.provedor)
@@ -101,6 +104,7 @@ export function useIAPreferencia() {
       provedor: patch.provedor,
       api_key:  patch.api_key?.trim() || undefined,
       nome:     patch.nome === undefined ? undefined : (patch.nome ?? null),
+      modelo:   patch.modelo === undefined ? undefined : (patch.modelo ?? null),
     })
     setSalvando(false)
     if (!r.ok || !r.dados) return { ok: false, erro: r.erro ?? 'Falha ao salvar.' }

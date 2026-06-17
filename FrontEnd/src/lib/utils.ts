@@ -31,6 +31,24 @@ export function formatData(iso: string): string {
 }
 
 /**
+ * Estima a idade (anos completos) a partir de uma data de nascimento ISO
+ * ("YYYY-MM-DD" — normalmente com dia 01, já que só guardamos mês/ano).
+ * Retorna null quando a data é vazia/ inválida.
+ */
+export function estimarIdade(dataNascimento: string | null | undefined): number | null {
+  if (!dataNascimento) return null
+  const [y, m, d] = dataNascimento.split('-').map(Number)
+  if (!y || !m) return null
+  const hoje = new Date()
+  let idade = hoje.getFullYear() - y
+  // Ainda não fez aniversário este ano → subtrai 1.
+  const mesAtual = hoje.getMonth() + 1
+  const diaAtual = hoje.getDate()
+  if (mesAtual < m || (mesAtual === m && diaAtual < (d || 1))) idade -= 1
+  return idade >= 0 && idade <= 130 ? idade : null
+}
+
+/**
  * Formata "YYYY-MM" como label de mês.
  * @param formato 'curto'  → "Abr/26"  (padrão, para gráficos/selects)
  *                'longo'  → "Abril/2026" (para cabeçalhos)

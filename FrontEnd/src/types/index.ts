@@ -389,8 +389,8 @@ export interface InvQuestionario {
 // Perfil de investidor (usuarios.inv_perfil — JSONB inline).
 export interface PerfilInvestidor {
   perfil:              PerfilInvestidorTipo
-  idade:               number
-  idade_aposentadoria: number
+  idade:               number | null  // null quando a data de nascimento não foi informada no Perfil
+  idade_aposentadoria: number | null  // opcional — melhora a estimativa de horizonte
   suitability:         Record<string, number>
   atualizado_em:       string
 }

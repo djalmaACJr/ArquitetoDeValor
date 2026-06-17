@@ -28,7 +28,7 @@ import {
   erro,
   json,
 } from "../_shared/utils.ts";
-import { chamarProvedorIA, lerConfigIAAtiva, parsearImagem } from "../_shared/ia.ts";
+import { chamarProvedorIA, ErroIA, lerConfigIAAtiva, parsearImagem } from "../_shared/ia.ts";
 
 // ── Persona dos mascotes ──────────────────────────────────────────────
 // Mantido em sincronia com `Documentação/MASCOTES.md` e
@@ -261,7 +261,7 @@ Deno.serve(async (req: Request) => {
   const cliente = db(req);
   const cfg = await lerConfigIAAtiva(cliente, userId);
   if (!cfg.ok) return erro(cfg.erro, cfg.status);
-  const { provedor, apiKey } = cfg.config;
+  const { provedor, apiKey, modelo } = cfg.config;
 
   // Injeta contexto da página (texto) antes da pergunta do usuário, separado
   // por delimitador claro pra IA distinguir o que são DADOS e o que é PERGUNTA.
@@ -278,12 +278,14 @@ Deno.serve(async (req: Request) => {
   const imagem = parsearImagem(screenshot) ?? undefined;
 
   try {
-    const resposta = await chamarProvedorIA(provedor, { apiKey, persona, mensagens, imagem });
+    const resposta = await chamarProvedorIA(provedor, { apiKey, persona, mensagens, imagem, modelo: modelo ?? undefined });
     if (!resposta) return erro("Resposta vazia da IA", 502);
     return json({ resposta });
   } catch (e) {
     console.error("Erro IA:", e);
+    // ErroIA já traz mensagem amigável (pt-BR) e o status HTTP adequado.
+    if (e instanceof ErroIA) return erro(e.message, e.statusResposta);
     const msg = e instanceof Error ? e.message : String(e);
-    return erro(`Falha ao falar com a IA (${provedor}): ${msg.slice(0, 200)}`, 502);
+    return erro(`Não consegui falar com a IA (${provedor}) agora. Tente novamente em instantes. (${msg.slice(0, 160)})`, 502);
   }
 });

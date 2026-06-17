@@ -65,6 +65,7 @@ export const qk = {
   invAlocacoes:  (uid: Uid)              => ['inv-alocacoes', uid]             as const,
   invQuestionarios: (uid: Uid)           => ['inv-questionarios', uid]         as const,
   invPerfil:     (uid: Uid)              => ['inv-perfil', uid]                as const,
+  invPesos:      (uid: Uid)              => ['inv-pesos', uid]                 as const,
   invHistorico:  (uid: Uid, f?: unknown) => ['inv-historico', uid, f ?? null]  as const,
   invDashboard:  (uid: Uid, contaId?: string | null) => ['inv-dashboard', uid, contaId ?? null] as const,
   invRanking:    (uid: Uid, contaId?: string | null) => ['inv-ranking', uid, contaId ?? null]   as const,

@@ -20,9 +20,10 @@ import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 
 interface UsuarioPerfil {
-  id:    string
-  email: string
-  nome:  string | null
+  id:               string
+  email:            string
+  nome:             string | null
+  data_nascimento:  string | null  // "YYYY-MM-DD" (dia fixado em 01)
 }
 
 export function useUsuarioPerfil() {
@@ -35,7 +36,7 @@ export function useUsuarioPerfil() {
       const { data, error } = await supabase
         .schema('arqvalor')
         .from('usuarios')
-        .select('id, email, nome')
+        .select('id, email, nome, data_nascimento')
         .eq('id', uid!)
         .single()
       if (error) throw error
@@ -51,5 +52,5 @@ export function useUsuarioPerfil() {
   const email = data?.email ?? session?.user?.email ?? ''
   const nome  = data?.nome ?? email.split('@')[0] ?? ''
 
-  return { nome, email, loading: isLoading }
+  return { nome, email, dataNascimento: data?.data_nascimento ?? null, loading: isLoading }
 }

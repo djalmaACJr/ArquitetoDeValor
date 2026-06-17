@@ -69,16 +69,23 @@ export function useInvQuestionarios() {
   const invalidar = () => qc.invalidateQueries({ queryKey: qk.invQuestionarios(uid) })
 
   // Resolve o questionário efetivo de um tipo: custom (banco) ou padrão.
+  //
+  // Os PESOS são GLOBAIS (valem para todos os tipos): se `pesosGlobais` for
+  // informado, ele prevalece sobre os pesos por tipo (legado) e sobre o
+  // padrão — só as PERGUNTAS variam por tipo.
   const questionarioEfetivo = (
     tipo: TipoAtivoInvestimento,
     perfil?: PerfilInvestidorTipo | null,
+    pesosGlobais?: PesosCriterio | null,
   ): QuestionarioEfetivo => {
+    const pesosPadrao = perfil ? { ...PESOS_SUGERIDOS_POR_PERFIL[perfil] } : { ...PESOS_PADRAO }
+    const pesos = pesosGlobais ?? pesosPadrao
     const custom = questionarios.find((q) => q.tipo_ativo === tipo)
     if (custom) {
       return {
         tipo_ativo:  tipo,
         perguntas:   custom.perguntas,
-        pesos:       custom.pesos,
+        pesos,
         origem:      custom.origem,
         ia_provedor: custom.ia_provedor,
         ia_modelo:   custom.ia_modelo,
@@ -88,7 +95,7 @@ export function useInvQuestionarios() {
     return {
       tipo_ativo:  tipo,
       perguntas:   perguntasPadrao(tipo),
-      pesos:       perfil ? { ...PESOS_SUGERIDOS_POR_PERFIL[perfil] } : { ...PESOS_PADRAO },
+      pesos,
       origem:      'PADRAO',
       ia_provedor: null,
       ia_modelo:   null,

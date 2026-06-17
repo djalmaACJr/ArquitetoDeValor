@@ -12,6 +12,20 @@
 // A edge function `chat_mascote` mantém um mapeamento espelhado deste
 // arquivo — se você adicionar um provedor aqui, adicione também lá.
 
+/** Um modelo selecionável dentro de um provedor. */
+export interface ModeloIA {
+  /** Identificador enviado à API do provedor. */
+  id:        string
+  /** Rótulo amigável exibido no select. */
+  label:     string
+  /** Dica curta (custo / velocidade / contexto). */
+  nota?:     string
+  /** true = recomendado para uso em finanças (melhor raciocínio/qualidade). */
+  financas?: boolean
+  /** true = utilizável no tier gratuito do provedor. */
+  gratuito?: boolean
+}
+
 export interface IAProvedor {
   id:          string
   label:       string
@@ -19,8 +33,12 @@ export interface IAProvedor {
   custo:       string
   /** true = tem tier 100% grátis e usável (sem cartão). false = exige pagamento ou só crédito de trial. */
   gratuito:    boolean
-  /** Identificador do modelo usado na edge function `chat_mascote`. Mantenha em sincronia. */
+  /** Modelo PADRÃO usado quando o usuário não escolhe um (mantém compat. com a edge function). */
   modelo:      string
+  /** Modelos selecionáveis pelo usuário (o 1º recomendado vira sugestão). Mantenha em sincronia com a edge function. */
+  modelos:     ModeloIA[]
+  /** true = o usuário pode digitar um ID de modelo livre (catálogo grande/volátil, ex.: OpenRouter). */
+  permiteCustom?: boolean
   /** true = aceita imagens (multimodal). Liberado: claude-haiku-4-5, gpt-4o-mini, gemini-2.5-flash. */
   visao:       boolean
   formato:     RegExp   // valida formato da chave (best effort)
@@ -36,6 +54,10 @@ export const PROVEDORES: IAProvedor[] = [
     custo: 'US$5 de crédito grátis no cadastro · depois pague por uso (modelo Haiku é o mais barato).',
     gratuito: false,
     modelo:  'claude-haiku-4-5',
+    modelos: [
+      { id: 'claude-haiku-4-5',  label: 'Claude Haiku 4.5',  nota: 'Rápido e barato — bom para o dia a dia', gratuito: false },
+      { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', nota: 'Raciocínio mais forte — melhor para análise financeira', financas: true },
+    ],
     visao:   true,
     formato: /^sk-ant-[\w-]{40,}$/,
     formatoDica: 'sk-ant-...',
@@ -54,6 +76,10 @@ export const PROVEDORES: IAProvedor[] = [
     custo: 'Pago desde o início — exige cartão e crédito mínimo de US$5. Sem tier gratuito.',
     gratuito: false,
     modelo:  'gpt-4o-mini',
+    modelos: [
+      { id: 'gpt-4o-mini', label: 'GPT-4o mini', nota: 'Mais barato — bom custo-benefício', gratuito: false },
+      { id: 'gpt-4o',      label: 'GPT-4o',      nota: 'Mais capaz — melhor para análise financeira', financas: true },
+    ],
     visao:   true,
     formato: /^sk-(proj-)?[\w-]{20,}$/,
     formatoDica: 'sk-... ou sk-proj-...',
@@ -73,6 +99,11 @@ export const PROVEDORES: IAProvedor[] = [
     custo: 'Tier gratuito generoso (15 requests/min · 1500/dia). Ideal pra começar sem cartão.',
     gratuito: true,
     modelo:  'gemini-2.5-flash',
+    modelos: [
+      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', nota: 'Rápido e com tier gratuito generoso', gratuito: true },
+      { id: 'gemini-2.5-pro',   label: 'Gemini 2.5 Pro',   nota: 'Raciocínio mais forte — melhor para finanças (pode exigir billing)', financas: true },
+      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', nota: 'Alternativa estável caso o 2.5 falhe', gratuito: true },
+    ],
     visao:   true,
     formato: /^AIza[\w-]{30,}$/,
     formatoDica: 'AIza...',
@@ -91,6 +122,10 @@ export const PROVEDORES: IAProvedor[] = [
     custo: 'Tarifas muito baixas (~10x mais barato que o GPT-4o-mini), mas exige saldo: adicione US$2 pré-pago para começar.',
     gratuito: false,
     modelo:  'deepseek-chat',
+    modelos: [
+      { id: 'deepseek-chat',     label: 'DeepSeek Chat (V3)', nota: 'Barato e rápido — uso geral', gratuito: false },
+      { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1)', nota: 'Raciocínio passo a passo — melhor para análise financeira', financas: true },
+    ],
     visao:   false,
     formato: /^sk-[\w-]{32,}$/,
     formatoDica: 'sk-...',
@@ -107,9 +142,24 @@ export const PROVEDORES: IAProvedor[] = [
     id:    'openrouter',
     label: 'OpenRouter',
     url:   'https://openrouter.ai/keys',
-    custo: 'Acesso unificado a vários modelos. Inclui modelos marcados ":free" (Llama, DeepSeek-R1, etc.) sem cartão.',
+    custo: 'Acesso unificado a modelos que você NÃO tem direto aqui (Meta Llama, Qwen, Grok…). Inclui opções ":free" sem cartão.',
     gratuito: true,
     modelo:  'meta-llama/llama-3.3-70b-instruct:free',
+    permiteCustom: true,
+    // OpenRouter só faz sentido para modelos que NÃO existem como provedor
+    // direto no app (Claude, GPT, Gemini, DeepSeek, Mistral, Cohere já são
+    // diretos). Por isso a lista abaixo foca em Meta Llama, Qwen, Gemma
+    // (open-weights), Grok e Hermes. Os ":free" rodam sem cartão, mas têm
+    // rate-limit compartilhado — bons para testar, instáveis para depender.
+    modelos: [
+      { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (grátis)', nota: 'Meta · grátis, mas o free tier pode ficar lento/limitado', gratuito: true },
+      { id: 'qwen/qwen-2.5-72b-instruct:free',        label: 'Qwen 2.5 72B (grátis)',  nota: 'Alibaba · forte em raciocínio e multilíngue · grátis', gratuito: true, financas: true },
+      { id: 'google/gemma-2-9b-it:free',              label: 'Gemma 2 9B (grátis)',    nota: 'Google open-weights · leve e grátis', gratuito: true },
+      { id: 'meta-llama/llama-3.3-70b-instruct',      label: 'Llama 3.3 70B',          nota: 'Meta · versão paga, sem o rate-limit do free' },
+      { id: 'qwen/qwen-2.5-72b-instruct',             label: 'Qwen 2.5 72B',           nota: 'Alibaba · versão paga e estável' },
+      { id: 'x-ai/grok-2-1212',                       label: 'Grok 2',                 nota: 'xAI · indisponível direto no app (pago)' },
+      { id: 'nousresearch/hermes-3-llama-3.1-70b',    label: 'Hermes 3 70B',           nota: 'Nous · Llama afinado p/ diálogo (pago)' },
+    ],
     visao:   false,
     formato: /^sk-or-[\w-]{20,}$/,
     formatoDica: 'sk-or-...',
@@ -129,6 +179,10 @@ export const PROVEDORES: IAProvedor[] = [
     custo: 'Modelos franceses de qualidade. Tier "experimental" grátis (1 req/seg) — sem cartão para começar.',
     gratuito: true,
     modelo:  'mistral-small-latest',
+    modelos: [
+      { id: 'mistral-small-latest', label: 'Mistral Small', nota: 'Tier experimental gratuito', gratuito: true },
+      { id: 'mistral-large-latest', label: 'Mistral Large', nota: 'Mais capaz — melhor para análise financeira', financas: true },
+    ],
     visao:   false,
     formato: /^[A-Za-z0-9]{20,}$/,
     formatoDica: 'string alfanumérica de 32+ chars',
@@ -148,6 +202,10 @@ export const PROVEDORES: IAProvedor[] = [
     custo: 'Trial key grátis com 1000 calls/mês. Sem cartão. Bom pra uso ocasional.',
     gratuito: true,
     modelo:  'command-r-08-2024',
+    modelos: [
+      { id: 'command-r-08-2024',      label: 'Command R',      nota: 'Trial gratuito (1000 calls/mês)', gratuito: true },
+      { id: 'command-r-plus-08-2024', label: 'Command R+',     nota: 'Mais capaz — melhor para finanças', financas: true },
+    ],
     visao:   false,
     formato: /^[\w-]{20,}$/,
     formatoDica: 'string alfanumérica',
@@ -167,4 +225,15 @@ export const PROVEDOR_PADRAO: IAProvedor['id'] = 'claude'
 export function provedorPorId(id: string | null | undefined): IAProvedor | null {
   if (!id) return null
   return PROVEDORES.find(p => p.id === id) ?? null
+}
+
+/** Modelo padrão sugerido ao escolher um provedor: o 1º recomendado p/ finanças, senão o `modelo` base. */
+export function modeloSugerido(p: IAProvedor): string {
+  return p.modelos.find(m => m.financas)?.id ?? p.modelo
+}
+
+/** Rótulo amigável de um modelo dentro do provedor (cai no próprio id se for custom). */
+export function rotuloModelo(p: IAProvedor | null, modeloId: string | null | undefined): string {
+  if (!modeloId) return p?.modelo ?? ''
+  return p?.modelos.find(m => m.id === modeloId)?.label ?? modeloId
 }

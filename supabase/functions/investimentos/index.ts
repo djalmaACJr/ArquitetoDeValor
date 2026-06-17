@@ -12,7 +12,7 @@ import {
   verificarExistencia, camposParaAtualizar, corsPreFlight,
 } from "../_shared/utils.ts";
 import { logError, logRequest, logResponse, logSuccess } from "../_shared/logger.ts";
-import { chamarProvedorIA, lerConfigIAAtiva } from "../_shared/ia.ts";
+import { chamarProvedorIA, ErroIA, lerConfigIAAtiva } from "../_shared/ia.ts";
 
 type Db = ReturnType<typeof db>;
 
@@ -518,7 +518,8 @@ async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, userId: st
     "válido (sem markdown, sem comentários, sem texto fora do JSON) no formato exato:\n" +
     '{ "perguntas": [ { "id": "slug_curto", "texto": "...", "criterio": "FUNDAMENTOS|CRESCIMENTO|DIVIDENDOS", ' +
     '"opcoes": ["pior","...","...","...","melhor"] } ], "pesos": { "FUNDAMENTOS": int, "CRESCIMENTO": int, "DIVIDENDOS": int } }\n' +
-    "Regras: no MÍNIMO 10 perguntas; cobrir os 3 critérios (FUNDAMENTOS = solidez/qualidade do ativo; " +
+    "Regras: gere EXATAMENTE 10 perguntas (distribuição sugerida: 4 de FUNDAMENTOS, 3 de CRESCIMENTO, " +
+    "3 de DIVIDENDOS); cobrir os 3 critérios (FUNDAMENTOS = solidez/qualidade do ativo; " +
     "CRESCIMENTO = potencial de valorização; DIVIDENDOS = geração de renda/proventos); cada pergunta com " +
     "EXATAMENTE 5 opções ordenadas da pior (índice 0) à melhor (índice 4); ids curtos, únicos, em snake_case; " +
     "os pesos são inteiros que SOMAM 100 e devem refletir o perfil do investidor.";
@@ -533,11 +534,14 @@ async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, userId: st
       persona: system,
       mensagens: [{ role: "user", content: userMsg }],
       maxTokens: 4000,
+      modelo: modelo ?? undefined,
     });
   } catch (e) {
     logError("Gerar questionario IA", e);
+    // ErroIA já traz mensagem amigável (pt-BR) e o status HTTP adequado.
+    if (e instanceof ErroIA) return erro(e.message, e.statusResposta);
     const msg = e instanceof Error ? e.message : String(e);
-    return erro(`Falha ao falar com a IA (${provedor}): ${msg.slice(0, 200)}`, 502);
+    return erro(`Não consegui falar com a IA (${provedor}) agora. Tente novamente em instantes. (${msg.slice(0, 160)})`, 502);
   }
 
   const parsed = extrairJson(bruto);

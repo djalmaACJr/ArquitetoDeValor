@@ -38,6 +38,8 @@ interface IAConfigPersistida {
   id:       string;
   provedor: string;
   nome:     string | null;
+  /** Modelo escolhido pelo usuário (null → padrão do provedor). */
+  modelo:   string | null;
   api_key:  BlobCriptografado;
   mascara:  string;
 }
@@ -69,6 +71,20 @@ function ehProvedor(s: unknown): s is ProvedorId {
   return typeof s === "string" && (PROVEDORES_VALIDOS as readonly string[]).includes(s);
 }
 
+// Aceita ids de modelo no formato dos provedores (ex.: "gpt-4o",
+// "claude-sonnet-4-6", "meta-llama/llama-3.3-70b-instruct:free").
+const MODELO_RE = /^[\w./:-]{1,80}$/;
+
+/** Normaliza o `modelo` do body. `undefined` = não mexer; ""/null = limpar (usar padrão). */
+function sanitizarModelo(v: unknown): string | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  if (!t) return null;
+  return MODELO_RE.test(t) ? t : undefined;
+}
+
 /** Versão "pública" sem o api_key bruto pra retornar ao cliente. */
 function exportar(c: IAConfigsCol) {
   return {
@@ -77,6 +93,7 @@ function exportar(c: IAConfigsCol) {
       id:       cfg.id,
       provedor: cfg.provedor,
       nome:     cfg.nome,
+      modelo:   cfg.modelo ?? null,
       mascara:  cfg.mascara,
     })),
   };
@@ -170,11 +187,14 @@ async function criar(cliente: ReturnType<typeof db>, userId: string, body: Recor
     return erro("Nome deve ser texto.");
   }
 
+  const modelo = sanitizarModelo(body.modelo);
+
   const blob = await encriptar(keyTrim);
   const nova: IAConfigPersistida = {
     id:       uuid(),
     provedor,
     nome:     (typeof nome === "string" && nome.trim()) ? nome.trim().slice(0, 60) : null,
+    modelo:   modelo ?? null,
     api_key:  blob,
     mascara:  mascarar(keyTrim),
   };
@@ -223,10 +243,15 @@ async function atualizar(
     }
   }
 
+  // `undefined` (campo ausente) preserva; "" / null limpa; string válida troca.
+  const modeloPatch = sanitizarModelo(body.modelo);
+  const novoModelo = modeloPatch === undefined ? (atual.modelo ?? null) : modeloPatch;
+
   col.configs[idx] = {
     ...atual,
     provedor: novoProvedor,
     nome:     novoNome,
+    modelo:   novoModelo,
     api_key:  novoBlob,
     mascara:  novaMascara,
   };
@@ -294,9 +319,9 @@ const OPENAI_COMPAT: Partial<Record<ProvedorId, { url: string; label: string }>>
   cohere:     { url: "https://api.cohere.com/v2/chat",                label: "Cohere" },
 };
 
-async function pingProvedor(provedor: ProvedorId, apiKey: string): Promise<{ ok: boolean; mensagem: string }> {
+async function pingProvedor(provedor: ProvedorId, apiKey: string, modeloEscolhido?: string | null): Promise<{ ok: boolean; mensagem: string }> {
   const msgPing = "Responda apenas 'ok'.";
-  const modelo  = MODELOS[provedor];
+  const modelo  = (modeloEscolhido && modeloEscolhido.trim()) || MODELOS[provedor];
 
   try {
     if (provedor === "claude") {
@@ -317,9 +342,12 @@ async function pingProvedor(provedor: ProvedorId, apiKey: string): Promise<{ ok:
     }
     const compat = OPENAI_COMPAT[provedor];
     if (compat) {
+      const extra = provedor === "openrouter"
+        ? { "HTTP-Referer": "https://arquitetodevalor.app", "X-Title": "Arquiteto de Valor" }
+        : {};
       const r = await fetch(compat.url, {
         method: "POST",
-        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json", ...extra },
         body: JSON.stringify({
           model: modelo, max_tokens: 10,
           messages: [{ role: "user", content: msgPing }],
@@ -329,10 +357,14 @@ async function pingProvedor(provedor: ProvedorId, apiKey: string): Promise<{ ok:
       return { ok: true, mensagem: `Conectado ao ${modelo}.` };
     }
     if (provedor === "gemini") {
-      // Tenta cada modelo em ordem (o Google muda muito o que está disponível).
+      // Tenta o modelo escolhido primeiro, depois os fallbacks (o Google muda muito o que está disponível).
+      const escolhido = (modeloEscolhido ?? "").trim();
+      const ordem = escolhido
+        ? [escolhido, ...GEMINI_MODELOS.filter(g => g !== escolhido)]
+        : GEMINI_MODELOS;
       let ultimoStatus = 0;
       let ultimoCorpo = "";
-      for (const m of GEMINI_MODELOS) {
+      for (const m of ordem) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`;
         const r = await fetch(url, {
           method: "POST",
@@ -395,6 +427,6 @@ async function testar(cliente: ReturnType<typeof db>, userId: string, id: string
     return erro("Falha ao decriptar a chave salva. Recadastre.", 500);
   }
 
-  const r = await pingProvedor(cfg.provedor, chave);
+  const r = await pingProvedor(cfg.provedor, chave, cfg.modelo);
   return json({ dados: { ok: r.ok, mensagem: r.mensagem } });
 }
