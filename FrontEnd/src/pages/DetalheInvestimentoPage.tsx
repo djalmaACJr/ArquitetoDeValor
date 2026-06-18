@@ -14,6 +14,7 @@ import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
 import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
 import { usePtax } from '../hooks/usePtax'
 import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo } from '../components/ui/shared'
+import DrawerAtivo from '../components/ui/DrawerAtivo'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL, formatData } from '../lib/utils'
 import {
@@ -62,6 +63,7 @@ export default function DetalheInvestimentoPage() {
   const ativoId = id ?? null
   const [toast, setToast] = useState<string | null>(null)
   const [editandoNota, setEditandoNota] = useState(false)
+  const [editandoAtivo, setEditandoAtivo] = useState(false)
   const [excluindo, setExcluindo] = useState(false)
   const [salvandoExclusao, setSalvandoExclusao] = useState(false)
 
@@ -220,6 +222,10 @@ export default function DetalheInvestimentoPage() {
             <Star size={14} style={{ color: '#f0b429' }} />
             Nota: {ativo.nota_usuario ?? '—'}
             <Pencil size={12} style={{ color: MUTED }} />
+          </button>
+          <button onClick={() => setEditandoAtivo(true)} title="Editar dados do ativo"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
+            <Pencil size={14} style={{ color: MUTED }} /> Editar
           </button>
           <button onClick={() => setExcluindo(true)} title="Excluir ativo"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] transition-colors hover:bg-red-400/10"
@@ -410,6 +416,11 @@ export default function DetalheInvestimentoPage() {
       {editandoNota && (
         <DrawerQuestionario ativo={ativo}
           onClose={() => setEditandoNota(false)} onToast={showToast} />
+      )}
+
+      {editandoAtivo && (
+        <DrawerAtivo ativo={ativo}
+          onClose={() => setEditandoAtivo(false)} onToast={showToast} />
       )}
 
       {excluindo && (

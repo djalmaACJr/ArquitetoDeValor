@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef, Fragment } from 'react'
+import { useMemo, useState, useEffect, useRef, type CSSProperties } from 'react'
 import { ChevronDown, ChevronUp, ChevronRight, TrendingUp, TrendingDown, Layers, LineChart, Pencil } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { LogoAtivo, SelectDark } from './shared'
@@ -13,6 +13,9 @@ import type {
 const MUTED = '#8b92a8'
 const VERDE = '#00c896'
 const VERMELHO = '#ff5c7a'
+// Fundo opaco do cabeçalho de grupo (sticky) — aproxima o card sobre o fundo
+// escuro da app, para as linhas não vazarem por baixo ao rolar.
+const HEADER_BG = '#121a2c'
 
 function corValor(v: number): string {
   if (v > 0) return VERDE
@@ -58,7 +61,7 @@ interface AcoesAtivo {
   onEditar:    (a: InvestimentoAtivo) => void
 }
 
-type Dimensao = 'categoria' | 'segmento' | 'nenhum'
+export type Dimensao = 'categoria' | 'segmento' | 'nenhum'
 const DIMENSOES: { value: Dimensao; label: string }[] = [
   { value: 'categoria', label: 'Categoria' },
   { value: 'segmento',  label: 'Segmento' },
@@ -69,7 +72,7 @@ const DIMENSOES: { value: Dimensao; label: string }[] = [
 // Componente compartilhado entre a página de Investimentos (sem ações) e
 // Meus ativos (com botões Posições/Histórico/Editar via prop `acoes`).
 export default function QuadroTipoAtivos({
-  tipo, dados, linhas, acoes, defaultAberto = false, focoSinal,
+  tipo, dados, linhas, acoes, defaultAberto = false, focoSinal, focoGrupo,
 }: {
   tipo:          TipoAtivoInvestimento
   dados:         InvestimentoDashboardTipo | null
@@ -77,12 +80,23 @@ export default function QuadroTipoAtivos({
   acoes?:        AcoesAtivo
   defaultAberto?: boolean
   focoSinal?:    number | null
+  // Quando informado, o foco realça apenas este agrupamento (a fatia da rosca
+  // que originou o gráfico). Sem ele, o realce recai sobre o quadro inteiro.
+  focoGrupo?:    { dim: Dimensao; chave: string } | null
 }) {
   const [aberto, setAberto] = useState(defaultAberto)
   const [dim, setDim] = useState<Dimensao>('categoria')
   const [catsFechadas, setCatsFechadas] = useState<Set<string>>(new Set())
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'saldo', dir: 'desc' })
+  const [destaque, setDestaque] = useState(false)
+  // null = realça o quadro todo; string = realça só aquele agrupamento
+  const [destaqueChave, setDestaqueChave] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  // tbody do agrupamento realçado — alvo do scroll quando o foco é por grupo
+  const grupoRef = useRef<HTMLTableSectionElement>(null)
+  // payload do foco lido dentro do effect sem re-disparar a cada render
+  const focoGrupoRef = useRef(focoGrupo)
+  useEffect(() => { focoGrupoRef.current = focoGrupo })
 
   const toggleCat = (cat: string) => setCatsFechadas((s) => {
     const n = new Set(s)
@@ -92,15 +106,39 @@ export default function QuadroTipoAtivos({
   const clickSort = (key: SortKey) => setSort((s) =>
     s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'ticker' || key === 'setor' ? 'asc' : 'desc' })
 
-  // Foco vindo do gráfico "Ativos na Carteira": abre e rola até o quadro
+  // Foco vindo do gráfico (rosca): abre, rola até o quadro e o destaca por
+  // alguns instantes (anel/glow) para o usuário se localizar na listagem.
   useEffect(() => {
     if (focoSinal == null) return
     const id = requestAnimationFrame(() => {
       setAberto(true)
-      requestAnimationFrame(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+      const fg = focoGrupoRef.current
+      if (fg) {
+        setDim(fg.dim)
+        setDestaqueChave(fg.chave)
+        setCatsFechadas((s) => { const n = new Set(s); n.delete(fg.chave); return n })
+      } else {
+        setDestaqueChave(null)
+      }
+      setDestaque(true)
+    })
+    const t = setTimeout(() => setDestaque(false), 2200)
+    return () => { cancelAnimationFrame(id); clearTimeout(t) }
+  }, [focoSinal])
+
+  // Posiciona na tela o alvo do foco — o agrupamento realçado, quando há um;
+  // senão, o quadro inteiro. Centraliza se couber na tela; se for mais alto que
+  // a viewport, alinha ao topo (deixando uma folga) para começar pelo início.
+  useEffect(() => {
+    if (!destaque) return
+    const id = requestAnimationFrame(() => {
+      const alvo = grupoRef.current ?? ref.current
+      if (!alvo) return
+      const cabe = alvo.getBoundingClientRect().height <= window.innerHeight - 100
+      alvo.scrollIntoView({ behavior: 'smooth', block: cabe ? 'center' : 'start' })
     })
     return () => cancelAnimationFrame(id)
-  }, [focoSinal])
+  }, [destaque, destaqueChave])
 
   const cor = TIPO_ATIVO_COR[tipo]
   const ehFII = tipo === 'FII'
@@ -158,10 +196,20 @@ export default function QuadroTipoAtivos({
   // colunas visíveis + "Comprar?" + (Ações, se houver)
   const nCols = visiveis.length + 1 + (acoes ? 1 : 0)
 
-  function LinhaAtivo({ l }: { l: AtivoLinha }) {
+  function LinhaAtivo({ l, realce, alvo, primeira, ultima }: {
+    l: AtivoLinha; realce: boolean; alvo: boolean; primeira: boolean; ultima: boolean
+  }) {
     const rec = recomendacaoCompra(l.nota_usuario ?? null, idealRef)
+    const estilo: CSSProperties = realce ? { background: `${cor}1f` } : {}
+    if (alvo) {
+      estilo.borderLeft = `1px solid ${cor}`
+      estilo.borderRight = `1px solid ${cor}`
+      if (primeira) estilo.borderTop = `1px solid ${cor}`
+      if (ultima) estilo.borderBottom = `1px solid ${cor}`
+    }
     return (
-      <tr className="border-t border-white/5 hover:bg-white/[0.03]">
+      <tr className="border-t border-white/5 hover:bg-white/[0.03] transition-colors duration-700"
+        style={Object.keys(estilo).length ? estilo : undefined}>
         <td className="px-2 py-1.5">
           <Link to={`/investimentos/ativos/${l.ativo_id}`} className="inline-flex items-center gap-2 text-white font-semibold hover:underline">
             <LogoAtivo url={l.logo_url} />{l.ticker}
@@ -217,7 +265,11 @@ export default function QuadroTipoAtivos({
   }
 
   return (
-    <div ref={ref} className="rounded-xl border border-white/10 bg-white/[0.02] scroll-mt-4">
+    <div ref={ref} className="rounded-xl border bg-white/[0.02] scroll-mt-4 transition-shadow duration-700"
+      style={{
+        borderColor: destaque && destaqueChave === null ? cor : 'rgba(255,255,255,0.1)',
+        boxShadow: destaque && destaqueChave === null ? `0 0 0 2px ${cor}, 0 0 26px ${cor}88` : 'none',
+      }}>
       <button onClick={() => setAberto(!aberto)} className="w-full px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-3 items-center text-left">
         {/* Tipo + contagem */}
         <div className="flex items-center gap-2 min-w-0">
@@ -296,7 +348,7 @@ export default function QuadroTipoAtivos({
                 </SelectDark>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-auto max-h-[72vh]">
                 <table className="w-full text-[12px]" style={{ minWidth: ehFII ? 980 : 860 }}>
                   <thead>
                     <tr style={{ color: MUTED }}>
@@ -310,29 +362,45 @@ export default function QuadroTipoAtivos({
                       {acoes && <th className="px-2 py-1.5 font-medium text-right">Ações</th>}
                     </tr>
                   </thead>
-                  <tbody>
-                    {grupos.map((g) => {
-                      const catAberta = !temGrupos || !catsFechadas.has(g.chave)
-                      return (
-                        <Fragment key={g.chave || '__flat__'}>
-                          {temGrupos && (
-                            <tr className="border-t border-white/[0.03] cursor-pointer hover:bg-white/[0.02]" onClick={() => toggleCat(g.chave)}>
-                              <td colSpan={nCols} className="px-2 py-1.5">
-                                <span className="inline-flex items-center gap-2">
-                                  {catAberta ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
-                                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: cor }} />
-                                  <span className="text-[13px] font-semibold" style={{ color: '#c5cad8' }}>{g.chave}</span>
-                                  <span className="text-[12px]" style={{ color: MUTED }}>· {g.lista.length}</span>
-                                  <span className="text-[12px] ml-2" style={{ color: '#e8eaf0' }}>{formatBRL(g.total)}</span>
-                                </span>
-                              </td>
-                            </tr>
-                          )}
-                          {catAberta && g.lista.map((l) => <LinhaAtivo key={l.ativo_id} l={l} />)}
-                        </Fragment>
-                      )
-                    })}
-                  </tbody>
+                  {grupos.map((g) => {
+                    const catAberta = !temGrupos || !catsFechadas.has(g.chave)
+                    // Realça este grupo: foco no quadro todo (chave null) ou
+                    // foco exatamente nesta chave (fatia clicada na rosca).
+                    const realce = destaque && (destaqueChave === null || destaqueChave === g.chave)
+                    const ehAlvo = destaqueChave !== null && destaqueChave === g.chave
+                    // Fundo sempre opaco (sticky) — com tinta sobreposta no realce.
+                    const estiloHeader: CSSProperties = {
+                      background: realce ? `linear-gradient(${cor}33, ${cor}33), ${HEADER_BG}` : HEADER_BG,
+                    }
+                    if (ehAlvo) {
+                      estiloHeader.borderTop = `1px solid ${cor}`
+                      estiloHeader.borderLeft = `1px solid ${cor}`
+                      estiloHeader.borderRight = `1px solid ${cor}`
+                    }
+                    return (
+                      <tbody key={g.chave || '__flat__'} ref={ehAlvo ? grupoRef : undefined}
+                        style={{ scrollMarginTop: 12 }}>
+                        {temGrupos && (
+                          <tr className="cursor-pointer" onClick={() => toggleCat(g.chave)}>
+                            <td colSpan={nCols} style={estiloHeader}
+                              className="px-2 py-1.5 sticky top-0 z-10 border-t border-white/[0.03] transition-[filter] duration-700 hover:brightness-125">
+                              <span className="inline-flex items-center gap-2">
+                                {catAberta ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ background: cor }} />
+                                <span className="text-[13px] font-semibold" style={{ color: '#c5cad8' }}>{g.chave}</span>
+                                <span className="text-[12px]" style={{ color: MUTED }}>· {g.lista.length}</span>
+                                <span className="text-[12px] ml-2" style={{ color: '#e8eaf0' }}>{formatBRL(g.total)}</span>
+                              </span>
+                            </td>
+                          </tr>
+                        )}
+                        {catAberta && g.lista.map((l, idx) => (
+                          <LinhaAtivo key={l.ativo_id} l={l} realce={realce} alvo={ehAlvo}
+                            primeira={!temGrupos && idx === 0} ultima={idx === g.lista.length - 1} />
+                        ))}
+                      </tbody>
+                    )
+                  })}
                 </table>
               </div>
             </>

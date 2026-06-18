@@ -1,47 +1,44 @@
-import { useState, useEffect, useMemo } from 'react'
-import { Plus, Trash2, ArrowLeft, Search, RefreshCw } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Plus, Trash2, ArrowLeft, Search, RefreshCw, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { Bar } from 'react-chartjs-2'
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js'
-import {
-  useInvestimentosAtivos, useBuscaAtivoExterno,
-  type CriarAtivoInput, type EditarAtivoInput,
-} from '../hooks/useInvestimentosAtivos'
+import { Bar, Doughnut } from 'react-chartjs-2'
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, type Plugin, type ChartData } from 'chart.js'
+import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes, type CriarPosicaoInput } from '../hooks/useInvestimentosPosicoes'
 import { useInvestimentosHistorico, useBackfillHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
 import { useInvestimentosDashboard, useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
 import { useContas } from '../hooks/useContas'
 import {
-  Drawer, Field, Input, SelectDark, BtnSalvar, BtnCancelar, Toast,
+  Drawer, Field, Input, SelectDark, Toast,
 } from '../components/ui/shared'
-import QuadroTipoAtivos from '../components/ui/QuadroTipoAtivos'
+import DrawerAtivo from '../components/ui/DrawerAtivo'
+import QuadroTipoAtivos, { type Dimensao } from '../components/ui/QuadroTipoAtivos'
 import { linhaDeMeta, type AtivoLinha } from '../lib/ativosLinha'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL, formatData } from '../lib/utils'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
-  INDEXADORES_RF, INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO,
-  SUBTIPO_RF_INFO, subtiposParaTipo,
-  CATEGORIAS_FII, FII_CATEGORIA_INFO,
-  ACOES_SUBTIPOS, ACOES_SUBTIPO_LABEL, ACOES_SUBTIPO_DESCRICAO,
+  setorLabel,
 } from '../lib/constants'
 import type {
-  InvestimentoAtivo, TipoAtivoInvestimento, SubtipoRF, IndexadorRF, CategoriaFII,
-  AcoesSubtipo, ResultadoBuscaAtivo, InvestimentoDashboardTipo, InvestimentoRankingAtivo,
+  InvestimentoAtivo, TipoAtivoInvestimento,
+  InvestimentoDashboardTipo, InvestimentoRankingAtivo,
 } from '../types'
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend)
 
 const MUTED = '#8b92a8'
 
-const FORM_VAZIO: CriarAtivoInput = {
-  ticker: '', nome: '', tipo_ativo: 'ACOES', moeda: 'BRL', descricao: '', nota_usuario: null,
-  rf_subtipo: null, rf_indexador: null, rf_taxa: null, rf_emissor: null,
-  rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
-  fii_categoria: null, acoes_subtipo: null, cotacao_automatica: true,
+// Clareia uma cor hex misturando com branco — mesmas cores suaves da rosca
+// "Ativos na Carteira" da tela de Investimentos.
+function suavizar(hex: string, mix = 0.35): string {
+  const h = hex.replace('#', '')
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  const m = (c: number) => Math.round(c + (255 - c) * mix)
+  return `rgb(${m(r)}, ${m(g)}, ${m(b)})`
 }
-
-const ehRendaFixa = (tipo: TipoAtivoInvestimento) => tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
 
 // ── Evolução do valor de mercado, empilhada por tipo de ativo ──
 const PERIODOS_EVOLUCAO = [
@@ -117,34 +114,208 @@ function EvolucaoPorTipo() {
   )
 }
 
+// ── Rosca de composição por dimensão (segmento/categoria) ──────
+// Fatia = soma do valor de mercado por grupo; quando ainda não há valor de
+// mercado (ativos sem posição), cai para a contagem de ativos para não
+// renderizar uma rosca vazia.
+const PALETA_ROSCA = [
+  '#3b82f6', '#00c896', '#f59e0b', '#8b5cf6', '#ec4899',
+  '#06b6d4', '#f97316', '#14b8a6', '#a3e635', '#ef4444',
+]
+
+// Campos custom que o plugin lê do dataset (texto do buraco central). Ficam
+// no dataset porque o react-chartjs-2 reaplica o `data` a cada update — assim
+// o plugin nunca usa valores presos num closure antigo (causa de legendas
+// erradas ao voltar à página, quando o cache do React Query reaplica dados).
+type DatasetRosca = { data: number[]; backgroundColor: string[]; centroLabel?: string; centroValor?: string }
+
+// Rótulos (nome + %) dentro de cada fatia + total no centro — mesmo visual da
+// rosca "Ativos na Carteira" da tela Investimentos. Quando o rótulo não cabe
+// dentro do arco, é desenhado fora com uma linha apontando a fatia. Lê tudo do
+// `chart` (sempre atual); por isso é estável em escopo de módulo.
+const rotulosRosca: Plugin<'doughnut'> = {
+  id: 'rotulosRosca',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart
+    const meta = chart.getDatasetMeta(0)
+    const ds = chart.data.datasets[0] as unknown as DatasetRosca
+    const labels = (chart.data.labels ?? []) as string[]
+    const soma = ds.data.reduce((s, v) => s + Number(v), 0)
+    ctx.save()
+    ctx.textBaseline = 'middle'
+    meta.data.forEach((arc, i) => {
+      const pct = soma > 0 ? (Number(ds.data[i]) / soma) * 100 : 0
+      if (pct <= 0) return
+      const a = arc as unknown as {
+        x: number; y: number; startAngle: number; endAngle: number
+        innerRadius: number; outerRadius: number
+        tooltipPosition: () => { x: number; y: number }
+      }
+      const label = String(labels[i] ?? '')
+      const pctTxt = `${pct.toFixed(1).replace('.', ',')}%`
+
+      // Cabe dentro? compara a largura do texto com o comprimento do arco
+      // na faixa central onde o rótulo seria desenhado.
+      const labelRadius = (a.innerRadius + a.outerRadius) / 2
+      const arcLen = (a.endAngle - a.startAngle) * labelRadius
+      ctx.font = '600 10px system-ui, sans-serif'
+      const cabe = ctx.measureText(label).width <= arcLen - 4
+
+      if (cabe) {
+        const pos = a.tooltipPosition()
+        ctx.textAlign = 'center'
+        ctx.fillStyle = '#0e1525'
+        ctx.font = '600 10px system-ui, sans-serif'
+        ctx.fillText(label, pos.x, pos.y - 6)
+        ctx.font = '700 12px system-ui, sans-serif'
+        ctx.fillText(pctTxt, pos.x, pos.y + 8)
+        return
+      }
+
+      // Não cabe: rótulo fora, com linha-guia (cotovelo) apontando a fatia.
+      const ang = (a.startAngle + a.endAngle) / 2
+      const cos = Math.cos(ang), sin = Math.sin(ang)
+      const dir = cos >= 0 ? 1 : -1
+      const x0 = a.x + cos * a.outerRadius
+      const y0 = a.y + sin * a.outerRadius
+      const xb = a.x + cos * (a.outerRadius + 10)
+      const yb = a.y + sin * (a.outerRadius + 10)
+      const xt = xb + dir * 12
+      ctx.strokeStyle = ds.backgroundColor[i]
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(x0, y0)
+      ctx.lineTo(xb, yb)
+      ctx.lineTo(xt, yb)
+      ctx.stroke()
+      const tx = xt + dir * 4
+      ctx.textAlign = dir > 0 ? 'left' : 'right'
+      ctx.fillStyle = '#c5cad8'
+      ctx.font = '600 10px system-ui, sans-serif'
+      ctx.fillText(label, tx, yb - 5)
+      ctx.fillStyle = MUTED
+      ctx.font = '700 10px system-ui, sans-serif'
+      ctx.fillText(pctTxt, tx, yb + 6)
+    })
+    // total no buraco central
+    const arc0 = meta.data[0] as unknown as { x: number; y: number } | undefined
+    if (arc0) {
+      ctx.textAlign = 'center'
+      ctx.fillStyle = MUTED
+      ctx.font = '500 11px system-ui, sans-serif'
+      ctx.fillText(ds.centroLabel ?? '', arc0.x, arc0.y - 11)
+      ctx.fillStyle = '#fff'
+      ctx.font = '700 16px system-ui, sans-serif'
+      ctx.fillText(ds.centroValor ?? '', arc0.x, arc0.y + 9)
+    }
+    ctx.restore()
+  },
+}
+
+function RoscaCategoria({ titulo, fatias, centro, onFoco }: {
+  titulo: string
+  fatias: { label: string; valor: number; count: number }[]
+  centro: string  // rótulo do buraco central (ex.: "Patrimônio")
+  onFoco?: (chave: string) => void  // recebe o rótulo da fatia clicada
+}) {
+  const totalValor = fatias.reduce((s, f) => s + f.valor, 0)
+  const usarContagem = totalValor <= 0
+  const dados = fatias.map((f) => (usarContagem ? f.count : f.valor))
+  const total = dados.reduce((s, v) => s + v, 0)
+  const cores = fatias.map((_, i) => suavizar(PALETA_ROSCA[i % PALETA_ROSCA.length]))
+
+  const data = {
+    labels: fatias.map((f) => f.label),
+    datasets: [{
+      data: dados,
+      backgroundColor: cores,
+      borderColor: 'rgba(14,21,37,0.55)',
+      borderWidth: 2,
+      borderRadius: 8,
+      hoverOffset: 6,
+      // lidos pelo plugin rotulosRosca (texto do centro)
+      centroLabel: centro,
+      centroValor: usarContagem ? `${total}` : formatBRL(total),
+    }],
+  } as unknown as ChartData<'doughnut', number[], string>
+
+  return (
+    <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 flex flex-col">
+      <h2 className="text-[15px] font-semibold text-white mb-3">{titulo}</h2>
+      <div className="flex-1 min-h-[300px] flex items-center justify-center">
+        <Doughnut
+          plugins={[rotulosRosca]}
+          data={data}
+          options={{
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '62%',
+            layout: { padding: { top: 16, bottom: 16, left: 64, right: 64 } },
+            onClick: (_evt, elements) => {
+              if (elements.length > 0) onFoco?.(fatias[elements[0].index].label)
+            },
+            onHover: (evt, elements) => {
+              const alvo = evt.native?.target as HTMLElement | null
+              if (alvo) alvo.style.cursor = elements.length && onFoco ? 'pointer' : 'default'
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const f = fatias[ctx.dataIndex]
+                    const pct = total > 0 ? (Number(ctx.parsed) / total) * 100 : 0
+                    const qtd = `${f.count} ativo${f.count === 1 ? '' : 's'}`
+                    return usarContagem
+                      ? ` ${qtd} · ${pct.toFixed(1).replace('.', ',')}%`
+                      : ` ${formatBRL(f.valor)} · ${pct.toFixed(1).replace('.', ',')}% (${qtd})`
+                  },
+                },
+              },
+            },
+          }}
+        />
+      </div>
+    </section>
+  )
+}
+
+// Agrupa as linhas de um tipo pela chave informada, somando valor de mercado
+// e contando ativos. Ordena pelas fatias maiores primeiro.
+function fatiasPorChave(
+  linhas: AtivoLinha[], chaveDe: (l: AtivoLinha) => string,
+): { label: string; valor: number; count: number }[] {
+  const m = new Map<string, { valor: number; count: number }>()
+  for (const l of linhas) {
+    const k = chaveDe(l)
+    const cur = m.get(k) ?? { valor: 0, count: 0 }
+    cur.valor += l.valor_mercado
+    cur.count += 1
+    m.set(k, cur)
+  }
+  return [...m.entries()]
+    .map(([label, v]) => ({ label, ...v }))
+    .sort((a, b) => b.valor - a.valor || b.count - a.count)
+}
+
 export default function AtivosInvestimentosPage() {
   const [tipoFiltro, setTipoFiltro] = useState<TipoAtivoInvestimento | ''>('')
   const [pesquisa,   setPesquisa]   = useState('')
   const [drawer,     setDrawer]     = useState(false)
   const [editando,   setEditando]   = useState<InvestimentoAtivo | null>(null)
-  const [form,       setForm]       = useState<CriarAtivoInput>(FORM_VAZIO)
-  const [salvando,   setSalvando]   = useState(false)
   const [toast,      setToast]      = useState<string | null>(null)
   const [posicoesDe, setPosicoesDe] = useState<InvestimentoAtivo | null>(null)
   const [historicoDe, setHistoricoDe] = useState<InvestimentoAtivo | null>(null)
 
-  // Busca externa (ticker → nome/preço/características)
-  const [busca,       setBusca]       = useState('')
-  const [buscaDeb,    setBuscaDeb]    = useState('')
-  const [selecionado, setSelecionado] = useState(false)  // nome veio da lista
-  const [manualLivre, setManualLivre] = useState(false)  // fallback de cadastro manual
-  const [precoSel,    setPrecoSel]    = useState<number | null>(null)
-
-  useEffect(() => {
-    const t = setTimeout(() => setBuscaDeb(busca), 400)
-    return () => clearTimeout(t)
-  }, [busca])
-
-  const { resultados, buscando, erroBusca } = useBuscaAtivoExterno(form.tipo_ativo, drawer ? buscaDeb : '')
-
   const filtros = tipoFiltro ? { tipo: tipoFiltro } : {}
-  const { ativos, loading, error, criar, editar, atualizarAtivos } = useInvestimentosAtivos(filtros)
+  const { ativos, loading, error, atualizarAtivos } = useInvestimentosAtivos(filtros)
   const [atualizando, setAtualizando] = useState(false)
+
+  // Foco vindo do clique numa fatia da rosca: abre o quadro do tipo, rola até
+  // ele e realça só o agrupamento (dim + chave) que originou aquela fatia.
+  const [foco, setFoco] = useState<{ tipo: TipoAtivoInvestimento; dim: Dimensao; chave: string; n: number } | null>(null)
+  const focar = (tipo: TipoAtivoInvestimento, dim: Dimensao, chave: string) =>
+    setFoco((f) => ({ tipo, dim, chave, n: (f?.n ?? 0) + 1 }))
 
   // Agregados financeiros por tipo (valor, variação, dividendos, participação),
   // usados no cabeçalho de cada card — mesma fonte da página de Investimentos.
@@ -198,6 +369,15 @@ export default function AtivosInvestimentosPage() {
       .map(([tipo, linhas]) => ({ tipo, linhas }))
   }, [ativos, pesquisa, rankingPorAtivo, contasPorAtivo])
 
+  // Fatias das roscas: Ações por segmento (setor) e FIIs por categoria.
+  const { segmentosAcoes, categoriasFII } = useMemo(() => {
+    const linhasDe = (t: TipoAtivoInvestimento) => grupos.find((g) => g.tipo === t)?.linhas ?? []
+    return {
+      segmentosAcoes: fatiasPorChave(linhasDe('ACOES'), (l) => setorLabel(l.setor) ?? 'Sem segmento'),
+      categoriasFII:  fatiasPorChave(linhasDe('FII'),   (l) => l.categoria ?? 'Sem categoria'),
+    }
+  }, [grupos])
+
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
   // Re-busca nome/moeda oficiais (brapi) de todos os ativos — útil quando a
@@ -216,99 +396,8 @@ export default function AtivosInvestimentosPage() {
     )
   }
 
-  function resetBusca() {
-    setBusca(''); setBuscaDeb(''); setSelecionado(false); setManualLivre(false); setPrecoSel(null)
-  }
-
-  function abrirNovo() { setEditando(null); setForm(FORM_VAZIO); resetBusca(); setDrawer(true) }
-  function abrirEditar(a: InvestimentoAtivo) {
-    setEditando(a)
-    setForm({
-      ticker: a.ticker, nome: a.nome, tipo_ativo: a.tipo_ativo, moeda: a.moeda,
-      descricao: a.descricao ?? '', nota_usuario: a.nota_usuario,
-      rf_subtipo: a.rf_subtipo, rf_indexador: a.rf_indexador, rf_taxa: a.rf_taxa,
-      rf_emissor: a.rf_emissor, rf_vencimento: a.rf_vencimento,
-      rf_garantia_fgc: a.rf_garantia_fgc, rf_isento_ir: a.rf_isento_ir,
-      fii_categoria: a.fii_categoria, acoes_subtipo: a.acoes_subtipo,
-      cotacao_automatica: a.cotacao_automatica,
-    })
-    resetBusca()
-    setSelecionado(true)   // já tem nome definido — não exige nova seleção
-    setDrawer(true)
-  }
-
-  // Resultado escolhido na lista: preenche ticker, nome e características
-  function selecionarResultado(r: ResultadoBuscaAtivo) {
-    setForm({
-      ...form,
-      ticker: r.ticker,
-      nome:   r.nome,
-      moeda:  r.moeda || form.moeda,
-      ...(r.emissor    ? { rf_emissor: r.emissor } : {}),
-      ...(r.taxa       ? { rf_taxa: r.taxa } : {}),
-      ...(r.vencimento ? { rf_vencimento: r.vencimento } : {}),
-      ...(r.indexador  ? { rf_indexador: r.indexador } : {}),
-    })
-    setPrecoSel(r.preco)
-    setSelecionado(true)
-    setBusca(''); setBuscaDeb('')
-  }
-
-  // Troca de tipo limpa/pré-preenche as características específicas
-  // e zera a busca/seleção (a fonte de dados muda com o tipo)
-  function mudarTipo(tipo: TipoAtivoInvestimento) {
-    if (!editando) { resetBusca() }
-    const limpaIdent = editando ? {} : { ticker: '', nome: '' }
-    // Ações no exterior (Stocks) e REITs são, por padrão, em dólar. BDRs e
-    // ETFs internacionais listados na B3 são cotados em BRL (campo editável).
-    const moedaPadrao = tipo === 'STOCKS' || tipo === 'REIT' ? 'USD' : 'BRL'
-    if (tipo === 'TESOURO_DIRETO') {
-      const info = SUBTIPO_RF_INFO.TESOURO
-      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, acoes_subtipo: null, moeda: 'BRL',
-        rf_subtipo: 'TESOURO', rf_emissor: info.emissor,
-        rf_garantia_fgc: info.fgc, rf_isento_ir: info.isentoIR })
-    } else if (tipo === 'RENDA_FIXA') {
-      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, acoes_subtipo: null, moeda: 'BRL',
-        rf_subtipo: form.rf_subtipo === 'TESOURO' ? null : form.rf_subtipo })
-    } else {
-      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, moeda: moedaPadrao,
-        rf_subtipo: null, rf_indexador: null, rf_taxa: null, rf_emissor: null,
-        rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
-        fii_categoria: tipo === 'FII' ? form.fii_categoria : null,
-        acoes_subtipo: tipo === 'ACOES' ? form.acoes_subtipo : null })
-    }
-  }
-
-  // Subtipo de renda fixa pré-preenche FGC/IR/emissor (continuam editáveis)
-  function mudarSubtipoRF(sub: SubtipoRF | '') {
-    if (!sub) { setForm({ ...form, rf_subtipo: null }); return }
-    const info = SUBTIPO_RF_INFO[sub]
-    setForm({ ...form, rf_subtipo: sub,
-      rf_emissor: form.rf_emissor || info.emissor || null,
-      rf_garantia_fgc: info.fgc, rf_isento_ir: info.isentoIR })
-  }
-
-  async function salvar() {
-    if (!editando && !selecionado && !manualLivre) {
-      showToast('Busque e selecione o ativo na lista — ou ative o cadastro manual')
-      return
-    }
-    if (!form.ticker.trim()) { showToast('Ticker é obrigatório'); return }
-    setSalvando(true)
-    const payload: CriarAtivoInput | EditarAtivoInput = {
-      ...form,
-      ticker: form.ticker.trim().toUpperCase(),
-      // Nome opcional: se em branco, o backend busca o nome oficial pelo ticker
-      nome: form.nome.trim(),
-      descricao: form.descricao?.trim() || null,
-      nota_usuario: form.nota_usuario === null || form.nota_usuario === undefined || Number.isNaN(form.nota_usuario)
-        ? null : Number(form.nota_usuario),
-    }
-    const res = editando ? await editar(editando.id, payload) : await criar(payload as CriarAtivoInput)
-    setSalvando(false)
-    if (res.ok) { setDrawer(false); showToast(editando ? 'Ativo atualizado!' : 'Ativo criado!') }
-    else showToast(res.erro ?? 'Erro ao salvar')
-  }
+  function abrirNovo() { setEditando(null); setDrawer(true) }
+  function abrirEditar(a: InvestimentoAtivo) { setEditando(a); setDrawer(true) }
 
   if (loading) return <LoadingMascote />
 
@@ -347,6 +436,11 @@ export default function AtivosInvestimentosPage() {
             <RefreshCw size={15} className={atualizando ? 'animate-spin' : ''} />
             {atualizando ? 'Atualizando…' : 'Atualizar tickets'}
           </button>
+          <Link to="/investimentos/avaliacoes"
+            title="Seus mentores (IAs) avaliam cada ativo da carteira"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30">
+            <Sparkles size={15} style={{ color: '#8b5cf6' }} /> Avaliações
+          </Link>
           <button onClick={abrirNovo}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white"
             style={{ background: '#3b82f6' }}>
@@ -367,6 +461,18 @@ export default function AtivosInvestimentosPage() {
       ) : (
         <>
           {!pesquisa && <EvolucaoPorTipo />}
+          {!pesquisa && (segmentosAcoes.length > 0 || categoriasFII.length > 0) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
+              {segmentosAcoes.length > 0 && (
+                <RoscaCategoria titulo="Ações por segmento" fatias={segmentosAcoes}
+                  centro="Ações" onFoco={(chave) => focar('ACOES', 'segmento', chave)} />
+              )}
+              {categoriasFII.length > 0 && (
+                <RoscaCategoria titulo="FIIs por categoria" fatias={categoriasFII}
+                  centro="FIIs" onFoco={(chave) => focar('FII', 'categoria', chave)} />
+              )}
+            </div>
+          )}
           {grupos.length === 0 ? (
             <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center text-[13px]" style={{ color: MUTED }}>
               Nenhum ativo encontrado para “{pesquisa}”.
@@ -376,6 +482,8 @@ export default function AtivosInvestimentosPage() {
               {grupos.map((g) => (
                 <QuadroTipoAtivos key={g.tipo} tipo={g.tipo} dados={dadosPorTipo.get(g.tipo) ?? null}
                   linhas={g.linhas} defaultAberto
+                  focoSinal={foco?.tipo === g.tipo ? foco.n : null}
+                  focoGrupo={foco?.tipo === g.tipo ? { dim: foco.dim, chave: foco.chave } : null}
                   acoes={{ onPosicoes: setPosicoesDe, onHistorico: setHistoricoDe, onEditar: abrirEditar }} />
               ))}
             </div>
@@ -383,228 +491,10 @@ export default function AtivosInvestimentosPage() {
         </>
       )}
 
-      {/* Drawer criar/editar ativo */}
-      <Drawer open={drawer} onClose={() => setDrawer(false)}
-        titulo={editando ? 'Editar ativo' : 'Novo ativo'}
-        subtitulo={editando ? editando.ticker : 'Cadastre um ativo da sua carteira'}
-        rodape={<><BtnCancelar onClick={() => setDrawer(false)} /><BtnSalvar editando={!!editando} onClick={salvar} salvando={salvando} /></>}>
-        {/* 1) Tipo primeiro — define a fonte da busca */}
-        <Field label="Tipo de ativo">
-          <SelectDark value={form.tipo_ativo} onChange={(e) => mudarTipo(e.target.value as TipoAtivoInvestimento)}>
-            {TIPOS_ATIVO_INV.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
-          </SelectDark>
-        </Field>
-
-        {/* 2) Subtipo / categoria — refina a busca */}
-        {form.tipo_ativo === 'RENDA_FIXA' && (
-          <Field label="Tipo do título">
-            <SelectDark value={form.rf_subtipo ?? ''} onChange={(e) => mudarSubtipoRF(e.target.value as SubtipoRF | '')}>
-              <option value="">Selecione...</option>
-              {subtiposParaTipo('RENDA_FIXA').map((s) => (
-                <option key={s} value={s}>{SUBTIPO_RF_INFO[s].label}</option>
-              ))}
-            </SelectDark>
-          </Field>
-        )}
-        {form.tipo_ativo === 'FII' && (
-          <Field label="Categoria do fundo">
-            <SelectDark value={form.fii_categoria ?? ''}
-              onChange={(e) => setForm({ ...form, fii_categoria: (e.target.value || null) as CategoriaFII | null })}>
-              <option value="">Selecione...</option>
-              {CATEGORIAS_FII.map((c) => <option key={c} value={c}>{FII_CATEGORIA_INFO[c].label}</option>)}
-            </SelectDark>
-            {form.fii_categoria && (
-              <div className="text-[12px] space-y-0.5 mt-1" style={{ color: MUTED }}>
-                <p><span className="text-white/70">Compra:</span> {FII_CATEGORIA_INFO[form.fii_categoria].compra}</p>
-                <p><span className="text-white/70">Fonte de lucro:</span> {FII_CATEGORIA_INFO[form.fii_categoria].fonteLucro}</p>
-                <p><span className="text-white/70">Risco:</span> {FII_CATEGORIA_INFO[form.fii_categoria].risco} ·{' '}
-                  <span className="text-white/70">Vantagem:</span> {FII_CATEGORIA_INFO[form.fii_categoria].vantagem}</p>
-              </div>
-            )}
-          </Field>
-        )}
-        {form.tipo_ativo === 'ACOES' && (
-          <Field label="Subtipo da ação">
-            <SelectDark value={form.acoes_subtipo ?? ''}
-              onChange={(e) => setForm({ ...form, acoes_subtipo: (e.target.value || null) as AcoesSubtipo | null })}>
-              <option value="">Selecione...</option>
-              {ACOES_SUBTIPOS.map((s) => <option key={s} value={s}>{ACOES_SUBTIPO_LABEL[s]}</option>)}
-            </SelectDark>
-            {form.acoes_subtipo && (
-              <p className="text-[12px] mt-1" style={{ color: MUTED }}>{ACOES_SUBTIPO_DESCRICAO[form.acoes_subtipo]}</p>
-            )}
-          </Field>
-        )}
-
-        {/* 3) Busca na internet — ticker, nome e preço vêm da lista */}
-        {!editando && (
-          <div className="rounded-lg border border-white/10 p-3 space-y-2">
-            <Field label="Buscar ativo (ticker ou nome)">
-              <div className="relative">
-                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: MUTED }} />
-                <Input value={busca} onChange={(e) => { setBusca(e.target.value); setSelecionado(false) }}
-                  placeholder={form.tipo_ativo === 'TESOURO_DIRETO' ? 'Ex.: IPCA 2029, Selic...' : 'Ex.: PETR, Vale, BTC...'}
-                  className="!pl-8" />
-                {buscando && <RefreshCw size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin" style={{ color: MUTED }} />}
-              </div>
-            </Field>
-
-            {/* Resultados */}
-            {buscaDeb.length >= 2 && !buscando && !selecionado && (
-              resultados.length === 0 && !erroBusca ? (
-                <p className="text-[12px]" style={{ color: MUTED }}>Nada encontrado para "{buscaDeb}".</p>
-              ) : (
-                <div className="max-h-52 overflow-y-auto space-y-1">
-                  {resultados.map((r) => (
-                    <button key={`${r.ticker}-${r.nome}`} type="button" onClick={() => selecionarResultado(r)}
-                      className="w-full text-left px-2.5 py-1.5 rounded-md border border-white/10 hover:border-blue-400/50 hover:bg-blue-500/10 flex items-center justify-between gap-2">
-                      <span className="min-w-0">
-                        <span className="text-white text-[13px] font-semibold">{r.ticker}</span>
-                        <span className="text-[12px] ml-2 truncate" style={{ color: MUTED }}>{r.nome}</span>
-                      </span>
-                      {r.preco != null && (
-                        <span className="text-[12px] shrink-0" style={{ color: '#00c896' }}>{formatBRL(r.preco)}</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )
-            )}
-
-            {erroBusca && (
-              <p className="text-[12px]" style={{ color: '#ffb74d' }}>
-                {erroBusca} — você pode cadastrar manualmente abaixo.
-              </p>
-            )}
-
-            {/* Selecionado */}
-            {selecionado && form.ticker && (
-              <div className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-white text-[13px] font-semibold">{form.ticker}
-                    {precoSel != null && <span className="ml-2 font-normal" style={{ color: '#00c896' }}>{formatBRL(precoSel)}</span>}
-                  </p>
-                  <p className="text-[12px] truncate" style={{ color: MUTED }}>{form.nome}</p>
-                </div>
-                <button type="button" onClick={() => { setSelecionado(false); setForm({ ...form, ticker: '', nome: '' }); setPrecoSel(null) }}
-                  className="text-[12px] shrink-0 underline" style={{ color: MUTED }}>trocar</button>
-              </div>
-            )}
-
-            {!selecionado && (
-              <label className="flex items-center gap-2 text-[12px] cursor-pointer" style={{ color: MUTED }}>
-                <input type="checkbox" checked={manualLivre} onChange={(e) => setManualLivre(e.target.checked)} />
-                Não encontrei — cadastrar manualmente
-              </label>
-            )}
-          </div>
-        )}
-
-        {/* 4) Identificação — preenchida pela busca (editável só no manual) */}
-        {(editando || manualLivre || selecionado) && (
-          <>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Ticker">
-                <Input value={form.ticker} onChange={(e) => setForm({ ...form, ticker: e.target.value })}
-                  placeholder="Ex.: VALE3" maxLength={20} disabled={!editando && !manualLivre} />
-              </Field>
-              <Field label="Moeda">
-                <Input value={form.moeda} onChange={(e) => setForm({ ...form, moeda: e.target.value.toUpperCase() })} maxLength={3} placeholder="BRL" />
-              </Field>
-            </div>
-            <Field label="Nome (opcional — busca automática pelo ticker)">
-              <Input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })}
-                placeholder="Deixe em branco para buscar pelo ticker" maxLength={120} disabled={!editando && !manualLivre} />
-            </Field>
-          </>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Nota (0–10)">
-            <Input type="number" min={0} max={10} step={0.5}
-              value={form.nota_usuario ?? ''}
-              onChange={(e) => setForm({ ...form, nota_usuario: e.target.value === '' ? null : Number(e.target.value) })}
-              placeholder="—" />
-          </Field>
-          <Field label="Descrição">
-            <Input value={form.descricao ?? ''} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Opcional" />
-          </Field>
-        </div>
-
-        {/* Busca automática de cotação — desligue para ativos sem fonte gratuita */}
-        <label className="flex items-start gap-2 text-[13px] cursor-pointer rounded-lg border border-white/10 p-3">
-          <input type="checkbox" className="mt-0.5"
-            checked={form.cotacao_automatica !== false}
-            onChange={(e) => setForm({ ...form, cotacao_automatica: e.target.checked })} />
-          <span>
-            <span className="text-white">Buscar cotação automaticamente</span>
-            <span className="block text-[12px] mt-0.5" style={{ color: MUTED }}>
-              Desligue para ativos sem fonte gratuita (ex.: FIIs pequenos, papéis deslistados).
-              Ele sai das atualizações automáticas e do aviso de lacuna — você lança o valor manualmente.
-            </span>
-          </span>
-        </label>
-
-        {/* Características de renda fixa / Tesouro Direto */}
-        {ehRendaFixa(form.tipo_ativo) && (
-          <div className="rounded-lg border border-white/10 p-3 space-y-3">
-            <p className="text-[13px] font-semibold text-white">Características do título</p>
-
-            <Field label="Forma de rentabilidade">
-              <SelectDark value={form.rf_indexador ?? ''}
-                onChange={(e) => setForm({ ...form, rf_indexador: (e.target.value || null) as IndexadorRF | null })}>
-                <option value="">Selecione...</option>
-                {INDEXADORES_RF.map((i) => <option key={i} value={i}>{INDEXADOR_RF_LABEL[i]}</option>)}
-              </SelectDark>
-              {form.rf_indexador && (
-                <p className="text-[12px] mt-1" style={{ color: MUTED }}>
-                  {INDEXADOR_RF_DESCRICAO[form.rf_indexador]}
-                </p>
-              )}
-            </Field>
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Taxa">
-                <Input value={form.rf_taxa ?? ''} maxLength={40}
-                  onChange={(e) => setForm({ ...form, rf_taxa: e.target.value || null })}
-                  placeholder={form.rf_indexador === 'POS_FIXADO' ? '110% CDI'
-                    : form.rf_indexador === 'HIBRIDO' ? 'IPCA + 6,2%' : '13,5% a.a.'} />
-              </Field>
-              <Field label="Vencimento">
-                <Input type="date" value={form.rf_vencimento ?? ''}
-                  onChange={(e) => setForm({ ...form, rf_vencimento: e.target.value || null })} />
-              </Field>
-            </div>
-
-            <Field label="Emissor">
-              <Input value={form.rf_emissor ?? ''} maxLength={80}
-                onChange={(e) => setForm({ ...form, rf_emissor: e.target.value || null })}
-                placeholder={form.rf_subtipo ? SUBTIPO_RF_INFO[form.rf_subtipo].emissor : 'Banco / empresa'} />
-            </Field>
-
-            <div className="grid grid-cols-2 gap-3">
-              <label className="flex items-center gap-2 text-[13px] text-white/80 cursor-pointer">
-                <input type="checkbox" checked={form.rf_garantia_fgc ?? false}
-                  onChange={(e) => setForm({ ...form, rf_garantia_fgc: e.target.checked })} />
-                Garantia do FGC
-              </label>
-              <label className="flex items-center gap-2 text-[13px] text-white/80 cursor-pointer">
-                <input type="checkbox" checked={form.rf_isento_ir ?? false}
-                  onChange={(e) => setForm({ ...form, rf_isento_ir: e.target.checked })} />
-                Isento de IR
-              </label>
-            </div>
-            {form.rf_subtipo && (
-              <p className="text-[12px]" style={{ color: MUTED }}>
-                {SUBTIPO_RF_INFO[form.rf_subtipo].label}: {SUBTIPO_RF_INFO[form.rf_subtipo].obsIR}
-                {form.rf_subtipo === 'TESOURO' && ' · sem FGC (garantia soberana do Governo Federal)'}
-                {SUBTIPO_RF_INFO[form.rf_subtipo].fgc && ' · FGC cobre até R$ 250 mil por CPF/instituição'}
-              </p>
-            )}
-          </div>
-        )}
-
-      </Drawer>
+      {/* Drawer criar/editar ativo (componente compartilhado) */}
+      {drawer && (
+        <DrawerAtivo ativo={editando} onClose={() => setDrawer(false)} onToast={showToast} />
+      )}
 
       {/* Drawer posições */}
       {posicoesDe && (

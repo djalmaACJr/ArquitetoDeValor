@@ -386,6 +386,59 @@ export interface InvQuestionario {
   updated_at?:  string
 }
 
+// ── Avaliação da carteira pelos MENTORES (linha de inv_avaliacoes) ──
+// Cada mentor é uma IA configurada (usuarios.ia_configs). A pedido do
+// usuário, todos avaliam cada ativo; a nota final é a média das notas.
+export interface InvAvaliacaoMentor {
+  config_id: string
+  nome:      string | null
+  provedor:  string
+  modelo:    string | null
+  nota:      number | null
+  respostas: QuestionarioRespostas      // { pergunta_id: indice 0..4 }
+  erro:      string | null
+}
+
+export type NivelConsenso = 'ALTO' | 'MEDIO' | 'BAIXO'
+
+export interface InvAvaliacaoConsenso {
+  pesos:     PesosCriterio
+  perguntas: { id: string; media_indice: number | null; media_nota: number | null }[]
+  mentores:  InvAvaliacaoMentor[]
+  /** Nota consolidada de cada critério (média ponderada → nota final). */
+  criterios?:      Record<CriterioQuestao, number | null>
+  /** Nível de concordância entre as IAs, pela dispersão das notas. */
+  nivel_consenso?: NivelConsenso
+  /** Desvio-padrão das notas dos mentores (base do nível de consenso). */
+  dispersao?:      number
+}
+
+// Item do histórico de avaliações de um ativo (cronológico; último = atual).
+export interface InvAvaliacaoHist {
+  gerado_em:  string
+  nota_final: number | null
+  criterios?: Record<CriterioQuestao, number | null> | null
+}
+
+export interface InvAvaliacao {
+  id?:         string
+  ativo_id:    string
+  nota_final:  number | null
+  consenso:    InvAvaliacaoConsenso
+  historico?:  InvAvaliacaoHist[] | null
+  gerado_em:   string
+  created_at?: string
+  updated_at?: string
+}
+
+// Agenda de reavaliação da carteira (usuarios.inv_avaliacao_agenda).
+export type FrequenciaAgenda =
+  | 'NENHUMA' | 'SEMANAL' | 'QUINZENAL' | 'MENSAL' | 'TRIMESTRAL' | 'SEMESTRAL' | 'ANUAL'
+
+export interface InvAvaliacaoAgenda {
+  frequencia: FrequenciaAgenda
+}
+
 // Perfil de investidor (usuarios.inv_perfil — JSONB inline).
 export interface PerfilInvestidor {
   perfil:              PerfilInvestidorTipo

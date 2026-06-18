@@ -143,7 +143,7 @@ async function excluirDadosInvestimentos(
 
   const tabelas = [
     "inv_historico_mensal", "inv_dividendos", "inv_operacoes",
-    "inv_posicoes", "inv_ativos",
+    "inv_posicoes", "inv_avaliacoes", "inv_ativos",
   ];
   for (const t of tabelas) {
     const { count, error } = await c.from(t).delete({ count: "exact" }).eq("user_id", userId);

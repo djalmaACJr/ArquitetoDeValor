@@ -27,3 +27,9 @@ FrontEnd/e2e/fixtures/auth.json
 FrontEnd/e2e/e2e/
 FrontEnd/e2e/report/
 FrontEnd/e2e/test-results/
+
+#robô investidor10 — perfil/sessão (login Google) e capturas (nunca commitar)
+FrontEnd/robo-investidor10/perfil/
+FrontEnd/robo-investidor10/sessao.json
+FrontEnd/robo-investidor10/capturas/
+FrontEnd/robo-investidor10/.env

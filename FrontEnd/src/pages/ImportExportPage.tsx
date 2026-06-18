@@ -88,6 +88,7 @@ interface InvestimentosBackup {
   tipos_dividendo: Record<string, unknown>[]
   alocacoes:       Record<string, unknown>[]
   questionarios?:  Record<string, unknown>[]
+  avaliacoes?:     Record<string, unknown>[]
   perfil?:         Record<string, unknown> | null
   pesos?:          Record<string, unknown> | null  // pesos globais dos critérios
 }
@@ -332,6 +333,7 @@ const ROTULO_ENTIDADE: Record<string, string> = {
   inv_ativos:            'Ativos',
   inv_alocacoes_tipo:    'Alocações',
   inv_questionarios:     'Questionários de avaliação',
+  inv_avaliacoes:        'Avaliações dos mentores',
   inv_tipos_dividendo:   'Tipos de provento',
   transacoes_dividendos: 'Dividendos no extrato',
   transacoes:            'Transações',
@@ -3057,7 +3059,7 @@ function SecaoBackup() {
 
       // 5. Investimentos (ativos, posições, operações, dividendos, histórico, tipos, alocações)
       addLog('ok', 'Buscando investimentos...')
-      const [rAtivos, rPos, rOps, rDiv, rHist, rTipos, rAloc, rQuest] = await Promise.all([
+      const [rAtivos, rPos, rOps, rDiv, rHist, rTipos, rAloc, rQuest, rAval] = await Promise.all([
         apiFetch('/investimentos/ativos'),
         apiFetch('/investimentos/posicoes'),
         apiFetch('/investimentos/operacoes'),
@@ -3066,6 +3068,7 @@ function SecaoBackup() {
         apiFetch('/investimentos/tipos-dividendo'),
         apiFetch('/investimentos/alocacoes'),
         apiFetch('/investimentos/questionarios'),
+        apiFetch('/investimentos/avaliacoes'),
       ])
       // Perfil de investidor + pesos globais (usuarios.* — preferências JSONB inline).
       let perfilInv: Record<string, unknown> | null = null
@@ -3085,6 +3088,7 @@ function SecaoBackup() {
         tipos_dividendo: extrairLista<Record<string, unknown>>(rTipos.dados),
         alocacoes:       extrairLista<Record<string, unknown>>(rAloc.dados),
         questionarios:   extrairLista<Record<string, unknown>>(rQuest.dados),
+        avaliacoes:      extrairLista<Record<string, unknown>>(rAval.dados),
         perfil:          perfilInv,
         pesos:           pesosInv,
       }
@@ -3153,6 +3157,7 @@ function SecaoBackup() {
               'Todas as transferências',
               'Investimentos (ativos, posições, operações, dividendos, histórico)',
               'Configurações de investimentos (metas, perfil, pesos e questionários de avaliação)',
+              'Avaliações dos mentores (notas das IAs por ativo)',
               'Lembretes (avulsos e vinculados a lançamentos)',
               'Objetivos (metas, sonhos e projetos)',
             ].map((item, i) => (
@@ -3489,12 +3494,13 @@ function SecaoRestore() {
           dividendos: inv.dividendos, historico: inv.historico,
           tipos_dividendo: inv.tipos_dividendo, alocacoes: inv.alocacoes,
           questionarios: inv.questionarios ?? [],
+          avaliacoes: inv.avaliacoes ?? [],
         })
         if (res.ok) {
-          const d = res.dados as { ativos?: number; posicoes?: number; operacoes?: number; dividendos?: number; historico?: number; questionarios?: number; avisos?: string[] } | null
-          addLog('ok', `Investimentos: ${d?.ativos ?? 0} ativos, ${d?.posicoes ?? 0} posições, ${d?.operacoes ?? 0} operações, ${d?.dividendos ?? 0} dividendos, ${d?.historico ?? 0} snapshots, ${d?.questionarios ?? 0} questionários restaurados`)
+          const d = res.dados as { ativos?: number; posicoes?: number; operacoes?: number; dividendos?: number; historico?: number; questionarios?: number; avaliacoes?: number; avisos?: string[] } | null
+          addLog('ok', `Investimentos: ${d?.ativos ?? 0} ativos, ${d?.posicoes ?? 0} posições, ${d?.operacoes ?? 0} operações, ${d?.dividendos ?? 0} dividendos, ${d?.historico ?? 0} snapshots, ${d?.questionarios ?? 0} questionários, ${d?.avaliacoes ?? 0} avaliações restauradas`)
           for (const a of d?.avisos ?? []) addLog('aviso', a)
-          for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo'], ['inv-alocacoes'], ['inv-questionarios']]) {
+          for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo'], ['inv-alocacoes'], ['inv-questionarios'], ['inv-avaliacoes']]) {
             qc.invalidateQueries({ queryKey: k })
           }
         } else addLog('erro', `Investimentos: ${res.erro}`)

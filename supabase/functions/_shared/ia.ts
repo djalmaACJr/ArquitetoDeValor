@@ -437,3 +437,72 @@ export async function lerConfigIAAtiva(cliente: SupabaseClient, userId: string):
 
   return { ok: true, config: { provedor: ativa.provedor, modelo: ativa.modelo ?? null, apiKey } };
 }
+
+// ── Resolução de TODAS as configs de IA do usuário (mentores) ──────────
+
+export interface MentorIA {
+  id:       string;
+  nome:     string | null;
+  provedor: string;
+  modelo:   string | null;
+  apiKey:   string;     // já decriptada
+}
+
+export type ResultadoMentoresIA =
+  | { ok: true;  mentores: MentorIA[] }
+  | { ok: false; erro: string; status: number };
+
+/**
+ * Lê `usuarios.ia_configs` e devolve TODAS as configs válidas (cada uma é
+ * um "mentor"), com a api_key decriptada. Configs em formato antigo (sem
+ * blob criptografado) são ignoradas. Usado pela avaliação da carteira,
+ * onde todos os mentores configurados opinam sobre cada ativo.
+ */
+export async function lerMentoresIA(cliente: SupabaseClient, userId: string): Promise<ResultadoMentoresIA> {
+  const { data: prefs, error } = await cliente
+    .from("usuarios")
+    .select("ia_configs")
+    .eq("id", userId)
+    .single();
+
+  if (error || !prefs) {
+    return { ok: false, erro: "Não foi possível ler suas preferências de IA.", status: 500 };
+  }
+
+  const col = (prefs.ia_configs as IAConfigsCol | null) ?? { ativa: null, configs: [] };
+  const validas = (col.configs ?? []).filter((c) => c.provedor && ehBlob(c.api_key));
+
+  if (validas.length === 0) {
+    return {
+      ok: false,
+      erro: "Nenhum mentor configurado. Vá em Perfil → Integração com IA e cadastre ao menos uma chave.",
+      status: 400,
+    };
+  }
+
+  const mentores: MentorIA[] = [];
+  for (const c of validas) {
+    try {
+      const apiKey = await decriptar(c.api_key);
+      mentores.push({
+        id:       c.id,
+        nome:     c.nome ?? null,
+        provedor: c.provedor,
+        modelo:   c.modelo ?? null,
+        apiKey,
+      });
+    } catch {
+      // Config com chave indecifrável é pulada (não derruba as demais).
+    }
+  }
+
+  if (mentores.length === 0) {
+    return {
+      ok: false,
+      erro: "Falha ao decriptar as chaves dos mentores. Recadastre em Perfil → Integração com IA.",
+      status: 500,
+    };
+  }
+
+  return { ok: true, mentores };
+}
