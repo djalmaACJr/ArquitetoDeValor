@@ -2,7 +2,7 @@ import { Fragment, useMemo, useRef, useState, type Dispatch, type SetStateAction
 import {
   ArrowLeft, Sparkles, RefreshCw, Bot, AlertTriangle, Settings, ChevronDown, CheckCircle2,
   Trophy, Medal, ShieldCheck, TrendingUp, Coins, Scale, Star, CalendarClock,
-  ArrowUp, ArrowDown, Minus, X, type LucideIcon,
+  ArrowUp, ArrowDown, Minus, X, CircleStop, type LucideIcon,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
@@ -356,8 +356,23 @@ function ModalLogMentor({ nome, log, onClose }: { nome: string; log: LogEntry[];
 interface ProgMentor {
   configId: string; nome: string; feito: number; total: number; erros: number
   abortado?: boolean
+  /** Interrompido manualmente pelo usuário (só este mentor). */
+  parado?: boolean
   /** Segundos restantes até a próxima tentativa automática (backoff). */
   aguardandoSeg?: number
+}
+
+// Botão (abaixo do mentor) para interromper SÓ aquele mentor durante a rodada.
+function BotaoPararMentor({ onParar }: { onParar: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onParar() }}
+      title="Parar este mentor (não afeta os demais)"
+      className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border"
+      style={{ borderColor: 'rgba(255,92,122,0.4)', color: '#ff5c7a', background: 'rgba(255,92,122,0.1)' }}>
+      <CircleStop size={11} /> Parar
+    </button>
+  )
 }
 
 // Barra de progresso de um mentor — exibida logo abaixo do mascote dele.
@@ -366,15 +381,17 @@ function BarraMentor({ prog }: { prog?: ProgMentor }) {
   const pct = prog.total > 0 ? Math.round((prog.feito / prog.total) * 100) : 0
   const completo = prog.feito >= prog.total
   const aguardando = prog.aguardandoSeg != null && prog.aguardandoSeg > 0
-  const cor = prog.abortado ? '#ff5c7a' : aguardando ? '#ffb74d' : completo ? '#00c896' : '#8b5cf6'
+  const interrompido = prog.parado || prog.abortado
+  const cor = interrompido ? '#ff5c7a' : aguardando ? '#ffb74d' : completo ? '#00c896' : '#8b5cf6'
   return (
     <div className="w-full mt-1.5">
       <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
         <div className={`h-full transition-all ${aguardando ? 'animate-pulse' : ''}`} style={{ width: `${pct}%`, background: cor }} />
       </div>
-      <div className="text-[10.5px] mt-0.5 text-center" style={{ color: prog.abortado ? '#ff5c7a' : aguardando ? '#ffb74d' : MUTED }}>
+      <div className="text-[10.5px] mt-0.5 text-center" style={{ color: interrompido ? '#ff5c7a' : aguardando ? '#ffb74d' : MUTED }}>
         {aguardando ? `Nova tentativa em ${prog.aguardandoSeg}s`
-          : prog.abortado ? 'Pausada'
+          : prog.parado ? 'Parado'
+          : prog.abortado ? 'Cancelado'
           : `${prog.feito}/${prog.total}`}
         {!aguardando && prog.erros > 0 && <span style={{ color: '#ffb74d' }}> · {prog.erros} erro(s)</span>}
       </div>
@@ -411,6 +428,15 @@ export default function AvaliacoesInvestimentosPage() {
     if (n.has(id)) n.delete(id); else n.add(id)
     return n
   })
+  // Mentores que o usuário pediu para PARAR no meio da rodada (só eles).
+  // Ref (não estado) p/ os loops assíncronos lerem o valor mais recente.
+  const pararMentoresRef = useRef<Set<string>>(new Set())
+  const pararMentor = (configId: string) => {
+    pararMentoresRef.current.add(configId)
+    setProgMentores((prev) => prev?.map((p) =>
+      p.configId === configId ? { ...p, parado: true, aguardandoSeg: undefined } : p) ?? prev)
+  }
+
   // Dados da rodada guardados para finalizar após a decisão do usuário.
   const decisaoRef = useRef<{
     lista: InvestimentoAtivo[]
@@ -566,6 +592,7 @@ export default function AvaliacoesInvestimentosPage() {
   // Espera com contagem regressiva visível na barra do mentor.
   async function esperarCountdown(configId: string, segundos: number) {
     for (let s = segundos; s > 0; s--) {
+      if (pararMentoresRef.current.has(configId)) break  // parado: aborta a espera
       setProgMentores((prev) => prev?.map((p) => p.configId === configId ? { ...p, aguardandoSeg: s } : p) ?? prev)
       await sleep(1000)
     }
@@ -636,6 +663,7 @@ export default function AvaliacoesInvestimentosPage() {
     setPendenteDecisao(null)
     setRoundSelecionado(null)
     decisaoRef.current = null
+    pararMentoresRef.current = new Set()
     const total = lista.length
     const participantes = configsAtivos          // mentores que farão a busca nesta rodada
     const idsParticipantes = participantes.map((c) => c.id)
@@ -673,10 +701,13 @@ export default function AvaliacoesInvestimentosPage() {
       let fila = [...lista]
       let ciclo = 0
       let abortou = false
+      let parado = false
       while (fila.length > 0) {
+        if (pararMentoresRef.current.has(c.id)) { parado = true; break }
         const aindaFalhou: InvestimentoAtivo[] = []
         let consecutivos = 0
         for (let idx = 0; idx < fila.length; idx++) {
+          if (pararMentoresRef.current.has(c.id)) { parado = true; break }
           const a = fila[idx]
           const ef = efPorAtivo.get(a.id)!
           const res = await avaliarMentorAtivo(a.id, c.id, ef.perguntas, ef.pesos)
@@ -700,6 +731,7 @@ export default function AvaliacoesInvestimentosPage() {
             break
           }
         }
+        if (parado) break                    // interrompido manualmente
         if (aindaFalhou.length === 0) break  // mentor concluiu sem pendências
         ciclo++
         if (ciclo > MAX_CICLOS_RETRY) { abortou = true; break }
@@ -716,7 +748,13 @@ export default function AvaliacoesInvestimentosPage() {
         arr.push(r)
         resultadosPorAtivo.set(aid, arr)
       }
-      if (abortou) {
+      if (parado) {
+        // Interrompido pelo usuário: NÃO entra no fluxo de decisão (abortados).
+        // Mantém os resultados parciais já coletados e segue a rodada.
+        log.push({ ticker: '—', ok: false, erro: 'Interrompido pelo usuário (parado).' })
+        registrarLog()
+        setProgMentores((prev) => prev?.map((p) => p.configId === c.id ? { ...p, parado: true, aguardandoSeg: undefined } : p) ?? prev)
+      } else if (abortou) {
         abortados.add(c.id)
         log.push({ ticker: '—', ok: false, erro: `Execução abortada após ${MAX_CICLOS_RETRY + 1} tentativas com erros.` })
         registrarLog()
@@ -875,6 +913,11 @@ export default function AvaliacoesInvestimentosPage() {
               const ativoCfg = ativa ?? configs[0]
               const outros = configs.filter((c) => c.id !== ativoCfg?.id)
               const progPorConfig = new Map((progMentores ?? []).map((p) => [p.configId, p]))
+              // Mentor "parável": rodando e ainda em andamento (não parado/cancelado/concluído).
+              const podeParar = (id: string) => {
+                const p = progPorConfig.get(id)
+                return rodando && !!p && !p.parado && !p.abortado && p.feito < p.total
+              }
               return (
                 <div className="flex flex-col items-center gap-3">
                   {/* Orquestrador (mentor ativo) — acima dos demais.
@@ -894,8 +937,10 @@ export default function AvaliacoesInvestimentosPage() {
                       <Sparkles size={11} /> Orquestrador
                     </span>
                     {ativoCfg && <BarraMentor prog={progPorConfig.get(ativoCfg.id)} />}
-                    {ativoCfg && <BotaoMentorAtivo ativo={!mentoresDesativados.has(ativoCfg.id)} desabilitado={rodando || !!pendenteDecisao}
-                      onToggle={() => toggleMentorAtivo(ativoCfg.id)} />}
+                    {ativoCfg && podeParar(ativoCfg.id)
+                      ? <BotaoPararMentor onParar={() => pararMentor(ativoCfg.id)} />
+                      : ativoCfg && <BotaoMentorAtivo ativo={!mentoresDesativados.has(ativoCfg.id)} desabilitado={rodando || !!pendenteDecisao}
+                          onToggle={() => toggleMentorAtivo(ativoCfg.id)} />}
                   </div>
 
                   {/* Conector + demais mentores */}
@@ -916,8 +961,10 @@ export default function AvaliacoesInvestimentosPage() {
                               <span className="text-[11px] text-center" style={{ color: MUTED }}>{c.modelo}</span>
                             )}
                             <BarraMentor prog={progPorConfig.get(c.id)} />
-                            <BotaoMentorAtivo ativo={!mentoresDesativados.has(c.id)} desabilitado={rodando || !!pendenteDecisao}
-                              onToggle={() => toggleMentorAtivo(c.id)} />
+                            {podeParar(c.id)
+                              ? <BotaoPararMentor onParar={() => pararMentor(c.id)} />
+                              : <BotaoMentorAtivo ativo={!mentoresDesativados.has(c.id)} desabilitado={rodando || !!pendenteDecisao}
+                                  onToggle={() => toggleMentorAtivo(c.id)} />}
                           </div>
                         ))}
                       </div>

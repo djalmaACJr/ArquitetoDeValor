@@ -19,7 +19,7 @@ import { mesAtual as mesAtualLocal, hojeLocal, dataParaYMD } from '../lib/utils'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { useAuth } from '../hooks/useAuth'
-import { usePtaxSerie } from '../hooks/usePtax'
+import { usePtax, usePtaxSerie } from '../hooks/usePtax'
 import { useIndicesEconomicos, type IndiceNome, type PontoIndice } from '../hooks/useIndicesEconomicos'
 import { useBackfillHistorico } from '../hooks/useInvestimentosHistorico'
 import { useOperacaoLonga } from '../hooks/useOperacaoLonga'
@@ -3808,6 +3808,58 @@ const PERIODOS_PTAX: { value: PeriodoPtax; label: string }[] = [
   { value: '7d', label: '7 dias' }, { value: '1m', label: '1 mês' }, { value: 'ano', label: 'Ano' },
 ]
 
+// Conversor USD ⇄ BRL pela cotação PTAX de uma data escolhida (<= hoje).
+// A taxa vem de `usePtax([data])`: o backend resolve o dia útil <= data,
+// então fins de semana/feriados caem na cotação válida anterior.
+type DirecaoConv = 'USD_BRL' | 'BRL_USD'
+const DIRECOES_CONV: { value: DirecaoConv; label: string }[] = [
+  { value: 'USD_BRL', label: 'US$ → R$' }, { value: 'BRL_USD', label: 'R$ → US$' },
+]
+function ConversorPtax() {
+  const [data, setData] = useState(hojeLocal())
+  const [valor, setValor] = useState('')
+  const [dir, setDir] = useState<DirecaoConv>('USD_BRL')
+  const { taxaEm } = usePtax([data])
+  const taxa = taxaEm(data)
+
+  const num = parseFloat(valor.replace(/\./g, '').replace(',', '.'))
+  const valido = Number.isFinite(num) && taxa != null && taxa > 0
+  const resultado = valido ? (dir === 'USD_BRL' ? num * taxa : num / taxa) : null
+
+  const moedaOrigem = dir === 'USD_BRL' ? 'US$' : 'R$'
+  const moedaDestino = dir === 'USD_BRL' ? 'R$' : 'US$'
+  const fmt2 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  return (
+    <div className="pt-3 mt-1 border-t border-gray-200 dark:border-white/10 space-y-2">
+      <p className="text-[13px] font-medium text-gray-500 dark:text-gray-400">Conversor</p>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <PeriodoSeg value={dir} onChange={setDir} opcoes={DIRECOES_CONV} cor="#10b981" />
+        <input
+          type="date" value={data} max={hojeLocal()}
+          onChange={(e) => setData(e.target.value)}
+          className="rounded-lg border border-gray-200 dark:border-white/10 bg-transparent px-2 py-1 text-[13px] text-gray-700 dark:text-gray-200"
+        />
+      </div>
+      <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-white/10 px-2.5 py-1.5">
+        <span className="text-[14px] text-gray-400 select-none">{moedaOrigem}</span>
+        <input
+          type="text" inputMode="decimal" value={valor}
+          onChange={(e) => setValor(e.target.value)}
+          placeholder="0,00"
+          className="flex-1 min-w-0 bg-transparent text-[15px] text-gray-800 dark:text-gray-100 outline-none"
+        />
+      </div>
+      <p className="text-[15px] font-semibold text-gray-800 dark:text-gray-100">
+        = {moedaDestino} {resultado != null ? fmt2(resultado) : '—'}
+      </p>
+      {taxa != null
+        ? <p className="text-[11px] text-gray-400">Cotação PTAX usada: R$ {taxa.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</p>
+        : <p className="text-[11px] text-gray-400">Sem cotação para a data escolhida.</p>}
+    </div>
+  )
+}
+
 function CardPtax() {
   const [periodo, setPeriodo] = useState<PeriodoPtax>('1m')
   const desdeAno = useMemo(() => recuarDiasISO(hojeLocal(), 366), [])  // busca 1 ano; fatia no cliente
@@ -3834,6 +3886,7 @@ function CardPtax() {
           <PeriodoSeg value={periodo} onChange={setPeriodo} opcoes={PERIODOS_PTAX} cor="#10b981" />
         </div>
         <LinhaEvolucao labels={labels} valores={valores} cor="#10b981" fmt={(v) => `R$ ${v.toFixed(4)}`} />
+        <ConversorPtax />
       </div>
     </Section>
   )
