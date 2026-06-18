@@ -518,7 +518,9 @@ function DrawerQuestionario({ ativo, onClose, onToast }: {
   const respondidas = perguntas.filter((p) => respostas[p.id] != null).length
 
   // Agrupa por critério para exibir junto do peso de cada bloco.
-  const porCriterio: Record<CriterioQuestao, PerguntaAvaliacao[]> = { FUNDAMENTOS: [], CRESCIMENTO: [], DIVIDENDOS: [] }
+  const porCriterio = Object.fromEntries(
+    CRITERIOS_QUESTAO.map((c) => [c, [] as PerguntaAvaliacao[]]),
+  ) as Record<CriterioQuestao, PerguntaAvaliacao[]>
   for (const p of perguntas) (porCriterio[p.criterio] ?? porCriterio.FUNDAMENTOS).push(p)
 
   async function salvar() {

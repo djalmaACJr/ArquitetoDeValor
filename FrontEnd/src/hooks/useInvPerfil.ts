@@ -18,7 +18,7 @@ export function useInvPerfil() {
   const { session } = useAuth()
   const uid = session?.user?.id ?? null
 
-  const { data, isLoading: loading } = useQuery<PerfilInvestidor | null>({
+  const { data, isLoading: loading, isFetched } = useQuery<PerfilInvestidor | null>({
     queryKey: qk.invPerfil(uid),
     queryFn: async () => {
       const { data, error } = await supabase
@@ -48,5 +48,5 @@ export function useInvPerfil() {
     return { ok: true }
   }
 
-  return { perfil: data ?? null, loading, salvar }
+  return { perfil: data ?? null, loading, isFetched, salvar }
 }

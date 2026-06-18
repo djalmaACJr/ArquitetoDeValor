@@ -253,21 +253,25 @@ export function setorLabel(setor: string | null | undefined): string | null {
 }
 
 // ── Avaliação de ativos: critérios das questões ───────────────
-// Cada pergunta do questionário pertence a um destes 3 critérios.
+// Cada pergunta do questionário pertence a um destes 4 critérios.
 // A nota final é a média ponderada pelas notas de cada critério.
-export const CRITERIOS_QUESTAO = ['FUNDAMENTOS', 'CRESCIMENTO', 'DIVIDENDOS'] as const
+// (O id interno DIVIDENDOS é mantido por compatibilidade com questionários
+// e pesos já salvos — o rótulo é "Geração de renda".)
+export const CRITERIOS_QUESTAO = ['FUNDAMENTOS', 'CRESCIMENTO', 'DIVIDENDOS', 'VALUATION'] as const
 export type CriterioQuestao = typeof CRITERIOS_QUESTAO[number]
 
 export const CRITERIO_LABEL: Record<CriterioQuestao, string> = {
-  FUNDAMENTOS: 'Fundamentos',
-  CRESCIMENTO: 'Crescimento',
-  DIVIDENDOS:  'Pagadora de dividendos',
+  FUNDAMENTOS: 'Fundamentos e governança',
+  CRESCIMENTO: 'Crescimento e resiliência',
+  DIVIDENDOS:  'Geração de renda',
+  VALUATION:   'Margem de segurança e valuation',
 }
 
 export const CRITERIO_DESCRICAO: Record<CriterioQuestao, string> = {
-  FUNDAMENTOS: 'Solidez do ativo: lucro, dívida, governança, qualidade do emissor/gestão.',
-  CRESCIMENTO: 'Potencial de valorização: expansão do negócio, setor, perspectivas futuras.',
-  DIVIDENDOS:  'Geração de renda: consistência e sustentabilidade da distribuição de proventos.',
+  FUNDAMENTOS: 'Solidez estrutural: lucro, dívida/alavancagem, barreiras de entrada, perenidade e governança.',
+  CRESCIMENTO: 'Capacidade de expansão, eficiência, escalabilidade e resiliência a ciclos e inflação.',
+  DIVIDENDOS:  'Geração de renda e fluxo de caixa: regularidade e sustentabilidade do retorno em caixa.',
+  VALUATION:   'Margem de segurança: múltiplos atuais, preço caro/barato no histórico e risco embutido no preço.',
 }
 
 // ── Perfil de investidor ──────────────────────────────────────
@@ -288,11 +292,11 @@ export const PERFIL_INVESTIDOR_DESCRICAO: Record<PerfilInvestidorTipo, string> =
 
 // Pesos por critério (somam 100) sugeridos para cada perfil. São apenas
 // sugestões — o usuário pode ajustar na tela de Configurações.
-//   Conservador → valoriza fundamentos e dividendos (renda/segurança).
+//   Conservador → valoriza fundamentos, renda e margem de segurança.
 //   Moderado    → equilibrado.
 //   Arrojado    → valoriza crescimento.
 export const PESOS_SUGERIDOS_POR_PERFIL: Record<PerfilInvestidorTipo, Record<CriterioQuestao, number>> = {
-  CONSERVADOR: { FUNDAMENTOS: 45, CRESCIMENTO: 15, DIVIDENDOS: 40 },
-  MODERADO:    { FUNDAMENTOS: 40, CRESCIMENTO: 30, DIVIDENDOS: 30 },
-  ARROJADO:    { FUNDAMENTOS: 35, CRESCIMENTO: 50, DIVIDENDOS: 15 },
+  CONSERVADOR: { FUNDAMENTOS: 35, CRESCIMENTO: 10, DIVIDENDOS: 35, VALUATION: 20 },
+  MODERADO:    { FUNDAMENTOS: 30, CRESCIMENTO: 25, DIVIDENDOS: 25, VALUATION: 20 },
+  ARROJADO:    { FUNDAMENTOS: 25, CRESCIMENTO: 40, DIVIDENDOS: 10, VALUATION: 25 },
 }

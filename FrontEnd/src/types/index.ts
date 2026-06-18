@@ -392,6 +392,7 @@ export interface PerfilInvestidor {
   idade:               number | null  // null quando a data de nascimento não foi informada no Perfil
   idade_aposentadoria: number | null  // opcional — melhora a estimativa de horizonte
   suitability:         Record<string, number>
+  renda_substituir?:   number | null   // renda-alvo a substituir (regra dos 4%); null = usar a média das receitas
   atualizado_em:       string
 }
 

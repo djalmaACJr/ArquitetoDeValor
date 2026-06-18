@@ -20,8 +20,17 @@ const TIPOS_ATIVO = [
   "ACOES", "ETF", "FII", "REIT", "STOCKS",
   "ETF_INTERNACIONAL", "RENDA_FIXA", "CRIPTOMOEDAS", "TESOURO_DIRETO",
 ];
-// Critérios das perguntas do questionário de avaliação.
-const CRITERIOS_QUESTAO = ["FUNDAMENTOS", "CRESCIMENTO", "DIVIDENDOS"];
+// Critérios das perguntas do questionário de avaliação. DIVIDENDOS é o id
+// interno do critério "Geração de renda" (mantido por compatibilidade).
+const CRITERIOS_QUESTAO = ["FUNDAMENTOS", "CRESCIMENTO", "DIVIDENDOS", "VALUATION"];
+// Pesos sugeridos por perfil (somam 100) — espelham FrontEnd/src/lib/constants.ts.
+// Usados no prompt da IA quando o usuário não tem pesos globais salvos.
+const PESOS_SUGERIDOS_POR_PERFIL: Record<string, Record<string, number>> = {
+  CONSERVADOR: { FUNDAMENTOS: 35, CRESCIMENTO: 10, DIVIDENDOS: 35, VALUATION: 20 },
+  MODERADO:    { FUNDAMENTOS: 30, CRESCIMENTO: 25, DIVIDENDOS: 25, VALUATION: 20 },
+  ARROJADO:    { FUNDAMENTOS: 25, CRESCIMENTO: 40, DIVIDENDOS: 10, VALUATION: 25 },
+};
+const PESOS_PADRAO_CRITERIO = PESOS_SUGERIDOS_POR_PERFIL.MODERADO;
 const TIPO_ATIVO_LABEL_BR: Record<string, string> = {
   ACOES: "Ações (Brasil)", ETF: "ETF (Brasil)", FII: "Fundos Imobiliários (FII)",
   REIT: "REITs (fundos imobiliários dos EUA)", STOCKS: "Ações internacionais (Stocks)",
@@ -403,7 +412,7 @@ function validarQuestionario(perguntas: unknown, pesos: unknown): string | null 
     ids.add(id);
     if (!String(p?.texto ?? "").trim()) return `pergunta ${id} sem texto`;
     if (!CRITERIOS_QUESTAO.includes(String(p?.criterio))) {
-      return `pergunta ${id} com critério inválido (use FUNDAMENTOS, CRESCIMENTO ou DIVIDENDOS)`;
+      return `pergunta ${id} com critério inválido (use FUNDAMENTOS, CRESCIMENTO, DIVIDENDOS ou VALUATION)`;
     }
     const opcoes = p?.opcoes;
     if (!Array.isArray(opcoes) || opcoes.length !== 5 || opcoes.some((o) => !String(o ?? "").trim())) {
@@ -501,31 +510,58 @@ async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, userId: st
   if (!cfg.ok) return erro(cfg.erro, cfg.status);
   const { provedor, modelo, apiKey } = cfg.config;
 
-  // Contexto do perfil do investidor (se configurado).
-  const { data: perfilRow } = await c.from("usuarios").select("inv_perfil").eq("id", userId).maybeSingle();
+  // Perfil + pesos globais do usuário (a "matriz de pesos dinâmicos" do prompt).
+  const { data: perfilRow } = await c.from("usuarios")
+    .select("inv_perfil, inv_pesos_criterio").eq("id", userId).maybeSingle();
   const perfil = (perfilRow?.inv_perfil ?? null) as
     | { perfil?: string; idade?: number; idade_aposentadoria?: number }
     | null;
+
+  // Pesos efetivos: globais salvos > sugeridos pelo perfil > padrão (Moderado).
+  const pesosSalvos = (perfilRow?.inv_pesos_criterio ?? null) as Record<string, number> | null;
+  const pesosBase = pesosSalvos
+    ?? (perfil?.perfil ? PESOS_SUGERIDOS_POR_PERFIL[perfil.perfil] : null)
+    ?? PESOS_PADRAO_CRITERIO;
+  const pf = Math.round(Number(pesosBase.FUNDAMENTOS) || 0);
+  const pc = Math.round(Number(pesosBase.CRESCIMENTO) || 0);
+  const pr = Math.round(Number(pesosBase.DIVIDENDOS) || 0);
+  const pv = Math.round(Number(pesosBase.VALUATION) || 0);
+  const pesosFinais = { FUNDAMENTOS: pf, CRESCIMENTO: pc, DIVIDENDOS: pr, VALUATION: pv };
+
   const ctxPerfil = perfil?.perfil
     ? `Perfil do investidor: ${perfil.perfil}. Idade: ${perfil.idade ?? "?"}. ` +
       `Idade de aposentadoria pretendida: ${perfil.idade_aposentadoria ?? "?"}.`
-    : "Perfil do investidor: não informado (use pesos equilibrados).";
+    : "Perfil do investidor: não informado.";
 
   const rotuloTipo = TIPO_ATIVO_LABEL_BR[tipo] ?? tipo;
+
   const system =
-    "Você é um especialista em análise de investimentos. Monte um questionário de avaliação " +
-    "de ativos para o tipo informado, em português do Brasil. Responda SOMENTE com um JSON " +
+    "Você é um analista de sistemas e engenheiro financeiro especializado em alocação de ativos de " +
+    "longo prazo (Buy and Hold). Gere um questionário de auditoria estrito, em português do Brasil, " +
+    "para avaliar a viabilidade e a qualidade de um tipo de ativo. Responda SOMENTE com um JSON " +
     "válido (sem markdown, sem comentários, sem texto fora do JSON) no formato exato:\n" +
-    '{ "perguntas": [ { "id": "slug_curto", "texto": "...", "criterio": "FUNDAMENTOS|CRESCIMENTO|DIVIDENDOS", ' +
-    '"opcoes": ["pior","...","...","...","melhor"] } ], "pesos": { "FUNDAMENTOS": int, "CRESCIMENTO": int, "DIVIDENDOS": int } }\n' +
-    "Regras: gere EXATAMENTE 10 perguntas (distribuição sugerida: 4 de FUNDAMENTOS, 3 de CRESCIMENTO, " +
-    "3 de DIVIDENDOS); cobrir os 3 critérios (FUNDAMENTOS = solidez/qualidade do ativo; " +
-    "CRESCIMENTO = potencial de valorização; DIVIDENDOS = geração de renda/proventos); cada pergunta com " +
-    "EXATAMENTE 5 opções ordenadas da pior (índice 0) à melhor (índice 4); ids curtos, únicos, em snake_case; " +
-    "os pesos são inteiros que SOMAM 100 e devem refletir o perfil do investidor.";
+    '{ "perguntas": [ { "id": "slug_curto", "texto": "...", ' +
+    '"criterio": "FUNDAMENTOS|CRESCIMENTO|DIVIDENDOS|VALUATION", ' +
+    '"opcoes": ["pior","...","...","...","melhor"] } ], ' +
+    '"pesos": { "FUNDAMENTOS": int, "CRESCIMENTO": int, "DIVIDENDOS": int, "VALUATION": int } }\n' +
+    "Regras OBRIGATÓRIAS: gere EXATAMENTE 40 perguntas — 10 por critério, na ordem FUNDAMENTOS, " +
+    "CRESCIMENTO, DIVIDENDOS, VALUATION. Cada pergunta com EXATAMENTE 5 opções ordenadas da pior " +
+    "(índice 0) à melhor (índice 4), específicas ao indicador da pergunta (evite repetir sempre a " +
+    "mesma escala genérica). ids curtos, únicos, em snake_case. Os pesos devem ser EXATAMENTE os " +
+    "informados na matriz abaixo.";
   const userMsg =
-    `Tipo de ativo: ${rotuloTipo} (código ${tipo}).\n${ctxPerfil}\n` +
-    "Gere o questionário agora.";
+    `Tipo de ativo a auditar: ${rotuloTipo} (código ${tipo}).\n${ctxPerfil}\n\n` +
+    "Matriz de pesos dinâmicos (cada seção = 10 questões de um critério):\n" +
+    `1. FUNDAMENTOS E GOVERNANÇA — critério FUNDAMENTOS (peso ${pf}%): saúde financeira estrutural, ` +
+    "barreiras de entrada, perenidade, alavancagem/endividamento e alinhamento da gestão/emissor.\n" +
+    `2. CRESCIMENTO E RESILIÊNCIA — critério CRESCIMENTO (peso ${pc}%): capacidade de expansão, ganho ` +
+    "de eficiência, escalabilidade do modelo e comportamento diante de ciclos macroeconômicos ou inflação.\n" +
+    `3. GERAÇÃO DE RENDA / FLUXO DE CAIXA — critério DIVIDENDOS (peso ${pr}%): regularidade do retorno ` +
+    "em caixa, sustentabilidade do fluxo de pagamentos (se aplicável) ou custo de oportunidade de carregar o ativo.\n" +
+    `4. MARGEM DE SEGURANÇA E VALUATION — critério VALUATION (peso ${pv}%): múltiplos atuais de preço, ` +
+    "se o ativo está historicamente caro ou barato, e quais premissas de risco estão embutidas no preço atual.\n\n" +
+    "Cada pergunta deve ser direta, focada em dados, fatos ou indicadores claros do mercado deste ativo " +
+    "específico. Gere agora o JSON do questionário.";
 
   let bruto: string;
   try {
@@ -533,7 +569,7 @@ async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, userId: st
       apiKey,
       persona: system,
       mensagens: [{ role: "user", content: userMsg }],
-      maxTokens: 4000,
+      maxTokens: 8000,
       modelo: modelo ?? undefined,
     });
   } catch (e) {
@@ -546,14 +582,15 @@ async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, userId: st
 
   const parsed = extrairJson(bruto);
   if (!parsed) return erro("A IA não retornou um JSON válido. Tente novamente.", 502);
-  const validacao = validarQuestionario(parsed.perguntas, parsed.pesos);
+  // Pesos são autoritativos (a matriz do usuário); ignoramos o que a IA devolveu.
+  const validacao = validarQuestionario(parsed.perguntas, pesosFinais);
   if (validacao) return erro(`A IA retornou um questionário inválido: ${validacao}`, 502);
 
   return json({
     dados: {
       tipo_ativo:  tipo,
       perguntas:   parsed.perguntas,
-      pesos:       parsed.pesos,
+      pesos:       pesosFinais,
       ia_provedor: provedor,
       ia_modelo:   modelo,
     },
@@ -1887,6 +1924,30 @@ async function upsertDividendoProvisionado(admin: Db, p: {
     return "atualizado";
   }
 
+  // Sem inv_dividendos provisionado: tenta ADOTAR um lançamento manual que o
+  // usuário já tenha criado na agenda para este provento (mesma conta +
+  // categoria do tipo + mês, RECEITA ainda não recebida e ainda não vinculada
+  // a nenhum dividendo). Evita duplicar quando a pessoa provisiona o aluguel
+  // na mão e o dia não bate com o anúncio da B3.
+  const manual = await adotarTransacaoManual(admin, {
+    userId: p.userId, contaId: p.contaId, categoriaId: p.categoriaId,
+    ticker: p.ticker, mesIni, mesFim,
+  });
+  if (manual) {
+    const { data: div, error: errDiv } = await admin.from("inv_dividendos").insert({
+      user_id: p.userId, ativo_id: p.ativoId, conta_id: p.contaId,
+      valor: p.valor, data_pagamento: p.payDate, tipo_ativo: p.tipoAtivo,
+      tipo_dividendo_id: p.tipoDivId, descricao: null, transacao_extrato_id: manual.id,
+    }).select("id").single();
+    if (errDiv || !div) { logError("dividendos-cron adotar div", errDiv); return "ignorado"; }
+    // Atualiza valor/data do lançamento manual com os números reais da B3
+    // (o trigger trg_sync_transacao_dividendo mantém o dividendo alinhado).
+    const campos: Record<string, unknown> = { valor: p.valor, data: p.payDate };
+    if (manual.status === "PROJECAO") campos.valor_projetado = p.valor;
+    await admin.from("transacoes").update(campos).eq("id", manual.id);
+    return "atualizado";
+  }
+
   // Cria o dividendo (sem vínculo ainda)
   const { data: div, error: errDiv } = await admin.from("inv_dividendos").insert({
     user_id: p.userId, ativo_id: p.ativoId, conta_id: p.contaId,
@@ -1909,6 +1970,41 @@ async function upsertDividendoProvisionado(admin: Db, p: {
 
   await admin.from("inv_dividendos").update({ transacao_extrato_id: tx.id }).eq("id", div.id);
   return "criado";
+}
+
+// Procura um lançamento de provento que o usuário criou manualmente na agenda e
+// que ainda NÃO está vinculado a nenhum inv_dividendos, para reaproveitar em vez
+// de duplicar. Conservador: só adota quando consegue identificar UM único
+// candidato (pelo ticker na descrição, ou um único lançamento livre no mês) —
+// nunca arrisca encostar em receita que possa ser de outro provento.
+async function adotarTransacaoManual(admin: Db, p: {
+  userId: string; contaId: string; categoriaId: string;
+  ticker: string; mesIni: string; mesFim: string;
+}): Promise<{ id: string; status: string } | null> {
+  const { data: txs } = await admin.from("transacoes")
+    .select("id, descricao, status")
+    .eq("user_id", p.userId).eq("conta_id", p.contaId)
+    .eq("categoria_id", p.categoriaId).eq("tipo", "RECEITA")
+    .in("status", ["PROJECAO", "PENDENTE"])
+    .gte("data", p.mesIni).lt("data", p.mesFim);
+  const lista = (txs ?? []) as { id: string; descricao: string | null; status: string }[];
+  if (lista.length === 0) return null;
+
+  // Descarta os que já pertencem a algum dividendo (já reconciliados).
+  const { data: vinc } = await admin.from("inv_dividendos")
+    .select("transacao_extrato_id").in("transacao_extrato_id", lista.map((t) => t.id));
+  const usados = new Set(
+    (vinc ?? []).map((v) => (v as { transacao_extrato_id: string }).transacao_extrato_id),
+  );
+  const livres = lista.filter((t) => !usados.has(t.id));
+  if (livres.length === 0) return null;
+
+  // Desambigua por ticker na descrição; senão, só adota se houver um único livre.
+  const alvo = p.ticker.trim().toUpperCase();
+  const porTicker = livres.filter((t) => (t.descricao ?? "").toUpperCase().includes(alvo));
+  if (porTicker.length === 1) return { id: porTicker[0].id, status: porTicker[0].status };
+  if (porTicker.length === 0 && livres.length === 1) return { id: livres[0].id, status: livres[0].status };
+  return null; // ambíguo → não arrisca; segue para criar um novo
 }
 
 // Proventos da Polygon.io (v3 reference dividends; incluído no plano free).
@@ -2087,6 +2183,18 @@ async function provisionarProventosBrl(
       itens:       [...info.itens, ...(prev?.itens ?? [])].slice(0, 25),
     };
     await admin.from("usuarios").update({ inv_dividendos_novidades: payload }).eq("id", userId);
+
+    // Registro DURÁVEL na agenda: 1 lembrete-resumo CONCLUÍDO por execução
+    // (a notificação do login some ao ser vista; este fica no histórico).
+    const partes: string[] = [];
+    if (info.criados > 0)     partes.push(`${info.criados} provisionado(s)`);
+    if (info.atualizados > 0) partes.push(`${info.atualizados} atualizado(s)`);
+    if (partes.length > 0) {
+      const desc = `Proventos B3 (busca automática): ${partes.join(", ")}`.slice(0, 200);
+      const { error: errLem } = await admin.from("lembretes")
+        .insert({ user_id: userId, data: hoje, descricao: desc, status: "CONCLUIDO" });
+      if (errLem) logError("dividendos-br lembrete", errLem);
+    }
   }
 
   logSuccess("Dividendos BR", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados });

@@ -1,10 +1,11 @@
 // ============================================================
 // Questionário de avaliação de ativos — definições PADRÃO por tipo
 //
-// Cada pergunta pertence a um critério (Fundamentos / Crescimento /
-// Pagadora de dividendos) e tem 5 opções (índice 0..4); quanto maior o
-// índice, mais favorável a resposta. A nota final (0..10) é a média
-// PONDERADA por critério (pesos somam 100).
+// Cada pergunta pertence a um critério (Fundamentos e governança /
+// Crescimento e resiliência / Geração de renda / Margem de segurança e
+// valuation) e tem 5 opções (índice 0..4); quanto maior o índice, mais
+// favorável a resposta. A nota final (0..10) é a média PONDERADA por
+// critério (pesos somam 100).
 //
 // Este arquivo é a SEMENTE (default). O usuário pode sobrepor por tipo
 // com um questionário customizado (manual ou gerado por IA) guardado em
@@ -21,8 +22,9 @@ import type { PerguntaAvaliacao, PesosCriterio } from '../types'
 export const PESOS_PADRAO: PesosCriterio = { ...PESOS_SUGERIDOS_POR_PERFIL.MODERADO }
 
 // ── Perguntas base (comuns a todos os tipos) ───────────────────
-// 10 perguntas cobrindo os 3 critérios. Garante o mínimo de 10 por tipo;
-// tipos com perguntas específicas as acrescentam.
+// 12 perguntas cobrindo os 4 critérios. Garante o mínimo por tipo;
+// tipos com perguntas específicas as acrescentam. É só a SEMENTE — o
+// Mentor (IA) gera o questionário completo (40 questões, 10 por critério).
 const PERGUNTAS_BASE: PerguntaAvaliacao[] = [
   // Fundamentos
   {
@@ -68,7 +70,7 @@ const PERGUNTAS_BASE: PerguntaAvaliacao[] = [
     texto: 'O ativo tem diferencial competitivo frente a alternativas similares?',
     opcoes: ['Nenhum', 'Pouco', 'Moderado', 'Forte', 'Muito forte'],
   },
-  // Pagadora de dividendos
+  // Geração de renda
   {
     id: 'd_historico',
     criterio: 'DIVIDENDOS',
@@ -87,12 +89,25 @@ const PERGUNTAS_BASE: PerguntaAvaliacao[] = [
     texto: 'O retorno em proventos (yield) é atrativo frente às alternativas?',
     opcoes: ['Bem abaixo', 'Abaixo', 'Na média', 'Acima', 'Bem acima'],
   },
+  // Margem de segurança e valuation
+  {
+    id: 'v_preco_justo',
+    criterio: 'VALUATION',
+    texto: 'O preço atual está atrativo frente ao valor justo estimado (margem de segurança)?',
+    opcoes: ['Muito caro', 'Caro', 'Justo', 'Barato', 'Muito barato'],
+  },
+  {
+    id: 'v_historico',
+    criterio: 'VALUATION',
+    texto: 'Frente ao próprio histórico, os múltiplos atuais (preço) estão caros ou baratos?',
+    opcoes: ['Muito caro', 'Caro', 'Na média', 'Barato', 'Muito barato'],
+  },
 ]
 
 // Perguntas específicas adicionais por tipo (enriquecem o default).
 const PERGUNTAS_POR_TIPO: Partial<Record<TipoAtivoInvestimento, PerguntaAvaliacao[]>> = {
   ACOES: [
-    { id: 'a_valuation', criterio: 'FUNDAMENTOS', texto: 'O preço atual está atrativo frente aos fundamentos (valuation)?',
+    { id: 'a_valuation', criterio: 'VALUATION', texto: 'O preço atual está atrativo frente aos fundamentos (valuation)?',
       opcoes: ['Muito caro', 'Caro', 'Justo', 'Barato', 'Muito barato'] },
     { id: 'a_lucro', criterio: 'CRESCIMENTO', texto: 'Qual a tendência de crescimento de lucros da empresa?',
       opcoes: ['Em queda', 'Estagnado', 'Leve alta', 'Crescente', 'Forte crescimento'] },
@@ -100,7 +115,7 @@ const PERGUNTAS_POR_TIPO: Partial<Record<TipoAtivoInvestimento, PerguntaAvaliaca
   FII: [
     { id: 'fii_vacancia', criterio: 'FUNDAMENTOS', texto: 'Como está a vacância/inadimplência dos imóveis do fundo?',
       opcoes: ['Muito alta', 'Alta', 'Média', 'Baixa', 'Muito baixa'] },
-    { id: 'fii_pvp', criterio: 'CRESCIMENTO', texto: 'O preço sobre valor patrimonial (P/VP) está favorável?',
+    { id: 'fii_pvp', criterio: 'VALUATION', texto: 'O preço sobre valor patrimonial (P/VP) está favorável?',
       opcoes: ['Muito acima', 'Acima', 'Em linha', 'Abaixo', 'Bem abaixo'] },
   ],
   REIT: [
