@@ -832,19 +832,8 @@ export default function DrawerLancamento({
           <Input ref={dataRef} type="date" value={form.data} onChange={e => set({ data: e.target.value })} />
         </Field>
 
-        {/* Categoria — logo abaixo da data para orientar o preenchimento da descrição */}
-        {form.tipo !== 'TRANSFERENCIA' && (
-          <Field label="Categoria" data-tutorial="drawer-categoria">
-            <SearchableSelect
-              opcoes={opcoesCategorias}
-              value={form.categoria_id}
-              onChange={id => set({ categoria_id: id })}
-              placeholder="Sem categoria"
-            />
-          </Field>
-        )}
-
-        {/* Descrição */}
+        {/* Descrição — antes da Categoria para que o assistente de lançamento
+            (que sugere categoria/conta a partir da descrição) faça sentido */}
         <Field label="Descrição *" data-tutorial="drawer-descricao">
           <div className="relative">
             <Input ref={descricaoRef} value={form.descricao}
@@ -990,6 +979,19 @@ export default function DrawerLancamento({
             </p>
           )}
         </Field>
+
+        {/* Categoria — depois da Descrição: o assistente preenche a categoria a
+            partir da descrição digitada */}
+        {form.tipo !== 'TRANSFERENCIA' && (
+          <Field label="Categoria" data-tutorial="drawer-categoria">
+            <SearchableSelect
+              opcoes={opcoesCategorias}
+              value={form.categoria_id}
+              onChange={id => set({ categoria_id: id })}
+              placeholder="Sem categoria"
+            />
+          </Field>
+        )}
 
         {/* Valor */}
         <Field label="Valor *" data-tutorial="drawer-valor">

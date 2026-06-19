@@ -13,6 +13,7 @@ import { useChatMascote } from '../../hooks/useChatMascote'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useContextoIA, serializarContexto } from '../../context/ContextoIAContext'
 import { useIAPreferencia } from '../../hooks/useIAPreferencia'
+import { provedorPorId } from '../../lib/iaProvedores'
 import { capturarTela } from '../../lib/screenshot'
 
 // Artigo definido por personagem (gênero do mascote, NÃO do apelido).
@@ -49,15 +50,18 @@ export default function ChatMascote({
   nome,
   aberto,
   onFechar,
+  configId,
 }: {
   nome:     MascoteNome
   aberto:   boolean
   onFechar: () => void
+  /** Config de IA específica a usar (sem trocar a ativa). Vazio → usa a ativa. */
+  configId?: string
 }) {
   const { apelidoDe } = useMascotePreferido()
   const apelido = apelidoDe(nome)
   const navigate = useNavigate()
-  const { mensagens, carregando, erro, enviar, limpar } = useChatMascote(nome, apelido)
+  const { mensagens, carregando, erro, enviar, limpar } = useChatMascote(nome, apelido, configId)
   const [input, setInput] = useState('')
   const finalRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -88,9 +92,13 @@ export default function ChatMascote({
     setContextoJaEnviado(false)
   }
 
-  // Screenshot — só relevante se o provedor ativo aceitar visão.
-  const { provedorAtivo } = useIAPreferencia()
-  const suportaVisao = !!provedorAtivo?.visao
+  // Screenshot — só relevante se o provedor da config em uso aceitar visão.
+  // Com `configId`, vale o provedor daquela config; senão, o da ativa.
+  const { provedorAtivo, configs } = useIAPreferencia()
+  const provedorEmUso = configId
+    ? provedorPorId(configs.find(c => c.id === configId)?.provedor ?? '')
+    : provedorAtivo
+  const suportaVisao = !!provedorEmUso?.visao
   const [screenshot, setScreenshot] = useState<string | null>(null)
   const [capturando, setCapturando] = useState(false)
 

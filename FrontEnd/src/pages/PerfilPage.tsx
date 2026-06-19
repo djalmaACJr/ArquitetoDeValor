@@ -440,15 +440,11 @@ function SecaoIA() {
   const { ativa, configs, carregando, salvando, adicionar, atualizar, ativar, remover } = useIAPreferencia()
   const { mascote, apelidoDe } = useMascotePreferido()
   const [chatAberto, setChatAberto] = useState(false)
-  const [ativandoId, setAtivandoId] = useState<string | null>(null)
+  const [conversarId, setConversarId] = useState<string | null>(null)
 
-  /** Abre o chat com o mascote. Se a config clicada não for a ativa, ativa antes. */
-  const aoConversar = async (configId: string) => {
-    if (configId !== ativa?.id) {
-      setAtivandoId(configId)
-      await ativar(configId)
-      setAtivandoId(null)
-    }
+  /** Abre o chat usando a config clicada — SEM trocar qual está ativa. */
+  const aoConversar = (configId: string) => {
+    setConversarId(configId)
     setChatAberto(true)
   }
 
@@ -633,15 +629,12 @@ function SecaoIA() {
                         <button
                           type="button"
                           onClick={() => aoConversar(c.id)}
-                          disabled={ativandoId === c.id}
                           className="px-2.5 py-1 rounded-lg text-[14px] font-medium transition-colors disabled:opacity-50 flex items-center gap-1.5"
                           style={{ color: '#4da6ff', border: '1px solid rgba(77,166,255,0.3)', background: 'rgba(77,166,255,0.08)' }}
-                          title={ehAtiva
-                            ? `Abrir chat com ${apelidoDe(mascote)}`
-                            : `Ativar esta configuração e abrir chat com ${apelidoDe(mascote)}`}
+                          title={`Abrir chat com ${apelidoDe(mascote)} usando esta configuração (não muda a ativa)`}
                         >
                           <MessageCircle size={13}/>
-                          {ativandoId === c.id ? 'Ativando…' : 'Conversar'}
+                          Conversar
                         </button>
                         <button
                           type="button"
@@ -932,8 +925,14 @@ function SecaoIA() {
         é só colar uma nova aqui. Deixar em branco mantém a que já está salva.
       </p>
 
-      {/* Chat com o mascote — abre ao clicar em "Conversar" num card */}
-      <ChatMascote nome={mascote} aberto={chatAberto} onFechar={() => setChatAberto(false)} />
+      {/* Chat com o mascote — abre ao clicar em "Conversar" num card.
+          Usa a config clicada (configId) sem trocar a ativa do usuário. */}
+      <ChatMascote
+        nome={mascote}
+        aberto={chatAberto}
+        configId={conversarId ?? undefined}
+        onFechar={() => { setChatAberto(false); setConversarId(null) }}
+      />
     </Secao>
   )
 }

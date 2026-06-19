@@ -1,11 +1,12 @@
-import { Fragment, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import {
   ArrowLeft, Sparkles, RefreshCw, Bot, AlertTriangle, Settings, ChevronDown, CheckCircle2,
   Trophy, Medal, ShieldCheck, TrendingUp, Coins, Scale, Star, CalendarClock,
-  ArrowUp, ArrowDown, Minus, X, CircleStop, type LucideIcon,
+  ArrowUp, ArrowDown, Minus, X, CircleStop, Clock, Info, type LucideIcon,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
+import { useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
 import { useInvAvaliacoes } from '../hooks/useInvAvaliacoes'
 import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
 import { useInvPerfil } from '../hooks/useInvPerfil'
@@ -13,6 +14,7 @@ import { useInvPesos } from '../hooks/useInvPesos'
 import { useIAPreferencia } from '../hooks/useIAPreferencia'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { useInvAvaliacaoAgenda, FREQUENCIA_LABEL, DIAS_FREQUENCIA } from '../hooks/useInvAvaliacaoAgenda'
+import { useAuth } from '../hooks/useAuth'
 import { useLembretes } from '../hooks/useLembretes'
 import { provedorPorId } from '../lib/iaProvedores'
 import { SelectDark } from '../components/ui/shared'
@@ -32,6 +34,12 @@ type DetAtivo = { perguntas: { id: string; texto: string; criterio: CriterioQues
 interface LogEntry { ticker: string; ok: boolean; erro?: string; nota?: number | null; respostas?: number }
 // Decisão pendente: mentores pausados por erros repetidos, com seu log.
 interface DecisaoPendente { mentores: { configId: string; nome: string; log: LogEntry[]; erros: number }[] }
+// Snapshot, gravado ao concluir uma avaliação, das IAs que participaram e do
+// tempo que cada uma levou — exibido antes da listagem de ativos.
+interface ResumoExecucao {
+  geradoEm: string
+  mentores: { configId: string; nome: string | null; provedor: string; modelo: string | null; tempoMs: number }[]
+}
 
 const MUTED = '#8b92a8'
 
@@ -94,6 +102,42 @@ function BotaoMentorAtivo({ ativo, desabilitado, onToggle }: { ativo: boolean; d
         : { borderColor: 'rgba(255,255,255,0.15)', color: MUTED }}>
       {ativo ? <><CheckCircle2 size={11} /> Participa</> : <><X size={11} /> Desativado</>}
     </button>
+  )
+}
+
+// Selo exibido abaixo do mentor quando ele JÁ concluiu sua parte da rodada
+// (avaliou todos os ativos pedidos, sem ser abortado/parado).
+function SeloParticipou() {
+  return (
+    <span
+      title="Este mentor concluiu sua avaliação nesta rodada"
+      className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border"
+      style={{ borderColor: 'rgba(59,130,246,0.45)', color: '#3b82f6', background: 'rgba(59,130,246,0.12)' }}>
+      <CheckCircle2 size={11} /> Participou
+    </span>
+  )
+}
+
+// Ícone (i) ao lado do mascote do mentor com o nome do modelo no hint.
+function IconeModelo({ modelo }: { modelo: string }) {
+  return (
+    <span
+      onClick={(e) => e.stopPropagation()}
+      title={`Modelo: ${modelo}`}
+      className="absolute top-0 right-0 inline-flex items-center justify-center w-4 h-4 rounded-full border cursor-help"
+      style={{ background: '#141929', borderColor: 'rgba(255,255,255,0.2)', color: '#8b5cf6' }}>
+      <Info size={11} />
+    </span>
+  )
+}
+
+// Tempo de execução real do mentor (abaixo do botão).
+function TempoExecucao({ ms }: { ms: number }) {
+  return (
+    <span className="mt-1 inline-flex items-center gap-1 text-[10.5px]" style={{ color: MUTED }}
+      title="Tempo que esta IA levou pesquisando (não conta reaproveitamento de cache)">
+      <Clock size={10} /> {formatDuracao(ms)}
+    </span>
   )
 }
 
@@ -198,6 +242,38 @@ function IconePosicao({ pos }: { pos: number }) {
   if (pos === 1) return <Medal size={14} style={{ color: '#c0c4cc' }} />
   if (pos === 2) return <Medal size={14} style={{ color: '#cd7f32' }} />
   return <span className="text-[11px] w-[14px] text-center inline-block" style={{ color: MUTED }}>{pos + 1}</span>
+}
+
+// Card de ranking compacto (melhores ou piores de um tipo): lista ticker + nota.
+function MiniRankAtivos({ titulo, Icon, cor, itens, medalhas = true }: {
+  titulo: string
+  Icon: LucideIcon
+  cor: string
+  itens: { ticker: string; nota: number }[]
+  /** Mostra troféu/medalha (melhores) ou só a posição numérica (piores). */
+  medalhas?: boolean
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 p-3">
+      <div className="flex items-center gap-1.5 mb-2">
+        <Icon size={15} style={{ color: cor }} />
+        <h4 className="text-[12px] font-semibold text-white leading-tight">{titulo}</h4>
+      </div>
+      <ol className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+        {itens.map((d, i) => (
+          <li key={d.ticker} className="flex items-center justify-between gap-2 text-[12px]">
+            <span className="flex items-center gap-1.5 min-w-0">
+              {medalhas
+                ? <IconePosicao pos={i} />
+                : <span className="text-[11px] w-[14px] text-center inline-block" style={{ color: MUTED }}>{i + 1}</span>}
+              <span className="text-white/90 truncate">{d.ticker}</span>
+            </span>
+            <span className="font-semibold shrink-0" style={{ color: corNota(d.nota) }}>{d.nota.toFixed(1)}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
 }
 
 // ── Ranking do topo: top 5 ativos por critério + nota final ──────
@@ -316,6 +392,15 @@ function rotuloMentor(nome: string | null, provedor: string): string {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+// Formata uma duração (ms) de execução de um mentor: "45s" ou "1m 05s".
+function formatDuracao(ms: number): string {
+  const seg = Math.max(0, Math.round(ms / 1000))
+  if (seg < 60) return `${seg}s`
+  const m = Math.floor(seg / 60)
+  const s = seg % 60
+  return `${m}m ${String(s).padStart(2, '0')}s`
+}
+
 // Modal com o log individual de execução de um mentor (clicável na lista).
 function ModalLogMentor({ nome, log, onClose }: { nome: string; log: LogEntry[]; onClose: () => void }) {
   const erros = log.filter((e) => !e.ok).length
@@ -356,21 +441,49 @@ function ModalLogMentor({ nome, log, onClose }: { nome: string; log: LogEntry[];
 interface ProgMentor {
   configId: string; nome: string; feito: number; total: number; erros: number
   abortado?: boolean
-  /** Interrompido manualmente pelo usuário (só este mentor). */
-  parado?: boolean
+  /** Pausado pelo usuário (só este mentor) — pode ser retomado. */
+  pausado?: boolean
   /** Segundos restantes até a próxima tentativa automática (backoff). */
   aguardandoSeg?: number
 }
 
-// Botão (abaixo do mentor) para interromper SÓ aquele mentor durante a rodada.
+// Botão (abaixo do mentor) para PAUSAR só aquele mentor durante a rodada.
 function BotaoPararMentor({ onParar }: { onParar: () => void }) {
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onParar() }}
-      title="Parar este mentor (não afeta os demais)"
+      title="Parar este mentor (pode continuar depois — não afeta os demais)"
       className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border"
       style={{ borderColor: 'rgba(255,92,122,0.4)', color: '#ff5c7a', background: 'rgba(255,92,122,0.1)' }}>
       <CircleStop size={11} /> Parar
+    </button>
+  )
+}
+
+// Botão (abaixo do mentor) para CONTINUAR um mentor pausado.
+function BotaoContinuarMentor({ onContinuar }: { onContinuar: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onContinuar() }}
+      title="Continuar este mentor de onde parou"
+      className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border"
+      style={{ borderColor: 'rgba(0,200,150,0.4)', color: '#00c896', background: 'rgba(0,200,150,0.1)' }}>
+      <Sparkles size={11} /> Continuar
+    </button>
+  )
+}
+
+// Botão (fora da rodada) p/ um mentor que avaliou SÓ PARTE dos pendentes — ao
+// continuar, fará apenas os ativos que ainda faltam para ele.
+function BotaoContinuarPendente({ faltam, desabilitado, onContinuar }: { faltam: number; desabilitado?: boolean; onContinuar: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onContinuar() }}
+      disabled={desabilitado}
+      title={`Faltam ${faltam} ativo(s) para este mentor — continuar faz só os que faltam`}
+      className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border disabled:opacity-50"
+      style={{ borderColor: 'rgba(240,180,41,0.45)', color: '#f0b429', background: 'rgba(240,180,41,0.12)' }}>
+      <Sparkles size={11} /> Continuar ({faltam} restante{faltam === 1 ? '' : 's'})
     </button>
   )
 }
@@ -381,28 +494,31 @@ function BarraMentor({ prog }: { prog?: ProgMentor }) {
   const pct = prog.total > 0 ? Math.round((prog.feito / prog.total) * 100) : 0
   const completo = prog.feito >= prog.total
   const aguardando = prog.aguardandoSeg != null && prog.aguardandoSeg > 0
-  const interrompido = prog.parado || prog.abortado
-  const cor = interrompido ? '#ff5c7a' : aguardando ? '#ffb74d' : completo ? '#00c896' : '#8b5cf6'
+  const cor = prog.abortado ? '#ff5c7a' : prog.pausado ? '#ffb74d' : aguardando ? '#ffb74d' : completo ? '#00c896' : '#8b5cf6'
+  const corTexto = prog.abortado ? '#ff5c7a' : (prog.pausado || aguardando) ? '#ffb74d' : MUTED
   return (
     <div className="w-full mt-1.5">
       <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-        <div className={`h-full transition-all ${aguardando ? 'animate-pulse' : ''}`} style={{ width: `${pct}%`, background: cor }} />
+        <div className={`h-full transition-all ${aguardando || prog.pausado ? 'animate-pulse' : ''}`} style={{ width: `${pct}%`, background: cor }} />
       </div>
-      <div className="text-[10.5px] mt-0.5 text-center" style={{ color: interrompido ? '#ff5c7a' : aguardando ? '#ffb74d' : MUTED }}>
-        {aguardando ? `Nova tentativa em ${prog.aguardandoSeg}s`
-          : prog.parado ? 'Parado'
+      <div className="text-[10.5px] mt-0.5 text-center" style={{ color: corTexto }}>
+        {prog.pausado ? `Pausado (${prog.feito}/${prog.total})`
+          : aguardando ? `Nova tentativa em ${prog.aguardandoSeg}s`
           : prog.abortado ? 'Cancelado'
           : `${prog.feito}/${prog.total}`}
-        {!aguardando && prog.erros > 0 && <span style={{ color: '#ffb74d' }}> · {prog.erros} erro(s)</span>}
+        {!aguardando && !prog.pausado && prog.erros > 0 && <span style={{ color: '#ffb74d' }}> · {prog.erros} erro(s)</span>}
       </div>
     </div>
   )
 }
 
 export default function AvaliacoesInvestimentosPage() {
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
   const { configs, ativa, carregando: carregandoIA } = useIAPreferencia()
   const { mascote } = useMascotePreferido()
   const { ativos, loading: loadingAtivos } = useInvestimentosAtivos()
+  const { ranking, loading: loadingRanking } = useInvestimentosRanking()
   const { avaliacoes, loading: loadingAval, avaliarMentorAtivo, salvarAvaliacao, concluir } = useInvAvaliacoes()
   const { questionarioEfetivo } = useInvQuestionarios()
   const { perfil } = useInvPerfil()
@@ -428,13 +544,89 @@ export default function AvaliacoesInvestimentosPage() {
     if (n.has(id)) n.delete(id); else n.add(id)
     return n
   })
-  // Mentores que o usuário pediu para PARAR no meio da rodada (só eles).
-  // Ref (não estado) p/ os loops assíncronos lerem o valor mais recente.
-  const pararMentoresRef = useRef<Set<string>>(new Set())
-  const pararMentor = (configId: string) => {
-    pararMentoresRef.current.add(configId)
+  // Mentores PAUSADOS pelo usuário no meio da rodada (só eles). Ref (não
+  // estado) p/ os loops assíncronos lerem o valor mais recente. Pausar não
+  // encerra o mentor: o loop dele aguarda até ser retomado (ou o usuário sair).
+  const pausadosRef = useRef<Set<string>>(new Set())
+  const pausarMentor = (configId: string) => {
+    pausadosRef.current.add(configId)
     setProgMentores((prev) => prev?.map((p) =>
-      p.configId === configId ? { ...p, parado: true, aguardandoSeg: undefined } : p) ?? prev)
+      p.configId === configId ? { ...p, pausado: true, aguardandoSeg: undefined } : p) ?? prev)
+  }
+  const retomarMentor = (configId: string) => {
+    pausadosRef.current.delete(configId)
+    setProgMentores((prev) => prev?.map((p) =>
+      p.configId === configId ? { ...p, pausado: false } : p) ?? prev)
+  }
+  // Guarda de montagem — encerra loops/esperas de mentores pausados se o
+  // usuário sair da tela (evita polling infinito após desmontar).
+  const montadoRef = useRef(true)
+  useEffect(() => {
+    montadoRef.current = true
+    return () => { montadoRef.current = false }
+  }, [])
+
+  // Cache de resultados bem-sucedidos por (ativo, mentor), PERSISTIDO em
+  // localStorage por usuário. Quando a rodada é interrompida (uma IA deu erro)
+  // e o usuário CONTINUA depois — inclusive após sair e voltar à tela — os
+  // mentores que já avaliaram um ativo o reaproveitam (não pesquisam de novo)
+  // e exibem "Participou". Limpo em reavaliação forçada (tudo / 1 ativo) e
+  // podado conforme os ativos vão sendo salvos.
+  const chaveCache = (ativoId: string, configId: string) => `${ativoId}::${configId}`
+  const cacheStorageKey = uid ? `inv-aval-cache:${uid}` : null
+  const temposStorageKey = uid ? `inv-aval-tempos:${uid}` : null
+  const resumoStorageKey = uid ? `inv-aval-resumo:${uid}` : null
+  // Snapshot das IAs que participaram da última avaliação concluída + tempos.
+  const [resumoExec, setResumoExec] = useState<ResumoExecucao | null>(null)
+  const cacheMentorRef = useRef<Map<string, InvAvaliacaoMentor>>(new Map())
+  // Tempo de execução real (ms de chamadas de IA) acumulado por mentor —
+  // também persistido, para exibir "quanto a IA demorou" mesmo após voltar.
+  const temposMentorRef = useRef<Map<string, number>>(new Map())
+  // Bump para forçar recálculo dos derivados / re-render quando os dados mudam.
+  const [cacheTick, setCacheTick] = useState(0)
+  // Carrega cache + tempos persistidos ao montar / trocar de usuário.
+  useEffect(() => {
+    let m = new Map<string, InvAvaliacaoMentor>()
+    let t = new Map<string, number>()
+    if (cacheStorageKey) {
+      try {
+        const raw = localStorage.getItem(cacheStorageKey)
+        if (raw) m = new Map(Object.entries(JSON.parse(raw) as Record<string, InvAvaliacaoMentor>))
+      } catch { /* cache corrompido — ignora */ }
+    }
+    if (temposStorageKey) {
+      try {
+        const raw = localStorage.getItem(temposStorageKey)
+        if (raw) t = new Map(Object.entries(JSON.parse(raw) as Record<string, number>))
+      } catch { /* ignora */ }
+    }
+    let r: ResumoExecucao | null = null
+    if (resumoStorageKey) {
+      try {
+        const raw = localStorage.getItem(resumoStorageKey)
+        if (raw) r = JSON.parse(raw) as ResumoExecucao
+      } catch { /* ignora */ }
+    }
+    cacheMentorRef.current = m
+    temposMentorRef.current = t
+    setResumoExec(r)
+    setCacheTick((tk) => tk + 1)
+  }, [cacheStorageKey, temposStorageKey, resumoStorageKey])
+  // Persiste o cache atual e dispara recálculo dos derivados.
+  const persistCache = () => {
+    if (cacheStorageKey) {
+      try { localStorage.setItem(cacheStorageKey, JSON.stringify(Object.fromEntries(cacheMentorRef.current))) }
+      catch { /* quota / indisponível — segue só em memória */ }
+    }
+    setCacheTick((t) => t + 1)
+  }
+  // Persiste os tempos de execução por mentor.
+  const persistTempos = () => {
+    if (temposStorageKey) {
+      try { localStorage.setItem(temposStorageKey, JSON.stringify(Object.fromEntries(temposMentorRef.current))) }
+      catch { /* ignora */ }
+    }
+    setCacheTick((t) => t + 1)
   }
 
   // Dados da rodada guardados para finalizar após a decisão do usuário.
@@ -458,13 +650,67 @@ export default function AvaliacoesInvestimentosPage() {
     return m
   }, [ativos])
 
-  // Ativos ainda SEM avaliação salva — base para "continuar" (retomar) após
-  // um erro: a avaliação só persiste por ativo ao final, então os já salvos
-  // são pulados e o processo retoma de onde parou.
-  const pendentes = useMemo(() => ativos.filter((a) => !avalPorAtivo.has(a.id)), [ativos, avalPorAtivo])
+  // Ativos com SALDO (quantidade em carteira) maior que zero — só eles são
+  // avaliados pelas IAs (posição encerrada não interessa para a avaliação).
+  const comSaldo = useMemo(
+    () => new Set((ranking?.ativos ?? []).filter((a) => a.quantidade > 0).map((a) => a.ativo_id)),
+    [ranking],
+  )
+  // Universo avaliável: ativos com saldo > 0.
+  const ativosAvaliaveis = useMemo(() => ativos.filter((a) => comSaldo.has(a.id)), [ativos, comSaldo])
+
+  // Ativos avaliáveis ainda SEM avaliação salva — base para "continuar"
+  // (retomar) após um erro: a avaliação só persiste por ativo ao final, então
+  // os já salvos são pulados e o processo retoma de onde parou.
+  const pendentes = useMemo(() => ativosAvaliaveis.filter((a) => !avalPorAtivo.has(a.id)), [ativosAvaliaveis, avalPorAtivo])
 
   // Mentores que vão de fato fazer a busca (não desativados pelo usuário).
   const configsAtivos = useMemo(() => configs.filter((c) => !mentoresDesativados.has(c.id)), [configs, mentoresDesativados])
+
+  // Tipos de ativo avaliáveis (saldo > 0) presentes na carteira.
+  const tiposPresentes = useMemo(() => {
+    const set = new Set<TipoAtivoInvestimento>(ativosAvaliaveis.map((a) => a.tipo_ativo))
+    return TIPOS_ATIVO_INV.filter((t) => set.has(t))
+  }, [ativosAvaliaveis])
+  // Tipos que o usuário DESMARCOU. Guardamos o que está desligado (não o que
+  // está ligado) para que, por padrão, TODOS os tipos venham marcados — e
+  // tipos novos que surjam depois também já entrem marcados.
+  const [tiposDesmarcados, setTiposDesmarcados] = useState<Set<TipoAtivoInvestimento>>(new Set())
+  const tipoMarcado = (t: TipoAtivoInvestimento) => !tiposDesmarcados.has(t)
+  const toggleTipo = (t: TipoAtivoInvestimento) => setTiposDesmarcados((prev) => {
+    const n = new Set(prev)
+    if (n.has(t)) n.delete(t); else n.add(t)
+    return n
+  })
+  // Filtra uma lista pelos tipos marcados.
+  const filtrarTipos = (lista: InvestimentoAtivo[]) => lista.filter((a) => tipoMarcado(a.tipo_ativo))
+
+  // Computa, a partir do cache persistido, QUANTOS dos ativos pendentes cada
+  // mentor JÁ avaliou (sobrevive a sair/voltar). É a "conta" feita ao carregar
+  // a tela: quem terminou (feitos === total) e quem ainda falta (feitos < total
+  // → ao continuar, faz só os que ainda não fez).
+  const statusPorMentor = useMemo(() => {
+    void cacheTick  // recalcula quando o cache muda
+    const total = pendentes.length
+    const m = new Map<string, { feitos: number; total: number }>()
+    for (const c of configs) {
+      const feitos = pendentes.reduce((n, a) => n + (cacheMentorRef.current.has(chaveCache(a.id, c.id)) ? 1 : 0), 0)
+      m.set(c.id, { feitos, total })
+    }
+    return m
+  }, [configs, pendentes, cacheTick])
+  // Mentores que JÁ concluíram todos os pendentes → exibem "Participou".
+  const mentoresConcluidos = useMemo(() => {
+    const s = new Set<string>()
+    for (const [id, st] of statusPorMentor) if (st.total > 0 && st.feitos >= st.total) s.add(id)
+    return s
+  }, [statusPorMentor])
+  // Há ativo pendente com ao menos um mentor já avaliado em cache? Então dá
+  // para "Concluir agora" (salvar o que já foi coletado, sem rodar mais).
+  const temCacheParaConcluir = useMemo(() => {
+    void cacheTick
+    return pendentes.some((a) => configs.some((c) => cacheMentorRef.current.has(chaveCache(a.id, c.id))))
+  }, [pendentes, configs, cacheTick])
 
   // Perguntas (com critério) + médias por critério de cada ativo avaliado
   // (avaliação ATUAL) — alimenta o detalhamento e o snapshot de histórico.
@@ -525,6 +771,13 @@ export default function AvaliacoesInvestimentosPage() {
     return [...porTipo.entries()].sort((x, y) => TIPOS_ATIVO_INV.indexOf(x[0]) - TIPOS_ATIVO_INV.indexOf(y[0]))
   }, [ativos, avalView])
 
+  // Avaliação da carteira COMO UM TODO (antes da quebra por tipo): qualidade
+  // média de todos os ativos avaliados na visão atual / snapshot.
+  const resumoCarteira = useMemo(() => {
+    const todos = ativos.filter((a) => avalView.has(a.id))
+    return resumoQualidade(todos, avalView, detalheView)
+  }, [ativos, avalView, detalheView])
+
   // Linhas do ranking do topo (refletem a visão atual ou o snapshot).
   const dadosRank = useMemo<LinhaRank[]>(() => {
     const out: LinhaRank[] = []
@@ -583,20 +836,39 @@ export default function AvaliacoesInvestimentosPage() {
   // Coluna/sentido de ordenação da lista (qualquer critério ou a nota final).
   const [ordenar, setOrdenar] = useState<{ key: CriterioQuestao | 'final'; dir: 'asc' | 'desc' }>({ key: 'final', dir: 'desc' })
 
-  // Nº de erros seguidos de uma IA que dispara a pausa daquela IA, e a
-  // política de novas tentativas automáticas (backoff) antes de desistir.
-  const LIMITE_ERROS_SEGUIDOS = 3
+  // Nº de erros SEGUIDOS (sem nenhum acerto no meio) de uma IA que dispara a
+  // pausa daquela IA. A contagem ZERA a cada chamada bem-sucedida. Após a
+  // pausa há novas tentativas automáticas (backoff) antes de desistir.
+  const LIMITE_ERROS_SEGUIDOS = 9
   const ESPERAS_SEG = [20, 45]          // backoff por ciclo de retentativa
   const MAX_CICLOS_RETRY = ESPERAS_SEG.length
+
+  // Enquanto a rodada roda, avisa se o usuário tentar fechar/recarregar a aba
+  // (o processo vive no JS desta aba — sair interrompe a avaliação).
+  useEffect(() => {
+    if (!rodando) return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [rodando])
 
   // Espera com contagem regressiva visível na barra do mentor.
   async function esperarCountdown(configId: string, segundos: number) {
     for (let s = segundos; s > 0; s--) {
-      if (pararMentoresRef.current.has(configId)) break  // parado: aborta a espera
       setProgMentores((prev) => prev?.map((p) => p.configId === configId ? { ...p, aguardandoSeg: s } : p) ?? prev)
       await sleep(1000)
     }
     setProgMentores((prev) => prev?.map((p) => p.configId === configId ? { ...p, aguardandoSeg: undefined } : p) ?? prev)
+  }
+
+  // Bloqueia o loop do mentor enquanto ele estiver PAUSADO, liberando assim que
+  // o usuário clicar em "Continuar". Mantém o mentor vivo na rodada. Para de
+  // aguardar se a tela for desmontada (evita polling infinito).
+  async function aguardarSePausado(configId: string) {
+    while (pausadosRef.current.has(configId) && montadoRef.current) {
+      setProgMentores((prev) => prev?.map((p) => p.configId === configId ? { ...p, pausado: true } : p) ?? prev)
+      await sleep(400)
+    }
   }
 
   // Consolida e persiste o consenso dos ativos, conforme o modo:
@@ -614,6 +886,7 @@ export default function AvaliacoesInvestimentosPage() {
   ) {
     setSalvandoFase(true)
     const jaAvaliados = new Set(avalPorAtivo.keys())
+    const participantes = new Set<string>()   // mentores que de fato avaliaram
     let salvos = 0
     let errosSalvar = 0
     for (const a of lista) {
@@ -627,8 +900,34 @@ export default function AvaliacoesInvestimentosPage() {
       }
       const ef = efPorAtivo.get(a.id)!
       const res = await salvarAvaliacao(a.id, ef.perguntas, ef.pesos, mentores)
-      if (res.ok) { salvos++; jaAvaliados.add(a.id) }
-      else errosSalvar++
+      if (res.ok) {
+        salvos++; jaAvaliados.add(a.id)
+        for (const m of mentores) if (!m.erro) participantes.add(m.config_id)
+        // Ativo salvo no banco → não é mais pendente; remove do cache local.
+        for (const c of configs) cacheMentorRef.current.delete(chaveCache(a.id, c.id))
+      } else errosSalvar++
+    }
+    persistCache()
+
+    // Snapshot das IAs que participaram desta avaliação + tempo de cada uma.
+    if (salvos > 0 && participantes.size > 0) {
+      const snapshot: ResumoExecucao = {
+        geradoEm: new Date().toISOString(),
+        mentores: [...participantes].map((id) => {
+          const c = configs.find((x) => x.id === id)
+          return {
+            configId: id,
+            nome: c?.nome ?? null,
+            provedor: c?.provedor ?? '',
+            modelo: c?.modelo ?? null,
+            tempoMs: temposMentorRef.current.get(id) ?? 0,
+          }
+        }),
+      }
+      setResumoExec(snapshot)
+      if (resumoStorageKey) {
+        try { localStorage.setItem(resumoStorageKey, JSON.stringify(snapshot)) } catch { /* ignora */ }
+      }
     }
 
     await concluir()
@@ -651,19 +950,53 @@ export default function AvaliacoesInvestimentosPage() {
     await finalizarSalvando(d.lista, d.efPorAtivo, d.resultadosPorAtivo, modo, d.abortados, d.configsRun)
   }
 
+  // CONCLUIR agora: salva os ativos pendentes com o que já está em cache (sem
+  // rodar mais nada). Ativos com ao menos um mentor avaliado são consolidados;
+  // os sem nenhum resultado continuam pendentes.
+  async function concluirAgora() {
+    if (rodando || pendenteDecisao) return
+    const lista: InvestimentoAtivo[] = []
+    const efPorAtivo = new Map<string, EfQ>()
+    const resultadosPorAtivo = new Map<string, InvAvaliacaoMentor[]>()
+    for (const a of pendentes) {
+      const mentores: InvAvaliacaoMentor[] = []
+      for (const c of configs) {
+        const r = cacheMentorRef.current.get(chaveCache(a.id, c.id))
+        if (r) mentores.push(r)
+      }
+      if (mentores.length === 0) continue
+      const ef = questionarioEfetivo(a.tipo_ativo, perfil?.perfil ?? null, pesosGlobais)
+      efPorAtivo.set(a.id, { perguntas: ef.perguntas, pesos: ef.pesos })
+      resultadosPorAtivo.set(a.id, mentores)
+      lista.push(a)
+    }
+    if (lista.length === 0) return
+    await finalizarSalvando(lista, efPorAtivo, resultadosPorAtivo, 'ignorar', new Set(), [])
+  }
+
   // Avalia uma lista de ativos. Cada MENTOR roda em paralelo (loop próprio
   // sobre os ativos, com barra de progresso individual). Uma IA que acumula
   // erros seguidos é PAUSADA (não é martelada nos demais ativos) e a rodada
   // espera o usuário decidir o que fazer. Sem pausas, consolida e persiste.
-  async function avaliar(lista: InvestimentoAtivo[]) {
+  // `fresh` força nova pesquisa (limpa o cache dos ativos da lista) — usado em
+  // "reavaliar tudo" e "reavaliar 1 ativo". Em "continuar" (fresh=false) o
+  // cache é reaproveitado: mentores que já concluíram não pesquisam de novo.
+  async function avaliar(lista: InvestimentoAtivo[], fresh = false) {
     if (rodando || pendenteDecisao || lista.length === 0 || configsAtivos.length === 0) return
+    if (fresh) {
+      for (const a of lista) for (const c of configs) cacheMentorRef.current.delete(chaveCache(a.id, c.id))
+      for (const c of configsAtivos) temposMentorRef.current.delete(c.id)
+      persistCache()
+      persistTempos()
+    }
+    const reusarCache = !fresh
     setRodando(true)
     setSalvandoFase(false)
     setResumo(null)
     setPendenteDecisao(null)
     setRoundSelecionado(null)
     decisaoRef.current = null
-    pararMentoresRef.current = new Set()
+    pausadosRef.current = new Set()
     const total = lista.length
     const participantes = configsAtivos          // mentores que farão a busca nesta rodada
     const idsParticipantes = participantes.map((c) => c.id)
@@ -692,6 +1025,7 @@ export default function AvaliacoesInvestimentosPage() {
       logsPorMentor.set(c.id, log)
       const atribuidos = new Map<string, InvAvaliacaoMentor>()
       const tentados = new Set<string>()
+      let msExecucao = 0   // tempo real gasto em chamadas de IA por este mentor
       const registrarLog = () => setLogsMentor((prev) => ({ ...prev, [c.id]: [...log] }))
       const atualizarProg = () => {
         const erros = [...atribuidos.values()].filter((x) => x.erro).length
@@ -701,23 +1035,36 @@ export default function AvaliacoesInvestimentosPage() {
       let fila = [...lista]
       let ciclo = 0
       let abortou = false
-      let parado = false
+      // Erros SEGUIDOS sem nenhum acerto — zera a cada sucesso (inclusive
+      // reaproveitamento de cache). Persiste entre ciclos de retentativa.
+      let consecutivos = 0
       while (fila.length > 0) {
-        if (pararMentoresRef.current.has(c.id)) { parado = true; break }
+        await aguardarSePausado(c.id)
+        if (!montadoRef.current) return     // saiu da tela: encerra este mentor
         const aindaFalhou: InvestimentoAtivo[] = []
-        let consecutivos = 0
+        // Bateu o limite de erros seguidos NESTE ciclo? Então pausa/aborta.
+        let atingiuLimite = false
         for (let idx = 0; idx < fila.length; idx++) {
-          if (pararMentoresRef.current.has(c.id)) { parado = true; break }
+          await aguardarSePausado(c.id)   // bloqueia aqui enquanto pausado
+          if (!montadoRef.current) return  // saiu da tela: encerra este mentor
           const a = fila[idx]
           const ef = efPorAtivo.get(a.id)!
-          const res = await avaliarMentorAtivo(a.id, c.id, ef.perguntas, ef.pesos)
-          const r: InvAvaliacaoMentor = res.ok && res.dados
-            ? res.dados
-            : { config_id: c.id, nome: c.nome ?? null, provedor: c.provedor, modelo: c.modelo ?? null, nota: null, respostas: {}, erro: res.erro ?? 'falha' }
+          // Reaproveita resultado já obtido (rodada anterior interrompida).
+          const cacheado = reusarCache ? cacheMentorRef.current.get(chaveCache(a.id, c.id)) : undefined
+          const r: InvAvaliacaoMentor = cacheado ?? await (async () => {
+            const t0 = performance.now()
+            const res = await avaliarMentorAtivo(a.id, c.id, ef.perguntas, ef.pesos)
+            msExecucao += performance.now() - t0
+            const rr: InvAvaliacaoMentor = res.ok && res.dados
+              ? res.dados
+              : { config_id: c.id, nome: c.nome ?? null, provedor: c.provedor, modelo: c.modelo ?? null, nota: null, respostas: {}, erro: res.erro ?? 'falha' }
+            if (!rr.erro) { cacheMentorRef.current.set(chaveCache(a.id, c.id), rr); persistCache() }
+            return rr
+          })()
           atribuidos.set(a.id, r)
           tentados.add(a.id)
           log.push({
-            ticker: ciclo > 0 ? `${a.ticker} (tentativa ${ciclo + 1})` : a.ticker,
+            ticker: cacheado ? `${a.ticker} (reaproveitado)` : ciclo > 0 ? `${a.ticker} (tentativa ${ciclo + 1})` : a.ticker,
             ok: !r.erro,
             erro: r.erro ?? undefined,
             nota: r.erro ? undefined : r.nota,
@@ -727,18 +1074,28 @@ export default function AvaliacoesInvestimentosPage() {
           atualizarProg()
           if (r.erro) { aindaFalhou.push(a); consecutivos++ } else consecutivos = 0
           if (consecutivos >= LIMITE_ERROS_SEGUIDOS) {
+            atingiuLimite = true
             for (let j = idx + 1; j < fila.length; j++) aindaFalhou.push(fila[j])
             break
           }
         }
-        if (parado) break                    // interrompido manualmente
         if (aindaFalhou.length === 0) break  // mentor concluiu sem pendências
-        ciclo++
-        if (ciclo > MAX_CICLOS_RETRY) { abortou = true; break }
-        const seg = ESPERAS_SEG[Math.min(ciclo - 1, ESPERAS_SEG.length - 1)]
-        log.push({ ticker: '—', ok: false, erro: `Pausada após erros — nova tentativa em ${seg}s (${ciclo + 1}ª de ${MAX_CICLOS_RETRY + 1}).` })
-        registrarLog()
-        await esperarCountdown(c.id, seg)
+        const resolvidosNoCiclo = fila.length - aindaFalhou.length
+        if (atingiuLimite) {
+          // Bateu o limite de erros SEGUIDOS: pausa com backoff e re-tenta.
+          // Persistindo após MAX_CICLOS_RETRY, aborta e pede decisão.
+          ciclo++
+          if (ciclo > MAX_CICLOS_RETRY) { abortou = true; break }
+          const seg = ESPERAS_SEG[Math.min(ciclo - 1, ESPERAS_SEG.length - 1)]
+          log.push({ ticker: '—', ok: false, erro: `Pausada após ${LIMITE_ERROS_SEGUIDOS} erros seguidos — nova tentativa em ${seg}s (${ciclo + 1}ª de ${MAX_CICLOS_RETRY + 1}).` })
+          registrarLog()
+          await esperarCountdown(c.id, seg)
+        } else if (resolvidosNoCiclo === 0) {
+          // Ciclo inteiro sem nenhum acerto e sem bater o limite (poucas falhas
+          // esparsas teimosas): para de re-tentar. Ficam como erro do mentor,
+          // mas NÃO bloqueiam a rodada (sem fluxo de decisão).
+          break
+        }
         fila = aindaFalhou
       }
 
@@ -748,13 +1105,17 @@ export default function AvaliacoesInvestimentosPage() {
         arr.push(r)
         resultadosPorAtivo.set(aid, arr)
       }
-      if (parado) {
-        // Interrompido pelo usuário: NÃO entra no fluxo de decisão (abortados).
-        // Mantém os resultados parciais já coletados e segue a rodada.
-        log.push({ ticker: '—', ok: false, erro: 'Interrompido pelo usuário (parado).' })
-        registrarLog()
-        setProgMentores((prev) => prev?.map((p) => p.configId === c.id ? { ...p, parado: true, aguardandoSeg: undefined } : p) ?? prev)
-      } else if (abortou) {
+      // Persiste o que este mentor obteve (resultados bem-sucedidos já estão no
+      // cacheMentorRef) — assim "Participou" e o reaproveitamento sobrevivem a
+      // sair/voltar mesmo que a rodada seja interrompida.
+      persistCache()
+      // Acumula o tempo real gasto em chamadas de IA deste mentor (reaproveitar
+      // cache soma 0). Persiste para exibir mesmo após sair/voltar.
+      if (msExecucao > 0) {
+        temposMentorRef.current.set(c.id, (temposMentorRef.current.get(c.id) ?? 0) + msExecucao)
+        persistTempos()
+      }
+      if (abortou) {
         abortados.add(c.id)
         log.push({ ticker: '—', ok: false, erro: `Execução abortada após ${MAX_CICLOS_RETRY + 1} tentativas com erros.` })
         registrarLog()
@@ -785,10 +1146,14 @@ export default function AvaliacoesInvestimentosPage() {
     await finalizarSalvando(lista, efPorAtivo, resultadosPorAtivo, 'todos', abortados, idsParticipantes)
   }
 
-  if (carregandoIA || loadingAtivos || loadingAval) return <LoadingMascote />
+  if (carregandoIA || loadingAtivos || loadingAval || loadingRanking) return <LoadingMascote />
 
   // Gating: precisa de ≥1 mentor configurado.
   const semMentor = configs.length === 0
+
+  // Listas que de fato vão para a avaliação (saldo > 0 + tipos selecionados).
+  const pendentesSel = filtrarTipos(pendentes)
+  const avaliaveisSel = filtrarTipos(ativosAvaliaveis)
 
   return (
     <div className="p-5">
@@ -804,9 +1169,6 @@ export default function AvaliacoesInvestimentosPage() {
           </p>
         </div>
       </div>
-
-      {/* Ranking dos ativos — topo da página */}
-      {dadosRank.length > 0 && <RankingTopo dados={dadosRank} />}
 
       {semMentor ? (
         <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
@@ -829,25 +1191,75 @@ export default function AvaliacoesInvestimentosPage() {
         </div>
       ) : (
         <>
+          {/* Seleção de quais TIPOS de ativo as IAs devem pesquisar. Só os
+              tipos com saldo > 0 aparecem; clicar liga/desliga o tipo. */}
+          {tiposPresentes.length > 1 && (
+            <div className="mb-3">
+              <p className="text-[12.5px] mb-1.5" style={{ color: MUTED }}>Tipos de ativo a avaliar:</p>
+              <div className="flex flex-wrap gap-2">
+                {tiposPresentes.map((t) => {
+                  const on = tipoMarcado(t)
+                  return (
+                    <button key={t} onClick={() => toggleTipo(t)} disabled={rodando || !!pendenteDecisao}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium border disabled:opacity-50"
+                      style={on
+                        ? { borderColor: `${TIPO_ATIVO_COR[t]}66`, color: TIPO_ATIVO_COR[t], background: `${TIPO_ATIVO_COR[t]}1a` }
+                        : { borderColor: 'rgba(255,255,255,0.15)', color: MUTED }}>
+                      <span className="w-2 h-2 rounded-full" style={{ background: on ? TIPO_ATIVO_COR[t] : MUTED }} />
+                      {TIPO_ATIVO_LABEL[t]}
+                      {on ? <CheckCircle2 size={12} /> : <X size={12} />}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Botão avaliar — à esquerda. Avalia só os PENDENTES (retoma de
               onde parou após erro). "Reavaliar tudo" força a carteira inteira. */}
           <div className="mb-4 flex items-center gap-2 flex-wrap">
-            <button onClick={() => avaliar(pendentes)} disabled={rodando || !!pendenteDecisao || pendentes.length === 0 || configsAtivos.length === 0}
+            <button onClick={() => avaliar(pendentesSel)} disabled={rodando || !!pendenteDecisao || pendentesSel.length === 0 || configsAtivos.length === 0}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50"
               style={{ background: '#8b5cf6' }}>
               <Sparkles size={15} className={rodando ? 'animate-pulse' : ''} />
               {rodando ? 'Avaliando…'
                 : avaliacoes.length > 0
-                  ? `Continuar avaliação (${pendentes.length} restante${pendentes.length === 1 ? '' : 's'})`
+                  ? `Continuar avaliação (${pendentesSel.length} restante${pendentesSel.length === 1 ? '' : 's'})`
                   : 'Avaliar carteira com os mentores'}
             </button>
+            {temCacheParaConcluir && (
+              <button onClick={() => concluirAgora()} disabled={rodando || !!pendenteDecisao}
+                title="Salvar agora os ativos pendentes com o que os mentores já avaliaram (sem rodar mais)"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50"
+                style={{ background: '#00a37a' }}>
+                <CheckCircle2 size={15} /> Concluir
+              </button>
+            )}
             {avaliacoes.length > 0 && (
-              <button onClick={() => avaliar(ativos)} disabled={rodando || !!pendenteDecisao || configsAtivos.length === 0}
+              <button onClick={() => avaliar(avaliaveisSel, true)} disabled={rodando || !!pendenteDecisao || avaliaveisSel.length === 0 || configsAtivos.length === 0}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border border-white/15 text-white/90 hover:border-white/30 disabled:opacity-50">
                 <RefreshCw size={14} className={rodando ? 'animate-spin' : ''} /> Reavaliar tudo
               </button>
             )}
+            {!rodando && ativosAvaliaveis.length === 0 && (
+              <span className="text-[12.5px]" style={{ color: MUTED }}>
+                Nenhum ativo com saldo em carteira para avaliar.
+              </span>
+            )}
           </div>
+
+          {/* Aviso enquanto roda: não trocar/fechar aba, não abrir o sistema
+              em outra aba — o processo vive nesta aba e seria interrompido. */}
+          {rodando && (
+            <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start gap-2">
+              <AlertTriangle size={18} style={{ color: '#ffb74d' }} className="mt-0.5 shrink-0" />
+              <p className="text-[13px] text-white/90">
+                <strong className="text-white">Avaliação em andamento — aguarde o término.</strong>{' '}
+                Não feche nem recarregue esta aba e não abra o sistema em outra aba: o processo
+                roda aqui e seria interrompido. Você pode acompanhar o progresso de cada mentor abaixo.
+              </p>
+            </div>
+          )}
 
           {/* Resumo da rodada — avaliados agora × restantes na carteira */}
           {resumo && !rodando && (
@@ -913,10 +1325,27 @@ export default function AvaliacoesInvestimentosPage() {
               const ativoCfg = ativa ?? configs[0]
               const outros = configs.filter((c) => c.id !== ativoCfg?.id)
               const progPorConfig = new Map((progMentores ?? []).map((p) => [p.configId, p]))
-              // Mentor "parável": rodando e ainda em andamento (não parado/cancelado/concluído).
-              const podeParar = (id: string) => {
+              // Decide o que mostrar abaixo de cada mentor conforme o estado:
+              //  - rodando + em andamento  → "Parar" (pausa)
+              //  - rodando + pausado       → "Continuar" (retoma o mentor)
+              //  - concluiu os pendentes   → "Participou"
+              //  - fora da rodada + parcial → "Continuar (N restantes)" (faz só o que falta)
+              //  - caso contrário          → liga/desliga participação
+              const acaoMentor = (id: string) => {
                 const p = progPorConfig.get(id)
-                return rodando && !!p && !p.parado && !p.abortado && p.feito < p.total
+                if (rodando && p) {
+                  if (p.pausado) return <BotaoContinuarMentor onContinuar={() => retomarMentor(id)} />
+                  if (!p.abortado && p.feito < p.total) return <BotaoPararMentor onParar={() => pausarMentor(id)} />
+                }
+                if (mentoresConcluidos.has(id)) return <SeloParticipou />
+                const st = statusPorMentor.get(id)
+                if (!rodando && !pendenteDecisao && st && st.total > 0 && st.feitos > 0 && st.feitos < st.total) {
+                  return <BotaoContinuarPendente faltam={st.total - st.feitos}
+                    desabilitado={configsAtivos.length === 0 || pendentesSel.length === 0}
+                    onContinuar={() => avaliar(pendentesSel)} />
+                }
+                return <BotaoMentorAtivo ativo={!mentoresDesativados.has(id)} desabilitado={rodando || !!pendenteDecisao}
+                  onToggle={() => toggleMentorAtivo(id)} />
               }
               return (
                 <div className="flex flex-col items-center gap-3">
@@ -927,8 +1356,11 @@ export default function AvaliacoesInvestimentosPage() {
                   <div className="flex flex-col items-center w-[150px] cursor-pointer rounded-lg hover:bg-white/[0.03] p-1"
                     title="Ver log de execução deste mentor"
                     onClick={() => ativoCfg && setLogAberto(ativoCfg.id)}>
-                    <Mascote nome={mascote} pose="comprimento-inicio"
-                      className={`!h-[120px] !w-auto ${ativoCfg && mentoresDesativados.has(ativoCfg.id) ? 'opacity-30 grayscale' : ''}`} />
+                    <div className="relative">
+                      <Mascote nome={mascote} pose="comprimento-inicio"
+                        className={`!h-[120px] !w-auto ${ativoCfg && mentoresDesativados.has(ativoCfg.id) ? 'opacity-30 grayscale' : ''}`} />
+                      {ativoCfg?.modelo && <IconeModelo modelo={ativoCfg.modelo} />}
+                    </div>
                     <span className="mt-1 text-[13px] font-semibold text-white text-center">
                       {ativoCfg ? rotuloMentor(ativoCfg.nome ?? null, ativoCfg.provedor) : '—'}
                     </span>
@@ -937,10 +1369,10 @@ export default function AvaliacoesInvestimentosPage() {
                       <Sparkles size={11} /> Orquestrador
                     </span>
                     {ativoCfg && <BarraMentor prog={progPorConfig.get(ativoCfg.id)} />}
-                    {ativoCfg && podeParar(ativoCfg.id)
-                      ? <BotaoPararMentor onParar={() => pararMentor(ativoCfg.id)} />
-                      : ativoCfg && <BotaoMentorAtivo ativo={!mentoresDesativados.has(ativoCfg.id)} desabilitado={rodando || !!pendenteDecisao}
-                          onToggle={() => toggleMentorAtivo(ativoCfg.id)} />}
+                    {ativoCfg && acaoMentor(ativoCfg.id)}
+                    {ativoCfg && (temposMentorRef.current.get(ativoCfg.id) ?? 0) > 0 && (
+                      <TempoExecucao ms={temposMentorRef.current.get(ativoCfg.id)!} />
+                    )}
                   </div>
 
                   {/* Conector + demais mentores */}
@@ -952,19 +1384,19 @@ export default function AvaliacoesInvestimentosPage() {
                           <div key={c.id} className="flex flex-col items-center w-[110px] cursor-pointer rounded-lg hover:bg-white/[0.03] p-1"
                             title="Ver log de execução deste mentor"
                             onClick={() => setLogAberto(c.id)}>
-                            <Mascote nome={mascoteSecundario(i, mascote)} pose="sentado"
-                              className={`!h-[120px] !w-auto ${mentoresDesativados.has(c.id) ? 'opacity-30 grayscale' : ''}`} />
+                            <div className="relative">
+                              <Mascote nome={mascoteSecundario(i, mascote)} pose="sentado"
+                                className={`!h-[120px] !w-auto ${mentoresDesativados.has(c.id) ? 'opacity-30 grayscale' : ''}`} />
+                              {c.modelo && <IconeModelo modelo={c.modelo} />}
+                            </div>
                             <span className="mt-1 text-[12px] font-medium text-white/90 text-center leading-tight">
                               {rotuloMentor(c.nome ?? null, c.provedor)}
                             </span>
-                            {c.modelo && (
-                              <span className="text-[11px] text-center" style={{ color: MUTED }}>{c.modelo}</span>
-                            )}
                             <BarraMentor prog={progPorConfig.get(c.id)} />
-                            {podeParar(c.id)
-                              ? <BotaoPararMentor onParar={() => pararMentor(c.id)} />
-                              : <BotaoMentorAtivo ativo={!mentoresDesativados.has(c.id)} desabilitado={rodando || !!pendenteDecisao}
-                                  onToggle={() => toggleMentorAtivo(c.id)} />}
+                            {acaoMentor(c.id)}
+                            {(temposMentorRef.current.get(c.id) ?? 0) > 0 && (
+                              <TempoExecucao ms={temposMentorRef.current.get(c.id)!} />
+                            )}
                           </div>
                         ))}
                       </div>
@@ -998,6 +1430,52 @@ export default function AvaliacoesInvestimentosPage() {
             </div>
           )}
 
+          {/* Avaliação da carteira COMO UM TODO + IAs que participaram —
+              exibida antes da listagem (por tipo) de ativos. */}
+          {gruposAvaliados.length > 0 && (
+            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-4">
+              <h2 className="text-[13px] font-semibold text-white mb-2 flex items-center gap-1.5">
+                <Sparkles size={15} style={{ color: '#8b5cf6' }} /> Avaliação da carteira
+              </h2>
+              {resumoCarteira ? (
+                <div className="rounded-lg border px-3 py-2 text-[12.5px]"
+                  style={{ borderColor: `${resumoCarteira.cor}55`, background: `${resumoCarteira.cor}14` }}>
+                  <span className="font-semibold" style={{ color: resumoCarteira.cor }}>{resumoCarteira.label}.</span>{' '}
+                  <span className="text-white/85">{resumoCarteira.texto.replace(/^Qualidade \w+ — /, '')}</span>
+                </div>
+              ) : (
+                <p className="text-[12.5px]" style={{ color: MUTED }}>Sem ativos avaliados ainda.</p>
+              )}
+
+              {/* IAs que participaram da última avaliação concluída + tempos */}
+              {!modoHistorico && resumoExec && resumoExec.mentores.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[12px] font-semibold text-white mb-1.5">
+                    IAs que participaram
+                    <span className="font-normal" style={{ color: MUTED }}> · {new Date(resumoExec.geradoEm).toLocaleString('pt-BR')}</span>
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {resumoExec.mentores.map((m) => (
+                      <span key={m.configId} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 text-[12px]">
+                        <Bot size={13} style={{ color: '#8b5cf6' }} />
+                        <span className="text-white/90">{rotuloMentor(m.nome, m.provedor)}</span>
+                        {m.modelo && <span style={{ color: MUTED }}>({m.modelo})</span>}
+                        {m.tempoMs > 0 && (
+                          <span className="inline-flex items-center gap-1" style={{ color: MUTED }}>
+                            <Clock size={11} /> {formatDuracao(m.tempoMs)}
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Ranking geral dos ativos — logo após a avaliação da carteira */}
+          {dadosRank.length > 0 && <RankingTopo dados={dadosRank} />}
+
           {avaliacoes.length === 0 && !progMentores ? (
             <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center text-[13px]" style={{ color: MUTED }}>
               Nenhuma avaliação ainda. Clique em “Avaliar carteira com os mentores”.
@@ -1008,7 +1486,7 @@ export default function AvaliacoesInvestimentosPage() {
                 <GrupoTipoAvaliacao key={tipo} tipo={tipo} ativos={lista}
                   avalPorAtivo={avalView} detalhePorAtivo={detalheView}
                   ordenar={ordenar} setOrdenar={setOrdenar} modoHistorico={modoHistorico}
-                  rodando={rodando} onReavaliar={(id) => avaliar([ativoPorId.get(id)!])} />
+                  rodando={rodando} onReavaliar={(id) => avaliar([ativoPorId.get(id)!], true)} />
               ))}
             </div>
           )}
@@ -1096,10 +1574,40 @@ function GrupoTipoAvaliacao({ tipo, ativos, avalPorAtivo, detalhePorAtivo, orden
     [ativos, avalPorAtivo, detalhePorAtivo],
   )
 
+  // Melhores e piores do tipo (por nota final). O quadro de ranking só faz
+  // sentido para tipos com mais de 10 ativos avaliados — abaixo disso a própria
+  // tabela já dá a visão completa. Os "piores" nunca repetem os "melhores".
+  const NRANK = 5
+  const MIN_PARA_RANK = 10
+  const { melhores, piores } = useMemo(() => {
+    const ranked = ativos
+      .map((a) => ({ ticker: a.ticker, nota: avalPorAtivo.get(a.id)?.nota_final ?? null }))
+      .filter((x): x is { ticker: string; nota: number } => x.nota != null)
+      .sort((a, b) => b.nota - a.nota)
+    if (ranked.length <= MIN_PARA_RANK) return { melhores: [], piores: [] }
+    const best = ranked.slice(0, NRANK)
+    const worst = ranked.slice(Math.max(NRANK, ranked.length - NRANK)).reverse()  // piores primeiro
+    return { melhores: best, piores: worst }
+  }, [ativos, avalPorAtivo])
+
+  // Posição (1..N) de cada ativo do tipo pela nota final — coluna "Ranking".
+  const rankPorAtivo = useMemo(() => {
+    const ranked = ativos
+      .map((a) => ({ id: a.id, nota: avalPorAtivo.get(a.id)?.nota_final ?? null }))
+      .filter((x): x is { id: string; nota: number } => x.nota != null)
+      .sort((a, b) => b.nota - a.nota)
+    const m = new Map<string, number>()
+    ranked.forEach((x, i) => m.set(x.id, i + 1))
+    return m
+  }, [ativos, avalPorAtivo])
+
   return (
     <div>
-      {/* Cabeçalho do tipo — clicável para colapsar/expandir o grupo. */}
-      <button onClick={() => setGrupoAberto((o) => !o)} className="w-full flex items-center gap-2 mb-2 text-left">
+      {/* Cabeçalho do tipo — clicável para colapsar/expandir o grupo. Fica
+          fixo no topo (sticky) enquanto a lista daquele tipo estiver em tela. */}
+      <button onClick={() => setGrupoAberto((o) => !o)}
+        className="w-full flex items-center gap-2 mb-2 text-left sticky top-0 z-10 py-1.5"
+        style={{ background: 'var(--bg-page, #0a0f1a)' }}>
         <ChevronDown size={15} style={{ color: MUTED }} className={`shrink-0 transition-transform ${grupoAberto ? '' : '-rotate-90'}`} />
         <span className="w-2.5 h-2.5 rounded-full" style={{ background: TIPO_ATIVO_COR[tipo] }} />
         <span className="text-[14px] font-semibold text-white">{TIPO_ATIVO_LABEL[tipo]}</span>
@@ -1119,11 +1627,22 @@ function GrupoTipoAvaliacao({ tipo, ativos, avalPorAtivo, detalhePorAtivo, orden
         </div>
       )}
 
+      {/* Rankings do tipo — melhores e (abaixo) piores. */}
+      {melhores.length > 0 && (
+        <div className="mb-2 space-y-2">
+          <MiniRankAtivos titulo="Melhores" Icon={Trophy} cor="#f0b429" itens={melhores} />
+          {piores.length > 0 && (
+            <MiniRankAtivos titulo="Piores" Icon={ArrowDown} cor="#ff5c7a" itens={piores} medalhas={false} />
+          )}
+        </div>
+      )}
+
       <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-x-auto">
         <table className="w-full text-[12.5px] border-collapse">
           <thead>
             <tr style={{ color: MUTED }}>
-              <th className="font-medium py-2 pl-3 pr-2 text-left min-w-[200px]">Ativo</th>
+              <th className="font-medium py-2 pl-3 pr-2 text-center whitespace-nowrap">Ranking</th>
+              <th className="font-medium py-2 pl-2 pr-2 text-left min-w-[200px]">Ativo</th>
               {CRITERIOS_QUESTAO.map((cr) => (
                 <ThSort key={cr} col={cr} label={CRITERIO_ABBR[cr]} icon={CRITERIO_ICON[cr]} ordenar={ordenar} setOrdenar={setOrdenar} />
               ))}
@@ -1142,7 +1661,15 @@ function GrupoTipoAvaliacao({ tipo, ativos, avalPorAtivo, detalhePorAtivo, orden
                 <Fragment key={a.id}>
                   <tr onClick={() => !modoHistorico && toggle(a.id)}
                     className={`border-t border-white/5 ${modoHistorico ? '' : 'cursor-pointer hover:bg-white/[0.02]'}`}>
-                    <td className="py-2 pl-3 pr-2">
+                    <td className="py-2 pl-3 pr-2 text-center">
+                      {(() => {
+                        const pos = rankPorAtivo.get(a.id)
+                        return pos
+                          ? <span className="inline-flex items-center justify-center"><IconePosicao pos={pos - 1} /></span>
+                          : <span style={{ color: MUTED }}>—</span>
+                      })()}
+                    </td>
+                    <td className="py-2 pl-2 pr-2">
                       <div className="flex items-center gap-1.5 min-w-0">
                         {!modoHistorico && <ChevronDown size={14} style={{ color: MUTED }} className={`shrink-0 transition-transform ${estaAberto ? '' : '-rotate-90'}`} />}
                         <span className="font-semibold text-white">{a.ticker}</span>
@@ -1190,7 +1717,7 @@ function GrupoTipoAvaliacao({ tipo, ativos, avalPorAtivo, detalhePorAtivo, orden
                   </tr>
                   {!modoHistorico && estaAberto && det && (
                     <tr className="bg-black/20">
-                      <td colSpan={CRITERIOS_QUESTAO.length + 4} className="p-0">
+                      <td colSpan={CRITERIOS_QUESTAO.length + 5} className="p-0">
                         <div className="px-3 py-3">
                           <PlanilhaDetalhe avaliacao={av} perguntasTexto={det.perguntas} />
                         </div>

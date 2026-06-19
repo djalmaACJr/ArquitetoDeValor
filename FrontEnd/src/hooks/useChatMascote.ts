@@ -16,7 +16,7 @@ export interface Mensagem {
   ts:      number
 }
 
-export function useChatMascote(mascote: MascoteNome, apelido?: string) {
+export function useChatMascote(mascote: MascoteNome, apelido?: string, configId?: string) {
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -44,6 +44,7 @@ export function useChatMascote(mascote: MascoteNome, apelido?: string) {
       mascote,
       apelido:  apelido || undefined,  // edge function injeta no system prompt
       mensagem: limpo,
+      configId: configId || undefined,  // conversa com config específica sem trocar a ativa
       contexto: extras?.contextoTexto || undefined,
       screenshot: extras?.screenshotBase64 || undefined,
       historico: [...mensagens, minhaMsg].slice(0, -1).map(m => ({
@@ -62,7 +63,7 @@ export function useChatMascote(mascote: MascoteNome, apelido?: string) {
       content: res.dados!.resposta!,
       ts:      Date.now(),
     }])
-  }, [mascote, apelido, mensagens, carregando])
+  }, [mascote, apelido, configId, mensagens, carregando])
 
   const limpar = useCallback(() => {
     setMensagens([])

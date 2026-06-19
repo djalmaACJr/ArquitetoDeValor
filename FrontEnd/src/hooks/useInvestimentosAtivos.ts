@@ -76,7 +76,14 @@ export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
 
   const editar = async (id: string, payload: EditarAtivoInput): Promise<OpResult<InvestimentoAtivo>> => {
     const res = await apiMutate<InvestimentoAtivo>(`/investimentos/ativos/${id}`, 'PUT', payload)
-    if (res.ok) await invalidar()
+    if (res.ok) {
+      // Editar pode mudar tipo_ativo/nome — o que reflete nos dividendos
+      // (tipo_ativo é desnormalizado e sincronizado no banco por trigger),
+      // no dashboard e no ranking. Invalida o módulo todo, não só os ativos.
+      for (const k of ['inv-ativos', 'inv-posicoes', 'inv-dividendos', 'inv-historico', 'inv-dashboard', 'inv-ranking']) {
+        await qc.invalidateQueries({ queryKey: [k, uid] })
+      }
+    }
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 

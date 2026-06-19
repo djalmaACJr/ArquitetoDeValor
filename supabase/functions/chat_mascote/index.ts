@@ -220,6 +220,8 @@ Deno.serve(async (req: Request) => {
     contexto?:   string;
     /** Screenshot em base64 (data URL ou só base64). Usado só por provedores com visão. */
     screenshot?: string;
+    /** Config de IA específica a usar (sem trocar a ativa). Vazio → usa a ativa. */
+    configId?:   string;
   };
   try {
     body = await req.json();
@@ -232,6 +234,7 @@ Deno.serve(async (req: Request) => {
   const mensagem  = (body.mensagem ?? "").trim();
   const contexto  = (body.contexto ?? "").trim().slice(0, 20_000);  // cap pra evitar abuso
   const screenshot = (body.screenshot ?? "").trim();
+  const configId  = (body.configId ?? "").trim() || undefined;
   const historico = Array.isArray(body.historico) ? body.historico.slice(-20) : [];
 
   if (!mensagem) return erro("Mensagem vazia", 400);
@@ -257,9 +260,11 @@ Deno.serve(async (req: Request) => {
     persona = `O usuário te deu o apelido "${apelido}". Sempre se apresente e se refira a si ${pronome} como "${apelido}" — esse é o seu nome agora. Sua função e personalidade continuam as mesmas do ${padrao}.\n\n${persona}`;
   }
 
-  // Lê a config de IA ATIVA do próprio usuário (RLS isola) e decripta a chave.
+  // Lê a config de IA do próprio usuário (RLS isola) e decripta a chave.
+  // `configId` força uma config específica (botão "Conversar" do Perfil) sem
+  // trocar a ativa; sem ele, usa a config ativa.
   const cliente = db(req);
-  const cfg = await lerConfigIAAtiva(cliente, userId);
+  const cfg = await lerConfigIAAtiva(cliente, userId, configId);
   if (!cfg.ok) return erro(cfg.erro, cfg.status);
   const { provedor, apiKey, modelo } = cfg.config;
 

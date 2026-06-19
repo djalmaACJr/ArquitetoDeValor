@@ -401,8 +401,19 @@ export type ResultadoConfigIA =
   | { ok: true;  config: ConfigIAAtiva }
   | { ok: false; erro: string; status: number };
 
-/** Lê `usuarios.ia_configs`, resolve a config ATIVA e decripta a chave. */
-export async function lerConfigIAAtiva(cliente: SupabaseClient, userId: string): Promise<ResultadoConfigIA> {
+/**
+ * Lê `usuarios.ia_configs` e decripta a chave de uma config.
+ *
+ * Por padrão resolve a config ATIVA. Quando `configId` é informado,
+ * resolve essa config específica (sem alterar qual está ativa) — usado
+ * pelo botão "Conversar" do Perfil, que conversa com uma config pontual
+ * sem trocar a ativa do usuário.
+ */
+export async function lerConfigIAAtiva(
+  cliente: SupabaseClient,
+  userId: string,
+  configId?: string,
+): Promise<ResultadoConfigIA> {
   const { data: prefs, error } = await cliente
     .from("usuarios")
     .select("ia_configs")
@@ -414,19 +425,23 @@ export async function lerConfigIAAtiva(cliente: SupabaseClient, userId: string):
   }
 
   const col = (prefs.ia_configs as IAConfigsCol | null) ?? { ativa: null, configs: [] };
-  const ativa = col.configs.find(c => c.id === col.ativa);
+  const alvo = configId
+    ? col.configs.find(c => c.id === configId)
+    : col.configs.find(c => c.id === col.ativa);
 
-  if (!ativa || !ativa.provedor || !ehBlob(ativa.api_key)) {
+  if (!alvo || !alvo.provedor || !ehBlob(alvo.api_key)) {
     return {
       ok: false,
-      erro: "Integração com IA não configurada (ou em formato antigo). Vá em Perfil → Integração com IA e cadastre uma chave.",
+      erro: configId
+        ? "Configuração de IA não encontrada (ou em formato antigo). Recadastre em Perfil → Integração com IA."
+        : "Integração com IA não configurada (ou em formato antigo). Vá em Perfil → Integração com IA e cadastre uma chave.",
       status: 400,
     };
   }
 
   let apiKey: string;
   try {
-    apiKey = await decriptar(ativa.api_key);
+    apiKey = await decriptar(alvo.api_key);
   } catch {
     return {
       ok: false,
@@ -435,7 +450,7 @@ export async function lerConfigIAAtiva(cliente: SupabaseClient, userId: string):
     };
   }
 
-  return { ok: true, config: { provedor: ativa.provedor, modelo: ativa.modelo ?? null, apiKey } };
+  return { ok: true, config: { provedor: alvo.provedor, modelo: alvo.modelo ?? null, apiKey } };
 }
 
 // ── Resolução de TODAS as configs de IA do usuário (mentores) ──────────

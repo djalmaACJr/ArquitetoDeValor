@@ -1211,15 +1211,25 @@ async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
     const params = new URL(req.url).searchParams;
     logRequest("GET", "/investimentos/dividendos", { params: Object.fromEntries(params) });
     let q = c.from("inv_dividendos")
-      .select("*, inv_ativos(ticker, nome), inv_tipos_dividendo(nome), transacoes(status)")
+      .select("*, inv_ativos(ticker, nome, tipo_ativo), inv_tipos_dividendo(nome), transacoes(status)")
       .order("data_pagamento", { ascending: false });
     const ativoId = params.get("ativo_id");
     const tipo    = params.get("tipo_ativo");
     if (ativoId) q = q.eq("ativo_id", ativoId);
-    if (tipo && TIPOS_ATIVO.includes(tipo)) q = q.eq("tipo_ativo", tipo);
     const { data, error } = await q;
     if (error) { logError("Listar dividendos", error); return erro(error.message); }
-    return json({ dados: data });
+    // inv_dividendos.tipo_ativo é uma cópia desnormalizada que pode ficar
+    // defasada (ex.: ativo reclassificado de FII p/ ETF). Para o gráfico de
+    // proventos nunca errar, devolvemos SEMPRE o tipo ATUAL do ativo (join),
+    // independentemente de a sincronização por trigger ter rodado.
+    const dados = (data ?? []).map((d) => {
+      const at = (d as { inv_ativos?: { tipo_ativo?: string } | null }).inv_ativos ?? null;
+      return at?.tipo_ativo ? { ...d, tipo_ativo: at.tipo_ativo } : d;
+    });
+    const filtrados = tipo && TIPOS_ATIVO.includes(tipo)
+      ? dados.filter((d) => (d as { tipo_ativo?: string }).tipo_ativo === tipo)
+      : dados;
+    return json({ dados: filtrados });
   }
 
   if (m === "POST" && !id) {
@@ -3715,7 +3725,9 @@ async function dashboard(c: Db, params: URLSearchParams) {
     })(),
     c.from("inv_alocacoes_tipo").select("tipo_ativo, percentual_ideal"),
     c.from("vw_inv_ultimo_mercado").select("ativo_id, conta_id, valor_mercado"),
-    c.from("inv_dividendos").select("tipo_ativo, valor"),
+    // tipo_ativo vem do ativo (join), não da cópia desnormalizada — assim a
+    // reclassificação de um ativo reflete na hora no gráfico de proventos.
+    c.from("inv_dividendos").select("valor, inv_ativos(tipo_ativo)"),
   ]);
 
   if (posRes.error)  { logError("Dashboard posicoes", posRes.error);  return erro(posRes.error.message); }
@@ -3753,7 +3765,9 @@ async function dashboard(c: Db, params: URLSearchParams) {
   }
 
   for (const d of divRes.data ?? []) {
-    garante(String(d.tipo_ativo)).dividendos += Number(d.valor) || 0;
+    const tipo = (d.inv_ativos as { tipo_ativo?: string } | null)?.tipo_ativo;
+    if (!tipo) continue;
+    garante(String(tipo)).dividendos += Number(d.valor) || 0;
   }
 
   const alocMap = new Map<string, number>();
