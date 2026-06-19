@@ -42,6 +42,7 @@ const TIPOS_OPERACAO = ["COMPRA", "VENDA", "APORTE", "RESGATE", "DIVIDENDO"];
 // Renda fixa / Tesouro Direto
 const SUBTIPOS_RF    = ["TESOURO", "CDB", "LCI", "LCA", "CRI", "CRA", "DEBENTURE", "OUTRO"];
 const INDEXADORES_RF = ["PREFIXADO", "POS_FIXADO", "HIBRIDO"];
+const INDICES_RF     = ["CDI", "SELIC", "IPCA", "IGPM"];
 // Fundos imobiliários
 const CATEGORIAS_FII = ["TIJOLO", "PAPEL", "FOF", "DESENVOLVIMENTO", "OUTRO"];
 // Ações
@@ -208,6 +209,9 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
       ativo_pai:    body.ativo_pai ?? null,
       rf_subtipo:      body.rf_subtipo ?? null,
       rf_indexador:    body.rf_indexador ?? null,
+      rf_indice:            body.rf_indice ?? null,
+      rf_percentual_indice: body.rf_percentual_indice ?? null,
+      rf_taxa_fixa:         body.rf_taxa_fixa ?? null,
       rf_taxa:         body.rf_taxa ?? null,
       rf_emissor:      body.rf_emissor ?? null,
       rf_vencimento:   body.rf_vencimento ?? null,
@@ -248,7 +252,8 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
     const campos = camposParaAtualizar(body, [
       "ticker", "nome", "tipo_ativo", "moeda", "descricao", "nota_usuario",
       "questionario_respostas", "ativo_pai",
-      "rf_subtipo", "rf_indexador", "rf_taxa", "rf_emissor",
+      "rf_subtipo", "rf_indexador", "rf_indice", "rf_percentual_indice",
+      "rf_taxa_fixa", "rf_taxa", "rf_emissor",
       "rf_vencimento", "rf_garantia_fgc", "rf_isento_ir", "fii_categoria",
       "acoes_subtipo", "cotacao_automatica",
     ]);
@@ -259,9 +264,18 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
       if (error.code === "23505") return erro("Já existe um ativo com este ticker", 409);
       logError("Editar ativo", error); return erro(error.message);
     }
-    // A propagação de tipo_ativo para inv_dividendos (cópia desnormalizada) é
-    // feita por trigger no banco (trg_sync_dividendo_tipo_ativo), cobrindo
-    // também SQL direto / importação — não precisa ser refeita aqui.
+    // Propaga tipo_ativo para a cópia desnormalizada em inv_dividendos. Existe
+    // também um trigger no banco (trg_sync_dividendo_tipo_ativo); repetimos aqui
+    // de forma idempotente para garantir a sincronização mesmo que a migration
+    // do trigger não esteja aplicada — evitando dados divergentes (backup,
+    // dedup de importação, etc. leem a coluna armazenada).
+    if (campos.tipo_ativo !== undefined) {
+      const { error: errSync } = await c.from("inv_dividendos")
+        .update({ tipo_ativo: campos.tipo_ativo })
+        .eq("ativo_id", id)
+        .neq("tipo_ativo", campos.tipo_ativo);
+      if (errSync) logError("Sincronizar tipo_ativo dos dividendos", errSync);
+    }
     return json({ dados: data });
   }
 
@@ -311,6 +325,15 @@ function validarCamposRF(body: Record<string, unknown>): string | null {
   }
   if (body.rf_indexador != null && !INDEXADORES_RF.includes(String(body.rf_indexador))) {
     return `rf_indexador inválido: ${INDEXADORES_RF.join(" | ")}`;
+  }
+  if (body.rf_indice != null && !INDICES_RF.includes(String(body.rf_indice))) {
+    return `rf_indice inválido: ${INDICES_RF.join(" | ")}`;
+  }
+  for (const campo of ["rf_percentual_indice", "rf_taxa_fixa"]) {
+    const v = body[campo];
+    if (v != null && (typeof v !== "number" || !Number.isFinite(v) || v < 0)) {
+      return `${campo} deve ser um número ≥ 0`;
+    }
   }
   if (body.rf_taxa != null && String(body.rf_taxa).length > 40) {
     return "rf_taxa deve ter no máximo 40 caracteres";
@@ -3519,6 +3542,8 @@ async function rotaRestaurar(c: Db, req: Request, m: string, userId: string) {
         moeda: a.moeda ? up(a.moeda).slice(0, 3) : "BRL", descricao: a.descricao ?? null,
         nota_usuario: a.nota_usuario ?? null, questionario_respostas: a.questionario_respostas ?? null,
         rf_subtipo: a.rf_subtipo ?? null, rf_indexador: a.rf_indexador ?? null, rf_taxa: a.rf_taxa ?? null,
+        rf_indice: a.rf_indice ?? null, rf_percentual_indice: a.rf_percentual_indice ?? null,
+        rf_taxa_fixa: a.rf_taxa_fixa ?? null,
         rf_emissor: a.rf_emissor ?? null, rf_vencimento: a.rf_vencimento ?? null,
         rf_garantia_fgc: a.rf_garantia_fgc ?? null, rf_isento_ir: a.rf_isento_ir ?? null,
         fii_categoria: a.fii_categoria ?? null, acoes_subtipo: a.acoes_subtipo ?? null,

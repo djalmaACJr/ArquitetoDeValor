@@ -9,12 +9,13 @@ import { formatBRL } from '../../lib/utils'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL,
   INDEXADORES_RF, INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO,
+  INDICE_RF_LABEL, INDICES_POR_INDEXADOR,
   SUBTIPO_RF_INFO, subtiposParaTipo,
   CATEGORIAS_FII, FII_CATEGORIA_INFO,
   ACOES_SUBTIPOS, ACOES_SUBTIPO_LABEL, ACOES_SUBTIPO_DESCRICAO,
 } from '../../lib/constants'
 import type {
-  InvestimentoAtivo, TipoAtivoInvestimento, SubtipoRF, IndexadorRF, CategoriaFII,
+  InvestimentoAtivo, TipoAtivoInvestimento, SubtipoRF, IndexadorRF, IndiceRF, CategoriaFII,
   AcoesSubtipo, ResultadoBuscaAtivo,
 } from '../../types'
 
@@ -22,12 +23,31 @@ const MUTED = '#8b92a8'
 
 const FORM_VAZIO: CriarAtivoInput = {
   ticker: '', nome: '', tipo_ativo: 'ACOES', moeda: 'BRL', descricao: '', nota_usuario: null,
-  rf_subtipo: null, rf_indexador: null, rf_taxa: null, rf_emissor: null,
+  rf_subtipo: null, rf_indexador: null, rf_indice: null, rf_percentual_indice: null,
+  rf_taxa_fixa: null, rf_taxa: null, rf_emissor: null,
   rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
   fii_categoria: null, acoes_subtipo: null, cotacao_automatica: true,
 }
 
 const ehRendaFixa = (tipo: TipoAtivoInvestimento) => tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
+
+// Rótulo amigável derivado dos campos estruturados (ex.: "110% CDI",
+// "IPCA + 6,2%", "13,5% a.a.") — gravado em rf_taxa para exibição.
+function rotuloTaxaRF(f: CriarAtivoInput): string | null {
+  const num = (n: number) => String(n).replace('.', ',')
+  if (f.rf_indexador === 'POS_FIXADO' && f.rf_indice && f.rf_percentual_indice != null) {
+    return `${num(f.rf_percentual_indice)}% ${INDICE_RF_LABEL[f.rf_indice]}`
+  }
+  if (f.rf_indexador === 'HIBRIDO' && f.rf_indice) {
+    return f.rf_taxa_fixa != null
+      ? `${INDICE_RF_LABEL[f.rf_indice]} + ${num(f.rf_taxa_fixa)}%`
+      : INDICE_RF_LABEL[f.rf_indice]
+  }
+  if (f.rf_indexador === 'PREFIXADO' && f.rf_taxa_fixa != null) {
+    return `${num(f.rf_taxa_fixa)}% a.a.`
+  }
+  return f.rf_taxa ?? null
+}
 
 // Form inicial — novo (limpo) ou espelhando o ativo em edição.
 function formDoAtivo(ativo: InvestimentoAtivo | null): CriarAtivoInput {
@@ -35,7 +55,9 @@ function formDoAtivo(ativo: InvestimentoAtivo | null): CriarAtivoInput {
   return {
     ticker: ativo.ticker, nome: ativo.nome, tipo_ativo: ativo.tipo_ativo, moeda: ativo.moeda,
     descricao: ativo.descricao ?? '', nota_usuario: ativo.nota_usuario,
-    rf_subtipo: ativo.rf_subtipo, rf_indexador: ativo.rf_indexador, rf_taxa: ativo.rf_taxa,
+    rf_subtipo: ativo.rf_subtipo, rf_indexador: ativo.rf_indexador,
+    rf_indice: ativo.rf_indice, rf_percentual_indice: ativo.rf_percentual_indice,
+    rf_taxa_fixa: ativo.rf_taxa_fixa, rf_taxa: ativo.rf_taxa,
     rf_emissor: ativo.rf_emissor, rf_vencimento: ativo.rf_vencimento,
     rf_garantia_fgc: ativo.rf_garantia_fgc, rf_isento_ir: ativo.rf_isento_ir,
     fii_categoria: ativo.fii_categoria, acoes_subtipo: ativo.acoes_subtipo,
@@ -111,7 +133,8 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
         rf_subtipo: form.rf_subtipo === 'TESOURO' ? null : form.rf_subtipo })
     } else {
       setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, moeda: moedaPadrao,
-        rf_subtipo: null, rf_indexador: null, rf_taxa: null, rf_emissor: null,
+        rf_subtipo: null, rf_indexador: null, rf_indice: null, rf_percentual_indice: null,
+        rf_taxa_fixa: null, rf_taxa: null, rf_emissor: null,
         rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
         fii_categoria: tipo === 'FII' ? form.fii_categoria : null,
         acoes_subtipo: tipo === 'ACOES' ? form.acoes_subtipo : null })
@@ -125,6 +148,25 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
     setForm({ ...form, rf_subtipo: sub,
       rf_emissor: form.rf_emissor || info.emissor || null,
       rf_garantia_fgc: info.fgc, rf_isento_ir: info.isentoIR })
+  }
+
+  // Troca a forma de rentabilidade e zera os campos que não se aplicam a ela.
+  function mudarIndexador(idx: IndexadorRF | null) {
+    if (idx === 'PREFIXADO') {
+      setForm({ ...form, rf_indexador: idx, rf_indice: null, rf_percentual_indice: null })
+    } else if (idx === 'POS_FIXADO') {
+      setForm({ ...form, rf_indexador: idx, rf_taxa_fixa: null })
+    } else if (idx === 'HIBRIDO') {
+      setForm({ ...form, rf_indexador: idx, rf_percentual_indice: null })
+    } else {
+      setForm({ ...form, rf_indexador: null, rf_indice: null, rf_percentual_indice: null, rf_taxa_fixa: null })
+    }
+  }
+
+  // Campo numérico (% a.a. / % do índice): aceita vírgula, guarda número|null.
+  function setNum(campo: 'rf_percentual_indice' | 'rf_taxa_fixa', valor: string) {
+    const v = valor.replace(',', '.').trim()
+    setForm({ ...form, [campo]: v === '' ? null : Number(v) })
   }
 
   async function salvar() {
@@ -142,6 +184,9 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       descricao: form.descricao?.trim() || null,
       nota_usuario: form.nota_usuario === null || form.nota_usuario === undefined || Number.isNaN(form.nota_usuario)
         ? null : Number(form.nota_usuario),
+      // rf_taxa (rótulo) é derivado dos campos estruturados — mantém o detalhe
+      // do ativo legível sem depender de texto digitado à mão.
+      ...(ehRendaFixa(form.tipo_ativo) ? { rf_taxa: rotuloTaxaRF(form) } : {}),
     }
     const res = editando ? await editar(editando.id, payload) : await criar(payload as CriarAtivoInput)
     setSalvando(false)
@@ -318,7 +363,7 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
 
           <Field label="Forma de rentabilidade">
             <SelectDark value={form.rf_indexador ?? ''}
-              onChange={(e) => setForm({ ...form, rf_indexador: (e.target.value || null) as IndexadorRF | null })}>
+              onChange={(e) => mudarIndexador((e.target.value || null) as IndexadorRF | null)}>
               <option value="">Selecione...</option>
               {INDEXADORES_RF.map((i) => <option key={i} value={i}>{INDEXADOR_RF_LABEL[i]}</option>)}
             </SelectDark>
@@ -329,13 +374,36 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
             )}
           </Field>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Taxa">
-              <Input value={form.rf_taxa ?? ''} maxLength={40}
-                onChange={(e) => setForm({ ...form, rf_taxa: e.target.value || null })}
-                placeholder={form.rf_indexador === 'POS_FIXADO' ? '110% CDI'
-                  : form.rf_indexador === 'HIBRIDO' ? 'IPCA + 6,2%' : '13,5% a.a.'} />
+          {/* Índice de referência — só para pós-fixado (CDI/Selic) e híbrido
+              (IPCA/IGP-M). É o que permite calcular o rendimento. */}
+          {(form.rf_indexador === 'POS_FIXADO' || form.rf_indexador === 'HIBRIDO') && (
+            <Field label="Índice de referência">
+              <SelectDark value={form.rf_indice ?? ''}
+                onChange={(e) => setForm({ ...form, rf_indice: (e.target.value || null) as IndiceRF | null })}>
+                <option value="">Selecione...</option>
+                {INDICES_POR_INDEXADOR[form.rf_indexador].map((i) => (
+                  <option key={i} value={i}>{INDICE_RF_LABEL[i]}</option>
+                ))}
+              </SelectDark>
             </Field>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            {form.rf_indexador === 'POS_FIXADO' ? (
+              <Field label="% do índice">
+                <Input type="number" step="0.01" inputMode="decimal"
+                  value={form.rf_percentual_indice ?? ''}
+                  onChange={(e) => setNum('rf_percentual_indice', e.target.value)}
+                  placeholder="110" />
+              </Field>
+            ) : (
+              <Field label={form.rf_indexador === 'HIBRIDO' ? 'Taxa fixa adicional (% a.a.)' : 'Taxa fixa (% a.a.)'}>
+                <Input type="number" step="0.01" inputMode="decimal"
+                  value={form.rf_taxa_fixa ?? ''}
+                  onChange={(e) => setNum('rf_taxa_fixa', e.target.value)}
+                  placeholder={form.rf_indexador === 'HIBRIDO' ? '6,2' : '13,5'} />
+              </Field>
+            )}
             <Field label="Vencimento">
               <Input type="date" value={form.rf_vencimento ?? ''}
                 onChange={(e) => setForm({ ...form, rf_vencimento: e.target.value || null })} />

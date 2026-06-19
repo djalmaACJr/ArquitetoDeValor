@@ -4,7 +4,7 @@ import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import type {
   InvestimentoAtivo, QuestionarioRespostas, TipoAtivoInvestimento,
-  SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo,
+  SubtipoRF, IndexadorRF, IndiceRF, CategoriaFII, AcoesSubtipo,
 } from '../types'
 
 export interface CriarAtivoInput {
@@ -19,6 +19,9 @@ export interface CriarAtivoInput {
   // Renda fixa / Tesouro Direto
   rf_subtipo?:      SubtipoRF | null
   rf_indexador?:    IndexadorRF | null
+  rf_indice?:            IndiceRF | null
+  rf_percentual_indice?: number | null
+  rf_taxa_fixa?:         number | null
   rf_taxa?:         string | null
   rf_emissor?:      string | null
   rf_vencimento?:   string | null

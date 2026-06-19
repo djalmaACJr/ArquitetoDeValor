@@ -4,11 +4,11 @@
 // para preservar `import type { TipoConta } from '../types'` existentes.
 import type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia,
   TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento,
-  SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo,
+  SubtipoRF, IndexadorRF, IndiceRF, CategoriaFII, AcoesSubtipo,
   CriterioQuestao, PerfilInvestidorTipo } from '../lib/constants'
 export type { TipoConta, TipoTransacao, StatusTransacao, TipoObjetivo, StatusObjetivo, Frequencia,
   TipoAtivoInvestimento, StatusPosicaoInvestimento, TipoOperacaoInvestimento,
-  SubtipoRF, IndexadorRF, CategoriaFII, AcoesSubtipo,
+  SubtipoRF, IndexadorRF, IndiceRF, CategoriaFII, AcoesSubtipo,
   CriterioQuestao, PerfilInvestidorTipo }
 
 export interface CartaoVirtual {
@@ -270,6 +270,9 @@ export interface InvestimentoAtivo {
   // Características de renda fixa (só RENDA_FIXA / TESOURO_DIRETO)
   rf_subtipo:      SubtipoRF | null
   rf_indexador:    IndexadorRF | null
+  rf_indice:            IndiceRF | null
+  rf_percentual_indice: number | null
+  rf_taxa_fixa:         number | null
   rf_taxa:         string | null
   rf_emissor:      string | null
   rf_vencimento:   string | null

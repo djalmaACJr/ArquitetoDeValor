@@ -105,6 +105,25 @@ export type SubtipoRF = typeof SUBTIPOS_RF[number]
 export const INDEXADORES_RF = ['PREFIXADO', 'POS_FIXADO', 'HIBRIDO'] as const
 export type IndexadorRF = typeof INDEXADORES_RF[number]
 
+// Índice de referência (benchmark) da renda fixa pós-fixada/híbrida.
+export const INDICES_RF = ['CDI', 'SELIC', 'IPCA', 'IGPM'] as const
+export type IndiceRF = typeof INDICES_RF[number]
+
+export const INDICE_RF_LABEL: Record<IndiceRF, string> = {
+  CDI:   'CDI',
+  SELIC: 'Selic',
+  IPCA:  'IPCA',
+  IGPM:  'IGP-M',
+}
+
+// Quais índices fazem sentido por forma de rentabilidade: pós-fixado segue
+// juros (CDI/Selic); híbrido soma uma taxa fixa a um índice de inflação.
+export const INDICES_POR_INDEXADOR: Record<IndexadorRF, readonly IndiceRF[]> = {
+  PREFIXADO:  [],
+  POS_FIXADO: ['CDI', 'SELIC'],
+  HIBRIDO:    ['IPCA', 'IGPM'],
+}
+
 export const INDEXADOR_RF_LABEL: Record<IndexadorRF, string> = {
   PREFIXADO:  'Prefixado',
   POS_FIXADO: 'Pós-fixado',
