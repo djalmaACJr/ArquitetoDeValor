@@ -78,13 +78,43 @@ a Fase 2.
 
 ---
 
-## Fase 2 — Geração do arquivo de importação (depois da descoberta)
+## Extração (atual) — via console, sem Playwright
 
-> A ser implementada assim que soubermos o formato exato do JSON. Vai:
-> - mapear o JSON do investidor10 para `{ ativos, operacoes }`;
-> - comparar com a carteira atual do app e manter **só os ativos que faltam**;
-> - gerar um arquivo para você revisar e **importar pela tela Importar/Exportar**
->   do Arquiteto de Valor (nada é gravado no banco sem sua confirmação).
+A interceptação de JSON não funcionou (o investidor10 é Next.js App Router e
+renda a tabela como **PrimeReact DataTable**, sem endpoint JSON). Os valores
+visíveis vêm truncados em 2 casas (cripto chega a `< 0,01`), mas cada linha
+carrega no React um `rowData` cru com **precisão cheia**. Por isso a extração é
+feita por um **snippet colado no console** do seu navegador já logado, que lê o
+`rowData` via React fiber, pagina sozinho (`button.p-paginator-next`) e baixa o
+`inv10-operacoes.json`. Snippet em [`extrator-console.js`](./extrator-console.js).
+
+Passo a passo: abra `/wallet/my-wallet/pro/entries`, **expanda os 4 grupos**
+(Renda variável, Criptomoedas, Renda fixa, Tesouro direto), F12 → Console → cole
+o `extrator-console.js` → aguarde `acumulado: N` → rode `inv10Baixar()`.
+
+## Fase 2 — Geração do arquivo de importação ✅
+
+Script [`gerar-arquivo-import.mjs`](./gerar-arquivo-import.mjs) converte o
+`inv10-operacoes.json` num **CSV no layout Status Invest**, que a tela
+Importar/Exportar do app já lê (`parseStatusInvest` em
+`FrontEnd/src/lib/importB3.ts`). O app deriva as posições atuais das operações
+(compras − vendas, custo médio) e cria só os ativos que faltam.
+
+```bash
+cd FrontEnd/robo-investidor10
+# coloque o inv10-operacoes.json aqui (ou passe o caminho)
+node gerar-arquivo-import.mjs
+# → gera investidor10-import.csv
+```
+
+Depois, importe o `investidor10-import.csv` pela tela **Importar/Exportar**
+(aceita `.csv`) e **escolha sua conta de investimento**. Nada é gravado sem sua
+confirmação; a importação é idempotente (re-rodar não duplica).
+
+Notas: eventos de **Desdobramento** são pulados (não viram compra/venda —
+ajuste a quantidade na mão se afetar a posição). Ativos em **US$** entram com o
+valor em dólar, mas rotulados como **BRL** (limitação do layout Status Invest).
+**Reits** entram como **STOCKS** (o parser não tem categoria REIT).
 
 ## Segurança
 
