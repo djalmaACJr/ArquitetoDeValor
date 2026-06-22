@@ -1,10 +1,10 @@
-import { useMemo, useState, useEffect, useRef, type CSSProperties } from 'react'
+import { useMemo, useState, useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { ChevronDown, ChevronUp, ChevronRight, TrendingUp, TrendingDown, Layers, LineChart, Pencil } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { LogoAtivo, SelectDark } from './shared'
-import { formatBRL } from '../../lib/utils'
+import { formatBRL, formatData } from '../../lib/utils'
 import { recomendacaoCompra } from '../../lib/questionarioAtivos'
-import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, setorLabel } from '../../lib/constants'
+import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, setorLabel, INDEXADOR_RF_LABEL, INDICE_RF_LABEL } from '../../lib/constants'
 import type { AtivoLinha } from '../../lib/ativosLinha'
 import type {
   InvestimentoAtivo, InvestimentoDashboardTipo, TipoAtivoInvestimento,
@@ -35,7 +35,7 @@ const COR_REC = { COMPRAR: '#00c896', NEUTRO: '#8b92a8', AGUARDAR: '#ffb74d' } a
 const LABEL_REC = { COMPRAR: 'Comprar', NEUTRO: 'Neutro', AGUARDAR: 'Aguardar' } as const
 
 // ── Ordenação por coluna ───────────────────────────────────────
-type SortKey = 'ticker' | 'nome' | 'setor' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart'
+type SortKey = 'ticker' | 'nome' | 'setor' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'venc' | 'indexador' | 'taxa'
 function precoMedio(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_custo / l.quantidade : 0 }
 function precoAtual(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_mercado / l.quantidade : 0 }
 function valorOrdenacao(l: AtivoLinha, k: SortKey): number | string {
@@ -52,7 +52,18 @@ function valorOrdenacao(l: AtivoLinha, k: SortKey): number | string {
     case 'saldo':      return l.valor_mercado
     case 'nota':       return l.nota_usuario ?? -1
     case 'cart':       return l.participacao_pct
+    case 'venc':       return l.meta?.rf_vencimento ?? ''  // ISO yyyy-mm-dd ordena lexicalmente
+    case 'indexador':  return rfIndexadorLabel(l) ?? ''
+    case 'taxa':       return l.meta?.rf_taxa ?? ''
   }
+}
+
+// Indexador de um título de RF: "Pós-fixado · CDI", "Híbrido · IPCA", "Prefixado".
+function rfIndexadorLabel(l: AtivoLinha): string | null {
+  const ix = l.meta?.rf_indexador
+  if (!ix) return null
+  const indice = l.meta?.rf_indice
+  return indice ? `${INDEXADOR_RF_LABEL[ix]} · ${INDICE_RF_LABEL[indice]}` : INDEXADOR_RF_LABEL[ix]
 }
 
 interface AcoesAtivo {
@@ -84,6 +95,10 @@ export default function QuadroTipoAtivos({
   // que originou o gráfico). Sem ele, o realce recai sobre o quadro inteiro.
   focoGrupo?:    { dim: Dimensao; chave: string } | null
 }) {
+  const location = useLocation()
+  // Origem para o botão "voltar" da página de detalhe — preserva de qual página
+  // (Meus ativos, Investimentos, …) o usuário abriu o ativo.
+  const origem = location.pathname + location.search
   const [aberto, setAberto] = useState(defaultAberto)
   const [dim, setDim] = useState<Dimensao>('categoria')
   const [catsFechadas, setCatsFechadas] = useState<Set<string>>(new Set())
@@ -104,7 +119,7 @@ export default function QuadroTipoAtivos({
     return n
   })
   const clickSort = (key: SortKey) => setSort((s) =>
-    s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'ticker' || key === 'setor' ? 'asc' : 'desc' })
+    s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'ticker' || key === 'setor' || key === 'venc' || key === 'nome' || key === 'indexador' || key === 'taxa' ? 'asc' : 'desc' })
 
   // Foco vindo do gráfico (rosca): abre, rola até o quadro e o destaca por
   // alguns instantes (anel/glow) para o usuário se localizar na listagem.
@@ -146,6 +161,22 @@ export default function QuadroTipoAtivos({
   const variacaoPct = dados && dados.valor_custo > 0 ? (dados.ganho_perda / dados.valor_custo) * 100 : 0
   const idealRef = dados && dados.percentual_ideal > 0 ? dados.desvio_pct : null
 
+  // Agrupamentos que fazem sentido para estas linhas: só oferece "Categoria"
+  // se algum ativo tiver categoria, e "Segmento" se algum tiver setor — assim
+  // Renda Fixa/Cripto/ETF não exibem dimensões vazias. "Nenhum" sempre vale.
+  const temCategoria = useMemo(() => linhas.some((l) => l.categoria), [linhas])
+  const temSegmento  = useMemo(() => linhas.some((l) => setorLabel(l.setor)), [linhas])
+  const dimsDisponiveis = useMemo<Dimensao[]>(() => {
+    const arr: Dimensao[] = []
+    if (temCategoria) arr.push('categoria')
+    if (temSegmento)  arr.push('segmento')
+    arr.push('nenhum')
+    return arr
+  }, [temCategoria, temSegmento])
+  // Dimensão efetiva: a escolhida, se disponível; senão a primeira que fizer
+  // sentido (ou "nenhum"). Mantém o estado intacto sem precisar de setState.
+  const dimEf: Dimensao = dimsDisponiveis.includes(dim) ? dim : dimsDisponiveis[0]
+
   // Agrupa as linhas pela dimensão escolhida (categoria/segmento) e ordena cada grupo
   const grupos = useMemo(() => {
     const ordenar = (lista: AtivoLinha[]) => {
@@ -157,11 +188,11 @@ export default function QuadroTipoAtivos({
       })
       return arr
     }
-    if (dim === 'nenhum') {
+    if (dimEf === 'nenhum') {
       return [{ chave: '', lista: ordenar(linhas), total: linhas.reduce((s, l) => s + l.valor_mercado, 0) }]
     }
     const chaveDe = (l: AtivoLinha) =>
-      dim === 'segmento' ? (setorLabel(l.setor) ?? 'Sem segmento') : (l.categoria ?? 'Sem categoria')
+      dimEf === 'segmento' ? (setorLabel(l.setor) ?? 'Sem segmento') : (l.categoria ?? 'Sem categoria')
     const map = new Map<string, AtivoLinha[]>()
     for (const l of linhas) {
       const c = chaveDe(l)
@@ -171,30 +202,78 @@ export default function QuadroTipoAtivos({
     return [...map.entries()]
       .map(([chave, lista]) => ({ chave, lista: ordenar(lista), total: lista.reduce((s, l) => s + l.valor_mercado, 0) }))
       .sort((a, b) => b.total - a.total)
-  }, [linhas, dim, sort])
+  }, [linhas, dimEf, sort])
 
   // Só há subdivisão real se houver mais de um grupo (ou um grupo nomeado)
-  const semNome = dim === 'segmento' ? 'Sem segmento' : 'Sem categoria'
-  const temGrupos = dim !== 'nenhum' && (grupos.length > 1 || (grupos.length === 1 && grupos[0].chave !== semNome))
+  const semNome = dimEf === 'segmento' ? 'Sem segmento' : 'Sem categoria'
+  const temGrupos = dimEf !== 'nenhum' && (grupos.length > 1 || (grupos.length === 1 && grupos[0].chave !== semNome))
 
-  const cols: { k: SortKey; label: string; align: 'left' | 'right' | 'center'; fii?: boolean; title?: string }[] = [
-    { k: 'ticker',     label: 'Ativo',       align: 'left' },
-    { k: 'nome',       label: 'Nome',        align: 'left' },
-    { k: 'setor',      label: 'Segmento',    align: 'left' },
-    { k: 'quantidade', label: 'Quant.',      align: 'right' },
-    { k: 'pm',         label: 'Preço médio', align: 'right' },
-    { k: 'pa',         label: 'Preço atual', align: 'right' },
-    { k: 'rent',       label: 'Variação',    align: 'right' },
-    { k: 'dy',         label: 'DY',          align: 'right', fii: true, title: 'Dividend Yield (12m)' },
-    { k: 'yoc',        label: 'YoC',         align: 'right', fii: true, title: 'Yield on Cost (12m)' },
-    { k: 'saldo',      label: 'Saldo',       align: 'right' },
-    { k: 'nota',       label: 'Nota',        align: 'center' },
-    { k: 'cart',       label: '% Cart.',     align: 'right' },
-  ]
-  const visiveis = cols.filter((c) => !c.fii || ehFII)
+  const ehRF = tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
   const alinhar = (a: 'left' | 'right' | 'center') => a === 'left' ? 'text-left' : a === 'center' ? 'text-center' : 'text-right'
+
+  // Coluna como descritor: cabeçalho + célula (render). Permite montar conjuntos
+  // diferentes por tipo de ativo — RF/Tesouro exibe Indexador/Taxa/Vencimento e
+  // esconde Ticker/Segmento (irrelevantes), enquanto ações/FII mantêm o layout
+  // clássico (ticker, segmento, preços, DY/YoC nos FIIs).
+  type Coluna = {
+    id: string; label: string; align: 'left' | 'right' | 'center'
+    sortKey?: SortKey; title?: string; cell: (l: AtivoLinha) => ReactNode
+  }
+  const traco = <span style={{ color: MUTED }}>—</span>
+  const linkAtivo = (l: AtivoLinha, texto: ReactNode) => (
+    <Link to={`/investimentos/ativos/${l.ativo_id}`} state={{ from: origem }}
+      className="inline-flex items-center gap-2 text-white font-semibold hover:underline">
+      <LogoAtivo url={l.logo_url} />{texto}
+    </Link>
+  )
+  const celNome = (l: AtivoLinha): ReactNode => (
+    <>
+      <span className="block truncate max-w-[220px]" title={l.nome ?? ''}>
+        {l.nome && l.nome.toUpperCase() !== l.ticker.toUpperCase() ? l.nome : '—'}
+      </span>
+      {l.contas.length > 0
+        ? <span className="block text-[11px]" style={{ color: MUTED }}>{l.contas.join(', ')}</span>
+        : acoes && <span className="block text-[11px]" style={{ color: '#ffb74d' }}>Sem posição em conta</span>}
+    </>
+  )
+  const celContas = (l: AtivoLinha): ReactNode => (
+    l.contas.length > 0
+      ? <span className="block text-[11px]" style={{ color: MUTED }}>{l.contas.join(', ')}</span>
+      : acoes ? <span className="block text-[11px]" style={{ color: '#ffb74d' }}>Sem posição em conta</span> : null
+  )
+
+  const C: Record<string, Coluna> = {
+    ticker: { id: 'ticker', label: 'Ativo', align: 'left', sortKey: 'ticker', cell: (l) => linkAtivo(l, l.ticker) },
+    nome:   { id: 'nome', label: 'Nome', align: 'left', sortKey: 'nome', cell: celNome },
+    // RF: identificador é o nome do título (não há ticker útil), com link.
+    titulo: { id: 'titulo', label: 'Título', align: 'left', sortKey: 'nome', cell: (l) => (
+      <>{linkAtivo(l, <span className="truncate max-w-[240px]" title={l.nome ?? l.ticker}>{l.nome || l.ticker}</span>)}{celContas(l)}</>
+    ) },
+    setor:  { id: 'setor', label: 'Segmento', align: 'left', sortKey: 'setor', cell: (l) => <span className="text-white/70">{setorLabel(l.setor) ?? '—'}</span> },
+    indexador: { id: 'indexador', label: 'Indexador', align: 'left', sortKey: 'indexador', cell: (l) => {
+      const v = rfIndexadorLabel(l); return v ? <span className="text-white/80">{v}</span> : traco } },
+    taxa:   { id: 'taxa', label: 'Taxa', align: 'right', sortKey: 'taxa', cell: (l) => l.meta?.rf_taxa ? <span className="text-white/80">{l.meta.rf_taxa}</span> : traco },
+    venc:   { id: 'venc', label: 'Vencimento', align: 'right', sortKey: 'venc', cell: (l) => l.meta?.rf_vencimento ? <span className="text-white/80">{formatData(l.meta.rf_vencimento)}</span> : traco },
+    quant:  { id: 'quant', label: 'Quant.', align: 'right', sortKey: 'quantidade', cell: (l) => <span className="text-white/80">{l.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</span> },
+    pm:     { id: 'pm', label: 'Preço médio', align: 'right', sortKey: 'pm', cell: (l) => <span className="text-white/80">{formatBRL(precoMedio(l))}</span> },
+    pa:     { id: 'pa', label: 'Preço atual', align: 'right', sortKey: 'pa', cell: (l) => <span className="text-white/80">{formatBRL(precoAtual(l))}</span> },
+    rent:   { id: 'rent', label: 'Variação', align: 'right', sortKey: 'rent', cell: (l) => <span style={{ color: corValor(l.rentabilidade_pct) }}>{fmtPct(l.rentabilidade_pct)}</span> },
+    dy:     { id: 'dy', label: 'DY', align: 'right', sortKey: 'dy', title: 'Dividend Yield (12m)', cell: (l) => <span style={{ color: l.dividend_yield_pct > 0 ? VERDE : MUTED }}>{pct2(l.dividend_yield_pct)}</span> },
+    yoc:    { id: 'yoc', label: 'YoC', align: 'right', sortKey: 'yoc', title: 'Yield on Cost (12m)', cell: (l) => <span className="text-white/70">{pct2(l.yield_on_cost_pct)}</span> },
+    saldo:  { id: 'saldo', label: 'Saldo', align: 'right', sortKey: 'saldo', cell: (l) => <span className="text-white font-medium">{formatBRL(l.valor_mercado)}</span> },
+    nota:   { id: 'nota', label: 'Nota', align: 'center', sortKey: 'nota', cell: (l) => l.nota_usuario != null
+      ? <span className="inline-block px-1.5 rounded bg-white/10 text-white text-[11px] font-semibold">{l.nota_usuario}</span> : traco },
+    cart:   { id: 'cart', label: '% Cart.', align: 'right', sortKey: 'cart', cell: (l) => <span className="text-white/80">{pct2(l.participacao_pct)}</span> },
+  }
+
+  const visiveis: Coluna[] = ehRF
+    ? [C.titulo, C.indexador, C.taxa, C.venc, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart]
+    : ehFII
+      ? [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart]
+      : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart]
   // colunas visíveis + "Comprar?" + (Ações, se houver)
   const nCols = visiveis.length + 1 + (acoes ? 1 : 0)
+  const minWidth = ehFII ? 980 : ehRF ? 920 : 860
 
   function LinhaAtivo({ l, realce, alvo, primeira, ultima }: {
     l: AtivoLinha; realce: boolean; alvo: boolean; primeira: boolean; ultima: boolean
@@ -210,33 +289,9 @@ export default function QuadroTipoAtivos({
     return (
       <tr className="border-t border-white/5 hover:bg-white/[0.03] transition-colors duration-700"
         style={Object.keys(estilo).length ? estilo : undefined}>
-        <td className="px-2 py-1.5">
-          <Link to={`/investimentos/ativos/${l.ativo_id}`} className="inline-flex items-center gap-2 text-white font-semibold hover:underline">
-            <LogoAtivo url={l.logo_url} />{l.ticker}
-          </Link>
-        </td>
-        <td className="px-2 py-1.5 text-left text-white/70 max-w-[220px]">
-          <span className="block truncate" title={l.nome ?? ''}>
-            {l.nome && l.nome.toUpperCase() !== l.ticker.toUpperCase() ? l.nome : '—'}
-          </span>
-          {l.contas.length > 0
-            ? <span className="block text-[11px]" style={{ color: MUTED }}>{l.contas.join(', ')}</span>
-            : acoes && <span className="block text-[11px]" style={{ color: '#ffb74d' }}>Sem posição em conta</span>}
-        </td>
-        <td className="px-2 py-1.5 text-left text-white/70">{setorLabel(l.setor) ?? '—'}</td>
-        <td className="px-2 py-1.5 text-right text-white/80">{l.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</td>
-        <td className="px-2 py-1.5 text-right text-white/80">{formatBRL(precoMedio(l))}</td>
-        <td className="px-2 py-1.5 text-right text-white/80">{formatBRL(precoAtual(l))}</td>
-        <td className="px-2 py-1.5 text-right" style={{ color: corValor(l.rentabilidade_pct) }}>{fmtPct(l.rentabilidade_pct)}</td>
-        {ehFII && <td className="px-2 py-1.5 text-right" style={{ color: l.dividend_yield_pct > 0 ? VERDE : MUTED }}>{pct2(l.dividend_yield_pct)}</td>}
-        {ehFII && <td className="px-2 py-1.5 text-right text-white/70">{pct2(l.yield_on_cost_pct)}</td>}
-        <td className="px-2 py-1.5 text-right text-white font-medium">{formatBRL(l.valor_mercado)}</td>
-        <td className="px-2 py-1.5 text-center">
-          {l.nota_usuario != null
-            ? <span className="inline-block px-1.5 rounded bg-white/10 text-white text-[11px] font-semibold">{l.nota_usuario}</span>
-            : <span style={{ color: MUTED }}>—</span>}
-        </td>
-        <td className="px-2 py-1.5 text-right text-white/80">{pct2(l.participacao_pct)}</td>
+        {visiveis.map((c) => (
+          <td key={c.id} className={`px-2 py-1.5 ${alinhar(c.align)}`}>{c.cell(l)}</td>
+        ))}
         <td className="px-2 py-1.5 text-center">
           {rec
             ? <span className="text-[11px] px-1.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: `${COR_REC[rec.recomendacao]}22`, color: COR_REC[rec.recomendacao] }} title={rec.motivo}>{LABEL_REC[rec.recomendacao]}</span>
@@ -339,23 +394,28 @@ export default function QuadroTipoAtivos({
             <p className="text-[13px] text-center py-2" style={{ color: MUTED }}>Nenhum ativo neste tipo.</p>
           ) : (
             <>
-              {/* Seletor de agrupamento */}
-              <div className="flex justify-end items-center gap-2">
-                <span className="text-[12px]" style={{ color: MUTED }}>Agrupar por</span>
-                <SelectDark value={dim} onChange={(e) => setDim(e.target.value as Dimensao)}
-                  style={{ width: 'auto' }} className="!text-[12px] !py-1.5">
-                  {DIMENSOES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-                </SelectDark>
-              </div>
+              {/* Seletor de agrupamento — só aparece quando há mais de uma
+                  dimensão que faz sentido para este tipo de ativo. */}
+              {dimsDisponiveis.length > 1 && (
+                <div className="flex justify-end items-center gap-2">
+                  <span className="text-[12px]" style={{ color: MUTED }}>Agrupar por</span>
+                  <SelectDark value={dimEf} onChange={(e) => setDim(e.target.value as Dimensao)}
+                    style={{ width: 'auto' }} className="!text-[12px] !py-1.5">
+                    {DIMENSOES.filter((d) => dimsDisponiveis.includes(d.value)).map((d) => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
+                    ))}
+                  </SelectDark>
+                </div>
+              )}
 
               <div className="overflow-auto max-h-[72vh]">
-                <table className="w-full text-[12px]" style={{ minWidth: ehFII ? 980 : 860 }}>
+                <table className="w-full text-[12px]" style={{ minWidth }}>
                   <thead>
                     <tr style={{ color: MUTED }}>
                       {visiveis.map((c) => (
-                        <th key={c.k} title={c.title} onClick={() => clickSort(c.k)}
-                          className={`px-2 py-1.5 font-medium cursor-pointer select-none hover:text-white/80 ${alinhar(c.align)}`}>
-                          {c.label}{sort.key === c.k ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                        <th key={c.id} title={c.title} onClick={c.sortKey ? () => clickSort(c.sortKey!) : undefined}
+                          className={`px-2 py-1.5 font-medium ${alinhar(c.align)} ${c.sortKey ? 'cursor-pointer select-none hover:text-white/80' : ''}`}>
+                          {c.label}{c.sortKey && sort.key === c.sortKey ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
                         </th>
                       ))}
                       <th className="px-2 py-1.5 font-medium text-center">Comprar?</th>

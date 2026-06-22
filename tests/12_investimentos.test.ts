@@ -171,6 +171,86 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     await api(`/investimentos/ativos/${data.dados.id}`, "DELETE");
   });
 
+  test("CA-INV21 — editar a forma de rentabilidade de renda fixa reconstrói o histórico mensal", async () => {
+    // Ativo importado SEM indexador (rentabilidade não marcada)
+    const { status: sAtivo, data: dAtivo } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINV9", nome: "Jest CDB sem indexador", tipo_ativo: "RENDA_FIXA", rf_subtipo: "CDB",
+    });
+    expect(sAtivo).toBe(201);
+    const aId = dAtivo.dados.id as string;
+
+    // Aporte de 3 meses atrás
+    const compra = `${mesOffset(-3)}-10`;
+    const { status: sPos } = await api("/investimentos/posicoes", "POST", {
+      ativo_id: aId, conta_id: contaId, quantidade: 1, preco_custo: 1000, data_compra: compra,
+    });
+    expect(sPos).toBe(201);
+
+    // Simula o snapshot achatado no custo que a importação gravou (sem indexador, taxa 0)
+    const { status: sSnap } = await api("/investimentos/historico-mensal", "POST", {
+      ativo_id: aId, conta_id: contaId, mes_ano: mesOffset(-2), valor_mercado: 1000,
+    });
+    expect(sSnap).toBe(201);
+
+    // Marca pós-fixado 110% CDI → deve apagar o histórico defasado e reconstruir
+    const { status: sPut } = await api(`/investimentos/ativos/${aId}`, "PUT", {
+      rf_indexador: "POS_FIXADO", rf_indice: "CDI", rf_percentual_indice: 110, rf_taxa: "110% CDI",
+    });
+    expect(sPut).toBe(200);
+
+    const { data: hist } = await api(`/investimentos/historico-mensal?ativo_id=${aId}`);
+    const serie = (hist?.dados ?? []) as { mes_ano: string; valor_mercado: number }[];
+    // Série reconstruída do aporte até o mês corrente (3 meses atrás .. atual)
+    expect(serie.length).toBeGreaterThanOrEqual(4);
+    const porMes = new Map(serie.map((h) => [h.mes_ano, Number(h.valor_mercado)]));
+    // O mês que estava achatado no custo agora rende acima dele
+    expect(porMes.get(mesOffset(-2))!).toBeGreaterThan(1000);
+    // E a rentabilidade acumula no tempo (mês corrente > primeiro mês)
+    expect(porMes.get(mesOffset(0))!).toBeGreaterThan(porMes.get(mesOffset(-3))!);
+
+    // Limpeza
+    for (const h of serie) await api(`/investimentos/historico-mensal/${(h as any).id}`, "DELETE");
+    const { data: pos } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
+    for (const p of pos?.dados ?? []) await api(`/investimentos/posicoes/${p.id}`, "DELETE");
+    await api(`/investimentos/ativos/${aId}`, "DELETE");
+  });
+
+  test("CA-INV22 — pós-fixado aditivo (CDI + 2%) rende diferente do multiplicativo (102% CDI)", async () => {
+    const compra = `${mesOffset(-3)}-10`;
+
+    // Cria um CDB pós-fixado, aporta 3 meses atrás e marca a taxa (dispara o
+    // rebuild do histórico). Devolve o valor de mercado do mês corrente.
+    async function valorAtual(ticker: string, taxa: string): Promise<number> {
+      const { data: dA } = await api("/investimentos/ativos", "POST", {
+        ticker, nome: `Jest ${taxa}`, tipo_ativo: "RENDA_FIXA", rf_subtipo: "CDB",
+      });
+      const id = dA.dados.id as string;
+      await api("/investimentos/posicoes", "POST", {
+        ativo_id: id, conta_id: contaId, quantidade: 1, preco_custo: 1000, data_compra: compra,
+      });
+      await api(`/investimentos/ativos/${id}`, "PUT", {
+        rf_indexador: "POS_FIXADO", rf_indice: "CDI", rf_taxa: taxa,
+      });
+      const { data: hist } = await api(`/investimentos/historico-mensal?ativo_id=${id}`);
+      const serie = (hist?.dados ?? []) as { mes_ano: string; valor_mercado: number; id: string }[];
+      const atual = serie.find((h) => h.mes_ano === mesOffset(0));
+      // Limpeza
+      for (const h of serie) await api(`/investimentos/historico-mensal/${h.id}`, "DELETE");
+      const { data: pos } = await api(`/investimentos/posicoes?ativo_id=${id}`);
+      for (const p of pos?.dados ?? []) await api(`/investimentos/posicoes/${p.id}`, "DELETE");
+      await api(`/investimentos/ativos/${id}`, "DELETE");
+      return Number(atual?.valor_mercado ?? 0);
+    }
+
+    const aditivo       = await valorAtual("JESTINVA", "CDI + 2%");
+    const multiplicativo = await valorAtual("JESTINVB", "102% CDI");
+
+    // Para qualquer CDI < 100% a.a., (CDI + 2%) > (1,02 × CDI). Ambos > custo.
+    expect(aditivo).toBeGreaterThan(1000);
+    expect(multiplicativo).toBeGreaterThan(1000);
+    expect(aditivo).toBeGreaterThan(multiplicativo);
+  });
+
   test("CA-INV20 — GET /investimentos/busca-externa valida tipo e tamanho mínimo da query", async () => {
     const { status: s1 } = await api("/investimentos/busca-externa?tipo=BITCOIN&q=petr");
     expect(s1).toBe(400); // tipo inválido

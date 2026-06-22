@@ -7,35 +7,23 @@ if (!url || !key) {
   throw new Error('Variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY são obrigatórias.')
 }
 
-// Sessão por ABA — `sessionStorage` em vez de `localStorage` (padrão).
+// Sessão COMPARTILHADA entre abas — `localStorage` (padrão do supabase-js).
 //
-// Por quê: este é um app financeiro pessoal. Com localStorage (padrão do
-// supabase-js), fechar a aba MANTÉM a sessão; qualquer pessoa que abrir o
-// navegador depois entra logada como o último usuário (não é vazamento de
-// código, é como sessões persistentes funcionam — mas é arriscado em PC
-// compartilhado).
+// Decisão (jun/2026): priorizar a conveniência de abrir links em nova aba.
+// Com `localStorage` a sessão é compartilhada entre todas as abas e sobrevive
+// ao fechar a aba — então middle-click / "abrir em nova aba" NÃO pede login de
+// novo e já cai na página pretendida.
 //
-// Com sessionStorage:
-//   - Fechar a aba = perde a sessão; o próximo acesso pede login.
-//   - F5 (reload) na mesma aba mantém a sessão.
-//   - Cada aba tem sessão independente (abrir nova aba = pede login).
+// Tradeoff: perde-se a proteção "fechar a aba = desloga" do `sessionStorage`.
+// Quem abrir o navegador depois entra logado como o último usuário. A defesa
+// contra sessão "esquecida" passa a depender de:
+//   - `useAutoLogout` (15min de inatividade no client) — montado em AppLayout;
+//   - Inactivity timeout do Supabase (server-side) — config no Dashboard.
 //
-// Combinada com o `useAutoLogout` (inatividade), cobre os dois cenários
-// principais de sessão "esquecida" aberta.
-//
-// EXCEÇÃO E2E: testes do Playwright dependem de `storageState`, que só
-// persiste `cookies` + `localStorage` entre specs. Detectamos automatica-
-// mente browsers controlados via `navigator.webdriver` (que Playwright,
-// Selenium e WebDriver sempre setam como `true`) e voltamos a usar
-// `localStorage`. Também aceita override por `VITE_E2E=true` (útil em
-// debug local fora do Playwright).
-const ehAutomatizado =
-  typeof navigator !== 'undefined' && (navigator as Navigator).webdriver === true
-const ehE2E = import.meta.env.VITE_E2E === 'true' || ehAutomatizado
+// (E2E/Playwright já dependia de `localStorage` via `storageState`; agora é o
+// padrão para todos, sem precisar detectar `navigator.webdriver`.)
 const storageEscolhido: Storage | undefined =
-  typeof window === 'undefined'
-    ? undefined
-    : (ehE2E ? window.localStorage : window.sessionStorage)
+  typeof window === 'undefined' ? undefined : window.localStorage
 
 export const supabase = createClient(url, key, {
   auth: {

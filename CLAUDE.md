@@ -299,7 +299,7 @@ npm run test:e2e:report   # abre relatório HTML
 ./rodar_testes_e2e.bat
 ```
 
-> **Storage automático em E2E**: o app usa `sessionStorage` para a sessão Supabase em uso normal (proteção contra "sessão esquecida" — ver seção 🔐). Como o `storageState` do Playwright só persiste `localStorage`, o supabase detecta browsers controlados via `navigator.webdriver === true` (sempre `true` em Playwright/Selenium/WebDriver) e volta a usar `localStorage` automaticamente. **Não precisa de comando separado**. Em debug manual fora do Playwright, dá pra forçar com `VITE_E2E=true` no env (ou `npm run dev:e2e` se já criado).
+> **Storage da sessão em E2E**: o app usa `localStorage` para a sessão Supabase (compartilhada entre abas — ver seção 🔐), que é exatamente o que o `storageState` do Playwright persiste entre specs. **Não precisa de comando separado nem de detectar `navigator.webdriver`**.
 
 ### Deploy Edge Functions
 
@@ -345,9 +345,11 @@ IA_KEYS_ENCRYPTION_KEY=...
 
 Defesa contra "sessão esquecida em PC compartilhado". Camadas trabalham juntas e atacam dois problemas distintos: **sessão persistida no LS** e **token vivo demais após inatividade ou roubo**.
 
+> ⚠️ **Decisão jun/2026**: a sessão usa `localStorage` (padrão do supabase-js), e não mais `sessionStorage`. Motivo: permitir abrir links em **nova aba** (middle-click) sem novo login — a sessão é compartilhada entre abas e sobrevive ao fechar a aba. Em troca, **abandona-se** a proteção "fechar a aba = desloga"; a defesa contra sessão esquecida fica só com o `useAutoLogout` (client) + Inactivity timeout (server).
+
 #### Camadas no client (este repo)
 
-1. **`sessionStorage`** ([lib/supabase.ts](FrontEnd/src/lib/supabase.ts)) — substitui o `localStorage` padrão do supabase-js. Fechar a aba descarta a sessão. F5 na mesma aba mantém. Cada aba é independente.
+1. **`localStorage`** ([lib/supabase.ts](FrontEnd/src/lib/supabase.ts)) — storage padrão do supabase-js: sessão **compartilhada entre abas** e persistida ao fechar a aba (abrir nova aba não pede login). ⚠️ Não protege "fechar aba = desloga" — ver aviso acima.
 2. **`useAutoLogout(15)`** ([hooks/useAutoLogout.ts](FrontEnd/src/hooks/useAutoLogout.ts) montado em `AppLayout`) — timer de inatividade no client. 15 min sem mouse/teclado/scroll/click → `signOut()` + redirect `/login?expirado=1` (banner amigável).
 3. **`limparEstadoCliente()`** ([lib/clientCache.ts](FrontEnd/src/lib/clientCache.ts)) — chamado pelo listener de `onAuthStateChange` em troca de user. Reseta `_saved` em memória das páginas e LS de preferências.
 

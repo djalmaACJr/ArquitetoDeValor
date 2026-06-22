@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, Navigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Menu } from 'lucide-react'
@@ -16,8 +16,15 @@ export default function AppLayout() {
   const uid = session?.user?.id ?? null
   const mainRef = useRef<HTMLElement>(null)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const { pathname } = useLocation()
+  const location = useLocation()
+  const pathname = location.pathname
   const { primeiroAcesso } = useMascotePreferido()
+  // Posição de scroll do <main> por entrada de histórico (location.key).
+  const scrollPos = useRef<Map<string, number>>(new Map())
+  // Chave da entrada de histórico ATUAL — atualizada de forma síncrona no
+  // layout effect, ANTES de qualquer scroll programático, para o listener
+  // sempre gravar na entrada certa (evita corromper a posição da página anterior).
+  const chaveAtual = useRef(location.key)
 
   // Auto-logout após 15min de inatividade — defesa em PC compartilhado.
   // Combinado com sessionStorage (fechar aba = sair) cobre os 2 cenários
@@ -35,6 +42,42 @@ export default function AppLayout() {
     const mes = mesAtual()
     prefetchLancamentosVizinhos(qc, uid, mes)
   }, [qc, uid])
+
+  // ── Restauração de scroll do <main> ao voltar ───────────────────────
+  // O <main> persiste entre rotas; ao abrir o detalhe e voltar, a página
+  // filha remonta e a rolagem se perderia. Guardamos a posição de cada
+  // entrada de histórico e a restauramos ao revisitá-la (voltar/avançar);
+  // entrada inédita (navegação nova) começa no topo.
+  //
+  // Listener ÚNICO (montado uma vez) que grava sempre na chave ATUAL via ref
+  // — assim um scroll programático (restauração) nunca grava na página errada.
+  useEffect(() => {
+    const main = mainRef.current
+    if (!main) return
+    const onScroll = () => { scrollPos.current.set(chaveAtual.current, main.scrollTop) }
+    main.addEventListener('scroll', onScroll, { passive: true })
+    return () => main.removeEventListener('scroll', onScroll)
+  }, [])
+
+  useLayoutEffect(() => {
+    chaveAtual.current = location.key          // síncrono, antes de mexer no scroll
+    const main = mainRef.current
+    if (!main) return
+    // Posição conhecida da entrada (revisita) → restaura; inédita → topo (0).
+    const alvo = scrollPos.current.get(location.key) ?? 0
+    // O conteúdo pode pintar depois (Suspense/react-query): tenta por alguns
+    // frames até a altura comportar a posição salva.
+    let raf = 0
+    let tentativas = 0
+    const restaurar = () => {
+      const m = mainRef.current
+      if (!m) return
+      if (m.scrollHeight - m.clientHeight >= alvo || tentativas++ > 60) m.scrollTop = alvo
+      else raf = requestAnimationFrame(restaurar)
+    }
+    raf = requestAnimationFrame(restaurar)
+    return () => cancelAnimationFrame(raf)
+  }, [location.key])
 
   // ── Delegação de scroll para ↑ / ↓ / PageUp / PageDown / Home / End ───
   //

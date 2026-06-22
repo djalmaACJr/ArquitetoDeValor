@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2 } from 'lucide-react'
 import { Line, Bar } from 'react-chartjs-2'
 import {
@@ -60,6 +60,18 @@ const OPCOES_GRAFICO = {
 export default function DetalheInvestimentoPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  // De onde o usuário chegou (Meus ativos, Investimentos, etc.) — passado em
+  // `state.from` pelo link de origem. Fallback p/ a lista quando veio de link
+  // direto/refresh (sem histórico).
+  const voltarPara = (location.state as { from?: string } | null)?.from ?? '/investimentos/ativos'
+  // Volta de verdade no histórico (POP) quando há para onde voltar — assim o
+  // AppLayout restaura a posição de scroll da página de origem. Sem histórico
+  // (link direto/refresh), navega para o caminho conhecido.
+  const voltar = () => {
+    if ((window.history.state?.idx ?? 0) > 0) navigate(-1)
+    else navigate(voltarPara)
+  }
   const ativoId = id ?? null
   const [toast, setToast] = useState<string | null>(null)
   const [editandoNota, setEditandoNota] = useState(false)
@@ -157,9 +169,9 @@ export default function DetalheInvestimentoPage() {
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-[14px] text-red-300">
           {error ?? 'Ativo não encontrado'}
         </div>
-        <Link to="/investimentos/ativos" className="inline-flex items-center gap-1.5 mt-4 text-[13px] text-white/70 hover:text-white">
-          <ArrowLeft size={14} /> Voltar para meus ativos
-        </Link>
+        <button onClick={voltar} className="inline-flex items-center gap-1.5 mt-4 text-[13px] text-white/70 hover:text-white">
+          <ArrowLeft size={14} /> Voltar
+        </button>
       </div>
     )
   }
@@ -171,7 +183,7 @@ export default function DetalheInvestimentoPage() {
     setSalvandoExclusao(true)
     const res = await excluir(ativo.id)
     setSalvandoExclusao(false)
-    if (res.ok) navigate('/investimentos/ativos')
+    if (res.ok) voltar()
     else { setExcluindo(false); showToast(res.erro ?? 'Erro ao excluir o ativo') }
   }
 
@@ -188,9 +200,9 @@ export default function DetalheInvestimentoPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <Link to="/investimentos/ativos" className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
+          <button onClick={voltar} title="Voltar" className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
             <ArrowLeft size={15} />
-          </Link>
+          </button>
           <LogoAtivo url={ativo.logo_url} size={36} />
           <div>
             <div className="flex items-center gap-2 flex-wrap">

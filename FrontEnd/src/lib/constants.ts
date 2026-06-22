@@ -137,8 +137,9 @@ export const INDEXADOR_RF_DESCRICAO: Record<IndexadorRF, string> = {
     'Taxa exata conhecida na compra (ex.: 11,5% a.a.). Rendimento linear, ' +
     'mas pode perder poder de compra se a inflação subir demais.',
   POS_FIXADO:
-    'Acompanha um indicador que varia no tempo, geralmente CDI ou Selic ' +
-    '(ex.: 100% do CDI). Juros do país sobem → rendimento sobe; caem → acompanha a queda.',
+    'Acompanha um indicador que varia no tempo, geralmente CDI ou Selic. Pode ser ' +
+    'um percentual do índice (ex.: 110% do CDI) ou o índice mais um spread (ex.: CDI + 2%) ' +
+    '— formas diferentes! Juros do país sobem → rendimento sobe; caem → acompanha a queda.',
   HIBRIDO:
     'Taxa fixa + indexador de inflação (ex.: IPCA + 6% a.a.). Excelente para o ' +
     'longo prazo: garante ganho real acima do aumento do custo de vida.',
@@ -269,6 +270,23 @@ const SETOR_LABEL: Record<string, string> = {
 export function setorLabel(setor: string | null | undefined): string | null {
   if (!setor) return null
   return SETOR_LABEL[setor] ?? setor
+}
+
+// Área (setor/categoria) de um ativo com a melhor informação disponível:
+//   • setor econômico (ações/stocks com setor preenchido pela brapi/Yahoo)
+//   • categoria do FII (Tijolo/Papel/FoF…)
+//   • senão, cai no tipo do ativo (ETF, Cripto, Renda Fixa…) — cestas
+//     diversificadas não têm um único setor.
+// Usada nos quadros de Sobreposição e Correlação da tela Avaliações.
+export function areaAtivoLabel(opts: {
+  setor?: string | null
+  tipo: TipoAtivoInvestimento
+  fii_categoria?: CategoriaFII | null
+}): string {
+  const s = setorLabel(opts.setor)
+  if (s) return s
+  if (opts.tipo === 'FII' && opts.fii_categoria) return `FII · ${FII_CATEGORIA_INFO[opts.fii_categoria].label}`
+  return TIPO_ATIVO_LABEL[opts.tipo]
 }
 
 // ── Avaliação de ativos: critérios das questões ───────────────

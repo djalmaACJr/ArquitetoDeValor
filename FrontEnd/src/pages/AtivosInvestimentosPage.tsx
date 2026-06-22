@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, ArrowLeft, Search, RefreshCw, Sparkles } from 'lucide-react'
+import { Plus, Trash2, ArrowLeft, Search, RefreshCw, Sparkles, Wallet } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, type Plugin, type ChartData } from 'chart.js'
@@ -301,6 +301,7 @@ function fatiasPorChave(
 export default function AtivosInvestimentosPage() {
   const [tipoFiltro, setTipoFiltro] = useState<TipoAtivoInvestimento | ''>('')
   const [pesquisa,   setPesquisa]   = useState('')
+  const [soComValor, setSoComValor] = useState(false)
   const [drawer,     setDrawer]     = useState(false)
   const [editando,   setEditando]   = useState<InvestimentoAtivo | null>(null)
   const [toast,      setToast]      = useState<string | null>(null)
@@ -308,8 +309,9 @@ export default function AtivosInvestimentosPage() {
   const [historicoDe, setHistoricoDe] = useState<InvestimentoAtivo | null>(null)
 
   const filtros = tipoFiltro ? { tipo: tipoFiltro } : {}
-  const { ativos, loading, error, atualizarAtivos } = useInvestimentosAtivos(filtros)
+  const { ativos, loading, error, atualizarAtivos, normalizarTesouro } = useInvestimentosAtivos(filtros)
   const [atualizando, setAtualizando] = useState(false)
+  const [normalizando, setNormalizando] = useState(false)
 
   // Foco vindo do clique numa fatia da rosca: abre o quadro do tipo, rola até
   // ele e realça só o agrupamento (dim + chave) que originou aquela fatia.
@@ -360,14 +362,18 @@ export default function AtivosInvestimentosPage() {
       : ativos
     const porTipo = new Map<TipoAtivoInvestimento, AtivoLinha[]>()
     for (const a of filtrados) {
+      const linha = linhaDeMeta(a, rankingPorAtivo.get(a.id), contasPorAtivo.get(a.id) ?? [])
+      // "Somente com valor": esconde ativos sem valor de mercado (sem posição
+      // ativa ou já encerrados) — deixa só o que de fato compõe a carteira.
+      if (soComValor && !(linha.valor_mercado > 0)) continue
       const lista = porTipo.get(a.tipo_ativo) ?? []
-      lista.push(linhaDeMeta(a, rankingPorAtivo.get(a.id), contasPorAtivo.get(a.id) ?? []))
+      lista.push(linha)
       porTipo.set(a.tipo_ativo, lista)
     }
     return [...porTipo.entries()]
       .sort((x, y) => TIPOS_ATIVO_INV.indexOf(x[0]) - TIPOS_ATIVO_INV.indexOf(y[0]))
       .map(([tipo, linhas]) => ({ tipo, linhas }))
-  }, [ativos, pesquisa, rankingPorAtivo, contasPorAtivo])
+  }, [ativos, pesquisa, soComValor, rankingPorAtivo, contasPorAtivo])
 
   // Fatias das roscas: Ações por segmento (setor) e FIIs por categoria.
   const { segmentosAcoes, categoriasFII } = useMemo(() => {
@@ -393,6 +399,25 @@ export default function AtivosInvestimentosPage() {
       !d || d.atualizados === 0
         ? 'Nada a atualizar — tickets já estão completos'
         : `${d.atualizados} ticket(s) atualizado(s) de ${d.processados}`,
+    )
+  }
+
+  // Padroniza o ticker/nome dos títulos do Tesouro já cadastrados para o
+  // formato legível (TD-IPCA-2040…). Idempotente — re-rodar não muda nada.
+  async function handleNormalizarTesouro() {
+    if (normalizando) return
+    const temTesouro = ativos.some((a) => a.tipo_ativo === 'TESOURO_DIRETO')
+    if (!temTesouro) { showToast('Nenhum título do Tesouro cadastrado'); return }
+    setNormalizando(true)
+    const res = await normalizarTesouro()
+    setNormalizando(false)
+    if (!res.ok) { showToast(res.erro ?? 'Erro ao padronizar os títulos do Tesouro'); return }
+    const d = res.dados
+    const ign = d?.ignorados?.length ? ` · ${d.ignorados.length} ignorado(s)` : ''
+    showToast(
+      !d || d.renomeados === 0
+        ? `Tesouro já está padronizado${ign}`
+        : `${d.renomeados} título(s) padronizado(s)${ign}`,
     )
   }
 
@@ -430,11 +455,27 @@ export default function AtivosInvestimentosPage() {
             <option value="">Todos os tipos</option>
             {TIPOS_ATIVO_INV.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
           </SelectDark>
+          <button onClick={() => setSoComValor((v) => !v)}
+            aria-pressed={soComValor}
+            title="Mostra apenas ativos com valor de mercado (posição ativa na carteira)"
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border ${
+              soComValor
+                ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200'
+                : 'border-white/15 text-white/90 hover:border-white/30'
+            }`}>
+            <Wallet size={15} /> Somente com valor
+          </button>
           <button onClick={handleAtualizarAtivos} disabled={atualizando}
             title="Re-busca nome e moeda oficiais dos ativos (corrige tickets que ficaram só com o código)"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border border-white/15 text-white/90 hover:border-white/30 disabled:opacity-50">
             <RefreshCw size={15} className={atualizando ? 'animate-spin' : ''} />
             {atualizando ? 'Atualizando…' : 'Atualizar tickets'}
+          </button>
+          <button onClick={handleNormalizarTesouro} disabled={normalizando}
+            title="Padroniza o código e o nome dos títulos do Tesouro já cadastrados (ex.: TD-IPCA-2040)"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border border-white/15 text-white/90 hover:border-white/30 disabled:opacity-50">
+            <RefreshCw size={15} className={normalizando ? 'animate-spin' : ''} />
+            {normalizando ? 'Padronizando…' : 'Padronizar Tesouro'}
           </button>
           <Link to="/investimentos/avaliacoes"
             title="Seus mentores (IAs) avaliam cada ativo da carteira"
@@ -475,7 +516,11 @@ export default function AtivosInvestimentosPage() {
           )}
           {grupos.length === 0 ? (
             <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center text-[13px]" style={{ color: MUTED }}>
-              Nenhum ativo encontrado para “{pesquisa}”.
+              {pesquisa
+                ? `Nenhum ativo encontrado para “${pesquisa}”.`
+                : soComValor
+                  ? 'Nenhum ativo com valor de mercado na carteira.'
+                  : 'Nenhum ativo encontrado.'}
             </div>
           ) : (
             <div className="space-y-3">

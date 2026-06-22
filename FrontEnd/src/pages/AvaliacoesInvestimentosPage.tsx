@@ -7,6 +7,9 @@ import {
 import { Link } from 'react-router-dom'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
+import { useInvestimentosHistorico } from '../hooks/useInvestimentosHistorico'
+import QuadroSobreposicao from '../components/ui/QuadroSobreposicao'
+import QuadroCorrelacao from '../components/ui/QuadroCorrelacao'
 import { useInvAvaliacoes } from '../hooks/useInvAvaliacoes'
 import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
 import { useInvPerfil } from '../hooks/useInvPerfil'
@@ -526,6 +529,8 @@ export default function AvaliacoesInvestimentosPage() {
   const { frequencia, salvar: salvarAgenda } = useInvAvaliacaoAgenda()
   // Todos os lembretes — o agendamento vira um lembrete (aparece no calendário).
   const { lembretes: todosLembretes, criar: criarLembrete, editar: editarLembrete, excluir: excluirLembrete } = useLembretes({})
+  // Histórico mensal — base da correlação entre ativos.
+  const { historico } = useInvestimentosHistorico({})
 
   const [rodando, setRodando] = useState(false)
   const [progMentores, setProgMentores] = useState<ProgMentor[] | null>(null)
@@ -658,6 +663,13 @@ export default function AvaliacoesInvestimentosPage() {
   )
   // Universo avaliável: ativos com saldo > 0.
   const ativosAvaliaveis = useMemo(() => ativos.filter((a) => comSaldo.has(a.id)), [ativos, comSaldo])
+
+  // Linhas do ranking com saldo > 0 — base dos quadros de sobreposição e
+  // correlação (trazem ticker, tipo, valor de mercado e ativo_id).
+  const ativosComSaldo = useMemo(
+    () => (ranking?.ativos ?? []).filter((a) => a.quantidade > 0),
+    [ranking],
+  )
 
   // Ativos avaliáveis ainda SEM avaliação salva — base para "continuar"
   // (retomar) após um erro: a avaliação só persiste por ativo ao final, então
@@ -1475,6 +1487,15 @@ export default function AvaliacoesInvestimentosPage() {
 
           {/* Ranking geral dos ativos — logo após a avaliação da carteira */}
           {dadosRank.length > 0 && <RankingTopo dados={dadosRank} />}
+
+          {/* Concentração de risco da carteira: sobreposição de ETFs e
+              correlação entre ativos (independem do modo histórico). */}
+          {!modoHistorico && ativosComSaldo.length > 0 && (
+            <QuadroSobreposicao ativosCarteira={ativosComSaldo} ativoPorId={ativoPorId} />
+          )}
+          {!modoHistorico && ativosComSaldo.length > 0 && (
+            <QuadroCorrelacao historico={historico} ativosCarteira={ativosComSaldo} ativoPorId={ativoPorId} />
+          )}
 
           {avaliacoes.length === 0 && !progMentores ? (
             <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center text-[13px]" style={{ color: MUTED }}>

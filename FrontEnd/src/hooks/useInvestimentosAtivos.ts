@@ -43,6 +43,13 @@ export interface AtualizarAtivosResultado {
   ativos: { ticker: string; nome: string }[]
 }
 
+export interface NormalizarTesouroResultado {
+  processados: number
+  renomeados: number
+  ativos: { de: string; para: string }[]
+  ignorados: { ticker: string; motivo: string }[]
+}
+
 export interface FiltrosAtivos {
   tipo?: TipoAtivoInvestimento
 }
@@ -101,6 +108,17 @@ export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
+  const normalizarTesouro = async (): Promise<OpResult<NormalizarTesouroResultado>> => {
+    const res = await apiMutate<NormalizarTesouroResultado>('/investimentos/normalizar-tesouro', 'POST', {})
+    if (res.ok) {
+      // Ticker/nome mudam → reflete em tudo que exibe o ativo.
+      for (const k of ['inv-ativos', 'inv-posicoes', 'inv-dividendos', 'inv-historico', 'inv-dashboard', 'inv-ranking']) {
+        await qc.invalidateQueries({ queryKey: [k, uid] })
+      }
+    }
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   const excluir = async (id: string): Promise<OpResult> => {
     const res = await apiMutate(`/investimentos/ativos/${id}`, 'DELETE')
     if (res.ok) {
@@ -121,6 +139,7 @@ export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
     editar,
     excluir,
     atualizarAtivos,
+    normalizarTesouro,
   }
 }
 

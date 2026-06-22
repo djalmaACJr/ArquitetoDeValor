@@ -1,11 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Search, RefreshCw } from 'lucide-react'
 import {
   useInvestimentosAtivos, useBuscaAtivoExterno,
   type CriarAtivoInput, type EditarAtivoInput,
 } from '../../hooks/useInvestimentosAtivos'
+import { useCotacoesTesouro } from '../../hooks/useCotacoesTesouro'
 import { Drawer, Field, Input, SelectDark, BtnSalvar, BtnCancelar } from './shared'
 import { formatBRL } from '../../lib/utils'
+import {
+  tickerTesouro, nomeTesouro, tipoTituloTesouro, anoVencimento, ehSemestral,
+  INDEXADOR_TESOURO_LABEL,
+} from '../../lib/tesouro'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL,
   INDEXADORES_RF, INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO,
@@ -35,8 +40,10 @@ const ehRendaFixa = (tipo: TipoAtivoInvestimento) => tipo === 'RENDA_FIXA' || ti
 // "IPCA + 6,2%", "13,5% a.a.") — gravado em rf_taxa para exibição.
 function rotuloTaxaRF(f: CriarAtivoInput): string | null {
   const num = (n: number) => String(n).replace('.', ',')
-  if (f.rf_indexador === 'POS_FIXADO' && f.rf_indice && f.rf_percentual_indice != null) {
-    return `${num(f.rf_percentual_indice)}% ${INDICE_RF_LABEL[f.rf_indice]}`
+  if (f.rf_indexador === 'POS_FIXADO' && f.rf_indice) {
+    // Multiplicativo ("110% CDI") ou aditivo ("CDI + 2%") — diferentes!
+    if (f.rf_percentual_indice != null) return `${num(f.rf_percentual_indice)}% ${INDICE_RF_LABEL[f.rf_indice]}`
+    if (f.rf_taxa_fixa != null) return `${INDICE_RF_LABEL[f.rf_indice]} + ${num(f.rf_taxa_fixa)}%`
   }
   if (f.rf_indexador === 'HIBRIDO' && f.rf_indice) {
     return f.rf_taxa_fixa != null
@@ -84,8 +91,34 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
   const [selecionado, setSelecionado] = useState(!!ativo)  // edição já tem nome definido
   const [manualLivre, setManualLivre] = useState(false)    // fallback de cadastro manual
   const [precoSel, setPrecoSel] = useState<number | null>(null)
+  // Pós-fixado: modo da taxa — multiplicativo ("110% CDI") vs aditivo ("CDI + 2%").
+  // São matematicamente diferentes; o aditivo usa rf_taxa_fixa como spread.
+  const [posSpread, setPosSpread] = useState(
+    () => ativo?.rf_indexador === 'POS_FIXADO' && ativo?.rf_taxa_fixa != null && ativo?.rf_percentual_indice == null,
+  )
+  // Tesouro: "com juros semestrais" (NTN-F / NTN-B) — compõe ticker/nome.
+  const [tesouroSemestral, setTesouroSemestral] = useState(() => ehSemestral(ativo?.nome))
 
   const { criar, editar } = useInvestimentosAtivos()
+
+  // Tesouro em cadastro manual: deriva ticker/nome dos campos estruturados
+  // (indexador + vencimento + semestral) — o usuário não digita identificador.
+  const tesouroManual = !editando && manualLivre && form.tipo_ativo === 'TESOURO_DIRETO'
+  // Vencimentos disponíveis na marcação a mercado (Prefixado/IPCA+) p/ o dropdown.
+  const tipoTit = tesouroManual ? tipoTituloTesouro(form.rf_indexador, tesouroSemestral) : null
+  const { cotacoes } = useCotacoesTesouro({ tipo: tipoTit ?? undefined, enabled: !!tipoTit })
+  const vencimentosTesouro = useMemo(() => {
+    const set = new Set<string>()
+    for (const c of cotacoes) set.add(c.vencimento)
+    return [...set].sort()
+  }, [cotacoes])
+
+  // Ticker/nome do Tesouro manual são DERIVADOS (indexador+vencimento+semestral)
+  // — calculados na hora, sem estado próprio, e materializados no payload ao salvar.
+  const tesouroTicker = tesouroManual && form.rf_indexador && form.rf_vencimento
+    ? tickerTesouro(form.rf_indexador, form.rf_vencimento, tesouroSemestral) : ''
+  const tesouroNome = tesouroManual && form.rf_indexador && form.rf_vencimento
+    ? nomeTesouro(form.rf_indexador, form.rf_vencimento, tesouroSemestral) : ''
 
   function resetBusca() {
     setBusca(''); setBuscaDeb(''); setSelecionado(false); setManualLivre(false); setPrecoSel(null)
@@ -155,12 +188,20 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
     if (idx === 'PREFIXADO') {
       setForm({ ...form, rf_indexador: idx, rf_indice: null, rf_percentual_indice: null })
     } else if (idx === 'POS_FIXADO') {
+      setPosSpread(false)
       setForm({ ...form, rf_indexador: idx, rf_taxa_fixa: null })
     } else if (idx === 'HIBRIDO') {
       setForm({ ...form, rf_indexador: idx, rf_percentual_indice: null })
     } else {
       setForm({ ...form, rf_indexador: null, rf_indice: null, rf_percentual_indice: null, rf_taxa_fixa: null })
     }
+  }
+
+  // Pós-fixado: troca entre "% do índice" (multiplicativo) e "índice + spread"
+  // (aditivo). Zera os dois campos para não misturar as duas formas.
+  function mudarModoPos(spread: boolean) {
+    setPosSpread(spread)
+    setForm({ ...form, rf_percentual_indice: null, rf_taxa_fixa: null })
   }
 
   // Campo numérico (% a.a. / % do índice): aceita vírgula, guarda número|null.
@@ -174,13 +215,20 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       onToast('Busque e selecione o ativo na lista — ou ative o cadastro manual')
       return
     }
-    if (!form.ticker.trim()) { onToast('Ticker é obrigatório'); return }
+    if (tesouroManual && (!form.rf_indexador || !form.rf_vencimento)) {
+      onToast('Escolha o indexador e o vencimento do título')
+      return
+    }
+    // Tesouro manual: ticker/nome saem dos campos estruturados; demais, do form.
+    const tickerFinal = (tesouroManual ? tesouroTicker : form.ticker).trim().toUpperCase()
+    const nomeFinal   = (tesouroManual ? tesouroNome : form.nome).trim()
+    if (!tickerFinal) { onToast('Ticker é obrigatório'); return }
     setSalvando(true)
     const payload: CriarAtivoInput | EditarAtivoInput = {
       ...form,
-      ticker: form.ticker.trim().toUpperCase(),
+      ticker: tickerFinal,
       // Nome opcional: se em branco, o backend busca o nome oficial pelo ticker
-      nome: form.nome.trim(),
+      nome: nomeFinal,
       descricao: form.descricao?.trim() || null,
       nota_usuario: form.nota_usuario === null || form.nota_usuario === undefined || Number.isNaN(form.nota_usuario)
         ? null : Number(form.nota_usuario),
@@ -305,14 +353,32 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
           {!selecionado && (
             <label className="flex items-center gap-2 text-[12px] cursor-pointer" style={{ color: MUTED }}>
               <input type="checkbox" checked={manualLivre} onChange={(e) => setManualLivre(e.target.checked)} />
-              Não encontrei — cadastrar manualmente
+              {form.tipo_ativo === 'TESOURO_DIRETO'
+                ? 'Não está na lista — cadastrar pelos campos do título'
+                : 'Não encontrei — cadastrar manualmente'}
             </label>
           )}
         </div>
       )}
 
-      {/* 4) Identificação — preenchida pela busca (editável só no manual) */}
-      {(editando || manualLivre || selecionado) && (
+      {/* 4) Identificação — preenchida pela busca (editável só no manual).
+          No Tesouro manual o identificador é GERADO dos campos do título
+          (indexador + vencimento + semestral) lá embaixo — nada de digitar. */}
+      {tesouroManual ? (
+        <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2">
+          {tesouroTicker ? (
+            <>
+              <p className="text-white text-[13px] font-semibold">{tesouroTicker}</p>
+              <p className="text-[12px]" style={{ color: MUTED }}>{tesouroNome}</p>
+            </>
+          ) : (
+            <p className="text-[12px]" style={{ color: MUTED }}>
+              Escolha o indexador e o vencimento em "Características do título" abaixo —
+              o código e o nome são preenchidos automaticamente.
+            </p>
+          )}
+        </div>
+      ) : (editando || manualLivre || selecionado) && (
         <>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Ticker">
@@ -361,11 +427,15 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
         <div className="rounded-lg border border-white/10 p-3 space-y-3">
           <p className="text-[13px] font-semibold text-white">Características do título</p>
 
-          <Field label="Forma de rentabilidade">
+          <Field label={form.tipo_ativo === 'TESOURO_DIRETO' ? 'Indexador' : 'Forma de rentabilidade'}>
             <SelectDark value={form.rf_indexador ?? ''}
               onChange={(e) => mudarIndexador((e.target.value || null) as IndexadorRF | null)}>
               <option value="">Selecione...</option>
-              {INDEXADORES_RF.map((i) => <option key={i} value={i}>{INDEXADOR_RF_LABEL[i]}</option>)}
+              {INDEXADORES_RF.map((i) => (
+                <option key={i} value={i}>
+                  {form.tipo_ativo === 'TESOURO_DIRETO' ? INDEXADOR_TESOURO_LABEL[i] : INDEXADOR_RF_LABEL[i]}
+                </option>
+              ))}
             </SelectDark>
             {form.rf_indexador && (
               <p className="text-[12px] mt-1" style={{ color: MUTED }}>
@@ -373,6 +443,17 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
               </p>
             )}
           </Field>
+
+          {/* Tesouro: Prefixado (NTN-F) e IPCA+ (NTN-B) têm versão com juros
+              semestrais — entra no ticker/nome e escolhe a série de MtM certa. */}
+          {form.tipo_ativo === 'TESOURO_DIRETO' &&
+            (form.rf_indexador === 'PREFIXADO' || form.rf_indexador === 'HIBRIDO') && (
+            <label className="flex items-center gap-2 text-[13px] text-white/80 cursor-pointer">
+              <input type="checkbox" checked={tesouroSemestral}
+                onChange={(e) => setTesouroSemestral(e.target.checked)} />
+              Com juros semestrais
+            </label>
+          )}
 
           {/* Índice de referência — só para pós-fixado (CDI/Selic) e híbrido
               (IPCA/IGP-M). É o que permite calcular o rendimento. */}
@@ -388,14 +469,34 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
             </Field>
           )}
 
+          {/* Pós-fixado: "110% do CDI" e "CDI + 2%" rendem diferente — escolher qual */}
+          {form.rf_indexador === 'POS_FIXADO' && (
+            <Field label="Tipo de taxa">
+              <SelectDark value={posSpread ? 'SPREAD' : 'PERCENTUAL'}
+                onChange={(e) => mudarModoPos(e.target.value === 'SPREAD')}>
+                <option value="PERCENTUAL">Percentual do índice (ex.: 110% do CDI)</option>
+                <option value="SPREAD">Índice + taxa (ex.: CDI + 2%)</option>
+              </SelectDark>
+            </Field>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             {form.rf_indexador === 'POS_FIXADO' ? (
-              <Field label="% do índice">
-                <Input type="number" step="0.01" inputMode="decimal"
-                  value={form.rf_percentual_indice ?? ''}
-                  onChange={(e) => setNum('rf_percentual_indice', e.target.value)}
-                  placeholder="110" />
-              </Field>
+              posSpread ? (
+                <Field label="Spread (+ % a.a.)">
+                  <Input type="number" step="0.01" inputMode="decimal"
+                    value={form.rf_taxa_fixa ?? ''}
+                    onChange={(e) => setNum('rf_taxa_fixa', e.target.value)}
+                    placeholder="2" />
+                </Field>
+              ) : (
+                <Field label="% do índice">
+                  <Input type="number" step="0.01" inputMode="decimal"
+                    value={form.rf_percentual_indice ?? ''}
+                    onChange={(e) => setNum('rf_percentual_indice', e.target.value)}
+                    placeholder="110" />
+                </Field>
+              )
             ) : (
               <Field label={form.rf_indexador === 'HIBRIDO' ? 'Taxa fixa adicional (% a.a.)' : 'Taxa fixa (% a.a.)'}>
                 <Input type="number" step="0.01" inputMode="decimal"
@@ -404,10 +505,22 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
                   placeholder={form.rf_indexador === 'HIBRIDO' ? '6,2' : '13,5'} />
               </Field>
             )}
-            <Field label="Vencimento">
-              <Input type="date" value={form.rf_vencimento ?? ''}
-                onChange={(e) => setForm({ ...form, rf_vencimento: e.target.value || null })} />
-            </Field>
+            {tesouroManual && vencimentosTesouro.length > 0 ? (
+              <Field label="Vencimento">
+                <SelectDark value={form.rf_vencimento ?? ''}
+                  onChange={(e) => setForm({ ...form, rf_vencimento: e.target.value || null })}>
+                  <option value="">Selecione...</option>
+                  {vencimentosTesouro.map((v) => (
+                    <option key={v} value={v}>{anoVencimento(v)} ({v.split('-').reverse().join('/')})</option>
+                  ))}
+                </SelectDark>
+              </Field>
+            ) : (
+              <Field label="Vencimento">
+                <Input type="date" value={form.rf_vencimento ?? ''}
+                  onChange={(e) => setForm({ ...form, rf_vencimento: e.target.value || null })} />
+              </Field>
+            )}
           </div>
 
           <Field label="Emissor">

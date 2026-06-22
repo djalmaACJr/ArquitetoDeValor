@@ -99,6 +99,7 @@ Deno.serve(async (req: Request) => {
       case "snapshot-backfill": return await rotaSnapshotBackfill(c, req, m, userId);
       case "importar":        return await rotaImportar(c, req, m, userId);
       case "atualizar-ativos": return await rotaAtualizarAtivos(c, req, m, userId);
+      case "normalizar-tesouro": return await rotaNormalizarTesouro(c, req, m, userId);
       case "restaurar":       return await rotaRestaurar(c, req, m, userId);
       case "dashboard":       return m === "GET" ? await dashboard(c, url.searchParams) : erro("Método não permitido", 405);
       case "ranking":         return m === "GET" ? await ranking(c, url.searchParams) : erro("Método não permitido", 405);
@@ -237,6 +238,12 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
     const naoEncontrado = await verificarExistencia(c, "inv_ativos", id, "Ativo não encontrado");
     if (naoEncontrado) return naoEncontrado;
 
+    // Estado dos campos que DEFINEM o valor de mercado da renda fixa, antes do
+    // update — para detectar, depois, se a forma de rentabilidade mudou.
+    const { data: antesRF } = await c.from("inv_ativos")
+      .select("tipo_ativo, rf_indexador, rf_taxa, rf_vencimento")
+      .eq("id", id).maybeSingle();
+
     if (body.tipo_ativo !== undefined && !TIPOS_ATIVO.includes(String(body.tipo_ativo))) {
       return erro(`tipo_ativo inválido: ${TIPOS_ATIVO.join(" | ")}`);
     }
@@ -275,6 +282,30 @@ async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
         .eq("ativo_id", id)
         .neq("tipo_ativo", campos.tipo_ativo);
       if (errSync) logError("Sincronizar tipo_ativo dos dividendos", errSync);
+    }
+
+    // Renda fixa: o valor de mercado é DERIVADO do indexador/taxa (não vem de
+    // cotação externa). Se a forma de rentabilidade mudou, os snapshots mensais
+    // já gravados ficam defasados — ex.: ativo importado SEM indexador teve o
+    // histórico achatado no custo; ao marcar "110% CDI" depois, os meses antigos
+    // continuariam parados e todo o rendimento se acumularia num único mês.
+    // Apaga a série defasada e a reconstrói do 1º aporte até o mês corrente.
+    const ehRFTipo = (t: unknown) => t === "RENDA_FIXA" || t === "TESOURO_DIRETO";
+    const mudouRF = !!antesRF && (
+      antesRF.tipo_ativo    !== data.tipo_ativo    ||
+      antesRF.rf_indexador  !== data.rf_indexador  ||
+      antesRF.rf_taxa       !== data.rf_taxa       ||
+      antesRF.rf_vencimento !== data.rf_vencimento
+    );
+    if (mudouRF && (ehRFTipo(data.tipo_ativo) || ehRFTipo(antesRF?.tipo_ativo))) {
+      try {
+        await c.from("inv_historico_mensal").delete().eq("ativo_id", id);
+        // Só reconstrói se CONTINUA renda fixa. Se virou um tipo cotado, o
+        // histórico será preenchido pelo backfill/snapshot a partir da cotação.
+        if (ehRFTipo(data.tipo_ativo)) await rebuildHistoricoRF(c, userId, id);
+      } catch (e) {
+        logError("Recalcular histórico de renda fixa", e);
+      }
     }
     return json({ dados: data });
   }
@@ -1671,9 +1702,12 @@ function taxaAnualRF(indexador: string | null, taxa: string | null, cdi: number,
   const t = String(taxa ?? "");
   if (indexador === "PREFIXADO") return primeiraTaxa(t);
   if (indexador === "POS_FIXADO") {
-    if (/cdi/i.test(t))   { const pct = primeiraTaxa(t); return (pct > 0 ? pct : 1) * cdi; } // "110% CDI"
-    if (/selic/i.test(t)) return cdi + primeiraTaxa(t.replace(/.*\+/, ""));                  // "SELIC + x"
-    return cdi;
+    // Aditivo ("CDI + 2%", "SELIC + 1,5%"): índice + spread fixo. O "+" no
+    // texto é o que distingue do multiplicativo — checar antes.
+    if (/\+/.test(t)) return cdi + primeiraTaxa(t.replace(/.*\+/, ""));
+    // Multiplicativo ("110% CDI", "102% do CDI"): percentual aplicado ao índice.
+    const pct = primeiraTaxa(t);
+    return (pct > 0 ? pct : 1) * cdi;
   }
   if (indexador === "HIBRIDO") return ipca + primeiraTaxa(t.replace(/.*\+/, ""));            // "IPCA + x"
   return 0; // sem indexador → mantém o custo
@@ -2888,6 +2922,75 @@ async function ptaxPorMesMap(c: Db, desdeISO: string): Promise<Map<string, numbe
   return out;
 }
 
+// Reconstrói o histórico mensal de UM ativo de renda fixa / Tesouro, do 1º
+// aporte até o mês corrente, recalculando cada mês pela fórmula do indexador
+// (e MtM, no Tesouro). Chamado quando a forma de rentabilidade do ativo muda:
+// como o valor é derivado (não cotado), apagar e recalcular é seguro e
+// determinístico. Pressupõe que o histórico antigo já foi removido — grava em
+// ordem crescente para que a variação % de cada mês saia contra o anterior.
+async function rebuildHistoricoRF(c: Db, userId: string, ativoId: string): Promise<number> {
+  const { data: ativo } = await c.from("inv_ativos")
+    .select("tipo_ativo, nome, rf_indexador, rf_taxa, rf_vencimento")
+    .eq("id", ativoId).maybeSingle();
+  if (!ativo) return 0;
+  const tipo = String(ativo.tipo_ativo ?? "");
+  if (tipo !== "RENDA_FIXA" && tipo !== "TESOURO_DIRETO") return 0;
+
+  const { data: posicoes } = await c.from("inv_posicoes")
+    .select("conta_id, quantidade, valor_custo, data_compra")
+    .eq("ativo_id", ativoId).eq("status", "ATIVA");
+  if (!posicoes || posicoes.length === 0) return 0;
+
+  // Cada conta tem sua própria série de snapshot (ativo pode estar em mais de uma)
+  const porConta = new Map<string, { quantidade: number; valor_custo: number; data_compra: string }[]>();
+  for (const p of posicoes) {
+    const k = String(p.conta_id);
+    if (!porConta.has(k)) porConta.set(k, []);
+    porConta.get(k)!.push({
+      quantidade: Number(p.quantidade) || 0, valor_custo: Number(p.valor_custo) || 0,
+      data_compra: String(p.data_compra),
+    });
+  }
+
+  const mesCorrente = new Date().toISOString().slice(0, 7);
+  const indexador = (ativo.rf_indexador as string | null) ?? null;
+  const taxa      = (ativo.rf_taxa as string | null) ?? null;
+  const venc      = (ativo.rf_vencimento as string | null) ?? null;
+  const nome      = String(ativo.nome ?? "");
+  const cdi  = await sgsUltimo(432, CDI_FALLBACK);
+  const ipca = await sgsUltimo(13522, IPCA_FALLBACK);
+  const taxaAa = taxaAnualRF(indexador, taxa, cdi, ipca);
+
+  const vencs = tipo === "TESOURO_DIRETO" && venc ? [venc] : [];
+  if (vencs.length) { try { await garantirTesouroMesCorrente(c, vencs, mesCorrente); } catch (e) { logError("rebuild RF tesouro mes", e); } }
+  const mtm = await carregarTesouroMtM(c, vencs);
+
+  let gravados = 0;
+  for (const [contaId, posic] of porConta) {
+    const inicio = posic.reduce((min, p) => {
+      const me = p.data_compra.slice(0, 7);
+      return me < min ? me : min;
+    }, mesCorrente);
+    for (const me of mesesEntre(inicio, mesCorrente)) {
+      const posMes = posic.filter((p) => p.data_compra.slice(0, 7) <= me);
+      if (posMes.length === 0) continue;
+      const qtd   = posMes.reduce((s, p) => s + p.quantidade, 0);
+      const custo = posMes.reduce((s, p) => s + p.valor_custo, 0);
+      if (qtd <= 0) continue;
+      const precoMedio = custo / qtd;
+      // Mês corrente acumula até HOJE; meses fechados, até o último dia do mês.
+      const dataRef = me === mesCorrente
+        ? new Date()
+        : new Date(Date.UTC(Number(me.slice(0, 4)), Number(me.slice(5, 7)), 0, 12));
+      const valor = valorRFPosicoes(posMes, tipo, indexador, venc, nome, me, dataRef, taxaAa, mtm);
+      if (!(valor > 0)) continue;
+      await gravarSnapshot(c, userId, ativoId, contaId, me, valor, qtd, precoMedio);
+      gravados++;
+    }
+  }
+  return gravados;
+}
+
 async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: string) {
   if (m !== "POST") return erro("Método não permitido", 405);
   const body = await req.json().catch(() => ({})) as { conta_id?: string; ate?: string; ativo_id?: string };
@@ -3157,6 +3260,59 @@ async function rotaAtualizarAtivos(c: Db, _req: Request, m: string, _userId: str
 
   logSuccess("Ativos atualizados", { processados: lista.length, atualizados: atualizados.length });
   return json({ dados: { processados: lista.length, atualizados: atualizados.length, ativos: atualizados } });
+}
+
+// ============================================================
+// /investimentos/normalizar-tesouro — padroniza o ticker/nome dos títulos
+// do Tesouro já cadastrados para o formato legível (TD-IPCA-2040…), derivado
+// de indexador + vencimento (+ juros semestrais). Idempotente: re-rodar não
+// muda nada. Pula quando faltam dados ou quando o código novo colidiria com
+// outro ativo já existente (relatado em `ignorados`).
+// ============================================================
+async function rotaNormalizarTesouro(c: Db, _req: Request, m: string, _userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  logRequest("POST", "/investimentos/normalizar-tesouro");
+
+  const { data, error } = await c.from("inv_ativos")
+    .select("id, ticker, nome, rf_indexador, rf_vencimento")
+    .eq("tipo_ativo", "TESOURO_DIRETO");
+  if (error) { logError("Normalizar Tesouro — listar", error); return erro(error.message); }
+  const lista = (data ?? []) as {
+    id: string; ticker: string; nome: string | null;
+    rf_indexador: string | null; rf_vencimento: string | null;
+  }[];
+  if (lista.length === 0) return json({ dados: { processados: 0, renomeados: 0, ativos: [], ignorados: [] } });
+
+  // tickers em uso (para detectar colisão antes do UPDATE)
+  const emUso = new Set(lista.map((a) => String(a.ticker).toUpperCase()));
+  const renomeados: { de: string; para: string }[] = [];
+  const ignorados:  { ticker: string; motivo: string }[] = [];
+
+  for (const a of lista) {
+    const indexador = a.rf_indexador;
+    const venc      = a.rf_vencimento;
+    const atual     = String(a.ticker).toUpperCase();
+    if (!indexador || !venc) { ignorados.push({ ticker: a.ticker, motivo: "sem indexador/vencimento" }); continue; }
+    const semestral = tesouroSemestral(String(a.nome ?? ""));
+    const novo = tickerTesouro(indexador, venc, semestral);
+    if (!novo) { ignorados.push({ ticker: a.ticker, motivo: "vencimento inválido" }); continue; }
+    if (novo === atual) continue;                               // já no padrão
+    if (emUso.has(novo)) { ignorados.push({ ticker: a.ticker, motivo: `já existe ${novo}` }); continue; }
+
+    const campos: Record<string, unknown> = { ticker: novo };
+    // Nome: só preenche/normaliza quando vazio ou ainda era o ticker antigo
+    // (nunca sobrescreve um nome editado à mão).
+    const nomeAtual = String(a.nome ?? "").trim();
+    if (!nomeAtual || nomeAtual.toUpperCase() === atual) campos.nome = nomeTesouro(indexador, venc, semestral);
+
+    const { error: eUp } = await c.from("inv_ativos").update(campos).eq("id", a.id);
+    if (eUp) { ignorados.push({ ticker: a.ticker, motivo: eUp.message }); continue; }
+    emUso.delete(atual); emUso.add(novo);
+    renomeados.push({ de: a.ticker, para: novo });
+  }
+
+  logSuccess("Tesouro normalizado", { processados: lista.length, renomeados: renomeados.length });
+  return json({ dados: { processados: lista.length, renomeados: renomeados.length, ativos: renomeados, ignorados } });
 }
 
 async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
@@ -3975,6 +4131,33 @@ function indexadorDoTesouro(nome: string): string {
   return "HIBRIDO"; // IPCA+, Renda+, Educa+
 }
 
+// Código curto da família p/ compor o ticker legível do Tesouro.
+const TESOURO_COD: Record<string, string> = { PREFIXADO: "PRE", POS_FIXADO: "SELIC", HIBRIDO: "IPCA" };
+// Ticker determinístico e legível: TD-IPCA-2040, TD-IPCA-JS-2060, TD-PRE-2027,
+// TD-SELIC-2029. Mantém o MESMO código entre busca, cadastro manual (frontend
+// lib/tesouro.ts) e importação — evita duplicar o ativo. "" se faltar dado.
+function tickerTesouro(indexador: string, vencimento: string, semestral: boolean): string {
+  const ano = String(vencimento ?? "").slice(0, 4);
+  const cod = TESOURO_COD[indexador];
+  if (!cod || !/^\d{4}$/.test(ano)) return "";
+  const js = semestral && indexador !== "POS_FIXADO" ? "-JS" : "";
+  return `TD-${cod}${js}-${ano}`;
+}
+// Nome amigável do título (espelha FrontEnd/src/lib/tesouro.ts).
+const TESOURO_NOME_FAMILIA: Record<string, string> = { PREFIXADO: "Prefixado", POS_FIXADO: "Selic", HIBRIDO: "IPCA+" };
+function nomeTesouro(indexador: string, vencimento: string, semestral: boolean): string {
+  const fam = TESOURO_NOME_FAMILIA[indexador];
+  if (!fam) return "";
+  const ano = String(vencimento ?? "").slice(0, 4);
+  const js = semestral && indexador !== "POS_FIXADO" ? " com Juros Semestrais" : "";
+  return `Tesouro ${fam}${js}${/^\d{4}$/.test(ano) ? ` ${ano}` : ""}`;
+}
+// Heurística "com juros semestrais" pelo nome (espelha puTesouro/lib tesouro).
+function tesouroSemestral(nome: string): boolean {
+  const s = String(nome ?? "");
+  return /semestr|ntn-?f/i.test(s) || (/ntn-?b/i.test(s) && !/princ/i.test(s));
+}
+
 function taxaDoTesouro(nome: string, rate: number): string {
   const pct = `${String(rate).replace(".", ",")}%`;
   if (/selic/i.test(nome)) return `SELIC + ${pct}`;
@@ -3997,15 +4180,19 @@ async function buscaTesouro(q: string): Promise<ResultadoBusca[]> {
     if (preco <= 0) continue;                       // só títulos disponíveis para compra
     if (!nome.toLowerCase().includes(termo)) continue;
     const rate = Number(bd.anulInvstmtRate ?? 0);
+    const indexador  = indexadorDoTesouro(nome);
+    const vencimento = String(bd.mtrtyDt ?? "").slice(0, 10) || undefined;
+    const legivel    = vencimento ? tickerTesouro(indexador, vencimento, /semestr/i.test(nome)) : "";
     out.push({
-      ticker:     nome.replace(/tesouro\s*/i, "").replace(/[^A-Za-z0-9+]/g, "").toUpperCase().slice(0, 20),
+      ticker:     legivel ||
+        nome.replace(/tesouro\s*/i, "").replace(/[^A-Za-z0-9+]/g, "").toUpperCase().slice(0, 20),
       nome,
       preco,
       moeda:      "BRL",
       emissor:    "Governo Federal",
       taxa:       taxaDoTesouro(nome, rate),
-      vencimento: String(bd.mtrtyDt ?? "").slice(0, 10) || undefined,
-      indexador:  indexadorDoTesouro(nome),
+      vencimento,
+      indexador,
     });
     if (out.length >= 10) break;
   }
