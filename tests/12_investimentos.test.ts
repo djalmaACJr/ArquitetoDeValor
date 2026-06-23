@@ -251,6 +251,52 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect(aditivo).toBeGreaterThan(multiplicativo);
   });
 
+  test("CA-INV24 — vencimento limita a série: passado para no vencimento, futuro volta a render", async () => {
+    const { data: dA } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVV", nome: "Jest CDB com vencimento", tipo_ativo: "RENDA_FIXA", rf_subtipo: "CDB",
+    });
+    const aId = dA.dados.id as string;
+
+    // Aporte 4 meses atrás
+    await api("/investimentos/posicoes", "POST", {
+      ativo_id: aId, conta_id: contaId, quantidade: 1, preco_custo: 1000, data_compra: `${mesOffset(-4)}-10`,
+    });
+
+    const vencMesPassado = mesOffset(-2);
+    // Classifica (110% CDI) + vencimento 2 meses atrás → rebuild
+    const { status: sPut } = await api(`/investimentos/ativos/${aId}`, "PUT", {
+      rf_indexador: "POS_FIXADO", rf_indice: "CDI", rf_percentual_indice: 110, rf_taxa: "110% CDI",
+      rf_vencimento: `${vencMesPassado}-15`,
+    });
+    expect(sPut).toBe(200);
+
+    const { data: h1 } = await api(`/investimentos/historico-mensal?ativo_id=${aId}`);
+    const serie1 = (h1?.dados ?? []) as { mes_ano: string; valor_mercado: number; id: string }[];
+    const meses1 = serie1.map((h) => h.mes_ano);
+    // Nenhum mês depois do vencimento; o mês de vencimento rende acima do custo
+    expect(meses1.every((m) => m <= vencMesPassado)).toBe(true);
+    expect(meses1).toContain(vencMesPassado);
+    expect(meses1).not.toContain(mesOffset(0));
+    const noVenc = serie1.find((h) => h.mes_ano === vencMesPassado);
+    expect(Number(noVenc?.valor_mercado)).toBeGreaterThan(1000);
+
+    // Estende o vencimento para o futuro → série volta a ir até o mês corrente
+    const { status: sPut2 } = await api(`/investimentos/ativos/${aId}`, "PUT", {
+      rf_vencimento: `${mesOffset(12)}-15`,
+    });
+    expect(sPut2).toBe(200);
+
+    const { data: h2 } = await api(`/investimentos/historico-mensal?ativo_id=${aId}`);
+    const serie2 = (h2?.dados ?? []) as { mes_ano: string; valor_mercado: number; id: string }[];
+    expect(serie2.map((h) => h.mes_ano)).toContain(mesOffset(0));
+
+    // Limpeza
+    for (const h of serie2) await api(`/investimentos/historico-mensal/${h.id}`, "DELETE");
+    const { data: pos } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
+    for (const p of pos?.dados ?? []) await api(`/investimentos/posicoes/${p.id}`, "DELETE");
+    await api(`/investimentos/ativos/${aId}`, "DELETE");
+  });
+
   test("CA-INV20 — GET /investimentos/busca-externa valida tipo e tamanho mínimo da query", async () => {
     const { status: s1 } = await api("/investimentos/busca-externa?tipo=BITCOIN&q=petr");
     expect(s1).toBe(400); // tipo inválido
@@ -281,6 +327,71 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect(status).toBe(201);
     expect(Number(data.dados.valor_custo)).toBe(255.0);
     posicaoId = data.dados.id;
+  });
+
+  test("CA-INV23 — operação mantém a posição (compra soma c/ preço médio, venda abate/encerra, delete recalcula)", async () => {
+    const { data: dA } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVOP", nome: "Jest Operações", tipo_ativo: "ACOES",
+    });
+    const aId = dA.dados.id as string;
+    const posDoAtivo = async () => {
+      const { data } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
+      return (data?.dados ?? [])[0] as { id: string; quantidade: number; preco_custo: number; status: string };
+    };
+
+    // 1) Compra (sem posicao_id) cria a posição via ativo_id + conta_id
+    const { status: s1 } = await api("/investimentos/operacoes", "POST", {
+      ativo_id: aId, conta_id: contaId, tipo_operacao: "COMPRA",
+      quantidade: 10, preco_unitario: 20, valor_total: 200, data_operacao: `${mesOffset(-2)}-10`,
+    });
+    expect(s1).toBe(201);
+    let p = await posDoAtivo();
+    expect(Number(p.quantidade)).toBe(10);
+    expect(Number(p.preco_custo)).toBeCloseTo(20, 6);
+    expect(p.status).toBe("ATIVA");
+
+    // 2) Segunda compra → preço médio ponderado: (10×20 + 10×30)/20 = 25
+    await api("/investimentos/operacoes", "POST", {
+      ativo_id: aId, conta_id: contaId, tipo_operacao: "COMPRA",
+      quantidade: 10, preco_unitario: 30, valor_total: 300, data_operacao: `${mesOffset(-1)}-10`,
+    });
+    p = await posDoAtivo();
+    expect(Number(p.quantidade)).toBe(20);
+    expect(Number(p.preco_custo)).toBeCloseTo(25, 6);
+
+    // 3) Venda parcial abate a quantidade (média preservada)
+    const { data: dV } = await api("/investimentos/operacoes", "POST", {
+      ativo_id: aId, conta_id: contaId, tipo_operacao: "VENDA",
+      quantidade: 5, preco_unitario: 40, valor_total: 200, data_operacao: hoje(),
+    });
+    const opVenda = dV.dados.id as string;
+    p = await posDoAtivo();
+    expect(Number(p.quantidade)).toBe(15);
+    expect(Number(p.preco_custo)).toBeCloseTo(25, 6);
+
+    // 4) PUT com tipo_operacao inválido → 400
+    const { status: sErr } = await api(`/investimentos/operacoes/${opVenda}`, "PUT", { tipo_operacao: "INVALIDO" });
+    expect(sErr).toBe(400);
+
+    // 5) DELETE da venda recalcula a posição de volta para 20
+    const { status: sDel } = await api(`/investimentos/operacoes/${opVenda}`, "DELETE");
+    expect(sDel).toBe(200);
+    p = await posDoAtivo();
+    expect(Number(p.quantidade)).toBe(20);
+
+    // 6) Venda total → posição ENCERRADA (quantidade 0)
+    await api("/investimentos/operacoes", "POST", {
+      ativo_id: aId, conta_id: contaId, tipo_operacao: "VENDA",
+      quantidade: 20, preco_unitario: 50, valor_total: 1000, data_operacao: hoje(),
+    });
+    p = await posDoAtivo();
+    expect(Number(p.quantidade)).toBe(0);
+    expect(p.status).toBe("ENCERRADA");
+
+    // Limpeza (DELETE da posição cascateia as operações)
+    const { data: posAll } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
+    for (const pp of posAll?.dados ?? []) await api(`/investimentos/posicoes/${pp.id}`, "DELETE");
+    await api(`/investimentos/ativos/${aId}`, "DELETE");
   });
 
   test("CA-INV18 — DELETE /investimentos/ativos/:id com posições vinculadas retorna 409", async () => {

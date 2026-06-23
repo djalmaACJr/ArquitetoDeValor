@@ -1113,6 +1113,8 @@ async function rotaPosicoes(c: Db, req: Request, m: string, userId: string) {
 // ============================================================
 
 async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
+  const id = extrairId(req, "operacoes");
+
   if (m === "GET") {
     const params = new URL(req.url).searchParams;
     logRequest("GET", "/investimentos/operacoes", { params: Object.fromEntries(params) });
@@ -1128,38 +1130,170 @@ async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
     const body = await req.json();
     logRequest("POST", "/investimentos/operacoes", body);
 
-    if (!body.posicao_id || !body.tipo_operacao || !body.conta_id || body.quantidade == null || !body.data_operacao) {
-      return erro("Campos obrigatórios: posicao_id, tipo_operacao, conta_id, quantidade, data_operacao");
+    if (!body.tipo_operacao || body.quantidade == null || !body.data_operacao) {
+      return erro("Campos obrigatórios: tipo_operacao, quantidade, data_operacao");
     }
     if (!TIPOS_OPERACAO.includes(String(body.tipo_operacao))) {
       return erro(`tipo_operacao inválido: ${TIPOS_OPERACAO.join(" | ")}`);
     }
-    const posExiste = await verificarExistencia(c, "inv_posicoes", String(body.posicao_id), "Posição não encontrada");
-    if (posExiste) return posExiste;
-    if (!(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
-
     const qtd   = Number(body.quantidade);
     const preco = body.preco_unitario != null ? Number(body.preco_unitario) : 0;
     if (!Number.isFinite(qtd) || qtd < 0)     return erro("quantidade deve ser >= 0");
     if (!Number.isFinite(preco) || preco < 0) return erro("preco_unitario deve ser >= 0");
     const valorTotal = body.valor_total != null ? Number(body.valor_total) : qtd * preco;
 
+    // A operação mantém a posição. Resolve a posição por posicao_id (compat) ou
+    // find-or-create pelo par (ativo, conta) — a posição é a soma das operações.
+    let posicaoId: string;
+    let contaId: string;
+    if (body.posicao_id) {
+      const { data: pos } = await c.from("inv_posicoes").select("id, conta_id").eq("id", String(body.posicao_id)).maybeSingle();
+      if (!pos) return erro("Posição não encontrada", 404);
+      posicaoId = String(pos.id); contaId = String(pos.conta_id);
+    } else {
+      if (!body.ativo_id || !body.conta_id) return erro("Informe posicao_id ou (ativo_id e conta_id)");
+      if (!(await ativoExiste(c, String(body.ativo_id)))) return erro("Ativo não encontrado", 404);
+      if (!(await contaExiste(c, String(body.conta_id)))) return erro("Conta não encontrada", 404);
+      contaId = String(body.conta_id);
+      const resolved = await acharOuCriarPosicao(c, userId, String(body.ativo_id), contaId, String(body.data_operacao));
+      if (resolved instanceof Response) return resolved;
+      posicaoId = resolved;
+    }
+
     const { data, error } = await c.from("inv_operacoes").insert({
       user_id:        userId,
-      posicao_id:     body.posicao_id,
+      posicao_id:     posicaoId,
       tipo_operacao:  body.tipo_operacao,
-      conta_id:       body.conta_id,
+      conta_id:       contaId,
       quantidade:     qtd,
       preco_unitario: preco,
       valor_total:    valorTotal,
       data_operacao:  String(body.data_operacao),
     }).select().single();
     if (error) { logError("Criar operacao", error); return erro(error.message); }
+    await recomputarPosicao(c, posicaoId);
     logSuccess("Operação criada", { id: data.id });
     return json({ dados: data }, 201);
   }
 
+  if (m === "PUT" && id) {
+    const body = await req.json();
+    logRequest("PUT", `/investimentos/operacoes/${id}`, body);
+    const naoEncontrado = await verificarExistencia(c, "inv_operacoes", id, "Operação não encontrada");
+    if (naoEncontrado) return naoEncontrado;
+
+    if (body.tipo_operacao && !TIPOS_OPERACAO.includes(String(body.tipo_operacao))) {
+      return erro(`tipo_operacao inválido: ${TIPOS_OPERACAO.join(" | ")}`);
+    }
+    if (body.posicao_id) {
+      const posExiste = await verificarExistencia(c, "inv_posicoes", String(body.posicao_id), "Posição não encontrada");
+      if (posExiste) return posExiste;
+    }
+    if (body.conta_id && !(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
+    if (body.quantidade != null) {
+      const qtd = Number(body.quantidade);
+      if (!Number.isFinite(qtd) || qtd < 0) return erro("quantidade deve ser >= 0");
+    }
+    if (body.preco_unitario != null) {
+      const preco = Number(body.preco_unitario);
+      if (!Number.isFinite(preco) || preco < 0) return erro("preco_unitario deve ser >= 0");
+    }
+
+    // Estado anterior: posição dona (pode mudar) e qtd/preço (p/ recompor valor_total)
+    const { data: antes } = await c.from("inv_operacoes")
+      .select("posicao_id, quantidade, preco_unitario").eq("id", id).maybeSingle();
+
+    const campos = camposParaAtualizar(body, [
+      "posicao_id", "tipo_operacao", "conta_id", "quantidade", "preco_unitario", "valor_total", "data_operacao",
+    ]);
+    // valor_total derivado quando qtd/preço mudaram e não foi enviado explicitamente.
+    if (campos.valor_total == null && (campos.quantidade != null || campos.preco_unitario != null)) {
+      const q = campos.quantidade     != null ? Number(campos.quantidade)     : Number(antes?.quantidade)     || 0;
+      const p = campos.preco_unitario != null ? Number(campos.preco_unitario) : Number(antes?.preco_unitario) || 0;
+      campos.valor_total = q * p;
+    }
+
+    const { data, error } = await c.from("inv_operacoes").update(campos).eq("id", id).select().single();
+    if (error) { logError("Editar operacao", error); return erro(error.message); }
+
+    const posAfetadas = new Set<string>();
+    if (antes?.posicao_id) posAfetadas.add(String(antes.posicao_id));
+    if (data?.posicao_id)  posAfetadas.add(String(data.posicao_id));
+    for (const pid of posAfetadas) await recomputarPosicao(c, pid);
+    return json({ dados: data });
+  }
+
+  if (m === "DELETE" && id) {
+    logRequest("DELETE", `/investimentos/operacoes/${id}`);
+    const { data: op } = await c.from("inv_operacoes").select("posicao_id").eq("id", id).maybeSingle();
+    if (!op) return erro("Operação não encontrada", 404);
+    const { error } = await c.from("inv_operacoes").delete().eq("id", id);
+    if (error) { logError("Excluir operacao", error); return erro(error.message); }
+    await recomputarPosicao(c, String(op.posicao_id));
+    return json({ mensagem: "Operação excluída com sucesso" });
+  }
+
   return erro("Método não permitido", 405);
+}
+
+// Posição ATIVA do par (ativo, conta) — reusa a existente (ATIVA ou ENCERRADA)
+// ou cria uma vazia (qtd 0) que será preenchida por recomputarPosicao.
+async function acharOuCriarPosicao(
+  c: Db, userId: string, ativoId: string, contaId: string, dataOp: string,
+): Promise<string | Response> {
+  const { data: existentes } = await c.from("inv_posicoes")
+    .select("id, status").eq("ativo_id", ativoId).eq("conta_id", contaId);
+  const ativa = (existentes ?? []).find((p) => p.status === "ATIVA");
+  if (ativa) return String(ativa.id);
+  const qualquer = (existentes ?? [])[0];
+  if (qualquer) return String(qualquer.id);
+  const { data, error } = await c.from("inv_posicoes").insert({
+    user_id: userId, ativo_id: ativoId, conta_id: contaId,
+    quantidade: 0, preco_custo: 0, data_compra: dataOp, status: "ATIVA",
+  }).select("id").single();
+  if (error) { logError("Criar posição (operação)", error); return erro(error.message); }
+  return String(data.id);
+}
+
+// Recalcula a posição como a SOMA das suas operações (custo médio ponderado).
+// Compra/Aporte somam; Venda/Resgate abatem mantendo o preço médio; ao zerar a
+// quantidade a posição vira ENCERRADA. valor_custo é recalculado pelo trigger.
+async function recomputarPosicao(c: Db, posicaoId: string): Promise<void> {
+  const { data: ops, error } = await c.from("inv_operacoes")
+    .select("tipo_operacao, quantidade, preco_unitario, data_operacao, created_at")
+    .eq("posicao_id", posicaoId)
+    .order("data_operacao", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) { logError("Recomputar posição (ler operações)", error); return; }
+
+  let qtd = 0, custo = 0, precoMedio = 0;
+  let dataCompra: string | null = null;
+  for (const o of ops ?? []) {
+    const q = Number(o.quantidade) || 0;
+    const p = Number(o.preco_unitario) || 0;
+    const tipo = String(o.tipo_operacao);
+    if (tipo === "COMPRA" || tipo === "APORTE") {
+      qtd += q; custo += q * p;
+      if (!dataCompra) dataCompra = String(o.data_operacao);
+    } else if (tipo === "VENDA" || tipo === "RESGATE") {
+      const media = qtd > 0 ? custo / qtd : 0;
+      const remover = qtd > 0 ? Math.min(q, qtd) : 0;
+      custo -= remover * media; qtd -= remover;
+      if (qtd < 0) qtd = 0;
+    }
+    // DIVIDENDO: não altera a posição
+    if (qtd > 0) precoMedio = custo / qtd;
+  }
+
+  const { data: pos } = await c.from("inv_posicoes").select("data_compra").eq("id", posicaoId).maybeSingle();
+  const campos = {
+    quantidade:  qtd,
+    preco_custo: precoMedio,
+    data_compra: dataCompra ?? (pos?.data_compra ? String(pos.data_compra) : new Date().toISOString().split("T")[0]),
+    status:      qtd > 0 ? "ATIVA" : "ENCERRADA",
+  };
+  const { error: errUpd } = await c.from("inv_posicoes").update(campos).eq("id", posicaoId);
+  if (errUpd) logError("Recomputar posição (update)", errUpd);
 }
 
 // ============================================================
@@ -1697,22 +1831,6 @@ function primeiraTaxa(txt: string): number {
   return m ? Number(m[0]) / 100 : 0;
 }
 
-// Taxa anual efetiva do título conforme indexador/taxa
-function taxaAnualRF(indexador: string | null, taxa: string | null, cdi: number, ipca: number): number {
-  const t = String(taxa ?? "");
-  if (indexador === "PREFIXADO") return primeiraTaxa(t);
-  if (indexador === "POS_FIXADO") {
-    // Aditivo ("CDI + 2%", "SELIC + 1,5%"): índice + spread fixo. O "+" no
-    // texto é o que distingue do multiplicativo — checar antes.
-    if (/\+/.test(t)) return cdi + primeiraTaxa(t.replace(/.*\+/, ""));
-    // Multiplicativo ("110% CDI", "102% do CDI"): percentual aplicado ao índice.
-    const pct = primeiraTaxa(t);
-    return (pct > 0 ? pct : 1) * cdi;
-  }
-  if (indexador === "HIBRIDO") return ipca + primeiraTaxa(t.replace(/.*\+/, ""));            // "IPCA + x"
-  return 0; // sem indexador → mantém o custo
-}
-
 const DIA_MS = 86_400_000;
 // Valor acumulado de uma posição de renda fixa, do aporte até dataRef
 function valorRF(custo: number, dataCompra: string, dataRef: Date, taxaAa: number): number {
@@ -2106,6 +2224,9 @@ async function executarSnapshotMes(
   const temRF = lista.some((g) => ehRF(g.tipo));
   const cdi  = temRF ? await sgsUltimo(432, CDI_FALLBACK) : CDI_FALLBACK;
   const ipca = temRF ? await sgsUltimo(13522, IPCA_FALLBACK) : IPCA_FALLBACK;
+  const { cdi: cdiSerie, ipca: ipcaSerie } = temRF
+    ? await carregarIndicesMensais(client, INDICES_DATA_CORTE)
+    : { cdi: new Map<string, number>(), ipca: new Map<string, number>() };
   // Marcação a mercado do Tesouro (prefixado/IPCA+). No mês corrente, busca o
   // PU de resgate atual no feed da B3 (demand-driven + cache), como nas ações.
   const vencsTesouro = lista.filter((g) => g.tipo === "TESOURO_DIRETO").map((g) => g.vencimento ?? "");
@@ -2126,8 +2247,11 @@ async function executarSnapshotMes(
       if (preco == null) { ignorados.push({ ticker: g.ticker, motivo: "cotação de cripto indisponível" }); continue; }
       valor = preco * qtd;
     } else if (ehRF(g.tipo)) {
-      const taxaAa = taxaAnualRF(g.indexador, g.taxa, cdi, ipca);
-      valor = valorRFPosicoes(g.posicoes, g.tipo, g.indexador, g.vencimento, g.nome, mesAno, dataRef, taxaAa, mtmTesouro);
+      // Título já vencido em mês anterior não gera snapshot novo.
+      if (g.vencimento && g.vencimento.slice(0, 7) < mesAno) {
+        ignorados.push({ ticker: g.ticker, motivo: "título vencido" }); continue;
+      }
+      valor = valorRFPosicoes(g.posicoes, g.tipo, g.indexador, g.vencimento, g.nome, mesAno, dataRef, g.taxa, cdiSerie, ipcaSerie, cdi, ipca, mtmTesouro);
     } else {
       const cot = precos.get(g.ticker);
       if (cot == null) { ignorados.push({ ticker: g.ticker, motivo: "cotação indisponível" }); continue; }
@@ -2792,6 +2916,15 @@ function mesesEntre(ini: string, fim: string): string[] {
   return out;
 }
 
+// Último mês com snapshot de uma renda fixa: o título não gera histórico
+// depois de vencido, então a série não passa do mês de vencimento (quando este
+// é anterior ao fim normal da série).
+function fimSerieRF(venc: string | null, mesFim: string): string {
+  if (!venc) return mesFim;
+  const vencMes = venc.slice(0, 7);
+  return vencMes < mesFim ? vencMes : mesFim;
+}
+
 // Histórico mensal de cotação no Yahoo Finance. Devolve a série (mês→preço)
 // e a MOEDA detectada (meta.currency) — B3 usa sufixo .SA (BRL); papéis dos
 // EUA usam o ticker puro (USD). Yahoo bloqueia sem User-Agent.
@@ -2959,7 +3092,7 @@ async function rebuildHistoricoRF(c: Db, userId: string, ativoId: string): Promi
   const nome      = String(ativo.nome ?? "");
   const cdi  = await sgsUltimo(432, CDI_FALLBACK);
   const ipca = await sgsUltimo(13522, IPCA_FALLBACK);
-  const taxaAa = taxaAnualRF(indexador, taxa, cdi, ipca);
+  const { cdi: cdiSerie, ipca: ipcaSerie } = await carregarIndicesMensais(c, INDICES_DATA_CORTE);
 
   const vencs = tipo === "TESOURO_DIRETO" && venc ? [venc] : [];
   if (vencs.length) { try { await garantirTesouroMesCorrente(c, vencs, mesCorrente); } catch (e) { logError("rebuild RF tesouro mes", e); } }
@@ -2971,7 +3104,7 @@ async function rebuildHistoricoRF(c: Db, userId: string, ativoId: string): Promi
       const me = p.data_compra.slice(0, 7);
       return me < min ? me : min;
     }, mesCorrente);
-    for (const me of mesesEntre(inicio, mesCorrente)) {
+    for (const me of mesesEntre(inicio, fimSerieRF(venc, mesCorrente))) {
       const posMes = posic.filter((p) => p.data_compra.slice(0, 7) <= me);
       if (posMes.length === 0) continue;
       const qtd   = posMes.reduce((s, p) => s + p.quantidade, 0);
@@ -2982,7 +3115,7 @@ async function rebuildHistoricoRF(c: Db, userId: string, ativoId: string): Promi
       const dataRef = me === mesCorrente
         ? new Date()
         : new Date(Date.UTC(Number(me.slice(0, 4)), Number(me.slice(5, 7)), 0, 12));
-      const valor = valorRFPosicoes(posMes, tipo, indexador, venc, nome, me, dataRef, taxaAa, mtm);
+      const valor = valorRFPosicoes(posMes, tipo, indexador, venc, nome, me, dataRef, taxa, cdiSerie, ipcaSerie, cdi, ipca, mtm);
       if (!(valor > 0)) continue;
       await gravarSnapshot(c, userId, ativoId, contaId, me, valor, qtd, precoMedio);
       gravados++;
@@ -3045,6 +3178,9 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
   const temRF = lista.some((g) => ehRF(g.tipo));
   const cdi  = temRF ? await sgsUltimo(432, CDI_FALLBACK) : CDI_FALLBACK;
   const ipca = temRF ? await sgsUltimo(13522, IPCA_FALLBACK) : IPCA_FALLBACK;
+  const { cdi: cdiSerie, ipca: ipcaSerie } = temRF
+    ? await carregarIndicesMensais(c, INDICES_DATA_CORTE)
+    : { cdi: new Map<string, number>(), ipca: new Map<string, number>() };
   // Marcação a mercado do Tesouro (prefixado/IPCA+). O histórico por título só
   // existe no CSV do STN — baixado UMA vez (lazy) quando ainda não há cache;
   // depois é reusado. Mês corrente vem do feed da B3 (garantido no snapshot).
@@ -3085,7 +3221,9 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
     const { data: existentes } = await c.from("inv_historico_mensal")
       .select("mes_ano").eq("ativo_id", g.ativoId).eq("conta_id", g.contaId);
     const jaTem = new Set((existentes ?? []).map((e) => String(e.mes_ano)));
-    const faltantes = mesesEntre(g.inicio, mesFim).filter((me) => !jaTem.has(me));
+    // RF não gera histórico depois do vencimento.
+    const fimGrupo = ehRF(g.tipo) ? fimSerieRF(g.vencimento, mesFim) : mesFim;
+    const faltantes = mesesEntre(g.inicio, fimGrupo).filter((me) => !jaTem.has(me));
     if (faltantes.length === 0) continue;
 
     // série de preços por mês (cotados/cripto) + moeda real detectada
@@ -3105,7 +3243,6 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
       if (precoPorMes.size === 0) { ignorados.push({ ticker: g.ticker, motivo: "histórico de cripto indisponível" }); continue; }
     }
 
-    const taxaAa = ehRF(g.tipo) ? taxaAnualRF(g.indexador, g.taxa, cdi, ipca) : 0;
     let gravouAlgum = false;
     let gravadosAtivo = 0, semCotacaoMes = 0, semPtax = 0;
 
@@ -3121,7 +3258,7 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
 
       let valor: number;
       if (ehRF(g.tipo)) {
-        valor = valorRFPosicoes(posMes, g.tipo, g.indexador, g.vencimento, g.nome, me, dataRef, taxaAa, mtmTesouro);
+        valor = valorRFPosicoes(posMes, g.tipo, g.indexador, g.vencimento, g.nome, me, dataRef, g.taxa, cdiSerie, ipcaSerie, cdi, ipca, mtmTesouro);
       } else {
         let preco = precoPorMes!.get(me);
         if (preco == null) { semCotacaoMes++; continue; } // sem cotação naquele mês
@@ -4816,15 +4953,109 @@ function puTesouro(
   return pu;
 }
 
+// Série mensal de um índice: 'YYYY-MM' → taxa do mês em decimal (ex.: 0.0107).
+type SerieIndice = Map<string, number>;
+
+// Carrega as séries mensais reais de CDI e IPCA (arqvalor.indices_economicos,
+// SGS 4391/433) a partir de `desde`. Garante a sincronização com o BCB antes
+// de ler (idempotente). Usadas para acumular a rentabilidade de RF mês a mês
+// com a taxa que de fato vigorou — em vez de uma única taxa atual.
+async function carregarIndicesMensais(c: Db, desde: string): Promise<{ cdi: SerieIndice; ipca: SerieIndice }> {
+  try { await garantirIndicesSincronizados(c); } catch (e) { logError("Sincronizar índices (RF)", e); }
+  const cdi: SerieIndice = new Map();
+  const ipca: SerieIndice = new Map();
+  const { data } = await c.from("indices_economicos")
+    .select("indice, competencia, valor")
+    .in("indice", ["CDI", "IPCA"])
+    .gte("competencia", desde);
+  for (const r of (data ?? []) as { indice: string; competencia: string; valor: number }[]) {
+    const v = Number(r.valor) / 100;
+    if (!Number.isFinite(v)) continue;
+    if (r.indice === "CDI") cdi.set(String(r.competencia), v);
+    else if (r.indice === "IPCA") ipca.set(String(r.competencia), v);
+  }
+  return { cdi, ipca };
+}
+
+// Valor acumulado de uma aplicação de RF do aporte até `dataRef`, usando a
+// série MENSAL real do indexador (CDI/IPCA de cada mês), com proração por dias
+// corridos no 1º e no último mês. Prefixado não depende de série (taxa fixa).
+// Mês sem dado (ex.: corrente ainda não publicado) → carry-forward do último
+// conhecido; sem série alguma → cai na taxa anual atual (comportamento antigo).
+function valorRFAcumulado(
+  custo: number, dataCompra: string, dataRef: Date,
+  indexador: string | null, taxa: string | null,
+  cdiSerie: SerieIndice, ipcaSerie: SerieIndice,
+  cdiAtualAa: number, ipcaAtualAa: number,
+): number {
+  const t = String(taxa ?? "");
+  // Prefixado / sem indexador: taxa fixa composta nos dias corridos.
+  if (indexador === "PREFIXADO" || !indexador) {
+    return valorRF(custo, dataCompra, dataRef, primeiraTaxa(t));
+  }
+
+  const ini = new Date(`${String(dataCompra).slice(0, 10)}T00:00:00Z`).getTime();
+  const fim = dataRef.getTime();
+  if (!Number.isFinite(ini) || fim <= ini) return custo;
+
+  const usaIPCA   = indexador === "HIBRIDO";
+  const aditivo   = usaIPCA || (indexador === "POS_FIXADO" && /\+/.test(t));
+  const pct       = (indexador === "POS_FIXADO" && !aditivo) ? (primeiraTaxa(t) || 1) : 1;
+  const spreadAa  = aditivo ? primeiraTaxa(t.replace(/.*\+/, "")) : 0;
+  const spreadMes = spreadAa > 0 ? Math.pow(1 + spreadAa, 1 / 12) - 1 : 0;
+  const serie     = usaIPCA ? ipcaSerie : cdiSerie;
+  const fallbackMes = Math.pow(1 + Math.max(0, usaIPCA ? ipcaAtualAa : cdiAtualAa), 1 / 12) - 1;
+
+  const chavesOrd = [...serie.keys()].sort();
+  const taxaMes = (mesStr: string): number => {
+    if (serie.has(mesStr)) return serie.get(mesStr)!;
+    let v: number | undefined;
+    for (const k of chavesOrd) { if (k <= mesStr) v = serie.get(k); else break; }
+    return v ?? fallbackMes;
+  };
+
+  let acc = 1;
+  let y = new Date(ini).getUTCFullYear();
+  let mo = new Date(ini).getUTCMonth(); // 0-based
+  const fimY = new Date(fim).getUTCFullYear();
+  const fimMo = new Date(fim).getUTCMonth();
+  let guard = 0;
+  while ((y < fimY || (y === fimY && mo <= fimMo)) && guard++ < 1200) {
+    const inicioMes = Date.UTC(y, mo, 1);
+    const proxMes   = Date.UTC(y, mo + 1, 1);
+    const de  = Math.max(ini, inicioMes);
+    const ate = Math.min(fim, proxMes);
+    const fracao = Math.max(0, Math.min(1, (ate - de) / (proxMes - inicioMes)));
+    if (fracao > 0) {
+      const mesStr = `${y}-${String(mo + 1).padStart(2, "0")}`;
+      const r = taxaMes(mesStr);
+      const fatorMes = aditivo ? (1 + r) * (1 + spreadMes) : (1 + r * pct);
+      acc *= Math.pow(fatorMes, fracao);
+    }
+    mo++; if (mo > 11) { mo = 0; y++; }
+  }
+  return custo * acc;
+}
+
 // Valor de um conjunto de posições de renda fixa num mês: para Tesouro
 // prefixado/IPCA+ usa a marcação a mercado escalando o custo pela razão
 // PU_alvo / PU_compra (robusto a como a quantidade foi cadastrada); sem PU
-// disponível, cai para o acúmulo pelo indexador (valorRF).
+// disponível, cai para a acumulação pela série do indexador (valorRFAcumulado).
 function valorRFPosicoes(
   posicoes: { valor_custo: number; data_compra: string }[],
   tipo: string, indexador: string | null, venc: string | null, nome: string,
-  mes: string, dataRef: Date, taxaAa: number, mtm: SerieMtM,
+  mes: string, dataRef: Date,
+  taxa: string | null, cdiSerie: SerieIndice, ipcaSerie: SerieIndice,
+  cdiAtualAa: number, ipcaAtualAa: number, mtm: SerieMtM,
 ): number {
+  // Após o vencimento o título não rende mais (o resgate ocorre ali). Congela
+  // a acumulação na data de vencimento — sem isso o valor de um CDB/LCI/LCA
+  // cresceria indefinidamente, ignorando o vencimento.
+  let ref = dataRef;
+  if (venc) {
+    const vencMs = new Date(`${venc.slice(0, 10)}T12:00:00Z`).getTime();
+    if (Number.isFinite(vencMs) && vencMs < ref.getTime()) ref = new Date(vencMs);
+  }
   return posicoes.reduce((soma, p) => {
     if (tipo === "TESOURO_DIRETO") {
       const puAlvo   = puTesouro(mtm, indexador, venc, nome, mes);
@@ -4833,6 +5064,6 @@ function valorRFPosicoes(
         return soma + p.valor_custo * (puAlvo / puCompra);
       }
     }
-    return soma + valorRF(p.valor_custo, p.data_compra, dataRef, taxaAa);
+    return soma + valorRFAcumulado(p.valor_custo, p.data_compra, ref, indexador, taxa, cdiSerie, ipcaSerie, cdiAtualAa, ipcaAtualAa);
   }, 0);
 }

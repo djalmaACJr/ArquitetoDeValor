@@ -72,6 +72,25 @@ export type StatusPosicaoInvestimento = typeof STATUS_POSICAO_INV[number]
 export const TIPOS_OPERACAO_INV = ['COMPRA', 'VENDA', 'APORTE', 'RESGATE', 'DIVIDENDO'] as const
 export type TipoOperacaoInvestimento = typeof TIPOS_OPERACAO_INV[number]
 
+// Rótulos das movimentações. Renda fixa/Tesouro usam Aplicação/Resgate em vez
+// de Compra/Venda (APORTE é exibido como "Aplicação").
+export const TIPO_OPERACAO_LABEL: Record<TipoOperacaoInvestimento, string> = {
+  COMPRA: 'Compra', VENDA: 'Venda', APORTE: 'Aplicação', RESGATE: 'Resgate', DIVIDENDO: 'Dividendo',
+}
+
+const ehRendaFixaInv = (t: TipoAtivoInvestimento) => t === 'RENDA_FIXA' || t === 'TESOURO_DIRETO'
+
+// Movimentações aplicáveis por tipo de ativo: renda fixa/Tesouro → entrada
+// (APORTE) e saída (RESGATE); demais (bolsa/cripto) → COMPRA e VENDA.
+export function tiposOperacaoPara(tipoAtivo: TipoAtivoInvestimento): TipoOperacaoInvestimento[] {
+  return ehRendaFixaInv(tipoAtivo) ? ['APORTE', 'RESGATE'] : ['COMPRA', 'VENDA']
+}
+
+// Tipo de entrada (compra/aplicação) padrão para o ativo.
+export function tipoEntradaPara(tipoAtivo: TipoAtivoInvestimento): TipoOperacaoInvestimento {
+  return ehRendaFixaInv(tipoAtivo) ? 'APORTE' : 'COMPRA'
+}
+
 // Rótulos amigáveis e cor consistente por tipo de ativo
 export const TIPO_ATIVO_LABEL: Record<TipoAtivoInvestimento, string> = {
   ACOES:             'Ações',

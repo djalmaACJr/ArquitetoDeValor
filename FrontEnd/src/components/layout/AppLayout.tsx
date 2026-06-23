@@ -65,18 +65,32 @@ export default function AppLayout() {
     if (!main) return
     // Posição conhecida da entrada (revisita) → restaura; inédita → topo (0).
     const alvo = scrollPos.current.get(location.key) ?? 0
-    // O conteúdo pode pintar depois (Suspense/react-query): tenta por alguns
-    // frames até a altura comportar a posição salva.
-    let raf = 0
-    let tentativas = 0
-    const restaurar = () => {
-      const m = mainRef.current
-      if (!m) return
-      if (m.scrollHeight - m.clientHeight >= alvo || tentativas++ > 60) m.scrollTop = alvo
-      else raf = requestAnimationFrame(restaurar)
+    if (alvo === 0) { main.scrollTop = 0; return }
+
+    // O conteúdo costuma pintar depois (react-query/charts): páginas pesadas
+    // (ex.: Investimentos) mostram um spinner curto enquanto refazem fetch e
+    // só então crescem. Um número fixo de frames não basta — se o fetch passa
+    // de ~1s a restauração desistia com a página ainda curta e o scroll era
+    // clipado para 0. Em vez disso, reaplicamos a posição assim que a altura
+    // comportar o alvo, observando o crescimento do conteúdo.
+    let cancelado = false
+    const tentar = () => {
+      if (cancelado) return false
+      if (main.scrollHeight - main.clientHeight >= alvo) {
+        main.scrollTop = alvo
+        return true
+      }
+      return false
     }
-    raf = requestAnimationFrame(restaurar)
-    return () => cancelAnimationFrame(raf)
+    if (tentar()) return
+
+    const ro = new ResizeObserver(() => { if (tentar()) finalizar() })
+    ro.observe(main.firstElementChild ?? main)
+    // Janela de segurança: para de tentar após alguns segundos (conteúdo pode
+    // ter encolhido legitimamente — ex.: menos ativos do que antes).
+    const timer = window.setTimeout(() => { tentar(); finalizar() }, 3000)
+    function finalizar() { cancelado = true; ro.disconnect(); window.clearTimeout(timer) }
+    return finalizar
   }, [location.key])
 
   // ── Delegação de scroll para ↑ / ↓ / PageUp / PageDown / Home / End ───

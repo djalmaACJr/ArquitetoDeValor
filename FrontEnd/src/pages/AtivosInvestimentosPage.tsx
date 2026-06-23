@@ -4,18 +4,18 @@ import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, type Plugin, type ChartData } from 'chart.js'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
-import { useInvestimentosPosicoes, type CriarPosicaoInput } from '../hooks/useInvestimentosPosicoes'
-import { useInvestimentosHistorico, useBackfillHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
+import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
+import { useInvestimentosHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
 import { useInvestimentosDashboard, useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
-import { useContas } from '../hooks/useContas'
 import {
   Drawer, Field, Input, SelectDark, Toast,
 } from '../components/ui/shared'
 import DrawerAtivo from '../components/ui/DrawerAtivo'
+import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
 import QuadroTipoAtivos, { type Dimensao } from '../components/ui/QuadroTipoAtivos'
 import { linhaDeMeta, type AtivoLinha } from '../lib/ativosLinha'
 import LoadingMascote from '../components/ui/LoadingMascote'
-import { formatBRL, formatData } from '../lib/utils'
+import { formatBRL } from '../lib/utils'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
   setorLabel,
@@ -541,9 +541,9 @@ export default function AtivosInvestimentosPage() {
         <DrawerAtivo ativo={editando} onClose={() => setDrawer(false)} onToast={showToast} />
       )}
 
-      {/* Drawer posições */}
+      {/* Drawer movimentações (posição = soma das operações) */}
       {posicoesDe && (
-        <DrawerPosicoes ativo={posicoesDe} onClose={() => setPosicoesDe(null)} onToast={showToast} />
+        <DrawerMovimentacoes ativo={posicoesDe} onClose={() => setPosicoesDe(null)} onToast={showToast} />
       )}
 
       {/* Drawer histórico mensal de valor de mercado */}
@@ -552,110 +552,6 @@ export default function AtivosInvestimentosPage() {
       )}
 
     </div>
-  )
-}
-
-// ── Drawer de posições de um ativo ──────────────────────────────
-
-const POS_VAZIO = { conta_id: '', quantidade: '', preco_custo: '', data_compra: new Date().toISOString().split('T')[0] }
-
-function DrawerPosicoes({ ativo, onClose, onToast }: {
-  ativo: InvestimentoAtivo; onClose: () => void; onToast: (m: string) => void
-}) {
-  const { posicoes, loading, criar, excluir } = useInvestimentosPosicoes({ ativo_id: ativo.id })
-  const { contas } = useContas()
-  const { preencher } = useBackfillHistorico()
-  const [form, setForm] = useState(POS_VAZIO)
-  const [salvando, setSalvando] = useState(false)
-
-  // Opções de conta: contas de investimento ativas + qualquer conta onde o
-  // ativo já tem posição (mesmo inativa/outro tipo), pra nunca ficar vazio
-  // quando a posição caiu numa conta que não é INVESTIMENTO ativa.
-  const contasOpcoes = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const c of contas) if (c.tipo === 'INVESTIMENTO' && c.ativa) m.set(c.conta_id, c.nome)
-    for (const p of posicoes) if (p.conta_id && !m.has(p.conta_id)) m.set(p.conta_id, p.contas?.nome ?? '—')
-    return [...m.entries()]
-  }, [contas, posicoes])
-
-  async function adicionar() {
-    if (!form.conta_id) { onToast('Selecione a conta'); return }
-    const qtd = Number(form.quantidade), preco = Number(form.preco_custo)
-    if (!(qtd > 0) || !(preco >= 0)) { onToast('Quantidade e preço inválidos'); return }
-    setSalvando(true)
-    const payload: CriarPosicaoInput = {
-      ativo_id: ativo.id, conta_id: form.conta_id, quantidade: qtd, preco_custo: preco, data_compra: form.data_compra,
-    }
-    const res = await criar(payload)
-    setSalvando(false)
-    if (res.ok) {
-      setForm(POS_VAZIO); onToast('Posição adicionada!')
-      // Reconstrói o histórico de cotação deste ativo (desde a data de compra)
-      preencher({ ativo_id: ativo.id }).then((bf) => {
-        if (bf.ok && (bf.dados?.meses_gravados ?? 0) > 0) onToast(`Histórico reconstruído: ${bf.dados!.meses_gravados} mês(es).`)
-      })
-    }
-    else onToast(res.erro ?? 'Erro ao adicionar posição')
-  }
-
-  async function remover(id: string) {
-    const res = await excluir(id)
-    onToast(res.ok ? 'Posição removida.' : (res.erro ?? 'Erro ao remover'))
-  }
-
-  return (
-    <Drawer open onClose={onClose} titulo={`Posições · ${ativo.ticker}`} subtitulo={ativo.nome}>
-      {/* Form rápido */}
-      <div className="rounded-lg border border-white/10 p-3 space-y-3">
-        <Field label="Conta">
-          <SelectDark value={form.conta_id} onChange={(e) => setForm({ ...form, conta_id: e.target.value })}>
-            <option value="">Selecione...</option>
-            {contasOpcoes.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
-          </SelectDark>
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Quantidade">
-            <Input type="number" min={0} step="any" value={form.quantidade}
-              onChange={(e) => setForm({ ...form, quantidade: e.target.value })} placeholder="0" />
-          </Field>
-          <Field label="Preço de custo">
-            <Input type="number" min={0} step="any" value={form.preco_custo}
-              onChange={(e) => setForm({ ...form, preco_custo: e.target.value })} placeholder="0,00" />
-          </Field>
-        </div>
-        <Field label="Data da compra">
-          <Input type="date" value={form.data_compra} onChange={(e) => setForm({ ...form, data_compra: e.target.value })} />
-        </Field>
-        <button onClick={adicionar} disabled={salvando}
-          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-semibold text-white disabled:opacity-50"
-          style={{ background: '#3b82f6' }}>
-          <Plus size={14} /> Adicionar posição
-        </button>
-      </div>
-
-      {/* Lista de posições */}
-      {loading ? (
-        <p className="text-[13px]" style={{ color: MUTED }}>Carregando...</p>
-      ) : posicoes.length === 0 ? (
-        <p className="text-[13px] text-center py-4" style={{ color: MUTED }}>Nenhuma posição neste ativo.</p>
-      ) : (
-        <div className="space-y-2">
-          {posicoes.map((p) => (
-            <div key={p.id} className="rounded-lg border border-white/10 p-3 flex items-center justify-between gap-2">
-              <div>
-                <p className="text-white text-[14px] font-medium">{p.contas?.nome ?? '—'}</p>
-                <p className="text-[12px]" style={{ color: MUTED }}>
-                  {p.quantidade} × {formatBRL(p.preco_custo)} = {formatBRL(p.valor_custo)} · {formatData(p.data_compra)}
-                </p>
-              </div>
-              <button onClick={() => remover(p.id)} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </Drawer>
   )
 }
 

@@ -300,7 +300,7 @@ export default function QuadroTipoAtivos({
         {acoes && (
           <td className="px-2 py-1.5">
             <div className="flex items-center justify-end gap-1">
-              <button onClick={() => l.meta && acoes.onPosicoes(l.meta)} disabled={!l.meta} title="Posições"
+              <button onClick={() => l.meta && acoes.onPosicoes(l.meta)} disabled={!l.meta} title="Movimentações"
                 className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>
                 <Layers size={13} />
               </button>

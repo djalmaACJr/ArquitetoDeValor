@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2 } from 'lucide-react'
+import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus } from 'lucide-react'
 import { Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, Tooltip, Legend,
@@ -15,10 +15,11 @@ import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
 import { usePtax } from '../hooks/usePtax'
 import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo } from '../components/ui/shared'
 import DrawerAtivo from '../components/ui/DrawerAtivo'
+import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL, formatData } from '../lib/utils'
 import {
-  TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
+  TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPO_OPERACAO_LABEL,
   INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO, SUBTIPO_RF_INFO, FII_CATEGORIA_INFO,
   setorLabel,
 } from '../lib/constants'
@@ -78,6 +79,7 @@ export default function DetalheInvestimentoPage() {
   const [editandoAtivo, setEditandoAtivo] = useState(false)
   const [excluindo, setExcluindo] = useState(false)
   const [salvandoExclusao, setSalvandoExclusao] = useState(false)
+  const [gerenciar, setGerenciar] = useState(false)
 
   const { ativo, loading, error } = useInvestimentoAtivo(ativoId)
   const { excluir } = useInvestimentosAtivos()
@@ -177,6 +179,8 @@ export default function DetalheInvestimentoPage() {
   }
 
   const cor = TIPO_ATIVO_COR[ativo.tipo_ativo]
+  // Renda fixa, Tesouro e cripto não pagam proventos → escondem os quadros de dividendos.
+  const podeDividendos = !['RENDA_FIXA', 'TESOURO_DIRETO', 'CRIPTOMOEDAS'].includes(ativo.tipo_ativo)
 
   async function confirmarExclusao() {
     if (!ativo) return
@@ -339,74 +343,62 @@ export default function DetalheInvestimentoPage() {
           )}
         </section>
 
-        {/* Dividendos mensais */}
-        <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <h2 className="text-[14px] font-semibold text-white/80 mb-3">Dividendos por mês</h2>
-          {divPorMes.length === 0 ? (
-            <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo lançado para este ativo.</p>
-          ) : (
-            <Bar
-              data={{
-                labels: divPorMes.map(([mes]) => fmtMes(mes)),
-                datasets: [{
-                  label: 'Dividendos',
-                  data: divPorMes.map(([, v]) => v),
-                  backgroundColor: '#00c896aa',
-                  borderRadius: 4,
-                }],
-              }}
-              options={OPCOES_GRAFICO}
-            />
-          )}
-        </section>
+        {/* Dividendos mensais — só para ativos que pagam proventos */}
+        {podeDividendos && (
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <h2 className="text-[14px] font-semibold text-white/80 mb-3">Dividendos por mês</h2>
+            {divPorMes.length === 0 ? (
+              <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo lançado para este ativo.</p>
+            ) : (
+              <Bar
+                data={{
+                  labels: divPorMes.map(([mes]) => fmtMes(mes)),
+                  datasets: [{
+                    label: 'Dividendos',
+                    data: divPorMes.map(([, v]) => v),
+                    backgroundColor: '#00c896aa',
+                    borderRadius: 4,
+                  }],
+                }}
+                options={OPCOES_GRAFICO}
+              />
+            )}
+          </section>
+        )}
 
-        {/* Posições */}
-        <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <h2 className="text-[14px] font-semibold text-white/80 mb-3">Posições</h2>
-          {posicoes.length === 0 ? (
-            <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhuma posição neste ativo.</p>
-          ) : (
-            <div className="space-y-2">
-              {posicoes.map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-2 text-[13px]">
-                  <div>
-                    <p className="text-white font-medium">{p.contas?.nome ?? '—'}
-                      {p.status === 'ENCERRADA' && <span className="ml-2 text-[11px]" style={{ color: MUTED }}>(encerrada)</span>}
-                    </p>
-                    <p style={{ color: MUTED }}>{p.quantidade} × {formatBRL(p.preco_custo)} · {formatData(p.data_compra)}</p>
+        {/* Últimos dividendos — só para ativos que pagam proventos */}
+        {podeDividendos && (
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <h2 className="text-[14px] font-semibold text-white/80 mb-3">Últimos dividendos</h2>
+            {dividendos.length === 0 ? (
+              <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo lançado.</p>
+            ) : (
+              <div className="space-y-2">
+                {dividendos.slice(0, 8).map((d) => (
+                  <div key={d.id} className="flex items-center justify-between gap-2 text-[13px]">
+                    <div>
+                      <p className="text-white font-medium">{d.inv_tipos_dividendo?.nome ?? 'Dividendo'}</p>
+                      <p style={{ color: MUTED }}>{formatData(d.data_pagamento)}
+                        {d.transacoes?.status === 'PROJECAO' && <span className="ml-1.5" style={{ color: '#ffb74d' }}>· projetado</span>}
+                      </p>
+                    </div>
+                    <span className="font-semibold" style={{ color: '#00c896' }}>{formatBRL(d.valor)}</span>
                   </div>
-                  <span className="text-white font-semibold">{formatBRL(p.valor_custo)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Últimos dividendos */}
-        <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <h2 className="text-[14px] font-semibold text-white/80 mb-3">Últimos dividendos</h2>
-          {dividendos.length === 0 ? (
-            <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo lançado.</p>
-          ) : (
-            <div className="space-y-2">
-              {dividendos.slice(0, 8).map((d) => (
-                <div key={d.id} className="flex items-center justify-between gap-2 text-[13px]">
-                  <div>
-                    <p className="text-white font-medium">{d.inv_tipos_dividendo?.nome ?? 'Dividendo'}</p>
-                    <p style={{ color: MUTED }}>{formatData(d.data_pagamento)}
-                      {d.transacoes?.status === 'PROJECAO' && <span className="ml-1.5" style={{ color: '#ffb74d' }}>· projetado</span>}
-                    </p>
-                  </div>
-                  <span className="font-semibold" style={{ color: '#00c896' }}>{formatBRL(d.valor)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Operações recentes */}
         <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <h2 className="text-[14px] font-semibold text-white/80 mb-3">Operações recentes</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-[14px] font-semibold text-white/80">Operações recentes</h2>
+            <button onClick={() => setGerenciar(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 text-[12px] text-white hover:border-white/25">
+              <Plus size={13} /> Gerenciar
+            </button>
+          </div>
           {operacoesDoAtivo.length === 0 ? (
             <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhuma operação registrada.</p>
           ) : (
@@ -414,7 +406,7 @@ export default function DetalheInvestimentoPage() {
               {operacoesDoAtivo.map((o) => (
                 <div key={o.id} className="flex items-center justify-between gap-2 text-[13px]">
                   <div>
-                    <p className="text-white font-medium">{o.tipo_operacao}</p>
+                    <p className="text-white font-medium">{TIPO_OPERACAO_LABEL[o.tipo_operacao]}</p>
                     <p style={{ color: MUTED }}>{o.quantidade} × {formatBRL(o.preco_unitario)} · {formatData(o.data_operacao)}</p>
                   </div>
                   <span className="text-white font-semibold">{formatBRL(o.valor_total)}</span>
@@ -433,6 +425,10 @@ export default function DetalheInvestimentoPage() {
       {editandoAtivo && (
         <DrawerAtivo ativo={ativo}
           onClose={() => setEditandoAtivo(false)} onToast={showToast} />
+      )}
+
+      {gerenciar && (
+        <DrawerMovimentacoes ativo={ativo} onClose={() => setGerenciar(false)} onToast={showToast} />
       )}
 
       {excluindo && (

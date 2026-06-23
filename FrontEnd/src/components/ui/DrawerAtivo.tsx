@@ -2,8 +2,11 @@ import { useState, useEffect, useMemo } from 'react'
 import { Search, RefreshCw } from 'lucide-react'
 import {
   useInvestimentosAtivos, useBuscaAtivoExterno,
-  type CriarAtivoInput, type EditarAtivoInput,
+  type CriarAtivoInput,
 } from '../../hooks/useInvestimentosAtivos'
+import { useInvestimentosOperacoes } from '../../hooks/useInvestimentosOperacoes'
+import { useBackfillHistorico } from '../../hooks/useInvestimentosHistorico'
+import { useContas } from '../../hooks/useContas'
 import { useCotacoesTesouro } from '../../hooks/useCotacoesTesouro'
 import { Drawer, Field, Input, SelectDark, BtnSalvar, BtnCancelar } from './shared'
 import { formatBRL } from '../../lib/utils'
@@ -17,7 +20,7 @@ import {
   INDICE_RF_LABEL, INDICES_POR_INDEXADOR,
   SUBTIPO_RF_INFO, subtiposParaTipo,
   CATEGORIAS_FII, FII_CATEGORIA_INFO,
-  ACOES_SUBTIPOS, ACOES_SUBTIPO_LABEL, ACOES_SUBTIPO_DESCRICAO,
+  tipoEntradaPara,
 } from '../../lib/constants'
 import type {
   InvestimentoAtivo, TipoAtivoInvestimento, SubtipoRF, IndexadorRF, IndiceRF, CategoriaFII,
@@ -26,19 +29,53 @@ import type {
 
 const MUTED = '#8b92a8'
 
-const FORM_VAZIO: CriarAtivoInput = {
-  ticker: '', nome: '', tipo_ativo: 'ACOES', moeda: 'BRL', descricao: '', nota_usuario: null,
+// O tipo de ativo é o 1º campo e é obrigatório — começa vazio para forçar a
+// escolha antes de revelar o restante do formulário (que se adapta ao tipo).
+type FormAtivo = Omit<CriarAtivoInput, 'tipo_ativo'> & { tipo_ativo: TipoAtivoInvestimento | '' }
+
+const FORM_VAZIO: FormAtivo = {
+  ticker: '', nome: '', tipo_ativo: '', moeda: 'BRL', descricao: '', nota_usuario: null,
   rf_subtipo: null, rf_indexador: null, rf_indice: null, rf_percentual_indice: null,
   rf_taxa_fixa: null, rf_taxa: null, rf_emissor: null,
   rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
   fii_categoria: null, acoes_subtipo: null, cotacao_automatica: true,
 }
 
-const ehRendaFixa = (tipo: TipoAtivoInvestimento) => tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
+const ehRendaFixa = (tipo: TipoAtivoInvestimento | '') => tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
+
+const COMPRA_VAZIA = { conta_id: '', quantidade: '', preco_unitario: '', data: new Date().toISOString().split('T')[0] }
+
+// Subtipo da ação derivado do sufixo do ticker B3 (3=ON, 4/5/6=PN, 11=Unit,
+// 31–39=BDR). Retorna null quando não dá para inferir.
+function subtipoAcaoDoTicker(ticker: string): AcoesSubtipo | null {
+  const m = ticker.trim().toUpperCase().match(/(\d{1,2})$/)
+  if (!m) return null
+  const n = m[1]
+  if (n === '11') return 'UNIT'
+  if (n === '3') return 'ON'
+  if (['4', '5', '6', '7', '8'].includes(n)) return 'PN'
+  if (/^3[1-9]$/.test(n)) return 'BDR'
+  return null
+}
+
+// Identificador (ticker) gerado para renda fixa privada (CDB/LCI/LCA/...), que
+// não tem código de bolsa. Combina subtipo + emissor + ano de vencimento +
+// taxa, em até 20 chars (limite da coluna). Ex.: CDB-SOFISA-27-110CDI.
+function gerarTickerRF(f: FormAtivo): string {
+  const limpa = (s: string | null | undefined) => (s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const sub  = limpa(f.rf_subtipo) || 'RF'
+  const emi  = (limpa(f.rf_emissor) || limpa(f.nome)).slice(0, 8) || 'RF'
+  const ano  = f.rf_vencimento ? f.rf_vencimento.slice(2, 4) : ''
+  const taxa = limpa(f.rf_taxa).slice(0, 6)
+  let cod = `${sub}-${emi}`
+  if (ano) cod += `-${ano}`
+  if (taxa && cod.length + 1 + taxa.length <= 20) cod += `-${taxa}`
+  return cod.slice(0, 20)
+}
 
 // Rótulo amigável derivado dos campos estruturados (ex.: "110% CDI",
 // "IPCA + 6,2%", "13,5% a.a.") — gravado em rf_taxa para exibição.
-function rotuloTaxaRF(f: CriarAtivoInput): string | null {
+function rotuloTaxaRF(f: FormAtivo): string | null {
   const num = (n: number) => String(n).replace('.', ',')
   if (f.rf_indexador === 'POS_FIXADO' && f.rf_indice) {
     // Multiplicativo ("110% CDI") ou aditivo ("CDI + 2%") — diferentes!
@@ -57,7 +94,7 @@ function rotuloTaxaRF(f: CriarAtivoInput): string | null {
 }
 
 // Form inicial — novo (limpo) ou espelhando o ativo em edição.
-function formDoAtivo(ativo: InvestimentoAtivo | null): CriarAtivoInput {
+function formDoAtivo(ativo: InvestimentoAtivo | null): FormAtivo {
   if (!ativo) return FORM_VAZIO
   return {
     ticker: ativo.ticker, nome: ativo.nome, tipo_ativo: ativo.tipo_ativo, moeda: ativo.moeda,
@@ -82,7 +119,7 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
   onToast: (m: string) => void
 }) {
   const editando = ativo
-  const [form, setForm] = useState<CriarAtivoInput>(() => formDoAtivo(ativo))
+  const [form, setForm] = useState<FormAtivo>(() => formDoAtivo(ativo))
   const [salvando, setSalvando] = useState(false)
 
   // Busca externa (ticker → nome/preço/características)
@@ -100,6 +137,14 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
   const [tesouroSemestral, setTesouroSemestral] = useState(() => ehSemestral(ativo?.nome))
 
   const { criar, editar } = useInvestimentosAtivos()
+  const { criar: criarOperacao } = useInvestimentosOperacoes()
+  const { preencher } = useBackfillHistorico()
+  const { contas } = useContas()
+  const contasInvest = useMemo(() => contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa), [contas])
+
+  // Compra inicial opcional — ao criar um ativo novo, já registra a 1ª compra
+  // (que cria a posição). Só aparece no modo de criação.
+  const [compra, setCompra] = useState(COMPRA_VAZIA)
 
   // Tesouro em cadastro manual: deriva ticker/nome dos campos estruturados
   // (indexador + vencimento + semestral) — o usuário não digita identificador.
@@ -129,7 +174,8 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
     return () => clearTimeout(t)
   }, [busca])
 
-  const { resultados, buscando, erroBusca } = useBuscaAtivoExterno(form.tipo_ativo, !editando ? buscaDeb : '')
+  const { resultados, buscando, erroBusca } = useBuscaAtivoExterno(
+    form.tipo_ativo || 'ACOES', form.tipo_ativo && !editando ? buscaDeb : '')
 
   // Resultado escolhido na lista: preenche ticker, nome e características
   function selecionarResultado(r: ResultadoBuscaAtivo) {
@@ -144,6 +190,7 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       ...(r.indexador  ? { rf_indexador: r.indexador } : {}),
     })
     setPrecoSel(r.preco)
+    if (r.preco != null) setCompra((c) => ({ ...c, preco_unitario: String(r.preco) }))
     setSelecionado(true)
     setBusca(''); setBuscaDeb('')
   }
@@ -211,6 +258,8 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
   }
 
   async function salvar() {
+    // Tipo de ativo é obrigatório e define todo o resto do formulário.
+    if (!form.tipo_ativo) { onToast('Selecione o tipo de ativo'); return }
     if (!editando && !selecionado && !manualLivre) {
       onToast('Busque e selecione o ativo na lista — ou ative o cadastro manual')
       return
@@ -219,13 +268,36 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       onToast('Escolha o indexador e o vencimento do título')
       return
     }
-    // Tesouro manual: ticker/nome saem dos campos estruturados; demais, do form.
-    const tickerFinal = (tesouroManual ? tesouroTicker : form.ticker).trim().toUpperCase()
+    // Identificador: Tesouro manual gera dos campos do título; renda fixa
+    // privada (CDB/LCI/...) gera de emissor+venc+taxa (sem campo ticker); demais
+    // vêm do form. Na edição de RF o ticker já existente é preservado.
+    const tickerFinal = tesouroManual
+      ? tesouroTicker.trim().toUpperCase()
+      : (!editando && form.tipo_ativo === 'RENDA_FIXA')
+        ? gerarTickerRF(form)
+        : form.ticker.trim().toUpperCase()
     const nomeFinal   = (tesouroManual ? tesouroNome : form.nome).trim()
+    if (!editando && form.tipo_ativo === 'RENDA_FIXA' && !form.rf_emissor && !nomeFinal) {
+      onToast('Informe o nome ou o emissor do título'); return
+    }
     if (!tickerFinal) { onToast('Ticker é obrigatório'); return }
+
+    // Movimentação inicial (opcional, só na criação). Renda fixa/Tesouro usa
+    // "aplicação"; bolsa usa "compra".
+    const ehRF = ehRendaFixa(form.tipo_ativo)
+    const termo = ehRF ? 'aplicação' : 'compra'
+    const querCompra = !editando &&
+      (compra.conta_id !== '' || compra.quantidade !== '' || compra.preco_unitario !== '')
+    if (querCompra) {
+      if (!compra.conta_id) { onToast(`Selecione a conta da ${termo} inicial`); return }
+      if (!(Number(compra.quantidade) > 0)) { onToast(`Quantidade da ${termo} inválida`); return }
+      if (!(Number(compra.preco_unitario) >= 0)) { onToast(`Preço da ${termo} inválido`); return }
+    }
+
     setSalvando(true)
-    const payload: CriarAtivoInput | EditarAtivoInput = {
+    const payload: CriarAtivoInput = {
       ...form,
+      tipo_ativo: form.tipo_ativo,
       ticker: tickerFinal,
       // Nome opcional: se em branco, o backend busca o nome oficial pelo ticker
       nome: nomeFinal,
@@ -234,12 +306,32 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
         ? null : Number(form.nota_usuario),
       // rf_taxa (rótulo) é derivado dos campos estruturados — mantém o detalhe
       // do ativo legível sem depender de texto digitado à mão.
-      ...(ehRendaFixa(form.tipo_ativo) ? { rf_taxa: rotuloTaxaRF(form) } : {}),
+      ...(ehRF ? { rf_taxa: rotuloTaxaRF(form) } : {}),
+      // Subtipo da ação é inferido do ticker (ON/PN/Unit/BDR) — sem campo manual.
+      ...(form.tipo_ativo === 'ACOES'
+        ? { acoes_subtipo: form.acoes_subtipo ?? subtipoAcaoDoTicker(tickerFinal) }
+        : {}),
     }
-    const res = editando ? await editar(editando.id, payload) : await criar(payload as CriarAtivoInput)
+    const res = editando ? await editar(editando.id, payload) : await criar(payload)
+    if (!res.ok) { setSalvando(false); onToast(res.erro ?? 'Erro ao salvar'); return }
+
+    // Registra a movimentação inicial (cria a posição via operação) e reconstrói
+    // o histórico de renda fixa a partir dela.
+    if (querCompra && res.dados?.id) {
+      const q = Number(compra.quantidade), p = Number(compra.preco_unitario)
+      const opRes = await criarOperacao({
+        ativo_id: res.dados.id, conta_id: compra.conta_id, tipo_operacao: tipoEntradaPara(form.tipo_ativo),
+        quantidade: q, preco_unitario: p, valor_total: q * p, data_operacao: compra.data,
+      })
+      setSalvando(false)
+      if (!opRes.ok) { onClose(); onToast(`Ativo criado, mas falha ao registrar a ${termo}: ${opRes.erro ?? ''}`); return }
+      preencher({ ativo_id: res.dados.id })
+      onClose(); onToast(`Ativo criado e ${termo} registrada!`)
+      return
+    }
+
     setSalvando(false)
-    if (res.ok) { onClose(); onToast(editando ? 'Ativo atualizado!' : 'Ativo criado!') }
-    else onToast(res.erro ?? 'Erro ao salvar')
+    onClose(); onToast(editando ? 'Ativo atualizado!' : 'Ativo criado!')
   }
 
   return (
@@ -247,12 +339,19 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       titulo={editando ? 'Editar ativo' : 'Novo ativo'}
       subtitulo={editando ? editando.ticker : 'Cadastre um ativo da sua carteira'}
       rodape={<><BtnCancelar onClick={onClose} /><BtnSalvar editando={!!editando} onClick={salvar} salvando={salvando} /></>}>
-      {/* 1) Tipo primeiro — define a fonte da busca */}
+      {/* 1) Tipo primeiro — obrigatório; o restante do formulário se adapta a ele */}
       <Field label="Tipo de ativo">
-        <SelectDark value={form.tipo_ativo} onChange={(e) => mudarTipo(e.target.value as TipoAtivoInvestimento)}>
+        <SelectDark value={form.tipo_ativo} onChange={(e) => e.target.value && mudarTipo(e.target.value as TipoAtivoInvestimento)}>
+          <option value="" disabled>Selecione o tipo...</option>
           {TIPOS_ATIVO_INV.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
         </SelectDark>
       </Field>
+
+      {form.tipo_ativo === '' ? (
+        <p className="text-[13px] py-2" style={{ color: MUTED }}>
+          Escolha o tipo de ativo para continuar o cadastro.
+        </p>
+      ) : (<>
 
       {/* 2) Subtipo / categoria — refina a busca */}
       {form.tipo_ativo === 'RENDA_FIXA' && (
@@ -266,7 +365,7 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
         </Field>
       )}
       {form.tipo_ativo === 'FII' && (
-        <Field label="Categoria do fundo">
+        <Field label="Categoria do fundo (opcional)">
           <SelectDark value={form.fii_categoria ?? ''}
             onChange={(e) => setForm({ ...form, fii_categoria: (e.target.value || null) as CategoriaFII | null })}>
             <option value="">Selecione...</option>
@@ -282,18 +381,7 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
           )}
         </Field>
       )}
-      {form.tipo_ativo === 'ACOES' && (
-        <Field label="Subtipo da ação">
-          <SelectDark value={form.acoes_subtipo ?? ''}
-            onChange={(e) => setForm({ ...form, acoes_subtipo: (e.target.value || null) as AcoesSubtipo | null })}>
-            <option value="">Selecione...</option>
-            {ACOES_SUBTIPOS.map((s) => <option key={s} value={s}>{ACOES_SUBTIPO_LABEL[s]}</option>)}
-          </SelectDark>
-          {form.acoes_subtipo && (
-            <p className="text-[12px] mt-1" style={{ color: MUTED }}>{ACOES_SUBTIPO_DESCRICAO[form.acoes_subtipo]}</p>
-          )}
-        </Field>
-      )}
+      {/* Subtipo da ação (ON/PN/Unit/BDR) é inferido do ticker — sem campo manual. */}
 
       {/* 3) Busca na internet — ticker, nome e preço vêm da lista */}
       {!editando && (
@@ -380,47 +468,82 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
         </div>
       ) : (editando || manualLivre || selecionado) && (
         <>
-          <div className="grid grid-cols-2 gap-3">
+          {/* Moeda vem automaticamente do ticker (busca) ou do padrão do tipo — sem campo manual.
+              Renda fixa privada não tem ticker: o identificador é gerado ao salvar. */}
+          {form.tipo_ativo !== 'RENDA_FIXA' && (
             <Field label="Ticker">
               <Input value={form.ticker} onChange={(e) => setForm({ ...form, ticker: e.target.value })}
                 placeholder="Ex.: VALE3" maxLength={20} disabled={!editando && !manualLivre} />
             </Field>
-            <Field label="Moeda">
-              <Input value={form.moeda} onChange={(e) => setForm({ ...form, moeda: e.target.value.toUpperCase() })} maxLength={3} placeholder="BRL" />
-            </Field>
-          </div>
-          <Field label="Nome (opcional — busca automática pelo ticker)">
+          )}
+          <Field label={form.tipo_ativo === 'RENDA_FIXA'
+            ? 'Nome do título'
+            : 'Nome (opcional — busca automática pelo ticker)'}>
             <Input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })}
               placeholder="Deixe em branco para buscar pelo ticker" maxLength={120} disabled={!editando && !manualLivre} />
           </Field>
         </>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Nota (0–10)">
-          <Input type="number" min={0} max={10} step={0.5}
-            value={form.nota_usuario ?? ''}
-            onChange={(e) => setForm({ ...form, nota_usuario: e.target.value === '' ? null : Number(e.target.value) })}
-            placeholder="—" />
-        </Field>
-        <Field label="Descrição">
-          <Input value={form.descricao ?? ''} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Opcional" />
-        </Field>
-      </div>
+      <Field label="Nota (0–10)">
+        <Input type="number" min={0} max={10} step={0.5}
+          value={form.nota_usuario ?? ''}
+          onChange={(e) => setForm({ ...form, nota_usuario: e.target.value === '' ? null : Number(e.target.value) })}
+          placeholder="—" />
+      </Field>
 
-      {/* Busca automática de cotação — desligue para ativos sem fonte gratuita */}
-      <label className="flex items-start gap-2 text-[13px] cursor-pointer rounded-lg border border-white/10 p-3">
-        <input type="checkbox" className="mt-0.5"
-          checked={form.cotacao_automatica !== false}
-          onChange={(e) => setForm({ ...form, cotacao_automatica: e.target.checked })} />
-        <span>
-          <span className="text-white">Buscar cotação automaticamente</span>
-          <span className="block text-[12px] mt-0.5" style={{ color: MUTED }}>
-            Desligue para ativos sem fonte gratuita (ex.: FIIs pequenos, papéis deslistados).
-            Ele sai das atualizações automáticas e do aviso de lacuna — você lança o valor manualmente.
+      {/* Busca automática de cotação — não se aplica a renda fixa/Tesouro, cujo
+          valor é derivado do indexador/taxa (não vem de cotação de mercado) */}
+      {!ehRendaFixa(form.tipo_ativo) && (
+        <label className="flex items-start gap-2 text-[13px] cursor-pointer rounded-lg border border-white/10 p-3">
+          <input type="checkbox" className="mt-0.5"
+            checked={form.cotacao_automatica !== false}
+            onChange={(e) => setForm({ ...form, cotacao_automatica: e.target.checked })} />
+          <span>
+            <span className="text-white">Buscar cotação automaticamente</span>
+            <span className="block text-[12px] mt-0.5" style={{ color: MUTED }}>
+              Desligue para ativos sem fonte gratuita (ex.: FIIs pequenos, papéis deslistados).
+              Ele sai das atualizações automáticas e do aviso de lacuna — você lança o valor manualmente.
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      )}
+
+      {/* Primeira movimentação — opcional, só na criação (cria a posição).
+          Renda fixa/Tesouro = "aplicação"; bolsa = "compra". */}
+      {!editando && (
+        <div className="rounded-lg border border-white/10 p-3 space-y-3">
+          <p className="text-[13px] font-semibold text-white">
+            {ehRendaFixa(form.tipo_ativo) ? 'Primeira aplicação' : 'Primeira compra'}{' '}
+            <span className="font-normal" style={{ color: MUTED }}>(opcional)</span>
+          </p>
+          <Field label="Conta">
+            <SelectDark value={compra.conta_id} onChange={(e) => setCompra({ ...compra, conta_id: e.target.value })}>
+              <option value="">Não registrar agora</option>
+              {contasInvest.map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
+            </SelectDark>
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Quantidade">
+              <Input type="number" min={0} step="any" value={compra.quantidade}
+                onChange={(e) => setCompra({ ...compra, quantidade: e.target.value })} placeholder="0" />
+            </Field>
+            <Field label="Preço unitário">
+              <Input type="number" min={0} step="any" value={compra.preco_unitario}
+                onChange={(e) => setCompra({ ...compra, preco_unitario: e.target.value })} placeholder="0,00" />
+            </Field>
+          </div>
+          <Field label={ehRendaFixa(form.tipo_ativo) ? 'Data da aplicação' : 'Data da compra'}>
+            <Input type="date" value={compra.data} onChange={(e) => setCompra({ ...compra, data: e.target.value })} />
+          </Field>
+          <div className="flex items-center justify-between text-[12px]" style={{ color: MUTED }}>
+            <span>Valor total</span>
+            <span className="text-white font-medium">
+              {formatBRL((Number(compra.quantidade) || 0) * (Number(compra.preco_unitario) || 0))}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Características de renda fixa / Tesouro Direto */}
       {ehRendaFixa(form.tipo_ativo) && (
@@ -550,6 +673,8 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
           )}
         </div>
       )}
+
+      </>)}
 
     </Drawer>
   )
