@@ -394,6 +394,84 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     await api(`/investimentos/ativos/${aId}`, "DELETE");
   });
 
+  test("CA-INV25 — RF com vencimento futuro programa resgate e operação futura não reduz o saldo atual", async () => {
+    const venc = `${mesOffset(6)}-15`;
+    const { data: dA } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVRP", nome: "Jest RF Resgate Programado", tipo_ativo: "RENDA_FIXA",
+      rf_subtipo: "CDB", rf_indexador: "POS_FIXADO", rf_taxa: "110% CDI",
+      rf_emissor: "Banco Jest", rf_vencimento: venc,
+    });
+    const aId = dA.dados.id as string;
+    const posDoAtivo = async () => {
+      const { data } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
+      return (data?.dados ?? [])[0] as { id: string; quantidade: number; status: string };
+    };
+    const opsDoAtivo = async (posId: string) => {
+      const { data } = await api(`/investimentos/operacoes?posicao_id=${posId}`);
+      return (data?.dados ?? []) as { tipo_operacao: string; quantidade: number; data_operacao: string }[];
+    };
+
+    // Aplicação (APORTE) cria a posição e o resgate programado no vencimento.
+    await api("/investimentos/operacoes", "POST", {
+      ativo_id: aId, conta_id: contaId, tipo_operacao: "APORTE",
+      quantidade: 1, preco_unitario: 1000, valor_total: 1000, data_operacao: `${mesOffset(-1)}-10`,
+    });
+    let p = await posDoAtivo();
+    expect(Number(p.quantidade)).toBe(1);     // resgate futuro NÃO reduz o saldo atual
+    expect(p.status).toBe("ATIVA");
+
+    let ops = await opsDoAtivo(p.id);
+    const prog = ops.find((o) => o.tipo_operacao === "RESGATE" && o.data_operacao === venc);
+    expect(prog).toBeTruthy();
+    expect(Number(prog!.quantidade)).toBe(1);
+
+    // Nova aplicação atualiza o resgate programado para o novo saldo remanescente.
+    await api("/investimentos/operacoes", "POST", {
+      ativo_id: aId, conta_id: contaId, tipo_operacao: "APORTE",
+      quantidade: 2, preco_unitario: 1000, valor_total: 2000, data_operacao: `${mesOffset(-1)}-20`,
+    });
+    p = await posDoAtivo();
+    expect(Number(p.quantidade)).toBe(3);
+    ops = await opsDoAtivo(p.id);
+    const prog2 = ops.find((o) => o.tipo_operacao === "RESGATE" && o.data_operacao === venc);
+    expect(Number(prog2!.quantidade)).toBe(3);
+
+    const { data: posAll } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
+    for (const pp of posAll?.dados ?? []) await api(`/investimentos/posicoes/${pp.id}`, "DELETE");
+    await api(`/investimentos/ativos/${aId}`, "DELETE");
+  });
+
+  test("CA-INV26 — snapshot-auto encerra posição de RF cujo vencimento já passou", async () => {
+    const venc = `${mesOffset(-2)}-15`;
+    const { data: dA } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVVE", nome: "Jest RF Vencida", tipo_ativo: "RENDA_FIXA",
+      rf_subtipo: "CDB", rf_indexador: "POS_FIXADO", rf_taxa: "110% CDI",
+      rf_emissor: "Banco Jest", rf_vencimento: venc,
+    });
+    const aId = dA.dados.id as string;
+    const posDoAtivo = async () => {
+      const { data } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
+      return (data?.dados ?? [])[0] as { id: string; quantidade: number; status: string };
+    };
+
+    await api("/investimentos/operacoes", "POST", {
+      ativo_id: aId, conta_id: contaId, tipo_operacao: "APORTE",
+      quantidade: 1, preco_unitario: 1000, valor_total: 1000, data_operacao: `${mesOffset(-6)}-10`,
+    });
+    let p = await posDoAtivo();
+    expect(p.status).toBe("ATIVA"); // ainda não passou pelo snapshot
+
+    const { status: sSnap } = await api("/investimentos/snapshot-auto", "POST", {});
+    expect(sSnap).toBe(200);
+    p = await posDoAtivo();
+    expect(p.status).toBe("ENCERRADA");
+    expect(Number(p.quantidade)).toBe(0);
+
+    const { data: posAll } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
+    for (const pp of posAll?.dados ?? []) await api(`/investimentos/posicoes/${pp.id}`, "DELETE");
+    await api(`/investimentos/ativos/${aId}`, "DELETE");
+  });
+
   test("CA-INV18 — DELETE /investimentos/ativos/:id com posições vinculadas retorna 409", async () => {
     const { status } = await api(`/investimentos/ativos/${ativoId}`, "DELETE");
     expect(status).toBe(409);

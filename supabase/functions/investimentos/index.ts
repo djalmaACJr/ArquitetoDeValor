@@ -1172,6 +1172,7 @@ async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
     }).select().single();
     if (error) { logError("Criar operacao", error); return erro(error.message); }
     await recomputarPosicao(c, posicaoId);
+    await sincronizarResgateVencimento(c, posicaoId);
     logSuccess("Operação criada", { id: data.id });
     return json({ dados: data }, 201);
   }
@@ -1219,7 +1220,7 @@ async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
     const posAfetadas = new Set<string>();
     if (antes?.posicao_id) posAfetadas.add(String(antes.posicao_id));
     if (data?.posicao_id)  posAfetadas.add(String(data.posicao_id));
-    for (const pid of posAfetadas) await recomputarPosicao(c, pid);
+    for (const pid of posAfetadas) { await recomputarPosicao(c, pid); await sincronizarResgateVencimento(c, pid); }
     return json({ dados: data });
   }
 
@@ -1230,6 +1231,7 @@ async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
     const { error } = await c.from("inv_operacoes").delete().eq("id", id);
     if (error) { logError("Excluir operacao", error); return erro(error.message); }
     await recomputarPosicao(c, String(op.posicao_id));
+    await sincronizarResgateVencimento(c, String(op.posicao_id));
     return json({ mensagem: "Operação excluída com sucesso" });
   }
 
@@ -1258,6 +1260,10 @@ async function acharOuCriarPosicao(
 // Recalcula a posição como a SOMA das suas operações (custo médio ponderado).
 // Compra/Aporte somam; Venda/Resgate abatem mantendo o preço médio; ao zerar a
 // quantidade a posição vira ENCERRADA. valor_custo é recalculado pelo trigger.
+//
+// Operações com data FUTURA (data_operacao > hoje) NÃO afetam o saldo atual —
+// ficam "programadas" (ex.: resgate agendado no vencimento da renda fixa) e só
+// passam a valer quando a data chega (um recompute futuro as aplica).
 async function recomputarPosicao(c: Db, posicaoId: string): Promise<void> {
   const { data: ops, error } = await c.from("inv_operacoes")
     .select("tipo_operacao, quantidade, preco_unitario, data_operacao, created_at")
@@ -1266,9 +1272,11 @@ async function recomputarPosicao(c: Db, posicaoId: string): Promise<void> {
     .order("created_at", { ascending: true });
   if (error) { logError("Recomputar posição (ler operações)", error); return; }
 
+  const hoje = hojeISO();
   let qtd = 0, custo = 0, precoMedio = 0;
   let dataCompra: string | null = null;
   for (const o of ops ?? []) {
+    if (String(o.data_operacao) > hoje) continue; // operação programada (futura)
     const q = Number(o.quantidade) || 0;
     const p = Number(o.preco_unitario) || 0;
     const tipo = String(o.tipo_operacao);
@@ -1294,6 +1302,77 @@ async function recomputarPosicao(c: Db, posicaoId: string): Promise<void> {
   };
   const { error: errUpd } = await c.from("inv_posicoes").update(campos).eq("id", posicaoId);
   if (errUpd) logError("Recomputar posição (update)", errUpd);
+}
+
+// Mantém um RESGATE "programado" na data de vencimento da renda fixa/Tesouro,
+// para que a posição se encerre sozinha quando o título vencer. A operação é
+// futura (vencimento > hoje) → recomputarPosicao a ignora até a data chegar.
+// Espelha sempre o saldo remanescente atual: chamada após cada recompute.
+//   • vencimento futuro e saldo > 0 → cria/atualiza o resgate = saldo remanescente
+//   • vencimento futuro e saldo = 0 → remove o resgate programado (nada a resgatar)
+//   • vencimento já passado → não mexe (o resgate, se existir, já é histórico)
+async function sincronizarResgateVencimento(c: Db, posicaoId: string): Promise<void> {
+  const { data: pos } = await c.from("inv_posicoes")
+    .select("id, user_id, conta_id, quantidade, preco_custo, inv_ativos(tipo_ativo, rf_vencimento)")
+    .eq("id", posicaoId).maybeSingle();
+  if (!pos) return;
+  const rawA  = (pos as { inv_ativos?: Record<string, unknown> | Record<string, unknown>[] }).inv_ativos;
+  const ativo = (Array.isArray(rawA) ? rawA[0] : rawA) ?? {};
+  const tipo  = String(ativo.tipo_ativo ?? "");
+  const venc  = (ativo.rf_vencimento as string | null) ?? null;
+  if ((tipo !== "RENDA_FIXA" && tipo !== "TESOURO_DIRETO") || !venc) return;
+  if (venc <= hojeISO()) return; // só gerencia enquanto o resgate é futuro
+
+  const { data: existentes } = await c.from("inv_operacoes")
+    .select("id").eq("posicao_id", posicaoId).eq("tipo_operacao", "RESGATE").eq("data_operacao", venc);
+  const prog = (existentes ?? [])[0] as { id: string } | undefined;
+  const qtd   = Number(pos.quantidade) || 0;
+  const preco = Number(pos.preco_custo) || 0;
+
+  if (qtd <= 0) {
+    if (prog) await c.from("inv_operacoes").delete().eq("id", prog.id);
+    return;
+  }
+  const campos = { quantidade: qtd, preco_unitario: preco, valor_total: qtd * preco };
+  if (prog) {
+    await c.from("inv_operacoes").update(campos).eq("id", prog.id);
+  } else {
+    await c.from("inv_operacoes").insert({
+      user_id: pos.user_id, posicao_id: posicaoId, tipo_operacao: "RESGATE",
+      conta_id: pos.conta_id, data_operacao: venc, ...campos,
+    });
+  }
+}
+
+// Encerra posições de renda fixa/Tesouro cujo vencimento já passou e que ainda
+// estão ATIVA: garante um RESGATE na data de vencimento (caso de posições
+// antigas/importadas sem resgate programado) e recomputa — o resgate, agora no
+// passado, zera o saldo → ENCERRADA. Idempotente (ignora as já encerradas).
+async function fecharPosicoesVencidas(c: Db, userId: string): Promise<void> {
+  const hoje = hojeISO();
+  const { data: posicoes } = await c.from("inv_posicoes")
+    .select("id, quantidade, preco_custo, conta_id, user_id, inv_ativos!inner(tipo_ativo, rf_vencimento)")
+    .eq("user_id", userId).eq("status", "ATIVA");
+  for (const p of posicoes ?? []) {
+    const rawA  = (p as { inv_ativos?: Record<string, unknown> | Record<string, unknown>[] }).inv_ativos;
+    const ativo = (Array.isArray(rawA) ? rawA[0] : rawA) ?? {};
+    const tipo  = String(ativo.tipo_ativo ?? "");
+    const venc  = (ativo.rf_vencimento as string | null) ?? null;
+    if ((tipo !== "RENDA_FIXA" && tipo !== "TESOURO_DIRETO") || !venc || venc > hoje) continue;
+
+    const { data: existentes } = await c.from("inv_operacoes")
+      .select("id").eq("posicao_id", String(p.id)).eq("tipo_operacao", "RESGATE").eq("data_operacao", venc);
+    if (!(existentes ?? []).length) {
+      const qtd = Number(p.quantidade) || 0, preco = Number(p.preco_custo) || 0;
+      if (qtd > 0) {
+        await c.from("inv_operacoes").insert({
+          user_id: p.user_id, posicao_id: String(p.id), tipo_operacao: "RESGATE",
+          conta_id: p.conta_id, data_operacao: venc, quantidade: qtd, preco_unitario: preco, valor_total: qtd * preco,
+        });
+      }
+    }
+    await recomputarPosicao(c, String(p.id));
+  }
 }
 
 // ============================================================
@@ -1902,20 +1981,11 @@ async function nomesBrapi(tickers: string[]): Promise<Map<string, string>> {
   return out;
 }
 
-// Nome de criptomoedas (brapi → coinName)
+// Nome de criptomoedas (CoinGecko → name)
 async function nomesCripto(tickers: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
-  if (tickers.length === 0) return out;
-  try {
-    const data = await fetchJson(
-      brapiUrl(`v2/crypto?coin=${encodeURIComponent(tickers.join(","))}&currency=BRL`),
-    ) as { coins?: { coin?: string; coinName?: string }[] };
-    for (const cc of data.coins ?? []) {
-      const sym  = String(cc.coin ?? "").toUpperCase();
-      const nome = String(cc.coinName ?? "").trim();
-      if (sym && nome) out.set(sym, nome.slice(0, 120));
-    }
-  } catch (e) { logError("brapi crypto nomes", e); }
+  const meta = await metaCripto(tickers);
+  for (const [sym, v] of meta) if (v.nome) out.set(sym, v.nome);
   return out;
 }
 
@@ -1996,26 +2066,63 @@ async function resolverMeta(
   for (let i = 0; i < cotados.length; i += LOTE) {
     await Promise.all(cotados.slice(i, i + LOTE).map(umCotado));
   }
-  for (const tk of cripto) {
-    const nm = await nomesCripto([tk]);   // crypto: idem, 1 por requisição
-    const nome = nm.get(tk);
-    if (nome) out.set(tk, { nome, moeda: "BRL" });
-  }
+  // Cripto: nome + logo + moeda (BRL) numa única chamada à CoinGecko.
+  const metaCr = await metaCripto(cripto);
+  for (const [sym, v] of metaCr) out.set(sym, { nome: v.nome, moeda: "BRL", logo: v.logo });
   return out;
 }
 
+// Preço ATUAL de criptomoedas via CoinGecko (grátis, sem chave) — mesma fonte
+// do histórico. A brapi /v2/crypto passou a exigir token (MISSING_TOKEN), o que
+// deixava o preço atual de cripto congelado no cache.
 async function precosCripto(tickers: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (tickers.length === 0) return out;
+  // símbolo (UPPER) → id da CoinGecko
+  const idPorSimbolo = new Map<string, string>();
+  for (const tk of tickers) {
+    const id = await coingeckoId(tk);
+    if (id) idPorSimbolo.set(tk.toUpperCase(), id);
+  }
+  const ids = [...new Set(idPorSimbolo.values())];
+  if (ids.length === 0) return out;
   try {
     const data = await fetchJson(
-      brapiUrl(`v2/crypto?coin=${encodeURIComponent(tickers.join(","))}&currency=BRL`),
-    ) as { coins?: { coin?: string; regularMarketPrice?: number }[] };
-    for (const cc of data.coins ?? []) {
-      const sym = String(cc.coin ?? "").toUpperCase();
-      if (sym && cc.regularMarketPrice != null) out.set(sym, Number(cc.regularMarketPrice));
+      `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(ids.join(","))}&vs_currencies=brl`,
+    ) as Record<string, { brl?: number }>;
+    for (const [sym, id] of idPorSimbolo) {
+      const px = data[id]?.brl;
+      if (px != null) out.set(sym, Number(px));
     }
-  } catch (e) { logError("brapi crypto", e); }
+  } catch (e) { logError("coingecko preço atual", e); }
+  return out;
+}
+
+// Metadados de criptomoedas via CoinGecko /coins/markets (nome, logo e preço
+// em BRL numa única chamada). Mapa: símbolo (UPPER) → { nome, logo, preco }.
+async function metaCripto(tickers: string[]): Promise<Map<string, { nome?: string; logo?: string; preco?: number }>> {
+  const out = new Map<string, { nome?: string; logo?: string; preco?: number }>();
+  if (tickers.length === 0) return out;
+  const idPorSimbolo = new Map<string, string>();
+  for (const tk of tickers) { const id = await coingeckoId(tk); if (id) idPorSimbolo.set(tk.toUpperCase(), id); }
+  const ids = [...new Set(idPorSimbolo.values())];
+  if (ids.length === 0) return out;
+  try {
+    const arr = await fetchJson(
+      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=brl&ids=${encodeURIComponent(ids.join(","))}`,
+    ) as { id?: string; name?: string; image?: string; current_price?: number }[];
+    const porId = new Map<string, { nome?: string; logo?: string; preco?: number }>();
+    for (const m of arr ?? []) {
+      if (!m.id) continue;
+      const logo = String(m.image ?? "");
+      porId.set(m.id, {
+        nome:  m.name ? String(m.name).slice(0, 120) : undefined,
+        logo:  logo.startsWith("http") ? logo.split("?")[0].slice(0, 300) : undefined,
+        preco: m.current_price != null ? Number(m.current_price) : undefined,
+      });
+    }
+    for (const [sym, id] of idPorSimbolo) { const v = porId.get(id); if (v) out.set(sym, v); }
+  } catch (e) { logError("coingecko markets", e); }
   return out;
 }
 
@@ -2281,6 +2388,7 @@ async function rotaSnapshotAuto(c: Db, req: Request, m: string, userId: string) 
   const mesAno = body.mes_ano && RE_MES_ANO.test(body.mes_ano) ? body.mes_ano : mesCorrente;
   logRequest("POST", "/investimentos/snapshot-auto", { mesAno, conta_id: body.conta_id ?? null });
   try {
+    await fecharPosicoesVencidas(c, userId);
     const { atualizados, ignorados } = await executarSnapshotMes(c, userId, mesAno, body.conta_id ?? null);
     logSuccess("Snapshot automático", { mesAno, atualizados, ignorados: ignorados.length });
     return json({ dados: { mes_ano: mesAno, atualizados, ignorados } });
@@ -2314,6 +2422,7 @@ async function rotaSnapshotCron(req: Request, m: string) {
   let usuariosOk = 0, totalAtualizados = 0;
   for (const uid of uids) {
     try {
+      await fecharPosicoesVencidas(admin, uid);
       const { atualizados } = await executarSnapshotMes(admin, uid, mesAno, null);
       totalAtualizados += atualizados; usuariosOk++;
     } catch (e) { logError("snapshot-cron usuario", e); }
@@ -2985,20 +3094,28 @@ async function historicoCotado(ticker: string, moedaHint: string): Promise<{ pre
   return { precos: new Map<string, number>(), moeda: "BRL" };
 }
 
-// CoinGecko: mapeia símbolo→id (cache por instância) e baixa a série longa
-let _cgList: Map<string, string> | null = null;
+// CoinGecko: mapeia símbolo→id (cache por instância).
+//
+// IMPORTANTE: NÃO usar /coins/list — várias moedas compartilham o mesmo símbolo
+// e o 1º match costuma ser um token impostor de baixo valor (btc→"batcat",
+// sol→"allbridge-bridged-sol", eth→"bifrost-bridged-eth", usdc→"beam-bridged-usdc").
+// O /search já vem ordenado por relevância/market cap → pega o match exato de
+// símbolo com o melhor (menor) market_cap_rank.
+const _cgIdCache = new Map<string, string | null>();
 async function coingeckoId(symbol: string): Promise<string | null> {
-  if (!_cgList) {
-    try {
-      const list = await fetchJson("https://api.coingecko.com/api/v3/coins/list") as { id?: string; symbol?: string }[];
-      _cgList = new Map();
-      for (const cc of list) {
-        const s = cc.symbol?.toLowerCase();
-        if (s && cc.id && !_cgList.has(s)) _cgList.set(s, cc.id);
-      }
-    } catch (e) { logError("coingecko list", e); return null; }
-  }
-  return _cgList.get(symbol.toLowerCase()) ?? null;
+  const key = symbol.toLowerCase();
+  if (_cgIdCache.has(key)) return _cgIdCache.get(key) ?? null;
+  let id: string | null = null;
+  try {
+    const sr = await fetchJson(
+      `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(symbol)}`,
+    ) as { coins?: { id?: string; symbol?: string; market_cap_rank?: number | null }[] };
+    const exatos = (sr.coins ?? []).filter((c) => String(c.symbol ?? "").toLowerCase() === key && c.id);
+    exatos.sort((a, b) => (a.market_cap_rank ?? Number.MAX_SAFE_INTEGER) - (b.market_cap_rank ?? Number.MAX_SAFE_INTEGER));
+    id = exatos[0]?.id ?? null;
+  } catch (e) { logError(`coingecko id ${symbol}`, e); }
+  _cgIdCache.set(key, id);
+  return id;
 }
 
 async function historicoCripto(ticker: string): Promise<Map<string, number>> {
@@ -3006,8 +3123,11 @@ async function historicoCripto(ticker: string): Promise<Map<string, number>> {
   const id = await coingeckoId(ticker);
   if (!id) return out;
   try {
+    // CoinGecko free limita o histórico aos últimos 365 dias (erro 10012 com
+    // days=max) e o parâmetro interval virou pago — sem ele, days=365 já
+    // devolve pontos diários. Meses anteriores a ~1 ano não ficam disponíveis.
     const data = await fetchJson(
-      `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=brl&days=max&interval=daily`,
+      `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=brl&days=365`,
     ) as { prices?: [number, number][] };
     for (const [ts, px] of data.prices ?? []) {
       out.set(new Date(ts).toISOString().slice(0, 7), Number(px)); // ordem asc → último do mês prevalece
@@ -3375,8 +3495,10 @@ async function rotaAtualizarAtivos(c: Db, _req: Request, m: string, _userId: str
     const tk = String(a.ticker).toUpperCase();
     const campos: Record<string, unknown> = {};
 
+    // Preenche o nome quando o atual está vazio ou é só o ticker. Grava mesmo
+    // quando o nome oficial É o próprio ticker (ex.: USDC) — senão fica "—".
     const nomeEhTicker = !a.nome || a.nome.trim().toUpperCase() === tk;
-    if (info.nome && nomeEhTicker && info.nome.toUpperCase() !== tk) {
+    if (info.nome && nomeEhTicker && info.nome !== a.nome) {
       campos.nome = info.nome;
     }
     if (info.moeda && info.moeda.length <= 3 && info.moeda !== a.moeda) {
@@ -4336,19 +4458,27 @@ async function buscaTesouro(q: string): Promise<ResultadoBusca[]> {
   return out;
 }
 
+// Busca de criptomoedas via CoinGecko (grátis, sem chave). /search devolve as
+// moedas ordenadas por relevância (market cap); /coins/markets enriquece com o
+// preço atual em BRL numa única chamada.
 async function buscaCripto(q: string): Promise<ResultadoBusca[]> {
-  const disp = await fetchJson(
-    brapiUrl(`v2/crypto/available?search=${encodeURIComponent(q)}`),
-  ) as { coins?: string[] };
-  const coins = (disp.coins ?? []).slice(0, 8);
-  if (coins.length === 0) return [];
-  const cot = await fetchJson(
-    brapiUrl(`v2/crypto?coin=${encodeURIComponent(coins.join(","))}&currency=BRL`),
-  ) as { coins?: { coin?: string; coinName?: string; regularMarketPrice?: number }[] };
-  return (cot.coins ?? []).map((c) => ({
-    ticker: String(c.coin ?? "").toUpperCase().slice(0, 20),
-    nome:   String(c.coinName ?? c.coin ?? ""),
-    preco:  c.regularMarketPrice != null ? Number(c.regularMarketPrice) : null,
+  const sr = await fetchJson(
+    `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(q)}`,
+  ) as { coins?: { id?: string; name?: string; symbol?: string }[] };
+  const top = (sr.coins ?? []).slice(0, 8);
+  if (top.length === 0) return [];
+  const ids = top.map((c) => c.id).filter(Boolean) as string[];
+  const precoPorId = new Map<string, number>();
+  try {
+    const arr = await fetchJson(
+      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=brl&ids=${encodeURIComponent(ids.join(","))}`,
+    ) as { id?: string; current_price?: number }[];
+    for (const m of arr ?? []) if (m.id && m.current_price != null) precoPorId.set(m.id, Number(m.current_price));
+  } catch (e) { logError("coingecko busca preço", e); }
+  return top.map((c) => ({
+    ticker: String(c.symbol ?? "").toUpperCase().slice(0, 20),
+    nome:   String(c.name ?? c.symbol ?? ""),
+    preco:  c.id && precoPorId.has(c.id) ? precoPorId.get(c.id)! : null,
     moeda:  "BRL",
   }));
 }

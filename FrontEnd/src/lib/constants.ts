@@ -91,6 +91,11 @@ export function tipoEntradaPara(tipoAtivo: TipoAtivoInvestimento): TipoOperacaoI
   return ehRendaFixaInv(tipoAtivo) ? 'APORTE' : 'COMPRA'
 }
 
+// Tipo de saída (venda/resgate) usado ao encerrar uma posição.
+export function tipoSaidaPara(tipoAtivo: TipoAtivoInvestimento): TipoOperacaoInvestimento {
+  return ehRendaFixaInv(tipoAtivo) ? 'RESGATE' : 'VENDA'
+}
+
 // Rótulos amigáveis e cor consistente por tipo de ativo
 export const TIPO_ATIVO_LABEL: Record<TipoAtivoInvestimento, string> = {
   ACOES:             'Ações',

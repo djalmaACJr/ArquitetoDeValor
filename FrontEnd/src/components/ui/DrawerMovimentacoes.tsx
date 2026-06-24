@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, Pencil, X } from 'lucide-react'
+import { Plus, Trash2, Pencil, X, CircleSlash } from 'lucide-react'
 import { Drawer, Field, Input, SelectDark } from './shared'
 import { useInvestimentosPosicoes } from '../../hooks/useInvestimentosPosicoes'
 import { useInvestimentosOperacoes, type CriarOperacaoInput } from '../../hooks/useInvestimentosOperacoes'
 import { useBackfillHistorico } from '../../hooks/useInvestimentosHistorico'
 import { useContas } from '../../hooks/useContas'
 import { formatBRL, formatData } from '../../lib/utils'
-import { TIPO_OPERACAO_LABEL, tiposOperacaoPara, tipoEntradaPara } from '../../lib/constants'
-import type { InvestimentoAtivo, InvestimentoOperacao, TipoOperacaoInvestimento } from '../../types'
+import { TIPO_OPERACAO_LABEL, tiposOperacaoPara, tipoEntradaPara, tipoSaidaPara } from '../../lib/constants'
+import type { InvestimentoAtivo, InvestimentoOperacao, InvestimentoPosicao, TipoOperacaoInvestimento } from '../../types'
 
 const MUTED = '#8b92a8'
 const hoje = () => new Date().toISOString().split('T')[0]
@@ -31,6 +31,11 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
   const [form, setForm] = useState(vazio)
   const [editId, setEditId] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
+  // Encerramento de posição: zera o saldo via uma saída (venda/resgate) total.
+  const [encerrar, setEncerrar] = useState<InvestimentoPosicao | null>(null)
+  const [encData, setEncData] = useState(hoje())
+  const [encValor, setEncValor] = useState('')
+  const ehSaida = TIPO_OPERACAO_LABEL[tipoSaidaPara(ativo.tipo_ativo)].toLowerCase()
 
   // Opções de conta: contas de investimento ativas + contas onde o ativo já tem posição.
   const contasOpcoes = useMemo(() => {
@@ -95,6 +100,36 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
     })
   }
 
+  function abrirEncerramento(p: InvestimentoPosicao) {
+    setEncerrar(p); setEncData(hoje()); setEncValor('')
+  }
+
+  // Encerra a posição: registra uma saída total (venda/resgate) na data informada.
+  // O valor recebido é opcional — sem ele, usa o valor de custo. Como a posição é a
+  // soma das operações, abater a quantidade total a leva a ENCERRADA.
+  async function confirmarEncerramento() {
+    if (!encerrar) return
+    const qtd = Number(encerrar.quantidade)
+    if (!(qtd > 0)) { onToast('Posição sem saldo a encerrar'); return }
+    const usaValor = encValor.trim() !== '' && Number(encValor) >= 0
+    const total = usaValor ? Number(encValor) : qtd * Number(encerrar.preco_custo)
+    setSalvando(true)
+    const res = await criar({
+      ativo_id: ativo.id,
+      conta_id: encerrar.conta_id,
+      tipo_operacao: tipoSaidaPara(ativo.tipo_ativo),
+      quantidade: qtd,
+      preco_unitario: qtd > 0 ? total / qtd : 0,
+      valor_total: total,
+      data_operacao: encData,
+    })
+    setSalvando(false)
+    if (!res.ok) { onToast(res.erro ?? 'Erro ao encerrar posição'); return }
+    onToast('Posição encerrada!')
+    setEncerrar(null)
+    preencher({ ativo_id: ativo.id })
+  }
+
   async function remover(id: string) {
     const res = await excluir(id)
     if (editId === id) cancelarEdicao()
@@ -112,11 +147,48 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
         ) : (
           <div className="space-y-1.5">
             {saldos.map((p) => (
-              <div key={p.id} className="flex items-center justify-between gap-2 text-[13px]">
-                <span className="text-white font-medium">{p.contas?.nome ?? nomeConta(p.conta_id)}</span>
-                <span style={{ color: MUTED }}>
-                  {p.quantidade} un. · PM {formatBRL(p.preco_custo)} · <span className="text-white">{formatBRL(p.valor_custo)}</span>
-                </span>
+              <div key={p.id} className="space-y-2">
+                <div className="flex items-center justify-between gap-2 text-[13px]">
+                  <span className="text-white font-medium">{p.contas?.nome ?? nomeConta(p.conta_id)}</span>
+                  <div className="flex items-center gap-2">
+                    <span style={{ color: MUTED }}>
+                      {p.quantidade} un. · PM {formatBRL(p.preco_custo)} · <span className="text-white">{formatBRL(p.valor_custo)}</span>
+                    </span>
+                    <button onClick={() => abrirEncerramento(p)} title="Encerrar posição"
+                      className="flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-md border border-white/10 hover:border-red-400/40"
+                      style={{ color: '#ff5c7a' }}>
+                      <CircleSlash size={12} /> Encerrar
+                    </button>
+                  </div>
+                </div>
+                {encerrar?.id === p.id && (
+                  <div className="rounded-lg border border-red-400/30 bg-red-400/[0.04] p-3 space-y-3">
+                    <p className="text-[12px]" style={{ color: MUTED }}>
+                      Encerra a posição registrando um(a) <span className="text-white">{ehSaida}</span> de{' '}
+                      <span className="text-white">{p.quantidade} un.</span> na data informada.
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="Data do encerramento">
+                        <Input type="date" value={encData} onChange={(e) => setEncData(e.target.value)} />
+                      </Field>
+                      <Field label="Valor recebido (opcional)">
+                        <Input type="number" min={0} step="any" value={encValor}
+                          onChange={(e) => setEncValor(e.target.value)} placeholder={formatBRL(p.valor_custo)} />
+                      </Field>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={confirmarEncerramento} disabled={salvando}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-semibold text-white disabled:opacity-50"
+                        style={{ background: '#ef4444' }}>
+                        <CircleSlash size={14} /> Encerrar posição
+                      </button>
+                      <button onClick={() => setEncerrar(null)}
+                        className="px-3 py-2 rounded-lg text-[13px] border border-white/10 hover:border-white/25" style={{ color: MUTED }}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -184,28 +256,40 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
         <p className="text-[13px] text-center py-4" style={{ color: MUTED }}>Nenhuma movimentação registrada.</p>
       ) : (
         <div className="space-y-2">
-          {movimentos.map((o) => (
-            <div key={o.id} className={`rounded-lg border p-3 flex items-center justify-between gap-2 ${editId === o.id ? 'border-blue-400/50' : 'border-white/10'}`}>
+          {movimentos.map((o) => {
+            const programado = o.data_operacao > hoje()
+            return (
+            <div key={o.id} className={`rounded-lg border p-3 flex items-center justify-between gap-2 ${editId === o.id ? 'border-blue-400/50' : programado ? 'border-amber-400/25' : 'border-white/10'}`}>
               <div>
-                <p className="text-white text-[14px] font-medium">
+                <p className="text-white text-[14px] font-medium flex items-center gap-1.5">
                   {TIPO_OPERACAO_LABEL[o.tipo_operacao]} · {nomeConta(o.conta_id)}
+                  {programado && (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ color: '#f0b429', background: 'rgba(240,180,41,0.12)' }}>
+                      PROGRAMADO
+                    </span>
+                  )}
                 </p>
                 <p className="text-[12px]" style={{ color: MUTED }}>
-                  {o.quantidade} × {formatBRL(o.preco_unitario)} = {formatBRL(o.valor_total)} · {formatData(o.data_operacao)}
+                  {programado
+                    ? `${o.quantidade} un. · vencimento ${formatData(o.data_operacao)}`
+                    : `${o.quantidade} × ${formatBRL(o.preco_unitario)} = ${formatBRL(o.valor_total)} · ${formatData(o.data_operacao)}`}
                 </p>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button onClick={() => iniciarEdicao(o)} title="Editar"
-                  className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
-                  <Pencil size={13} />
-                </button>
-                <button onClick={() => remover(o.id)} title="Excluir"
-                  className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
-                  <Trash2 size={13} />
-                </button>
-              </div>
+              {!programado && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button onClick={() => iniciarEdicao(o)} title="Editar"
+                    className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
+                    <Pencil size={13} />
+                  </button>
+                  <button onClick={() => remover(o.id)} title="Excluir"
+                    className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              )}
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </Drawer>

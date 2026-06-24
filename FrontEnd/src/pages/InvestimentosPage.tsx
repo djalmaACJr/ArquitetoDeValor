@@ -533,29 +533,48 @@ export default function InvestimentosPage() {
   const lacunas = useMemo(() => {
     // ativos que optaram por não buscar cotação automática saem do aviso
     const semCotacao = new Set(ativosMeta.filter((a) => a.cotacao_automatica === false).map((a) => a.id))
-    const chavesAtivas = new Set<string>()
+    // Lacuna = mês sem snapshot dentro de uma JANELA fillável: dos últimos ~12
+    // meses (limite da fonte mais restrita — CoinGecko free vai a 365 dias) até
+    // o mês anterior ao corrente (o mês atual é tarefa do "Atualizar cotação").
+    // Não usar meses anteriores a isso evita "nagar" por períodos que a fonte
+    // não tem (o que dava lista gigante e "0 preenchidos"). O início real é o
+    // maior entre a data da compra e a janela.
+    const mesRel = (off: number) => {
+      const d = new Date()
+      return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + off, 1)).toISOString().slice(0, 7)
+    }
+    const fim = mesRel(-1)
+    const janela = mesRel(-12)
+
+    const inicioPorChave = new Map<string, string>()  // chave → mês da 1ª compra
+    const tickerPorAtivo = new Map<string, string>()
     for (const p of todasPosicoes) {
       if (p.status !== 'ATIVA' || semCotacao.has(p.ativo_id)) continue
-      chavesAtivas.add(`${p.ativo_id}|${p.conta_id}`)
+      const mes = (p.data_compra ?? '').slice(0, 7)
+      if (!mes) continue
+      const key = `${p.ativo_id}|${p.conta_id}`
+      const cur = inicioPorChave.get(key)
+      if (!cur || mes < cur) inicioPorChave.set(key, mes)
+      if (p.inv_ativos?.ticker) tickerPorAtivo.set(p.ativo_id, p.inv_ativos.ticker)
     }
-    const mesesPorChave = new Map<string, string[]>()
-    const tickerPorAtivo = new Map<string, string>()
+    const presentesPorChave = new Map<string, Set<string>>()
     for (const h of todoHistorico) {
       if (h.inv_ativos?.ticker) tickerPorAtivo.set(h.ativo_id, h.inv_ativos.ticker)
       const key = `${h.ativo_id}|${h.conta_id}`
-      if (!chavesAtivas.has(key)) continue
-      if (!mesesPorChave.has(key)) mesesPorChave.set(key, [])
-      mesesPorChave.get(key)!.push(h.mes_ano)
+      if (!inicioPorChave.has(key)) continue
+      if (!presentesPorChave.has(key)) presentesPorChave.set(key, new Set())
+      presentesPorChave.get(key)!.add(h.mes_ano)
     }
     const keys = new Set<string>()
     const tickers = new Set<string>()
-    for (const [key, meses] of mesesPorChave) {
-      if (meses.length < 2) continue
-      const ord = [...meses].sort()
-      const presentes = new Set(ord)
+    for (const [key, inicio] of inicioPorChave) {
       const ativoId = key.split('|')[0]
-      let [y, mo] = ord[0].split('-').map(Number)
-      const [yf, mf] = ord[ord.length - 1].split('-').map(Number)
+      const presentes = presentesPorChave.get(key) ?? new Set<string>()
+      // início = máximo(compra, janela de 12 meses); fim = mês anterior
+      const ini = inicio > janela ? inicio : janela
+      if (ini > fim) continue
+      let [y, mo] = ini.split('-').map(Number)
+      const [yf, mf] = fim.split('-').map(Number)
       let guard = 0
       while ((y < yf || (y === yf && mo <= mf)) && guard++ < 600) {
         const me = `${y}-${String(mo).padStart(2, '0')}`
