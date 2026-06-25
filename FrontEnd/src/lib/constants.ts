@@ -69,13 +69,15 @@ export type TipoAtivoInvestimento = typeof TIPOS_ATIVO_INV[number]
 export const STATUS_POSICAO_INV = ['ATIVA', 'ENCERRADA'] as const
 export type StatusPosicaoInvestimento = typeof STATUS_POSICAO_INV[number]
 
-export const TIPOS_OPERACAO_INV = ['COMPRA', 'VENDA', 'APORTE', 'RESGATE', 'DIVIDENDO'] as const
+export const TIPOS_OPERACAO_INV = ['COMPRA', 'VENDA', 'APORTE', 'RESGATE', 'DIVIDENDO', 'RENDIMENTO'] as const
 export type TipoOperacaoInvestimento = typeof TIPOS_OPERACAO_INV[number]
 
 // Rótulos das movimentações. Renda fixa/Tesouro usam Aplicação/Resgate em vez
-// de Compra/Venda (APORTE é exibido como "Aplicação").
+// de Compra/Venda (APORTE é exibido como "Aplicação"). RENDIMENTO = yield de
+// cripto creditado em mais tokens.
 export const TIPO_OPERACAO_LABEL: Record<TipoOperacaoInvestimento, string> = {
   COMPRA: 'Compra', VENDA: 'Venda', APORTE: 'Aplicação', RESGATE: 'Resgate', DIVIDENDO: 'Dividendo',
+  RENDIMENTO: 'Rendimento',
 }
 
 const ehRendaFixaInv = (t: TipoAtivoInvestimento) => t === 'RENDA_FIXA' || t === 'TESOURO_DIRETO'
