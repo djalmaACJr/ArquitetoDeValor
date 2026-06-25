@@ -20,7 +20,7 @@ export default function BotaoNovoLancamento({ onSelect, onLembrete, className }:
     <div className={`relative group${className ? ` ${className}` : ''}`}>
       <button
         onClick={() => onSelect('DESPESA')}
-        className="flex items-center gap-1.5 bg-av-green text-[16px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors"
+        className="w-full sm:w-auto flex items-center justify-center gap-1.5 bg-av-green text-[15px] sm:text-[16px] font-semibold px-3 py-1.5 rounded-lg hover:bg-av-green/90 transition-colors whitespace-nowrap"
         style={{ color: '#0a0f1a' }}
       >
         <Plus size={14} /> Novo lançamento

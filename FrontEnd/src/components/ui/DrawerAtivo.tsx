@@ -38,7 +38,8 @@ const FORM_VAZIO: FormAtivo = {
   rf_subtipo: null, rf_indexador: null, rf_indice: null, rf_percentual_indice: null,
   rf_taxa_fixa: null, rf_taxa: null, rf_emissor: null,
   rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
-  fii_categoria: null, acoes_subtipo: null, cotacao_automatica: true,
+  fii_categoria: null, acoes_subtipo: null, cripto_rendimento_aa: null,
+  cripto_rendimento_inicio: null, cripto_rendimento_periodicidade: null, cotacao_automatica: true,
 }
 
 const ehRendaFixa = (tipo: TipoAtivoInvestimento | '') => tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
@@ -105,6 +106,9 @@ function formDoAtivo(ativo: InvestimentoAtivo | null): FormAtivo {
     rf_emissor: ativo.rf_emissor, rf_vencimento: ativo.rf_vencimento,
     rf_garantia_fgc: ativo.rf_garantia_fgc, rf_isento_ir: ativo.rf_isento_ir,
     fii_categoria: ativo.fii_categoria, acoes_subtipo: ativo.acoes_subtipo,
+    cripto_rendimento_aa: ativo.cripto_rendimento_aa,
+    cripto_rendimento_inicio: ativo.cripto_rendimento_inicio,
+    cripto_rendimento_periodicidade: ativo.cripto_rendimento_periodicidade,
     cotacao_automatica: ativo.cotacao_automatica,
   }
 }
@@ -311,6 +315,10 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       ...(form.tipo_ativo === 'ACOES'
         ? { acoes_subtipo: form.acoes_subtipo ?? subtipoAcaoDoTicker(tickerFinal) }
         : {}),
+      // Rendimento só faz sentido p/ cripto — zera nos demais tipos.
+      ...(form.tipo_ativo !== 'CRIPTOMOEDAS'
+        ? { cripto_rendimento_aa: null, cripto_rendimento_inicio: null, cripto_rendimento_periodicidade: null }
+        : {}),
     }
     const res = editando ? await editar(editando.id, payload) : await criar(payload)
     if (!res.ok) { setSalvando(false); onToast(res.erro ?? 'Erro ao salvar'); return }
@@ -380,6 +388,35 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
             </div>
           )}
         </Field>
+      )}
+      {form.tipo_ativo === 'CRIPTOMOEDAS' && (
+        <Field label="Rendimento anual (% a.a.) — opcional">
+          <Input type="number" step="0.01" min="0" value={form.cripto_rendimento_aa ?? ''}
+            onChange={(e) => setForm({ ...form, cripto_rendimento_aa: e.target.value === '' ? null : Number(e.target.value) })}
+            placeholder="Ex.: 3.5 (USDC com yield)" />
+          <p className="text-[12px] mt-1" style={{ color: MUTED }}>
+            Yield creditado em mais tokens (não é provento). Depois clique em
+            "Provisionar rendimento" para gerar os créditos na posição.
+          </p>
+        </Field>
+      )}
+      {form.tipo_ativo === 'CRIPTOMOEDAS' && Number(form.cripto_rendimento_aa) > 0 && (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Rende desde (opcional)">
+            <Input type="date" value={form.cripto_rendimento_inicio ?? ''}
+              onChange={(e) => setForm({ ...form, cripto_rendimento_inicio: e.target.value || null })} />
+            <p className="text-[12px] mt-1" style={{ color: MUTED }}>Vazio = desde o 1º aporte.</p>
+          </Field>
+          <Field label="Periodicidade">
+            <SelectDark value={form.cripto_rendimento_periodicidade ?? 'MENSAL'}
+              onChange={(e) => setForm({ ...form, cripto_rendimento_periodicidade: e.target.value as 'DIARIA' | 'SEMANAL' | 'MENSAL' })}>
+              <option value="DIARIA">Diária</option>
+              <option value="SEMANAL">Semanal</option>
+              <option value="MENSAL">Mensal</option>
+            </SelectDark>
+            <p className="text-[12px] mt-1" style={{ color: MUTED }}>Base de composição (crédito materializado por semana).</p>
+          </Field>
+        </div>
       )}
       {/* Subtipo da ação (ON/PN/Unit/BDR) é inferido do ticker — sem campo manual. */}
 

@@ -31,6 +31,10 @@ export interface CriarAtivoInput {
   fii_categoria?:   CategoriaFII | null
   // Ações
   acoes_subtipo?:   AcoesSubtipo | null
+  // Cripto — rendimento (yield) anual em % a.a. (gera operações RENDIMENTO)
+  cripto_rendimento_aa?: number | null
+  cripto_rendimento_inicio?: string | null
+  cripto_rendimento_periodicidade?: 'DIARIA' | 'SEMANAL' | 'MENSAL' | null
   // Quando false, o ativo é pulado pela busca automática de cotação
   cotacao_automatica?: boolean
 }
@@ -131,6 +135,18 @@ export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
     return { ok: res.ok, dados: null, erro: res.erro }
   }
 
+  // Materializa o rendimento (yield) das criptos como operações RENDIMENTO
+  // (mais tokens). Aumenta a quantidade → reflete em posições/histórico/ranking.
+  const provisionarRendimentoCripto = async (): Promise<OpResult<RendimentoCriptoResultado>> => {
+    const res = await apiMutate<RendimentoCriptoResultado>('/investimentos/rendimento-cripto', 'POST', {})
+    if (res.ok) {
+      for (const k of ['inv-ativos', 'inv-posicoes', 'inv-operacoes', 'inv-historico', 'inv-dashboard', 'inv-ranking']) {
+        await qc.invalidateQueries({ queryKey: [k, uid] })
+      }
+    }
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   return {
     ativos,
     loading,
@@ -140,7 +156,14 @@ export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
     excluir,
     atualizarAtivos,
     normalizarTesouro,
+    provisionarRendimentoCripto,
   }
+}
+
+export interface RendimentoCriptoResultado {
+  posicoes: number
+  operacoes_criadas: number
+  operacoes_atualizadas: number
 }
 
 // ── Detalhe de um ativo (GET /investimentos/ativos/:id) ───────

@@ -119,6 +119,14 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
+  // Preenche o dividendo-por-cota (rate) dos proventos antigos re-buscando da
+  // B3. É o que destrava DY/Yield on Cost no padrão investidor10 no histórico.
+  const backfillRate = async (): Promise<OpResult<ResultadoBackfillRate>> => {
+    const res = await apiMutate<ResultadoBackfillRate>('/investimentos/dividendos-backfill-rate', 'POST')
+    if (res.ok) await invalidar()
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   return {
     dividendos,
     loading,
@@ -129,8 +137,16 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     confirmar,
     excluir,
     buscarBrl,
+    backfillRate,
     invalidar,
   }
+}
+
+export interface ResultadoBackfillRate {
+  processados: number
+  preenchidos: number
+  sem_fonte:   number
+  ambiguos:    number
 }
 
 export interface ResultadoBuscaProventos {

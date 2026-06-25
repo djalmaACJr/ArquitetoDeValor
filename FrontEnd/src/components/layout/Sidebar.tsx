@@ -337,11 +337,11 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
             // da viewport e gere um retângulo `bg-av-dark` visível em
             // cima da página principal — bug "quadro preto" reportado ao
             // navegar com Relatórios expandido + clicar em Perfil.
-            ? `flex flex-col px-3 py-5 bg-av-dark sticky top-0 h-screen overflow-y-auto rounded-r-2xl flex-shrink-0 transition-all duration-300 ${
+            ? `flex flex-col px-3 py-5 bg-av-dark sticky top-0 h-[100svh] overflow-y-auto rounded-r-2xl flex-shrink-0 transition-all duration-300 ${
                 colapsado ? 'w-[60px]' : 'w-[216px]'
               }`
             // Mobile: overlay deslizante.
-            : `flex flex-col px-3 py-5 bg-av-dark fixed top-0 left-0 h-screen overflow-y-auto z-50 w-[260px] transition-transform duration-300 ${
+            : `flex flex-col px-3 py-4 bg-av-dark fixed top-0 left-0 h-[100svh] overflow-y-auto z-50 w-[min(82vw,300px)] transition-transform duration-300 ${
                 mobileOpen ? 'translate-x-0' : '-translate-x-full'
               }`
         }

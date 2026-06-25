@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Plus, Pencil, X as XIcon, CreditCard, Trash2 } from 'lucide-react'
 import { useContas } from '../hooks/useContas'
 import { useOcultarValores } from '../hooks/useOcultarValores'
-import { formatBRL } from '../lib/utils'
+import { formatBRL, formatData } from '../lib/utils'
 import { IconeConta } from '../components/ui/IconeConta'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
 import {
@@ -356,6 +356,11 @@ export default function ContasPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-[17px] font-semibold truncate line-through" style={{ color: '#8b92a8' }}>{c.nome}</p>
                   <p className="text-[14px]" style={{ color: '#8b92a8' }}>{c.tipo} · inativa</p>
+                  <p className="text-[13px] mt-0.5" style={{ color: '#8b92a8' }}>
+                    {c.ultima_movimentacao
+                      ? `Últ. mov.: ${formatData(c.ultima_movimentacao)}`
+                      : 'Sem movimentações'}
+                  </p>
                 </div>
                 <button
                   onClick={() => abrirEditar(c)}

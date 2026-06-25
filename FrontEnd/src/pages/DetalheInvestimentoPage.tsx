@@ -80,9 +80,10 @@ export default function DetalheInvestimentoPage() {
   const [excluindo, setExcluindo] = useState(false)
   const [salvandoExclusao, setSalvandoExclusao] = useState(false)
   const [gerenciar, setGerenciar] = useState(false)
+  const [provisionando, setProvisionando] = useState(false)
 
   const { ativo, loading, error } = useInvestimentoAtivo(ativoId)
-  const { excluir } = useInvestimentosAtivos()
+  const { excluir, provisionarRendimentoCripto } = useInvestimentosAtivos()
   const { posicoes }  = useInvestimentosPosicoes(ativoId ? { ativo_id: ativoId } : {})
   const { historico } = useInvestimentosHistorico(ativoId ? { ativo_id: ativoId } : {})
   const { dividendos } = useDividendos(ativoId ? { ativo_id: ativoId } : {})
@@ -90,6 +91,17 @@ export default function DetalheInvestimentoPage() {
   const { dashboard } = useInvestimentosDashboard()
 
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 3000) }
+
+  async function provisionarRendimento() {
+    setProvisionando(true)
+    const res = await provisionarRendimentoCripto()
+    setProvisionando(false)
+    if (!res.ok) { showToast(res.erro ?? 'Erro ao provisionar rendimento'); return }
+    const n = res.dados?.operacoes_criadas ?? 0
+    showToast(n === 0
+      ? 'Nenhum rendimento a creditar ainda.'
+      : `Rendimento atualizado — ${n} crédito(s) semanais na posição.`)
+  }
 
   // Resumo: custo das posições ativas; mercado = snapshot mais recente por conta
   const resumo = useMemo(() => {
@@ -126,10 +138,20 @@ export default function DetalheInvestimentoPage() {
     return [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-12)
   }, [dividendos])
 
-  const operacoesDoAtivo = useMemo(() => {
+  // Operações do ativo separadas: compras/aportes × rendimentos (yield).
+  // Rendimentos (RENDIMENTO) têm valor_total 0 e podem ser muitos (semanais),
+  // então vão num grupo próprio, exibidos como tokens creditados.
+  const { compras, rendimentos, totalRendimento } = useMemo(() => {
     const posIds = new Set(posicoes.map((p) => p.id))
-    return operacoes.filter((o) => posIds.has(o.posicao_id)).slice(0, 8)
+    const doAtivo = operacoes.filter((o) => posIds.has(o.posicao_id))
+    const rend = doAtivo.filter((o) => o.tipo_operacao === 'RENDIMENTO')
+    return {
+      compras: doAtivo.filter((o) => o.tipo_operacao !== 'RENDIMENTO').slice(0, 8),
+      rendimentos: rend,
+      totalRendimento: rend.reduce((s, o) => s + Number(o.quantidade), 0),
+    }
   }, [operacoes, posicoes])
+  const fmtTokens = (q: number) => Number(q).toLocaleString('pt-BR', { maximumFractionDigits: 8 })
 
   // ── Conversão cambial (ativos em moeda estrangeira) ────────────
   // Valores das posições estão na moeda do ativo (ex.: USD). Convertemos
@@ -239,6 +261,14 @@ export default function DetalheInvestimentoPage() {
             Nota: {ativo.nota_usuario ?? '—'}
             <Pencil size={12} style={{ color: MUTED }} />
           </button>
+          {ativo.tipo_ativo === 'CRIPTOMOEDAS' && Number(ativo.cripto_rendimento_aa) > 0 && (
+            <button onClick={provisionarRendimento} disabled={provisionando}
+              title={`Credita o rendimento de ${ativo.cripto_rendimento_aa}% a.a. em mais tokens (operações RENDIMENTO)`}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60">
+              <Coins size={14} className={provisionando ? 'animate-spin' : ''} style={{ color: '#00c896' }} />
+              {provisionando ? 'Provisionando…' : 'Provisionar rendimento'}
+            </button>
+          )}
           <button onClick={() => setEditandoAtivo(true)} title="Editar dados do ativo"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
             <Pencil size={14} style={{ color: MUTED }} /> Editar
@@ -399,19 +429,47 @@ export default function DetalheInvestimentoPage() {
               <Plus size={13} /> Gerenciar
             </button>
           </div>
-          {operacoesDoAtivo.length === 0 ? (
+          {compras.length === 0 && rendimentos.length === 0 ? (
             <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhuma operação registrada.</p>
           ) : (
-            <div className="space-y-2">
-              {operacoesDoAtivo.map((o) => (
-                <div key={o.id} className="flex items-center justify-between gap-2 text-[13px]">
-                  <div>
-                    <p className="text-white font-medium">{TIPO_OPERACAO_LABEL[o.tipo_operacao]}</p>
-                    <p style={{ color: MUTED }}>{o.quantidade} × {formatBRL(o.preco_unitario)} · {formatData(o.data_operacao)}</p>
-                  </div>
-                  <span className="text-white font-semibold">{formatBRL(o.valor_total)}</span>
+            <div className="space-y-4">
+              {compras.length > 0 && (
+                <div className="space-y-2">
+                  {rendimentos.length > 0 && (
+                    <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>Compras e aportes</p>
+                  )}
+                  {compras.map((o) => (
+                    <div key={o.id} className="flex items-center justify-between gap-2 text-[13px]">
+                      <div>
+                        <p className="text-white font-medium">{TIPO_OPERACAO_LABEL[o.tipo_operacao]}</p>
+                        <p style={{ color: MUTED }}>{o.quantidade} × {formatBRL(o.preco_unitario)} · {formatData(o.data_operacao)}</p>
+                      </div>
+                      <span className="text-white font-semibold">{formatBRL(o.valor_total)}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
+              {rendimentos.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>Rendimentos (yield)</p>
+                    <span className="text-[12px] font-semibold" style={{ color: '#00c896' }}>
+                      +{fmtTokens(totalRendimento)} {ativo.ticker} · {rendimentos.length}×
+                    </span>
+                  </div>
+                  {rendimentos.slice(0, 5).map((o) => (
+                    <div key={o.id} className="flex items-center justify-between gap-2 text-[13px]">
+                      <p style={{ color: MUTED }}>{formatData(o.data_operacao)}</p>
+                      <span className="font-semibold" style={{ color: '#00c896' }}>+{fmtTokens(o.quantidade)} {ativo.ticker}</span>
+                    </div>
+                  ))}
+                  {rendimentos.length > 5 && (
+                    <p className="text-[12px] text-center" style={{ color: MUTED }}>
+                      +{rendimentos.length - 5} crédito(s) — ver em Gerenciar
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </section>

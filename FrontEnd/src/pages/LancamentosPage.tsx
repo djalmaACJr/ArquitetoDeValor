@@ -762,12 +762,12 @@ export default function LancamentosPage() {
                 <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} onSelectDia={handleSelectDia} />
               )}
             </div>
-            <BotaoNovoLancamento onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
+            <BotaoNovoLancamento className="hidden sm:block" onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
           </div>
         ) : (
           <>
         {/* Topbar */}
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <h1 className="text-[21px] font-bold flex items-center gap-2" style={{ color: '#e8eaf0' }}>
             Lançamentos
             {/* Botão de recolher filtros — sempre visível */}
@@ -781,7 +781,7 @@ export default function LancamentosPage() {
               <ChevronUp size={14} />
             </button>
           </h1>
-          <div className="flex items-center gap-2">
+          <div className="w-full sm:w-auto flex items-center gap-2">
             <button
               data-tutorial="extrato-exportar"
               onClick={exportarXlsx}
@@ -808,15 +808,15 @@ export default function LancamentosPage() {
               <FileDown size={14} />
               <span className="hidden sm:inline">Exportar XLS</span>
             </button>
-            <div data-tutorial="extrato-novo-lancamento">
+            <div data-tutorial="extrato-novo-lancamento" className="flex-1 sm:flex-none">
               <BotaoNovoLancamento onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
             </div>
           </div>
         </div>
         {/* Filtros — tudo em uma linha */}
-        <div className="flex flex-wrap gap-2 mb-2 items-center">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 mb-2 items-center">
         {/* Mês */}
-        <div className="flex items-center gap-1.5" data-tutorial="extrato-mes">
+        <div className="col-span-2 sm:col-span-1 flex items-center gap-1.5 min-w-0" data-tutorial="extrato-mes">
           <MonthPicker value={mes} onChange={setMes}
             onHoverPrev={() => prefetchAdj(-1)}
             onHoverNext={() => prefetchAdj(1)}
@@ -829,11 +829,14 @@ export default function LancamentosPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2" data-tutorial="extrato-filtros">
+        <div className="contents sm:flex sm:items-center sm:gap-2" data-tutorial="extrato-filtros">
           <FiltrosLancamentos
             pagina="extrato"
             filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
             setFiltContas={setFiltContas} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
+            classNameContas="w-full sm:w-40"
+            classNameCats="w-full sm:w-44"
+            classNameStatus="w-full sm:w-36"
             extras={{ comSaldo }}
             extrasFiltroAtivo={!comSaldo}
             onAplicarExtras={d => setComSaldo((d.comSaldo as boolean) ?? true)}
@@ -860,11 +863,11 @@ export default function LancamentosPage() {
         </div>
 
         {/* Toggle moderno — incluir saldo anterior */}
-        <div className="flex flex-col gap-0.5" data-tutorial="extrato-saldo-anterior">
+        <div className="col-span-2 sm:col-span-1 flex flex-col gap-0.5 min-w-0" data-tutorial="extrato-saldo-anterior">
           <button
             onClick={() => { if (filtCats.length === 0) setComSaldo(v => !v) }}
             disabled={filtCats.length > 0}
-            className="flex items-center gap-2 flex-shrink-0 px-3 py-1.5 rounded-lg border transition-all"
+            className="flex items-center justify-center sm:justify-start gap-2 flex-shrink-0 px-3 py-1.5 rounded-lg border transition-all"
             style={{
               background: filtCats.length > 0 ? 'transparent' : comSaldo ? 'rgba(0,200,150,0.1)' : 'transparent',
               borderColor: filtCats.length > 0 ? 'rgba(255,255,255,0.06)' : comSaldo ? 'rgba(0,200,150,0.4)' : 'rgba(255,255,255,0.1)',
@@ -899,7 +902,7 @@ export default function LancamentosPage() {
 
         </div>
         {/* Pesquisa */}
-        <div className="flex items-center gap-2 mb-2" data-tutorial="extrato-pesquisa">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-2" data-tutorial="extrato-pesquisa">
           <div className="flex items-center gap-2 flex-1 rounded-lg px-3 py-1.5 border min-w-0"
             style={{ background: '#131825', borderColor: pesquisa ? 'rgba(77,166,255,0.4)' : 'rgba(255,255,255,0.1)' }}>
             <Search size={13} style={{ color: '#8b92a8', flexShrink: 0 }} />
@@ -917,7 +920,7 @@ export default function LancamentosPage() {
             )}
           </div>
           {(pesquisa || temFiltroAtivo) && (
-            <div className="flex gap-1 flex-shrink-0">
+            <div className="flex gap-1 flex-wrap sm:flex-nowrap flex-shrink-0">
               {(['MES_ATUAL', 'MESES_ANTERIORES', 'PROXIMOS_MESES'] as const).map(e => {
                 const labels = { MES_ATUAL: 'Mês atual', MESES_ANTERIORES: 'Meses anteriores', PROXIMOS_MESES: 'Próximos meses' }
                 const ativo = escopoPesquisa === e
@@ -967,15 +970,15 @@ export default function LancamentosPage() {
       </div>
 
       {/* Cards de resumo */}
-      <div className="grid grid-cols-3 gap-3 mt-4 mb-4" data-tutorial="extrato-resumo">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 mb-4" data-tutorial="extrato-resumo">
         {[
           { label: 'Receitas',  valor: totais.receitas,  color: '#00c896' },
           { label: 'Despesas',  valor: totais.despesas,  color: '#f87171' },
           { label: 'Resultado', valor: totais.resultado, color: totais.resultado >= 0 ? '#00c896' : '#f87171' },
         ].map(c => (
-          <div key={c.label} className="bg-[#1a1f2e] border border-white/10 rounded-xl px-4 py-3">
+          <div key={c.label} className="bg-[#1a1f2e] border border-white/10 rounded-xl px-4 py-3 min-w-0">
             <p className="text-[14px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#8b92a8' }}>{c.label}</p>
-            <p className="text-[20px] font-bold" style={{ color: c.color }}>{formatBRL(c.valor)}</p>
+            <p className="text-[20px] font-bold break-words" style={{ color: c.color }}>{formatBRL(c.valor)}</p>
           </div>
         ))}
       </div>

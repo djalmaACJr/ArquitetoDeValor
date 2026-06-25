@@ -77,15 +77,15 @@ const CardResultados = memo(function CardResultados({
         <span className="w-2 h-2 rounded-full bg-av-green"/>
         <span className="text-[16px] font-semibold text-gray-500 dark:text-gray-400">Resultados do mês</span>
       </div>
-      <div className="grid grid-cols-3 gap-0 divide-x divide-gray-200 dark:divide-gray-700 min-w-0">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-0 divide-y sm:divide-y-0 sm:divide-x divide-gray-200 dark:divide-gray-700 min-w-0">
         {[
           { label: 'Receitas',  value: resumo?.total_entradas ?? 0, cor: 'text-av-green' },
           { label: 'Despesas',  value: resumo?.total_saidas   ?? 0, cor: 'text-red-400'  },
           { label: 'Resultado', value: resultado,                    cor: resultado >= 0 ? 'text-av-green' : 'text-red-400' },
         ].map(({ label, value, cor }) => (
-          <div key={label} className="px-3 first:pl-0 last:pr-0">
+          <div key={label} className="px-0 py-2 first:pt-0 last:pb-0 sm:px-3 sm:py-0 sm:first:pl-0 sm:last:pr-0 min-w-0">
             <p className="text-[15px] text-gray-400 mb-1">{label}</p>
-            <p className={`text-[20px] font-bold ${cor}`}>
+            <p className={`text-[19px] sm:text-[20px] font-bold break-words ${cor}`}>
               {formatBRL(value)}
             </p>
           </div>
@@ -670,11 +670,103 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
 
   const labelsChart = temOutros ? [...tops.map(d => d.categoria_nome), 'Outros'] : tops.map(d => d.categoria_nome)
   const valuesChart = temOutros ? [...tops.map(d => d.total),       outros]      : tops.map(d => d.total)
+  const suavizarCor = (hex: string, mix = 0.28) => {
+    const h = hex.replace('#', '')
+    const r = parseInt(h.slice(0, 2), 16)
+    const g = parseInt(h.slice(2, 4), 16)
+    const b = parseInt(h.slice(4, 6), 16)
+    const m = (c: number) => Math.round(c + (255 - c) * mix)
+    return `rgb(${m(r)}, ${m(g)}, ${m(b)})`
+  }
   const coresChart  = temOutros
-    ? [...tops.map((_, i) => CORES_CATEGORIA[i % CORES_CATEGORIA.length]), '#8b92a8']
-    : tops.map((_, i) => CORES_CATEGORIA[i % CORES_CATEGORIA.length])
+    ? [...tops.map((_, i) => suavizarCor(CORES_CATEGORIA[i % CORES_CATEGORIA.length])), '#a3a9b8']
+    : tops.map((_, i) => suavizarCor(CORES_CATEGORIA[i % CORES_CATEGORIA.length]))
 
   const formatPct = (v: number) => total > 0 ? ((v / total) * 100).toFixed(1) : '0.0'
+  const rotuloCurto = (s: string, max = 13) => s.length > max ? `${s.slice(0, max - 1)}…` : s
+
+  const donutLabelsPlugin = useMemo(() => ({
+    id: `donut-labels-${titulo.replace(/\W+/g, '-').toLowerCase()}`,
+    afterDatasetsDraw(chart: any) {
+      const meta = chart.getDatasetMeta(0)
+      const dataset = chart.data.datasets[0]
+      if (!meta?.data?.length || !dataset?.data?.length) return
+
+      const ctx = chart.ctx as CanvasRenderingContext2D
+      const area = chart.chartArea
+      const chartW = area.right - area.left
+      const compact = chartW < 380
+      const totalDataset = (dataset.data as number[]).reduce((s, v) => s + Number(v || 0), 0)
+      if (totalDataset <= 0) return
+
+      ctx.save()
+      ctx.textBaseline = 'middle'
+
+      meta.data.forEach((arc: any, i: number) => {
+        const value = Number(dataset.data[i] || 0)
+        if (value <= 0) return
+
+        const pct = totalDataset > 0 ? (value / totalDataset) * 100 : 0
+        const props = arc.getProps(['x', 'y', 'startAngle', 'endAngle', 'innerRadius', 'outerRadius'], true)
+        const angle = (props.startAngle + props.endAngle) / 2
+        const cos = Math.cos(angle)
+        const sin = Math.sin(angle)
+        const color = dataset.backgroundColor[i] as string
+        const label = String(chart.data.labels?.[i] ?? '')
+        const valueLabel = formatBRL(value)
+        const pctLabel = `${pct.toFixed(1)}%`
+        const inside = !compact && pct >= 16 && label.length <= 14
+
+        if (inside) {
+          const r = props.innerRadius + (props.outerRadius - props.innerRadius) * 0.55
+          const x = props.x + cos * r
+          const y = props.y + sin * r
+          ctx.textAlign = 'center'
+          ctx.fillStyle = 'rgba(8, 12, 20, 0.86)'
+          ctx.font = '700 11px Space Grotesk, system-ui, sans-serif'
+          ctx.fillText(rotuloCurto(label, 14), x, y - 9)
+          ctx.font = '700 10px Space Grotesk, system-ui, sans-serif'
+          ctx.fillText(`${valueLabel} · ${pctLabel}`, x, y + 8)
+          return
+        }
+
+        if (pct < 4) return
+
+        const startX = props.x + cos * (props.outerRadius - 2)
+        const startY = props.y + sin * (props.outerRadius - 2)
+        const elbowX = props.x + cos * (props.outerRadius + 14)
+        const elbowY = props.y + sin * (props.outerRadius + 14)
+        const side = cos >= 0 ? 1 : -1
+        const endX = elbowX + side * (compact ? 26 : 42)
+        const endY = elbowY
+        const textX = endX + side * 6
+        const align: CanvasTextAlign = side > 0 ? 'left' : 'right'
+
+        ctx.strokeStyle = color
+        ctx.lineWidth = 1.4
+        ctx.beginPath()
+        ctx.moveTo(startX, startY)
+        ctx.lineTo(elbowX, elbowY)
+        ctx.lineTo(endX, endY)
+        ctx.stroke()
+
+        ctx.fillStyle = color
+        ctx.beginPath()
+        ctx.arc(startX, startY, 2.6, 0, Math.PI * 2)
+        ctx.fill()
+
+        ctx.textAlign = align
+        ctx.fillStyle = 'rgba(232, 234, 240, 0.92)'
+        ctx.font = '700 11px Space Grotesk, system-ui, sans-serif'
+        ctx.fillText(rotuloCurto(label, compact ? 10 : 15), textX, endY - 8)
+        ctx.fillStyle = 'rgba(197, 202, 216, 0.86)'
+        ctx.font = '600 10px Space Grotesk, system-ui, sans-serif'
+        ctx.fillText(`${valueLabel} · ${pctLabel}`, textX, endY + 8)
+      })
+
+      ctx.restore()
+    },
+  }), [titulo, labelsChart.join('|'), valuesChart.join('|')])
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
@@ -699,7 +791,7 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
 
       {/* Donut clicável — também abre a expansão */}
       <div
-        style={{ position: 'relative', width: '100%', height: '250px', marginBottom: '1rem', cursor: dados.length > topN ? 'pointer' : 'default' }}
+        style={{ position: 'relative', width: '100%', height: '292px', marginBottom: '1rem', cursor: dados.length > topN ? 'pointer' : 'default' }}
         onClick={() => { if (dados.length > topN) setExpandido(true) }}
       >
         <Doughnut
@@ -708,48 +800,58 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
             datasets: [{
               data: valuesChart,
               backgroundColor: coresChart,
-              borderWidth: 0,
-              hoverOffset: 4,
+              borderColor: 'rgba(10,15,26,0.96)',
+              borderWidth: 4,
+              borderRadius: 12,
+              spacing: 3,
+              hoverOffset: 8,
             }],
           }}
           options={{
             responsive: true,
             maintainAspectRatio: false,
-            cutout: '68%',
+            layout: { padding: { top: 18, right: 48, bottom: 18, left: 48 } },
+            cutout: '64%',
             plugins: {
               legend: { display: false },
               tooltip: {
+                backgroundColor: 'rgba(10,15,26,0.94)',
+                borderColor: 'rgba(255,255,255,0.12)',
+                borderWidth: 1,
+                padding: 10,
+                titleColor: '#e8eaf0',
+                bodyColor: '#c5cad8',
+                displayColors: true,
                 callbacks: {
                   label: ctx => ` ${formatBRL(ctx.parsed)} (${formatPct(ctx.parsed)}%)`,
                 },
               },
             },
           }}
+          plugins={[donutLabelsPlugin]}
         />
       </div>
 
-      {/* Lista compacta — apenas top N.
-          Largura mínima das células fixada e flex-shrink-0 para que valores
-          longos (R$ 12.345,67) não estourem o card. A barra é que flexiona. */}
-      <div className="space-y-1.5 min-w-0">
+      {/* Legenda compacta — apenas top N, com valor e percentual. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
         {tops.map((d, i) => (
-          <div key={d.categoria_id} className="flex items-center gap-1.5 text-[15px] min-w-0">
-            <span className="w-[76px] flex-shrink-0 text-gray-400 truncate">{d.categoria_nome}</span>
-            <div className="flex-1 min-w-[24px] h-[3px] rounded-full bg-gray-100 dark:bg-gray-700">
-              <div className="h-full rounded-full" style={{ width: `${total > 0 ? (d.total / total) * 100 : 0}%`, background: coresChart[i] }} />
+          <div key={d.categoria_id} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: coresChart[i] }} />
+              <span className="flex-1 min-w-0 text-[14px] font-semibold text-gray-700 dark:text-gray-200 truncate">{d.categoria_nome}</span>
+              <span className="text-[13px] font-bold text-gray-400 whitespace-nowrap">{formatPct(d.total)}%</span>
             </div>
-            <span className="w-[44px] flex-shrink-0 text-right text-gray-400 whitespace-nowrap">{formatPct(d.total)}%</span>
-            <span className="min-w-[88px] flex-shrink-0 text-right font-semibold text-gray-700 dark:text-gray-200 whitespace-nowrap">{formatBRL(d.total)}</span>
+            <p className="mt-1 text-[14px] font-bold text-gray-700 dark:text-gray-100">{formatBRL(d.total)}</p>
           </div>
         ))}
         {temOutros && (
-          <div className="flex items-center gap-1.5 text-[15px] pt-1 border-t border-white/5 min-w-0">
-            <span className="w-[76px] flex-shrink-0 text-gray-500 italic truncate">Outros ({sobras.length})</span>
-            <div className="flex-1 min-w-[24px] h-[3px] rounded-full bg-gray-100 dark:bg-gray-700">
-              <div className="h-full rounded-full" style={{ width: `${total > 0 ? (outros / total) * 100 : 0}%`, background: '#8b92a8' }} />
+          <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: '#a3a9b8' }} />
+              <span className="flex-1 min-w-0 text-[14px] font-semibold text-gray-500 italic truncate">Outros ({sobras.length})</span>
+              <span className="text-[13px] font-bold text-gray-400 whitespace-nowrap">{formatPct(outros)}%</span>
             </div>
-            <span className="w-[44px] flex-shrink-0 text-right text-gray-400 whitespace-nowrap">{formatPct(outros)}%</span>
-            <span className="min-w-[88px] flex-shrink-0 text-right font-semibold text-gray-500 whitespace-nowrap">{formatBRL(outros)}</span>
+            <p className="mt-1 text-[14px] font-bold text-gray-500">{formatBRL(outros)}</p>
           </div>
         )}
       </div>
@@ -1562,14 +1664,17 @@ export default function DashboardPage() {
   return (
     <div className="p-5">
       {/* Topbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-5">
         <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2" data-tutorial="dashboard-filtros">
+        <div className="w-full lg:w-auto grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2">
+          <div className="contents sm:flex sm:items-center sm:gap-2" data-tutorial="dashboard-filtros">
             <FiltrosLancamentos
               pagina="dashboard"
               filtContas={contasFiltro} filtCats={filtCats} filtStatus={filtStatus}
               setFiltContas={setContasFiltro} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
+              classNameContas="w-full sm:w-40"
+              classNameCats="w-full sm:w-44"
+              classNameStatus="w-full sm:w-36"
             />
           </div>
 
@@ -1578,16 +1683,16 @@ export default function DashboardPage() {
             onClick={handleRefresh}
             title="Atualizar dados"
             disabled={refreshing || loading}
-            className="flex items-center gap-1.5 text-[16px] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors disabled:opacity-50"
+            className="flex items-center justify-center gap-1.5 text-[16px] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors disabled:opacity-50"
           >
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''}/>
           </button>
 
-          <div data-tutorial="dashboard-ocultar">
+          <div data-tutorial="dashboard-ocultar" className="min-w-0">
             <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
           </div>
 
-          <div data-tutorial="dashboard-mes">
+          <div data-tutorial="dashboard-mes" className="col-span-2 sm:col-span-1">
             <MonthPicker
               value={mes}
               onChange={setMes}
@@ -1596,7 +1701,7 @@ export default function DashboardPage() {
             />
           </div>
 
-          <div data-tutorial="dashboard-novo-lancamento">
+          <div data-tutorial="dashboard-novo-lancamento" className="col-span-2 sm:col-span-1">
             <BotaoNovoLancamento
               onSelect={tipo => navigate('/lancamentos', { state: { novoLancamento: true, tipoInicial: tipo } })}
               onLembrete={() => { setLembreteEditando(null); setDataInicialLembrete(undefined); setModalLembreteAberto(true) }}
@@ -1625,8 +1730,8 @@ export default function DashboardPage() {
           })()}
 
           {/* Linha 1: calendário + resultados + saldo */}
-          <div className="flex flex-wrap gap-3 items-stretch">
-            <div data-tutorial="dashboard-calendario">
+          <div className="flex flex-col xl:flex-row gap-3 items-stretch">
+            <div data-tutorial="dashboard-calendario" className="w-full xl:w-auto min-w-0">
               <CalendarioDashboard
                 mes={mes}
                 lembretes={lembretes}
@@ -1640,7 +1745,7 @@ export default function DashboardPage() {
                 onAbrirTodosLembretes={() => setPainelTodosAberto(true)}
               />
             </div>
-            <div className="flex-1 min-w-[300px] flex flex-col gap-3">
+            <div className="flex-1 min-w-0 flex flex-col gap-3">
               <div data-tutorial="dashboard-resultados"><CardResultados resumo={resumo}/></div>
               <div data-tutorial="dashboard-saldo"><CardSaldo contas={contas} oculto={oculto} mes={mes} historico={historico} modo={modo} setModo={setModo}/></div>
             </div>

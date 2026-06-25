@@ -35,7 +35,7 @@ const COR_REC = { COMPRAR: '#00c896', NEUTRO: '#8b92a8', AGUARDAR: '#ffb74d' } a
 const LABEL_REC = { COMPRAR: 'Comprar', NEUTRO: 'Neutro', AGUARDAR: 'Aguardar' } as const
 
 // ── Ordenação por coluna ───────────────────────────────────────
-type SortKey = 'ticker' | 'nome' | 'setor' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'venc' | 'indexador' | 'taxa'
+type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'venc' | 'indexador' | 'taxa'
 function precoMedio(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_custo / l.quantidade : 0 }
 function precoAtual(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_mercado / l.quantidade : 0 }
 function valorOrdenacao(l: AtivoLinha, k: SortKey): number | string {
@@ -43,6 +43,7 @@ function valorOrdenacao(l: AtivoLinha, k: SortKey): number | string {
     case 'ticker':     return l.ticker
     case 'nome':       return l.nome ?? ''
     case 'setor':      return setorLabel(l.setor) ?? ''
+    case 'categoria':  return l.categoria ?? ''
     case 'quantidade': return l.quantidade
     case 'pm':         return precoMedio(l)
     case 'pa':         return precoAtual(l)
@@ -119,7 +120,7 @@ export default function QuadroTipoAtivos({
     return n
   })
   const clickSort = (key: SortKey) => setSort((s) =>
-    s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'ticker' || key === 'setor' || key === 'venc' || key === 'nome' || key === 'indexador' || key === 'taxa' ? 'asc' : 'desc' })
+    s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'ticker' || key === 'setor' || key === 'categoria' || key === 'venc' || key === 'nome' || key === 'indexador' || key === 'taxa' ? 'asc' : 'desc' })
 
   // Foco vindo do gráfico (rosca): abre, rola até o quadro e o destaca por
   // alguns instantes (anel/glow) para o usuário se localizar na listagem.
@@ -165,7 +166,9 @@ export default function QuadroTipoAtivos({
   // se algum ativo tiver categoria, e "Segmento" se algum tiver setor — assim
   // Renda Fixa/Cripto/ETF não exibem dimensões vazias. "Nenhum" sempre vale.
   const temCategoria = useMemo(() => linhas.some((l) => l.categoria), [linhas])
-  const temSegmento  = useMemo(() => linhas.some((l) => setorLabel(l.setor)), [linhas])
+  // FII não oferece "Segmento": o setor dos FIIs vem incorreto (preenchido com
+  // a categoria), então agrupar por ele apenas duplicaria o agrupamento por categoria.
+  const temSegmento  = useMemo(() => !ehFII && linhas.some((l) => setorLabel(l.setor)), [linhas, ehFII])
   const dimsDisponiveis = useMemo<Dimensao[]>(() => {
     const arr: Dimensao[] = []
     if (temCategoria) arr.push('categoria')
@@ -213,8 +216,9 @@ export default function QuadroTipoAtivos({
 
   // Coluna como descritor: cabeçalho + célula (render). Permite montar conjuntos
   // diferentes por tipo de ativo — RF/Tesouro exibe Indexador/Taxa/Vencimento e
-  // esconde Ticker/Segmento (irrelevantes), enquanto ações/FII mantêm o layout
-  // clássico (ticker, segmento, preços, DY/YoC nos FIIs).
+  // esconde Ticker/Segmento (irrelevantes); ações mantêm o layout clássico
+  // (ticker, segmento, preços) e FIIs idem mas sem Segmento (o dado de setor
+  // dos FIIs vem incorreto — preenchido com a categoria — então é omitido).
   type Coluna = {
     id: string; label: string; align: 'left' | 'right' | 'center'
     sortKey?: SortKey; title?: string; cell: (l: AtivoLinha) => ReactNode
@@ -250,6 +254,7 @@ export default function QuadroTipoAtivos({
       <>{linkAtivo(l, <span className="truncate max-w-[240px]" title={l.nome ?? l.ticker}>{l.nome || l.ticker}</span>)}{celContas(l)}</>
     ) },
     setor:  { id: 'setor', label: 'Segmento', align: 'left', sortKey: 'setor', cell: (l) => <span className="text-white/70">{setorLabel(l.setor) ?? '—'}</span> },
+    categoria: { id: 'categoria', label: 'Categoria', align: 'left', sortKey: 'categoria', cell: (l) => <span className="text-white/70">{l.categoria ?? '—'}</span> },
     indexador: { id: 'indexador', label: 'Indexador', align: 'left', sortKey: 'indexador', cell: (l) => {
       const v = rfIndexadorLabel(l); return v ? <span className="text-white/80">{v}</span> : traco } },
     taxa:   { id: 'taxa', label: 'Taxa', align: 'right', sortKey: 'taxa', cell: (l) => l.meta?.rf_taxa ? <span className="text-white/80">{l.meta.rf_taxa}</span> : traco },
@@ -266,11 +271,20 @@ export default function QuadroTipoAtivos({
     cart:   { id: 'cart', label: '% Cart.', align: 'right', sortKey: 'cart', cell: (l) => <span className="text-white/80">{pct2(l.participacao_pct)}</span> },
   }
 
-  const visiveis: Coluna[] = ehRF
+  const base: Coluna[] = ehRF
     ? [C.titulo, C.indexador, C.taxa, C.venc, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart]
     : ehFII
-      ? [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart]
+      ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart]
       : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart]
+  // Quando o quadro NÃO está agrupado por categoria, ela deixa de aparecer como
+  // cabeçalho de grupo — então a exibimos como coluna (após Título, na RF, ou
+  // após Nome, nos demais). Sem dados de categoria, a coluna é omitida.
+  const visiveis: Coluna[] = (() => {
+    if (dimEf === 'categoria' || !temCategoria) return base
+    const arr = [...base]
+    arr.splice(ehRF ? 1 : 2, 0, C.categoria)
+    return arr
+  })()
   // colunas visíveis + "Comprar?" + (Ações, se houver)
   const nCols = visiveis.length + 1 + (acoes ? 1 : 0)
   const minWidth = ehFII ? 980 : ehRF ? 920 : 860

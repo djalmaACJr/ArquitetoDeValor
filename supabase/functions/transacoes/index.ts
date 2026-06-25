@@ -319,6 +319,28 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   return json({ id_recorrencia: idRecorrencia, total: data.length, parcelas: data }, 201);
 }
 
+// Propaga a troca de ATIVO de um provento ao editar a descrição no extrato
+// (modo investimento). Lê o ticker do INÍCIO da descrição (formato do datalist
+// "TICKER - Nome"), acha o ativo do usuário e, se for outro, repointar o
+// inv_dividendos vinculado. Sem trigger no banco porque só o app sabe casar a
+// descrição com o ticker; valor/data/conta já são sincronizados por trigger.
+async function repointarDividendoAtivo(
+  c: ReturnType<typeof db>, txId: string, descricao: unknown,
+): Promise<void> {
+  if (typeof descricao !== "string" || !descricao.trim()) return;
+  const { data: div } = await c.from("inv_dividendos")
+    .select("id, ativo_id").eq("transacao_extrato_id", txId).maybeSingle();
+  if (!div) return; // não é um provento
+  const tk = descricao.trim().split(/\s+/)[0].replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (!tk) return;
+  const { data: ativo } = await c.from("inv_ativos")
+    .select("id, tipo_ativo").eq("ticker", tk).maybeSingle();
+  if (!ativo || ativo.id === div.ativo_id) return; // ticker desconhecido ou inalterado
+  const { error } = await c.from("inv_dividendos")
+    .update({ ativo_id: ativo.id, tipo_ativo: ativo.tipo_ativo }).eq("id", div.id);
+  if (error) logError("Repointar dividendo (ativo)", error);
+}
+
 async function editar(c: ReturnType<typeof db>, id: string, body: Record<string, unknown>, escopo: string) {
   logRequest("PUT", `/transacoes/${id}`, { ...body, escopo });
 
@@ -460,6 +482,11 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   if (!atual.id_recorrencia || escopo === "SOMENTE_ESTE") {
     const { data, error } = await c.from("transacoes").update(dadosUpdate).eq("id", id).select();
     if (error) { logError("Editar transação", error); return erro(error.message); }
+    // Se a descrição mudou e o lançamento espelha um provento, propaga a troca
+    // de ATIVO para o inv_dividendos (modo investimento do extrato).
+    if (dadosUpdate.descricao !== undefined && dadosUpdate.descricao !== atual.descricao) {
+      await repointarDividendoAtivo(c, id, dadosUpdate.descricao);
+    }
     logSuccess("Transação atualizada", { id });
     return json({ atualizados: data?.length ?? 0, dados: data });
   }

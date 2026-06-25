@@ -83,9 +83,9 @@ export function MonthPicker({ value, onChange, min, max, className = '', onHover
   }
 
   return (
-    <div ref={ref} className={`relative ${className}`}>
+    <div ref={ref} className={`relative min-w-0 ${className}`}>
       {/* ── Controle principal ── */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 min-w-0">
         <button
           onClick={() => navMes(-1)}
           onMouseEnter={onHoverPrev}
@@ -101,12 +101,12 @@ export function MonthPicker({ value, onChange, min, max, className = '', onHover
         {/* Usa mesLabel('longo') da utils — formato "Abril/2026" */}
         <button
           onClick={() => setOpen(o => !o)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md min-w-[148px] justify-center
+          className="flex flex-1 sm:flex-none min-w-0 sm:min-w-[148px] items-center gap-1.5 px-3 py-1.5 rounded-md justify-center
                      bg-blue-400/10 border border-blue-400/20 text-blue-300 text-[17px] font-semibold
                      hover:bg-blue-400/20 transition-colors"
         >
           <Calendar size={13} className="opacity-70" />
-          {mesLabel(value, 'longo')}
+          <span className="truncate">{mesLabel(value, 'longo')}</span>
         </button>
 
         <button

@@ -32,6 +32,7 @@ export interface Conta {
   dia_pagamento?:  number | null
   limite_credito?: number | null
   cartoes_virtuais?: CartaoVirtual[]
+  ultima_movimentacao?: string | null
 }
 
 // ── Categorias ────────────────────────────────────────────
@@ -282,6 +283,12 @@ export interface InvestimentoAtivo {
   fii_categoria:   CategoriaFII | null
   // Subtipo da ação (só tipo_ativo = ACOES)
   acoes_subtipo:   AcoesSubtipo | null
+  // Rendimento anual em % a.a. (só CRIPTOMOEDAS) — gera operações RENDIMENTO
+  cripto_rendimento_aa: number | null
+  // Desde quando a cripto rende (NULL = 1º aporte)
+  cripto_rendimento_inicio: string | null
+  // Base de composição do yield: DIARIA | SEMANAL | MENSAL (NULL = MENSAL)
+  cripto_rendimento_periodicidade: 'DIARIA' | 'SEMANAL' | 'MENSAL' | null
   // Quando false, o ativo é pulado pela busca automática de cotação
   cotacao_automatica: boolean
   // URL do logo/ícone oficial (brapi); null quando a fonte não fornece

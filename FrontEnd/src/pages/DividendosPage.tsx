@@ -90,9 +90,10 @@ export default function DividendosPage() {
   const [confirmando,  setConfirmando]  = useState<InvestimentoDividendo | null>(null)
   const [salvando,     setSalvando]     = useState(false)
   const [buscando,     setBuscando]     = useState(false)
+  const [backfilling,  setBackfilling]  = useState(false)
   const [toast,        setToast]        = useState<string | null>(null)
 
-  const { dividendos, loading, excluir, buscarBrl } = useDividendos()
+  const { dividendos, loading, excluir, buscarBrl, backfillRate } = useDividendos()
 
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 4000) }
 
@@ -105,6 +106,15 @@ export default function DividendosPage() {
     const mudou = (d?.criados ?? 0) + (d?.atualizados ?? 0)
     if (mudou === 0) showToast('Busca concluída — nenhum provento novo na B3.')
     else showToast(`Busca concluída — ${d?.criados ?? 0} novo(s), ${d?.atualizados ?? 0} atualizado(s).`)
+  }
+
+  async function backfillYoc() {
+    setBackfilling(true)
+    const res = await backfillRate()
+    setBackfilling(false)
+    if (!res.ok) { showToast(res.erro ?? 'Erro ao preencher dividendo por cota'); return }
+    const d = res.dados
+    showToast(`Backfill concluído — ${d?.preenchidos ?? 0} provento(s) atualizado(s) com o dividendo por cota da B3.`)
   }
 
   async function confirmarExclusao() {
@@ -137,6 +147,11 @@ export default function DividendosPage() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
             title="Busca proventos na B3 e provisiona os futuros (ações e FIIs em BRL)">
             <RefreshCw size={15} className={buscando ? 'animate-spin' : ''} /> {buscando ? 'Buscando…' : 'Buscar proventos'}
+          </button>
+          <button onClick={backfillYoc} disabled={backfilling}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
+            title="Re-busca da B3 o dividendo por cota dos proventos antigos — corrige DY e Yield on Cost no padrão investidor10">
+            <Coins size={15} className={backfilling ? 'animate-spin' : ''} /> {backfilling ? 'Atualizando…' : 'Atualizar DY/YoC'}
           </button>
           <button onClick={() => setDrawerConfig(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">

@@ -160,9 +160,9 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="flex flex-col md:flex-row h-screen" style={{ background: 'var(--bg-page)' }}>
+    <div className="app-shell flex flex-col md:flex-row h-[100svh] min-h-[100svh]" style={{ background: 'var(--bg-page)' }}>
       {/* Topbar — só no mobile */}
-      <header className="md:hidden flex items-center gap-3 px-3 h-12 bg-av-dark border-b border-blue-400/15 flex-shrink-0 z-30">
+      <header className="md:hidden flex items-center gap-3 px-3 h-14 bg-av-dark border-b border-blue-400/15 flex-shrink-0 z-30">
         <button
           onClick={() => setMobileNavOpen(true)}
           aria-label="Abrir menu"
@@ -175,7 +175,7 @@ export default function AppLayout() {
 
       <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
 
-      <main ref={mainRef} className="flex-1 overflow-auto min-w-0">
+      <main ref={mainRef} className="app-main flex-1 overflow-auto min-w-0">
         <Outlet />
       </main>
 

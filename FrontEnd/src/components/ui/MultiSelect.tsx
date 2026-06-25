@@ -149,7 +149,7 @@ export function MultiSelect({
 
       {/* Dropdown — AUMENTADO EM TAMANHO */}
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-[50] min-w-full w-max max-w-md
+        <div className="absolute top-full left-0 mt-1 z-[50] min-w-full w-max max-w-[calc(100vw-2rem)] sm:max-w-md
           bg-[#1a1f2e] border border-white/10 rounded-xl shadow-xl overflow-hidden"
           style={{ maxHeight: '50vh' }}> {/* ← AUMENTADO DE 280px para 50vh */}
 
