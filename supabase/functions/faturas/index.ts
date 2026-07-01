@@ -1206,7 +1206,11 @@ async function listarTransacoesCandidatas(
     };
 
     const fromDate = modo === "CATEGORIA" ? inicioMes(0)  : inicioMes(-2);
-    const toDate   = fimMes(0);  // sempre fim do mês de vencimento
+    // Inclui o mês SEGUINTE ao vencimento: parcela de cartão é cobrada na
+    // fatura do mês de fechamento seguinte, então a projeção da parcela costuma
+    // estar datada em venc+1 (ex.: fatura de jul com parcela datada 10/07 quando
+    // o vencimento detectado caiu em jun). Sem isto, a parcela some dos candidatos.
+    const toDate   = fimMes(1);
     logDebug("Janela vincular", { modo, fromDate, toDate });
     query = query.gte("data", fromDate);
     query = query.lte("data", toDate);

@@ -236,6 +236,14 @@ function EvolucaoPatrimonio({ contaId, dividendos }: {
     return m
   }, [dividendos, contaId, tipo])
 
+  // Total exibido na legenda = soma das 3 séries do mês mais recente
+  // (aplicado + ganho + proventos), ou seja, a altura da última barra.
+  const legendaTotal = useMemo(() => {
+    if (meses.length === 0) return 0
+    const [mes, v] = meses[meses.length - 1]
+    return v.mercado + (provPorMes.get(mes) ?? 0)
+  }, [meses, provPorMes])
+
   return (
     <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 lg:col-span-2">
       <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
@@ -292,7 +300,39 @@ function EvolucaoPatrimonio({ contaId, dividendos }: {
           options={{
             ...OPCOES_GRAFICO,
             layout: { padding: { bottom: 52 } },
-            plugins: { legend: { display: true, position: 'top', labels: { color: MUTED, boxWidth: 12, font: { size: 11 } } } },
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: {
+                display: true, position: 'top',
+                labels: {
+                  color: MUTED, boxWidth: 12, font: { size: 11 },
+                  // Acrescenta um item "Total" (soma das 3 séries do mês atual).
+                  generateLabels: (chart) => {
+                    const base = ChartJS.defaults.plugins.legend.labels.generateLabels(chart)
+                    base.push({
+                      text: `Total: ${formatBRL(legendaTotal)}`,
+                      fillStyle: 'transparent', strokeStyle: 'transparent', lineWidth: 0,
+                      fontColor: '#fff', hidden: false,
+                    } as never)
+                    return base
+                  },
+                },
+                // Mantém o toggle padrão só nos itens de série (o "Total" não tem índice).
+                onClick: (_e, item, legend) => {
+                  if (typeof item.datasetIndex !== 'number') return
+                  const ci = legend.chart
+                  if (ci.isDatasetVisible(item.datasetIndex)) ci.hide(item.datasetIndex)
+                  else ci.show(item.datasetIndex)
+                },
+              },
+              tooltip: {
+                mode: 'index', intersect: false,
+                callbacks: {
+                  label: (ctx) => `${ctx.dataset.label}: ${formatBRL(Number(ctx.parsed.y))}`,
+                  footer: (items) => `Total: ${formatBRL(items.reduce((s, it) => s + Number(it.parsed.y), 0))}`,
+                },
+              },
+            },
             scales: {
               x: { stacked: true, ticks: { color: MUTED }, grid: { color: 'rgba(255,255,255,0.05)' } },
               y: { stacked: true, ticks: { color: MUTED }, grid: { color: 'rgba(255,255,255,0.05)' } },

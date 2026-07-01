@@ -101,6 +101,7 @@ Deno.serve(async (req: Request) => {
       case "dividendos":      return await rotaDividendos(c, req, m, userId);
       case "dividendos-buscar-br": return await rotaDividendosBuscarBr(req, m, userId);
       case "dividendos-backfill-rate": return await rotaDividendosBackfillRate(c, m, userId);
+      case "associar-extrato-massa": return await rotaAssociarExtratoMassa(c, m, userId);
       case "rendimento-cripto": return await rotaRendimentoCripto(c, m, userId);
       case "tipos-dividendo": return await rotaTiposDividendo(c, req, m, userId);
       case "historico-mensal": return await rotaHistorico(c, req, m, userId);
@@ -1683,6 +1684,80 @@ async function associarDividendoExistente(c: Db, body: Record<string, unknown>, 
 }
 
 // ============================================================
+// /investimentos/associar-extrato-massa (POST, JWT)
+//
+// Vincula em LOTE proventos que já estão no extrato (RECEITA em categoria de
+// investimento) mas sem inv_dividendos — caso típico de projeções de FII
+// lançadas/recorrentes na mão. Para cada transação não vinculada, lê o ticker
+// do INÍCIO da descrição ("TICKER - Nome"), acha o ativo do usuário e cria o
+// inv_dividendos ligado (sem gerar nova transação). Não toca em receitas que
+// não estejam em categoria de provento (Salário, transferências etc.).
+// ============================================================
+async function rotaAssociarExtratoMassa(c: Db, m: string, userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  logRequest("POST", "/investimentos/associar-extrato-massa", { userId });
+
+  // ticker → ativo
+  const { data: ativos } = await c.from("inv_ativos").select("id, ticker, tipo_ativo");
+  const porTicker = new Map<string, { id: string; tipo_ativo: string }>();
+  for (const a of (ativos ?? []) as { id: string; ticker: string; tipo_ativo: string }[]) {
+    porTicker.set(String(a.ticker).toUpperCase(), { id: String(a.id), tipo_ativo: a.tipo_ativo });
+  }
+
+  // categoria_id → tipo_dividendo_id (só categorias mapeadas = de investimento)
+  const { data: tipos } = await c.from("inv_tipos_dividendo").select("id, categoria_id");
+  const tipoPorCategoria = new Map<string, string>();
+  for (const t of (tipos ?? []) as { id: string; categoria_id: string | null }[]) {
+    if (t.categoria_id) tipoPorCategoria.set(String(t.categoria_id), String(t.id));
+  }
+  const catsInv = [...tipoPorCategoria.keys()];
+  if (catsInv.length === 0) return json({ dados: { associados: 0, sem_ativo: 0, ja_vinculados: 0 } });
+
+  // RECEITAS nessas categorias (qualquer status)
+  const { data: txs } = await c.from("transacoes")
+    .select("id, descricao, valor, data, conta_id, categoria_id")
+    .eq("tipo", "RECEITA").in("categoria_id", catsInv).gt("valor", 0);
+  const lista = (txs ?? []) as {
+    id: string; descricao: string | null; valor: number; data: string; conta_id: string; categoria_id: string;
+  }[];
+  if (lista.length === 0) return json({ dados: { associados: 0, sem_ativo: 0, ja_vinculados: 0 } });
+
+  // transações que já têm dividendo vinculado
+  const jaLinkadas = new Set<string>();
+  for (let i = 0; i < lista.length; i += 200) {
+    const { data: vinc } = await c.from("inv_dividendos")
+      .select("transacao_extrato_id").in("transacao_extrato_id", lista.slice(i, i + 200).map((t) => t.id));
+    for (const v of vinc ?? []) {
+      const tid = (v as { transacao_extrato_id: string | null }).transacao_extrato_id;
+      if (tid) jaLinkadas.add(String(tid));
+    }
+  }
+
+  let semAtivo = 0, jaVinc = 0;
+  const novos: Record<string, unknown>[] = [];
+  for (const t of lista) {
+    if (jaLinkadas.has(t.id)) { jaVinc++; continue; }
+    const tk = String(t.descricao ?? "").trim().split(/\s+/)[0].replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    const ativo = tk ? porTicker.get(tk) : undefined;
+    if (!ativo) { semAtivo++; continue; }
+    novos.push({
+      user_id: userId, ativo_id: ativo.id, conta_id: t.conta_id, valor: t.valor,
+      data_pagamento: t.data, tipo_ativo: ativo.tipo_ativo,
+      tipo_dividendo_id: tipoPorCategoria.get(String(t.categoria_id)) ?? null,
+      descricao: null, transacao_extrato_id: t.id,
+    });
+  }
+
+  let associados = 0;
+  if (novos.length > 0) {
+    try { associados = (await inserirEmLote(c, "inv_dividendos", novos, "id")).length; }
+    catch (e) { logError("Associar extrato em massa", e); return erro((e as Error).message); }
+  }
+  logSuccess("Associar extrato em massa", { associados, semAtivo, jaVinc });
+  return json({ dados: { associados, sem_ativo: semAtivo, ja_vinculados: jaVinc } });
+}
+
+// ============================================================
 // /investimentos/tipos-dividendo — tipos editáveis + mapeamento
 // para a categoria do extrato (1 categoria por tipo, reutilizável).
 // A criação da categoria em si usa a Edge Function `categorias`;
@@ -2780,7 +2855,12 @@ async function provisionarProventosBrl(
       .select("id, nome, categoria_id").eq("user_id", userId);
     const mapa = new Map<string, { id: string; categoria_id: string | null }>();
     for (const t of (data ?? []) as { id: string; nome: string; categoria_id: string | null }[]) {
-      mapa.set(t.nome, { id: String(t.id), categoria_id: t.categoria_id });
+      // Defesa contra tipos DUPLICADOS por nome: o mapeado (com categoria)
+      // sempre vence o não-mapeado, qualquer que seja a ordem da query.
+      const cur = mapa.get(t.nome);
+      if (!cur || (!cur.categoria_id && t.categoria_id)) {
+        mapa.set(t.nome, { id: String(t.id), categoria_id: t.categoria_id });
+      }
     }
     tiposPorUser.set(userId, mapa);
     return mapa;
@@ -4576,6 +4656,7 @@ async function ranking(c: Db, params: URLSearchParams) {
   const corte12m = new Date();
   corte12m.setMonth(corte12m.getMonth() - 12);
   const corteISO = corte12m.toISOString().split("T")[0];
+  const hojeRanking = hojeISO();
 
   const [posRes, histRes, divRes, opsRes] = await Promise.all([
     (() => {
@@ -4586,7 +4667,10 @@ async function ranking(c: Db, params: URLSearchParams) {
       return q;
     })(),
     c.from("vw_inv_ultimo_mercado").select("ativo_id, conta_id, valor_mercado"),
-    c.from("inv_dividendos").select("ativo_id, valor, data_pagamento, valor_por_cota, tipo_dividendo_id").gte("data_pagamento", corteISO),
+    // Janela trailing 12m ATÉ hoje: exclui projeções futuras (PROJECAO/PENDENTE
+    // a vencer) do DY/YoC — só conta provento já realizado.
+    c.from("inv_dividendos").select("ativo_id, valor, data_pagamento, valor_por_cota, tipo_dividendo_id")
+      .gte("data_pagamento", corteISO).lte("data_pagamento", hojeRanking),
     // Operações de TODAS as posições do usuário (inclui ENCERRADAS): a
     // quantidade histórica precisa do ciclo completo para saber quantas cotas
     // havia na data de cada provento. Ordenado por (data, created_at) p/

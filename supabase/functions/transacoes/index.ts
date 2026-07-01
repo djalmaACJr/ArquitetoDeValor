@@ -324,21 +324,54 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
 // "TICKER - Nome"), acha o ativo do usuário e, se for outro, repointar o
 // inv_dividendos vinculado. Sem trigger no banco porque só o app sabe casar a
 // descrição com o ticker; valor/data/conta já são sincronizados por trigger.
-async function repointarDividendoAtivo(
-  c: ReturnType<typeof db>, txId: string, descricao: unknown,
-): Promise<void> {
-  if (typeof descricao !== "string" || !descricao.trim()) return;
-  const { data: div } = await c.from("inv_dividendos")
-    .select("id, ativo_id").eq("transacao_extrato_id", txId).maybeSingle();
-  if (!div) return; // não é um provento
-  const tk = descricao.trim().split(/\s+/)[0].replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-  if (!tk) return;
-  const { data: ativo } = await c.from("inv_ativos")
-    .select("id, tipo_ativo").eq("ticker", tk).maybeSingle();
-  if (!ativo || ativo.id === div.ativo_id) return; // ticker desconhecido ou inalterado
-  const { error } = await c.from("inv_dividendos")
-    .update({ ativo_id: ativo.id, tipo_ativo: ativo.tipo_ativo }).eq("id", div.id);
-  if (error) logError("Repointar dividendo (ativo)", error);
+// Sincroniza o espelho em investimentos (inv_dividendos) das transações dadas,
+// cobrindo edição única OU em série (recorrência):
+//   • RECEITA em categoria de provento + ticker resolvido → cria o vínculo se
+//     faltar (replica projeção legada) ou atualiza ativo/tipo se já existir;
+//   • saiu da categoria de investimento → remove o espelho;
+//   • categoria ainda de investimento mas ticker não resolveu → mantém como está
+//     (não apaga por causa de um typo).
+// valor/data/conta continuam sincronizados pelo trigger trg_sync_transacao_dividendo.
+async function sincronizarProventoTransacoes(c: ReturnType<typeof db>, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { data: txs } = await c.from("transacoes")
+    .select("id, user_id, tipo, descricao, valor, data, conta_id, categoria_id").in("id", ids);
+  if (!txs || txs.length === 0) return;
+
+  const { data: divs } = await c.from("inv_dividendos")
+    .select("id, transacao_extrato_id").in("transacao_extrato_id", ids);
+  const divPorTx = new Map<string, string>();
+  for (const d of divs ?? []) {
+    const tid = (d as { transacao_extrato_id: string | null }).transacao_extrato_id;
+    if (tid) divPorTx.set(String(tid), String((d as { id: string }).id));
+  }
+
+  for (const tx of txs as {
+    id: string; user_id: string; tipo: string; descricao: string | null;
+    valor: number; data: string; conta_id: string; categoria_id: string | null;
+  }[]) {
+    const vinc  = await vinculoProvento(c, tx.categoria_id);
+    const ativo = (vinc.vinculado && tx.tipo === "RECEITA")
+      ? await ativoPorTicker(c, tickerDaDescricao(String(tx.descricao ?? ""))) : null;
+    const divId = divPorTx.get(tx.id);
+
+    if (ativo) {
+      if (divId) {
+        await c.from("inv_dividendos").update({
+          ativo_id: ativo.id, tipo_ativo: ativo.tipo_ativo, tipo_dividendo_id: vinc.tipoDividendoId,
+        }).eq("id", divId);
+      } else {
+        const { error } = await c.from("inv_dividendos").insert({
+          user_id: tx.user_id, ativo_id: ativo.id, conta_id: tx.conta_id, valor: tx.valor,
+          data_pagamento: tx.data, tipo_ativo: ativo.tipo_ativo, tipo_dividendo_id: vinc.tipoDividendoId,
+          descricao: tx.descricao, transacao_extrato_id: tx.id,
+        });
+        if (error) logError("Sincronizar provento (criar)", error);
+      }
+    } else if (divId && !vinc.vinculado) {
+      await c.from("inv_dividendos").delete().eq("id", divId);
+    }
+  }
 }
 
 async function editar(c: ReturnType<typeof db>, id: string, body: Record<string, unknown>, escopo: string) {
@@ -396,6 +429,11 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
       
       if (parcelasParaExcluir.data && parcelasParaExcluir.data.length > 0) {
         const idsParaExcluir = parcelasParaExcluir.data.map((p: { id: string }) => p.id);
+        // Replica em investimentos: remove os inv_dividendos espelho ANTES de
+        // apagar as parcelas (a FK é ON DELETE SET NULL — sem isto, órfãos).
+        const { error: eDivDel } = await c.from("inv_dividendos")
+          .delete().in("transacao_extrato_id", idsParaExcluir);
+        if (eDivDel) { logError("Excluir proventos das parcelas excedentes", eDivDel); return erro(eDivDel.message); }
         const { error: eExcluir } = await c.from("transacoes").delete().in("id", idsParaExcluir);
         if (eExcluir) {
           logError("Erro ao excluir parcelas excedentes", eExcluir);
@@ -482,11 +520,9 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   if (!atual.id_recorrencia || escopo === "SOMENTE_ESTE") {
     const { data, error } = await c.from("transacoes").update(dadosUpdate).eq("id", id).select();
     if (error) { logError("Editar transação", error); return erro(error.message); }
-    // Se a descrição mudou e o lançamento espelha um provento, propaga a troca
-    // de ATIVO para o inv_dividendos (modo investimento do extrato).
-    if (dadosUpdate.descricao !== undefined && dadosUpdate.descricao !== atual.descricao) {
-      await repointarDividendoAtivo(c, id, dadosUpdate.descricao);
-    }
+    // Replica/espelha o provento em investimentos (cria vínculo se faltar,
+    // atualiza ativo/tipo ou remove se saiu de categoria de investimento).
+    await sincronizarProventoTransacoes(c, [id]);
     logSuccess("Transação atualizada", { id });
     return json({ atualizados: data?.length ?? 0, dados: data });
   }
@@ -590,6 +626,9 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
     if (eUp) { logError(`Editar parcela ${parcela.id}`, eUp); }
     else atualizados++;
   }
+
+  // Replica/espelha o provento em investimentos para TODAS as parcelas do escopo.
+  await sincronizarProventoTransacoes(c, parcelas.map((p) => String(p.id)));
 
   logSuccess("Série atualizada", { escopo, atualizados });
   return json({ atualizados, dados: [] });

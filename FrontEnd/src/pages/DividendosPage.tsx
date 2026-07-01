@@ -91,9 +91,10 @@ export default function DividendosPage() {
   const [salvando,     setSalvando]     = useState(false)
   const [buscando,     setBuscando]     = useState(false)
   const [backfilling,  setBackfilling]  = useState(false)
+  const [associando,   setAssociando]   = useState(false)
   const [toast,        setToast]        = useState<string | null>(null)
 
-  const { dividendos, loading, excluir, buscarBrl, backfillRate } = useDividendos()
+  const { dividendos, loading, excluir, buscarBrl, backfillRate, associarMassa } = useDividendos()
 
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 4000) }
 
@@ -115,6 +116,17 @@ export default function DividendosPage() {
     if (!res.ok) { showToast(res.erro ?? 'Erro ao preencher dividendo por cota'); return }
     const d = res.dados
     showToast(`Backfill concluído — ${d?.preenchidos ?? 0} provento(s) atualizado(s) com o dividendo por cota da B3.`)
+  }
+
+  async function associarDoExtrato() {
+    setAssociando(true)
+    const res = await associarMassa()
+    setAssociando(false)
+    if (!res.ok) { showToast(res.erro ?? 'Erro ao associar do extrato'); return }
+    const d = res.dados
+    showToast((d?.associados ?? 0) === 0
+      ? 'Nenhum provento do extrato para associar.'
+      : `${d?.associados} provento(s) do extrato associado(s) aos investimentos.`)
   }
 
   async function confirmarExclusao() {
@@ -152,6 +164,11 @@ export default function DividendosPage() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
             title="Re-busca da B3 o dividendo por cota dos proventos antigos — corrige DY e Yield on Cost no padrão investidor10">
             <Coins size={15} className={backfilling ? 'animate-spin' : ''} /> {backfilling ? 'Atualizando…' : 'Atualizar DY/YoC'}
+          </button>
+          <button onClick={associarDoExtrato} disabled={associando}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
+            title="Vincula em lote proventos que já estão no extrato (ex.: projeções de FII lançadas na mão) aos investimentos">
+            <Link2 size={15} className={associando ? 'animate-spin' : ''} /> {associando ? 'Associando…' : 'Associar extrato (lote)'}
           </button>
           <button onClick={() => setDrawerConfig(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">

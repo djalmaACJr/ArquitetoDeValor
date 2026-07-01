@@ -59,7 +59,9 @@ BEGIN
         'Content-Type',  'application/json',
         'x-cron-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'cron_secret')
       ),
-      body    := '{}'::jsonb
+      body    := '{}'::jsonb,
+      -- Rotina longa (pausas por ativo): timeout amplo p/ não truncar.
+      timeout_milliseconds := 120000
     );
     $cron$
   );

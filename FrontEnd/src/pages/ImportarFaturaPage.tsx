@@ -75,6 +75,24 @@ function stripParcela(s: string): string {
     .trim()
 }
 
+const DIAS_SEMANA_ABREV = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
+// Data (dd/mm/aaaa) + dia da semana abreviado. Sábado/domingo recebem destaque
+// (âmbar + negrito) para facilitar a conferência da fatura.
+function DataDiaSemana({ iso }: { iso: string | null | undefined }) {
+  if (!iso) return <>—</>
+  const d = new Date(iso + 'T00:00')
+  const dow = d.getDay()
+  const fds = dow === 0 || dow === 6
+  return (
+    <span className="whitespace-nowrap" style={fds ? { color: '#e8b84b' } : undefined}>
+      {d.toLocaleDateString('pt-BR')}{' '}
+      <span style={{ fontWeight: fds ? 700 : 400, color: fds ? '#e8b84b' : '#5b6478' }}>
+        {DIAS_SEMANA_ABREV[dow]}
+      </span>
+    </span>
+  )
+}
+
 /** Inicializa grupos para o modo CATEGORIA, reconstruindo do estado
  *  persistido em fatura_import_item:
  *  - Items com `grupo_chave` setado → grupo customizado (separado).
@@ -1408,7 +1426,7 @@ function Sandbox({ id }: { id: string }) {
                       title="Selecionar todos"
                     />
                   </th>
-                  <th className="text-left px-3 py-2 w-24">Data</th>
+                  <th className="text-left px-3 py-2 w-32">Data</th>
                   <th className="text-left px-3 py-2">
                     <button
                       onClick={() => setOrdemFase1(o =>
@@ -1445,7 +1463,7 @@ function Sandbox({ id }: { id: string }) {
                         className="w-3.5 h-3.5 accent-av-green cursor-pointer disabled:opacity-40" />
                     </td>
                     <td className="px-3 py-2 text-[13px]" style={{ color: '#8b92a8' }}>
-                      {new Date(it.data_compra + 'T00:00').toLocaleDateString('pt-BR')}
+                      <DataDiaSemana iso={it.data_compra} />
                     </td>
                     <td className="px-3 py-2">
                       {/* Exibe descrição SEM o sufixo de parcela — info de parcela fica abaixo */}
@@ -1599,8 +1617,8 @@ function Sandbox({ id }: { id: string }) {
                     <div key={it.id}
                       className={`flex items-center gap-2 px-3 py-2 text-[13px] flex-wrap${idx > 0 ? ' border-t border-white/5' : ' border-t border-white/5'}`}
                       style={{ color: '#e8eaf0' }}>
-                      <span className="w-20 flex-none text-[12px]" style={{ color: '#8b92a8' }}>
-                        {new Date(it.data_compra + 'T00:00').toLocaleDateString('pt-BR')}
+                      <span className="w-28 flex-none text-[12px]" style={{ color: '#8b92a8' }}>
+                        <DataDiaSemana iso={it.data_compra} />
                       </span>
                       <span className="flex-1 min-w-0">
                         <span className="truncate block">{stripParcela(it.descricao)}</span>
@@ -1661,7 +1679,7 @@ function Sandbox({ id }: { id: string }) {
               <table className="w-full text-[14px]" style={{ color: '#e8eaf0' }}>
                 <thead style={{ background: '#252d42' }}>
                   <tr>
-                    <th className="text-left px-3 py-2 w-24">Data</th>
+                    <th className="text-left px-3 py-2 w-32">Data</th>
                     <th className="text-left px-3 py-2">Lançamento</th>
                     <th className="text-right px-3 py-2 w-28">Valor</th>
                     <th className="text-left px-3 py-2 w-56">Ação</th>
@@ -1677,7 +1695,7 @@ function Sandbox({ id }: { id: string }) {
                       <Fragment key={l.chave}>
                         <tr className="border-t border-white/5">
                           <td className="px-3 py-2 text-[13px]" style={{ color: '#8b92a8' }}>
-                            {l.data ? new Date(l.data + 'T00:00').toLocaleDateString('pt-BR') : '—'}
+                            <DataDiaSemana iso={l.data} />
                           </td>
                           <td className="px-3 py-2">
                             {editandoDesc === l.chave ? (

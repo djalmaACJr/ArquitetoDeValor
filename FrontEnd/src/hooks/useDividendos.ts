@@ -127,6 +127,14 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
+  // Vincula em lote proventos já no extrato (RECEITA em categoria de
+  // investimento) que estão sem inv_dividendos — ex.: projeções de FII na mão.
+  const associarMassa = async (): Promise<OpResult<ResultadoAssociarMassa>> => {
+    const res = await apiMutate<ResultadoAssociarMassa>('/investimentos/associar-extrato-massa', 'POST')
+    if (res.ok) await invalidar()
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   return {
     dividendos,
     loading,
@@ -138,6 +146,7 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     excluir,
     buscarBrl,
     backfillRate,
+    associarMassa,
     invalidar,
   }
 }
@@ -147,6 +156,12 @@ export interface ResultadoBackfillRate {
   preenchidos: number
   sem_fonte:   number
   ambiguos:    number
+}
+
+export interface ResultadoAssociarMassa {
+  associados:     number
+  sem_ativo:      number
+  ja_vinculados:  number
 }
 
 export interface ResultadoBuscaProventos {
