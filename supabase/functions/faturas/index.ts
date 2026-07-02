@@ -553,6 +553,7 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
     data_compra: string; tipo: "RECEITA" | "DESPESA" | null;
     categoria_escolhida_id: string | null;
     transacao_existente_id: string | null;
+    transacao_criada_id: string | null;
     parcela_atual: number | null;
     parcela_total: number | null;
     observacao: string | null;
@@ -735,6 +736,21 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
       }
     };
 
+    // Guarda anti-overwrite: uma transação existente só pode ser ALVO de UM
+    // grupo. Sem isso, dois grupos de categorias diferentes casados (pelo
+    // /sugerir) na MESMA projeção recorrente faziam UPDATE em cima do UPDATE —
+    // o 2º grupo zerava o valor do 1º (ex.: "Desconto Antecipação" sobrescreveu
+    // R$ 1.663,06 de Supermercado por R$ 5,63). Quando o alvo já foi consumido,
+    // este grupo passa a CRIAR um lançamento novo (preserva os dois valores).
+    const txUsadas = new Set<string>();
+    const alvoLivre = (tx: string | null, cat: string): string | null => {
+      if (tx && txUsadas.has(tx)) {
+        logWarn("confirmar", `Transação ${tx} já é alvo de outro grupo — criando novo lançamento p/ categoria ${cat}`);
+        return null;
+      }
+      return tx;
+    };
+
     if (body.grupos && Array.isArray(body.grupos) && (body.grupos as unknown[]).length > 0) {
       // ── Novo: front enviou grupos explícitos (parcelas separadas, etc.) ──
       type GrupoP = {
@@ -742,7 +758,15 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
         decisao: "CRIAR" | "ATUALIZAR"; descricao?: string;
         transacao_existente_id?: string | null;
       };
-      for (const g of body.grupos as GrupoP[]) {
+      // Processa os grupos com MAIS itens primeiro: quando dois grupos disputam
+      // a mesma transação existente (ver alvoLivre), o maior — tipicamente a
+      // categoria principal, ex.: Supermercado — fica com ela e o menor
+      // (ex.: Desconto) cria lançamento novo. Determinístico: não depende da
+      // ordem em que o front enviou os grupos.
+      const gruposOrdenados = [...(body.grupos as GrupoP[])].sort(
+        (a, b) => (b.item_ids?.length ?? 0) - (a.item_ids?.length ?? 0),
+      );
+      for (const g of gruposOrdenados) {
         const gItems = naoIgnorados.filter((i) => (g.item_ids as string[]).includes(i.id));
         if (gItems.length === 0) continue;
         const defDesc = `${conta?.nome ?? "Fatura"} - ${catNome.get(g.categoria_id) ?? ""}`.trim();
@@ -752,11 +776,15 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
         //   2. qualquer item com transacao_existente_id (vínculo manual/sugerido)
         //   3. qualquer item com transacao_criada_id (RE-CONFIRMAÇÃO após Reabrir —
         //      sem isso, o reconfirmar criaria tx duplicada ao invés de atualizar)
-        const txAlvo = (g.transacao_existente_id as string | null) ??
-          gItems.find((i) => i.transacao_existente_id)?.transacao_existente_id ??
-          gItems.find((i) => i.transacao_criada_id)?.transacao_criada_id ?? null;
+        const txAlvo = alvoLivre(
+          (g.transacao_existente_id as string | null) ??
+            gItems.find((i) => i.transacao_existente_id)?.transacao_existente_id ??
+            gItems.find((i) => i.transacao_criada_id)?.transacao_criada_id ?? null,
+          g.categoria_id,
+        );
         const decisaoEfetiva = txAlvo ? "ATUALIZAR" : g.decisao;
         await processarGrupo(g.categoria_id, gItems, decisaoEfetiva, descricao, txAlvo);
+        if (txAlvo) txUsadas.add(txAlvo);
       }
     } else {
       // ── Legado: 1 lançamento por categoria_id ──────────────────────────
@@ -766,15 +794,21 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
         if (!catGrupos.has(k)) catGrupos.set(k, []);
         catGrupos.get(k)!.push(it);
       }
-      for (const [catId, items] of catGrupos) {
+      // Maiores primeiro (mesmo motivo do caminho de grupos acima).
+      const catOrdenados = [...catGrupos.entries()].sort((a, b) => b[1].length - a[1].length);
+      for (const [catId, items] of catOrdenados) {
         const defDesc = `${conta?.nome ?? "Fatura"} - ${catNome.get(catId) ?? ""}`.trim();
         const descricao = (descricoesOv[catId] ?? defDesc).trim();
         // Mesmo princípio: vínculo > tx criada anteriormente.
-        const txAlvo = items.find((i) => i.transacao_existente_id)?.transacao_existente_id
-          ?? items.find((i) => i.transacao_criada_id)?.transacao_criada_id ?? null;
+        const txAlvo = alvoLivre(
+          items.find((i) => i.transacao_existente_id)?.transacao_existente_id
+            ?? items.find((i) => i.transacao_criada_id)?.transacao_criada_id ?? null,
+          catId,
+        );
         const decisaoFinal: "CRIAR" | "ATUALIZAR" =
-          decisoesOv[catId] ?? (txAlvo ? "ATUALIZAR" : "CRIAR");
+          txAlvo ? (decisoesOv[catId] ?? "ATUALIZAR") : "CRIAR";
         await processarGrupo(catId, items, decisaoFinal, descricao, txAlvo);
+        if (txAlvo) txUsadas.add(txAlvo);
       }
     }
   }
@@ -1206,11 +1240,16 @@ async function listarTransacoesCandidatas(
     };
 
     const fromDate = modo === "CATEGORIA" ? inicioMes(0)  : inicioMes(-2);
-    // Inclui o mês SEGUINTE ao vencimento: parcela de cartão é cobrada na
-    // fatura do mês de fechamento seguinte, então a projeção da parcela costuma
-    // estar datada em venc+1 (ex.: fatura de jul com parcela datada 10/07 quando
-    // o vencimento detectado caiu em jun). Sem isto, a parcela some dos candidatos.
-    const toDate   = fimMes(1);
+    // toDate depende do modo:
+    //   • CATEGORIA: só o mês do vencimento (fimMes(0)). O lançamento agrupado
+    //     nasce datado no dia de pagamento, DENTRO do mês do venc — não pode
+    //     vazar venc+1, senão o modal de vincular mostra lançamentos de outro
+    //     mês (ex.: fatura de jul exibindo projeções de 02/08).
+    //   • REGISTRO: inclui o mês SEGUINTE (fimMes(1)), porque a projeção de uma
+    //     parcela de cartão costuma ficar datada em venc+1 (ex.: fatura de jul
+    //     com parcela datada 10/07 quando o vencimento caiu em jun). Sem isso,
+    //     a parcela some dos candidatos.
+    const toDate   = modo === "CATEGORIA" ? fimMes(0) : fimMes(1);
     logDebug("Janela vincular", { modo, fromDate, toDate });
     query = query.gte("data", fromDate);
     query = query.lte("data", toDate);

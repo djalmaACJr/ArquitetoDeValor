@@ -138,22 +138,30 @@ function initGrupos(
     })
   }
 
-  // 2) Items sem grupo_chave → agrupa por (transacao_existente_id || categoria_id).
-  //    Múltiplos itens ligados à MESMA transação ficam em UM grupo só
-  //    (ex.: 7 itens de Supermercado vinculados manualmente ao mesmo
-  //    lançamento recorrente). Itens cada um ligado a um tx DIFERENTE
-  //    viram grupos individuais (ex.: parcelas 5/12 e 6/12 do Optical
-  //    Plus, vinculadas a projeções de meses diferentes).
-  type Bucket = { chave: string; items: FaturaImportItem[]; txId: string | null; catId: string }
+  // 2) Items sem grupo_chave → 1 grupo por CATEGORIA escolhida pelo usuário.
+  //    NÃO quebramos por transacao_existente_id: no modo CATEGORIA o objetivo
+  //    é UM lançamento por categoria. Quebrar por vínculo fazia a MESMA
+  //    categoria virar 2 grupos (os itens que o /sugerir casou com um
+  //    lançamento existente iam pra um grupo "Atualiza existente" e o resto
+  //    pra um "Novo lançamento") — confuso e contra o que o usuário pediu.
+  //    Um item vinculado a uma tx apenas define o ALVO de atualização do grupo.
+  //    Separação extra só acontece:
+  //      • manualmente, via grupo_chave (passo 1 acima);
+  //      • por cartão, quando `separarPorCartao` está ligado — aí a chave
+  //        inclui o cartão do item (observacao = "Cartão final 1234").
+  type Bucket = { chave: string; items: FaturaImportItem[]; txId: string | null; catId: string; card: string }
   const buckets = new Map<string, Bucket>()
   for (const it of semChave) {
-    const tx  = it.transacao_existente_id
-    const cat = it.categoria_escolhida_id!
-    const k   = tx ? `tx:${tx}` : `cat:${cat}`
-    if (!buckets.has(k)) buckets.set(k, { chave: k, items: [], txId: tx, catId: cat })
-    buckets.get(k)!.items.push(it)
+    const cat  = it.categoria_escolhida_id!
+    const card = separarPorCartao ? (it.observacao ?? '').trim() : ''
+    const k    = card ? `cat:${cat}|${card}` : `cat:${cat}`
+    if (!buckets.has(k)) buckets.set(k, { chave: k, items: [], txId: null, catId: cat, card })
+    const b = buckets.get(k)!
+    b.items.push(it)
+    // Primeiro item vinculado a uma tx define o alvo de ATUALIZAR do grupo.
+    if (!b.txId && it.transacao_existente_id) b.txId = it.transacao_existente_id
   }
-  for (const { chave, items, txId, catId } of buckets.values()) {
+  for (const { chave, items, txId, catId, card } of buckets.values()) {
     const itComOv    = items.find(i => i.descricao_override?.trim())
     const descOv     = itComOv?.descricao_override?.trim()
     const itComTx    = items.find(i => i.transacao_existente_id) ?? items[0]
@@ -162,10 +170,8 @@ function initGrupos(
     // só usa o default baseado em txId quando o item ainda está PENDENTE.
     const itDec    = items.find(i => i.decisao === 'CRIAR' || i.decisao === 'ATUALIZAR')?.decisao
     const decisao  = (itDec as 'CRIAR' | 'ATUALIZAR' | undefined) ?? (txId ? 'ATUALIZAR' : 'CRIAR')
-    // ID do grupo:
-    //  - vinculado     → `tx-${txId}` (estável; agrupa todos itens dessa tx)
-    //  - cat default   → `cat-${catId}` (compatível com IDs anteriores)
-    const groupId = txId ? `tx-${txId}` : `cat-${catId}`
+    // ID estável e único por bucket (categoria [+ cartão quando separado]).
+    const groupId = card ? `cat-${catId}-${card}` : `cat-${catId}`
     // Descrição default quando não há override nem tx vinculada:
     const descDefault = separarPorCartao
       ? `${contaNome} - ${catPorId.get(catId)?.descricao ?? ''}`.trim()

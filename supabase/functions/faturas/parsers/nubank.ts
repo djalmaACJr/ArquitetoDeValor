@@ -121,7 +121,7 @@ export const parserNubank: ParserFatura = {
 
     for (const m of texto1L.matchAll(RE_NUBANK_TX)) {
       const [, dia, mesAbrev, sufixo, descRaw, sinal, valorRaw] = m;
-      const desc = descRaw.trim();
+      let   desc = descRaw.trim();
 
       // Filtra "matches" que são na verdade resumos da fatura (sem
       // estabelecimento real após a data).
@@ -130,7 +130,7 @@ export const parserNubank: ParserFatura = {
 
       // Créditos (estornos, descontos) vêm com sinal "−" (U+2212) ou "-".
       // Valor permanece positivo; tipo RECEITA diferencia do débito normal.
-      const tipo = (sinal === "−" || sinal === "-") ? "RECEITA" as const : "DESPESA" as const;
+      let   tipo: "RECEITA" | "DESPESA" = (sinal === "−" || sinal === "-") ? "RECEITA" : "DESPESA";
 
       const data_compra = parseDataNubank(dia, mesAbrev, anoUsado);
       let   valor       = parseValorBR(valorRaw);
@@ -152,6 +152,34 @@ export const parserNubank: ParserFatura = {
           const vReal = parseValorBR(mReal[1]);
           if (Number.isFinite(vReal) && vReal > valor) valor = vReal;
         }
+      }
+
+      // Estorno de compra parcelada: o texto embute o VALOR TOTAL da compra
+      // original ("...de valor R$ 385,20, parcelada em 12 vezes de R$ 32,10...")
+      // ANTES do valor real do estorno (−R$ 32,10, à direita da linha). Como o
+      // não-guloso para no 1º "R$", ele captura o total (385,20) sem sinal e
+      // classifica como DESPESA. Correção: estorno é sempre CRÉDITO e o valor
+      // certo é o da parcela estornada, que carrega o sinal "−".
+      if (/^estorno\b/i.test(desc)) {
+        tipo = "RECEITA";
+
+        // Janela = match + texto até o início da PRÓXIMA transação (DD MMM),
+        // limitada a +200 chars, para não capturar o "−R$" de outro lançamento.
+        const fim    = (m.index ?? 0) + m[0].length;
+        const resto  = texto1L.slice(fim, fim + 200);
+        const corte  = resto.search(/\d{1,2}\s+(?:JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)\b/i);
+        const janela = m[0] + (corte >= 0 ? resto.slice(0, corte) : resto);
+
+        // Valor autêntico = o que vem com sinal "−" (U+2212 ou hífen). Fallback:
+        // "N vezes de R$ Y" (valor da parcela). Nunca o "de valor R$ X" (total).
+        const mNeg   = janela.match(/[−-]\s*R\$\s*([\d.]+,\d{2})/);
+        const mParc  = janela.match(/vezes\s+de\s+R\$\s*([\d.]+,\d{2})/i);
+        const vCorr  = mNeg ? parseValorBR(mNeg[1]) : mParc ? parseValorBR(mParc[1]) : NaN;
+        if (Number.isFinite(vCorr) && vCorr > 0) valor = vCorr;
+
+        // Descrição limpa: só o cabeçalho ("Estorno de ..."), sem o detalhe
+        // "Estorno referente a compra ... de valor ..." que o unpdf concatena.
+        desc = desc.split(/\s+Estorno\s+referente\b/i)[0].trim();
       }
 
       if (!data_compra || !Number.isFinite(valor) || valor <= 0) continue;
