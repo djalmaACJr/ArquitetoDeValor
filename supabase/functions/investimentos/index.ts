@@ -103,6 +103,7 @@ Deno.serve(async (req: Request) => {
       case "dividendos-buscar-usd": return await rotaDividendosBuscarUsd(req, m, userId);
       case "dividendos-backfill-rate": return await rotaDividendosBackfillRate(c, m, userId);
       case "dividendos-diagnostico": return await rotaDividendosDiagnostico(c, m, userId);
+      case "migrar-conta":    return await rotaMigrarConta(c, req, m, userId);
       case "associar-extrato-massa": return await rotaAssociarExtratoMassa(c, m, userId);
       case "rendimento-cripto": return await rotaRendimentoCripto(c, m, userId);
       case "tipos-dividendo": return await rotaTiposDividendo(c, req, m, userId);
@@ -3265,6 +3266,113 @@ async function rotaDividendosDiagnostico(c: Db, m: string, userId: string) {
     tipos: [...tipos.entries()].map(([nome, mapeado]) => ({ nome, mapeado })),
     ativos: itens,
   } });
+}
+
+// ============================================================
+// /investimentos/migrar-conta (POST, JWT do usuário)
+//
+// Move TODOS os dados de investimento de uma conta para outra — caso
+// típico: a importação criou uma conta provisória ("Investimentos XP") e
+// o usuário quer consolidar na conta real. Migra em bloco:
+//   • inv_posicoes / inv_operacoes → update simples de conta_id;
+//   • inv_dividendos → update de conta_id + as transações vinculadas no
+//     extrato acompanham (o saldo sai de uma conta e entra na outra);
+//   • inv_historico_mensal → tem UNIQUE (ativo, conta, mês): meses sem
+//     conflito são movidos; em conflito os valores são SOMADOS no destino
+//     (mesmo ativo nas duas contas) e a linha de origem removida.
+// Tudo via RLS do usuário (c) — só alcança as próprias linhas. A conta de
+// origem fica vazia de investimentos; pode ser inativada/excluída depois.
+// ============================================================
+async function rotaMigrarConta(c: Db, req: Request, m: string, _userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  const body = await req.json();
+  const de   = String(body?.de_conta_id ?? "");
+  const para = String(body?.para_conta_id ?? "");
+  logRequest("POST", "/investimentos/migrar-conta", { de, para });
+
+  if (!de || !para)  return erro("Campos obrigatórios: de_conta_id, para_conta_id");
+  if (de === para)   return erro("As contas de origem e destino devem ser diferentes");
+  if (!(await contaExiste(c, de)))   return erro("Conta de origem não encontrada", 404);
+  if (!(await contaExiste(c, para))) return erro("Conta de destino não encontrada", 404);
+
+  // 1) Posições e operações — update em bloco
+  const { data: posMov, error: errPos } = await c.from("inv_posicoes")
+    .update({ conta_id: para }).eq("conta_id", de).select("id");
+  if (errPos) { logError("migrar-conta posicoes", errPos); return erro(errPos.message); }
+  const { data: opMov, error: errOp } = await c.from("inv_operacoes")
+    .update({ conta_id: para }).eq("conta_id", de).select("id");
+  if (errOp) { logError("migrar-conta operacoes", errOp); return erro(errOp.message); }
+
+  // 2) Dividendos + transações vinculadas no extrato
+  const { data: divs, error: errDivSel } = await c.from("inv_dividendos")
+    .select("id, transacao_extrato_id").eq("conta_id", de);
+  if (errDivSel) { logError("migrar-conta dividendos sel", errDivSel); return erro(errDivSel.message); }
+  const { error: errDiv } = await c.from("inv_dividendos")
+    .update({ conta_id: para }).eq("conta_id", de);
+  if (errDiv) { logError("migrar-conta dividendos", errDiv); return erro(errDiv.message); }
+
+  const txIds = ((divs ?? []) as { transacao_extrato_id: string | null }[])
+    .map((d) => d.transacao_extrato_id)
+    .filter((t): t is string => !!t);
+  let txMovidas = 0;
+  for (let i = 0; i < txIds.length; i += 200) {          // lotes p/ não estourar a URL
+    const lote = txIds.slice(i, i + 200);
+    const { data: txs, error: errTx } = await c.from("transacoes")
+      .update({ conta_id: para }).in("id", lote).select("id");
+    if (errTx) { logError("migrar-conta transacoes", errTx); return erro(errTx.message); }
+    txMovidas += (txs ?? []).length;
+  }
+
+  // 3) Histórico mensal — UNIQUE (ativo, conta, mes): move ou mescla
+  const { data: histOrig, error: errHo } = await c.from("inv_historico_mensal")
+    .select("id, ativo_id, mes_ano, valor_mercado, quantidade, preco_medio, rentabilidade_mes")
+    .eq("conta_id", de);
+  if (errHo) { logError("migrar-conta hist origem", errHo); return erro(errHo.message); }
+  const { data: histDest } = await c.from("inv_historico_mensal")
+    .select("id, ativo_id, mes_ano, valor_mercado, quantidade, preco_medio, rentabilidade_mes")
+    .eq("conta_id", para);
+  type Hist = { id: string; ativo_id: string; mes_ano: string; valor_mercado: number; quantidade: number; preco_medio: number; rentabilidade_mes: number };
+  const destPorChave = new Map<string, Hist>();
+  for (const h of (histDest ?? []) as Hist[]) destPorChave.set(`${h.ativo_id}|${h.mes_ano}`, h);
+
+  let histMovidos = 0, histMesclados = 0;
+  for (const h of (histOrig ?? []) as Hist[]) {
+    const alvo = destPorChave.get(`${h.ativo_id}|${h.mes_ano}`);
+    if (!alvo) {
+      const { error: e1 } = await c.from("inv_historico_mensal")
+        .update({ conta_id: para }).eq("id", h.id);
+      if (e1) { logError("migrar-conta hist mover", e1); return erro(e1.message); }
+      histMovidos++;
+      continue;
+    }
+    // Mesmo ativo/mês nas duas contas → soma quantidades e valores; o preço
+    // médio vira a média ponderada pelas quantidades.
+    const qtd = Number(alvo.quantidade) + Number(h.quantidade);
+    const pm  = qtd > 0
+      ? (Number(alvo.preco_medio) * Number(alvo.quantidade) + Number(h.preco_medio) * Number(h.quantidade)) / qtd
+      : Number(alvo.preco_medio);
+    const { error: e2 } = await c.from("inv_historico_mensal").update({
+      valor_mercado:     Number((Number(alvo.valor_mercado) + Number(h.valor_mercado)).toFixed(2)),
+      quantidade:        qtd,
+      preco_medio:       Number(pm.toFixed(8)),
+      rentabilidade_mes: Number((Number(alvo.rentabilidade_mes) + Number(h.rentabilidade_mes)).toFixed(2)),
+    }).eq("id", alvo.id);
+    if (e2) { logError("migrar-conta hist mesclar", e2); return erro(e2.message); }
+    const { error: e3 } = await c.from("inv_historico_mensal").delete().eq("id", h.id);
+    if (e3) { logError("migrar-conta hist apagar", e3); return erro(e3.message); }
+    histMesclados++;
+  }
+
+  const resultado = {
+    posicoes:        (posMov ?? []).length,
+    operacoes:       (opMov ?? []).length,
+    dividendos:      (divs ?? []).length,
+    transacoes:      txMovidas,
+    historico_movido:   histMovidos,
+    historico_mesclado: histMesclados,
+  };
+  logSuccess("Migração de conta de investimentos", { de, para, ...resultado });
+  return json({ dados: resultado });
 }
 
 // ============================================================

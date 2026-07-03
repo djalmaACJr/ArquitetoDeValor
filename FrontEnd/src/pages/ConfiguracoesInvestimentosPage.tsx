@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowLeft, UserCog, Target, ClipboardList, Sparkles, RotateCcw, Save, Wand2, PiggyBank, Plus, Trash2,
-  SlidersHorizontal, AlertTriangle, Eraser,
+  SlidersHorizontal, AlertTriangle, Eraser, ArrowRightLeft,
 } from 'lucide-react'
 import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvQuestionarios, type QuestionarioEfetivo } from '../hooks/useInvQuestionarios'
@@ -11,7 +11,9 @@ import { useUsuarioPerfil } from '../hooks/useUsuarioPerfil'
 import { useInvPesos } from '../hooks/useInvPesos'
 import { useResumoAposentadoria } from '../hooks/useResumoAposentadoria'
 import { estimarIdade, formatData, formatBRL } from '../lib/utils'
-import { Input, BtnSalvar, Toast, ModalExcluir } from '../components/ui/shared'
+import { Input, BtnSalvar, Toast, ModalExcluir, SelectDark } from '../components/ui/shared'
+import { useContas } from '../hooks/useContas'
+import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import Mascote from '../components/ui/Mascote'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { PERGUNTAS_SUITABILITY, derivarPerfil } from '../lib/perfilInvestidor'
@@ -48,6 +50,7 @@ export default function ConfiguracoesInvestimentosPage() {
       <SecaoMetas onToast={showToast} />
       <SecaoPesos onToast={showToast} />
       <SecaoQuestionarios onToast={showToast} />
+      <SecaoMigrarConta onToast={showToast} />
 
       <Toast msg={toast} />
     </div>
@@ -809,4 +812,98 @@ function SeloOrigem({ origem, provedor, modelo }: {
     )
   }
   return <span className="text-[11.5px] px-2 py-1 rounded-md border border-white/10 text-white/70">Personalizado</span>
+}
+
+// ════════════════════════════════════════════════════════════
+// 6) Migrar conta de investimentos
+// ════════════════════════════════════════════════════════════
+// Consolida os dados de uma conta em outra — caso típico: a importação
+// criou uma conta provisória ("Investimentos XP") e o usuário quer tudo
+// na conta real. Move posições, operações, proventos (com as transações
+// do extrato juntas) e o histórico mensal (mesclando meses em conflito).
+function SecaoMigrarConta({ onToast }: { onToast: (m: string) => void }) {
+  const { contas } = useContas()
+  const { migrarConta } = useInvestimentosPosicoes()
+  const [de,   setDe]   = useState('')
+  const [para, setPara] = useState('')
+  const [confirmando, setConfirmando] = useState(false)
+  const [migrando,    setMigrando]    = useState(false)
+
+  const ativas = contas.filter((c) => c.ativa)
+  const nomeDe   = ativas.find((c) => c.conta_id === de)?.nome ?? ''
+  const nomePara = ativas.find((c) => c.conta_id === para)?.nome ?? ''
+
+  async function migrar() {
+    setConfirmando(false)
+    setMigrando(true)
+    const res = await migrarConta(de, para)
+    setMigrando(false)
+    if (!res.ok) { onToast(res.erro ?? 'Erro ao migrar conta'); return }
+    const d = res.dados
+    onToast(`Migração concluída: ${d?.posicoes ?? 0} posição(ões), ${d?.operacoes ?? 0} operação(ões), ` +
+      `${d?.dividendos ?? 0} provento(s) (${d?.transacoes ?? 0} lançamento(s) do extrato) e ` +
+      `${(d?.historico_movido ?? 0) + (d?.historico_mesclado ?? 0)} mês(es) de histórico.`)
+    setDe(''); setPara('')
+  }
+
+  return (
+    <Secao icone={<ArrowRightLeft size={16} />} titulo="Migrar conta de investimentos"
+      subtitulo="Move TUDO de uma conta para outra: posições, operações, proventos (inclusive os lançamentos no extrato — o saldo acompanha) e o histórico mensal. Útil para consolidar a conta provisória criada pela importação na sua conta real. A conta de origem fica vazia e pode ser inativada depois.">
+      <div className="flex items-end gap-3 flex-wrap">
+        <div>
+          <p className="text-[12.5px] mb-1" style={{ color: MUTED }}>De (conta de origem)</p>
+          <SelectDark value={de} onChange={(e) => setDe(e.target.value)} style={{ width: 260 }}>
+            <option value="">Selecione…</option>
+            {ativas.map((c) => (
+              <option key={c.conta_id} value={c.conta_id} disabled={c.conta_id === para}>{c.nome}</option>
+            ))}
+          </SelectDark>
+        </div>
+        <div>
+          <p className="text-[12.5px] mb-1" style={{ color: MUTED }}>Para (conta de destino)</p>
+          <SelectDark value={para} onChange={(e) => setPara(e.target.value)} style={{ width: 260 }}>
+            <option value="">Selecione…</option>
+            {ativas.map((c) => (
+              <option key={c.conta_id} value={c.conta_id} disabled={c.conta_id === de}>{c.nome}</option>
+            ))}
+          </SelectDark>
+        </div>
+        <button onClick={() => setConfirmando(true)} disabled={!de || !para || de === para || migrando}
+          className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg border text-[14px] font-semibold transition-all disabled:opacity-40"
+          style={{ borderColor: `${AMBAR}66`, color: AMBAR }}>
+          <ArrowRightLeft size={15} className={migrando ? 'animate-pulse' : ''} />
+          {migrando ? 'Migrando…' : 'Migrar'}
+        </button>
+      </div>
+      <p className="text-[12px] mt-2" style={{ color: MUTED }}>
+        Dica: se a conta provisória estiver certa e o problema for só o nome, basta renomeá-la na página Contas — sem migração.
+      </p>
+
+      {confirmando && (
+        <div role="dialog" aria-modal="true" aria-label="Confirmar migração"
+          className="fixed inset-0 z-[200] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setConfirmando(false)} />
+          <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-md mx-4 p-5">
+            <p className="text-[18px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>Confirmar migração</p>
+            <p className="text-[15px] mb-5" style={{ color: MUTED }}>
+              Mover todos os investimentos de <strong className="text-white">"{nomeDe}"</strong> para{' '}
+              <strong className="text-white">"{nomePara}"</strong>? Os lançamentos de proventos no extrato
+              mudam de conta junto (o saldo sai de uma e entra na outra).
+            </p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmando(false)}
+                className="px-4 py-2 rounded-lg border border-white/10 text-[14px] text-white/80 hover:border-white/25">
+                Cancelar
+              </button>
+              <button onClick={migrar}
+                className="px-4 py-2 rounded-lg border text-[14px] font-semibold"
+                style={{ borderColor: `${AMBAR}88`, color: AMBAR }}>
+                Migrar tudo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Secao>
+  )
 }

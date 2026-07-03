@@ -70,6 +70,23 @@ export function useInvestimentosPosicoes(filtros: FiltrosPosicoes = {}) {
     return { ok: res.ok, dados: null, erro: res.erro }
   }
 
+  // Move TODOS os dados de investimento (posições, operações, dividendos +
+  // transações do extrato, histórico) de uma conta para outra. Caso típico:
+  // consolidar a conta provisória criada pela importação na conta real.
+  const migrarConta = async (deContaId: string, paraContaId: string): Promise<OpResult<ResultadoMigrarConta>> => {
+    const res = await apiMutate<ResultadoMigrarConta>('/investimentos/migrar-conta', 'POST', {
+      de_conta_id: deContaId, para_conta_id: paraContaId,
+    })
+    if (res.ok) {
+      await invalidar()
+      // dividendos e extrato também mudam de conta
+      await qc.invalidateQueries({ queryKey: qk.invDividendosPref(uid) })
+      await qc.invalidateQueries({ queryKey: qk.transacoesMesPref(uid) })
+      await qc.invalidateQueries({ queryKey: qk.contas(uid) })
+    }
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   return {
     posicoes,
     loading,
@@ -77,5 +94,15 @@ export function useInvestimentosPosicoes(filtros: FiltrosPosicoes = {}) {
     criar,
     editar,
     excluir,
+    migrarConta,
   }
+}
+
+export interface ResultadoMigrarConta {
+  posicoes:           number
+  operacoes:          number
+  dividendos:         number
+  transacoes:         number
+  historico_movido:   number
+  historico_mesclado: number
 }
