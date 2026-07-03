@@ -100,6 +100,7 @@ Deno.serve(async (req: Request) => {
       case "operacoes":       return await rotaOperacoes(c, req, m, userId);
       case "dividendos":      return await rotaDividendos(c, req, m, userId);
       case "dividendos-buscar-br": return await rotaDividendosBuscarBr(req, m, userId);
+      case "dividendos-buscar-usd": return await rotaDividendosBuscarUsd(req, m, userId);
       case "dividendos-backfill-rate": return await rotaDividendosBackfillRate(c, m, userId);
       case "associar-extrato-massa": return await rotaAssociarExtratoMassa(c, m, userId);
       case "rendimento-cripto": return await rotaRendimentoCripto(c, m, userId);
@@ -2560,44 +2561,89 @@ async function rotaDividendosCron(req: Request, m: string) {
   if (m !== "POST") return erro("Método não permitido", 405);
   const esperado = Deno.env.get("CRON_SECRET") ?? "";
   if (!esperado || (req.headers.get("x-cron-secret") ?? "") !== esperado) return erro("Não autorizado", 401);
-  const apiKey = Deno.env.get("POLYGON_API_KEY") ?? "";
-  if (!apiKey) { logError("dividendos-cron", "POLYGON_API_KEY ausente"); return erro("POLYGON_API_KEY não configurada", 500); }
+  logRequest("POST", "/investimentos/dividendos-cron", {});
+  try { return json({ dados: await provisionarProventosUsd(dbAdmin(), null) }); }
+  catch (e) { logError("dividendos-cron", e); return erro((e as Error).message ?? "Erro interno", 500); }
+}
 
-  const admin = dbAdmin();
-  const hoje  = hojeISO();
-  logRequest("POST", "/investimentos/dividendos-cron", { hoje });
+// Disparo MANUAL pelo usuário logado (mesmo botão "Buscar proventos" da
+// página). Autenticado por JWT — roda a MESMA rotina do cron USD, escopada
+// só ao próprio usuário, então NÃO precisa do CRON_SECRET.
+async function rotaDividendosBuscarUsd(_req: Request, m: string, userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  logRequest("POST", "/investimentos/dividendos-buscar-usd", { userId });
+  try { return json({ dados: await provisionarProventosUsd(dbAdmin(), userId) }); }
+  catch (e) { logError("dividendos-buscar-usd", e); return erro((e as Error).message ?? "Erro interno", 500); }
+}
 
-  // PTAX recente para conversão USD→BRL (mesma fonte/convenção do resto)
-  try { await garantirSincronizado(admin); } catch (e) { logError("dividendos-cron ptax", e); }
-  if (!(await ptaxVendaAte(admin, hoje))) { logError("dividendos-cron", "PTAX indisponível"); return erro("PTAX indisponível", 500); }
+// Resultado padronizado das rotinas de provisão de proventos. `falhas_fonte`
+// conta ativos cuja FONTE externa (B3/Polygon) não respondeu — antes essa
+// falha era silenciosa e parecia "nenhum provento novo".
+interface ResultadoProvisaoProventos {
+  processados: number; criados: number; atualizados: number;
+  pulados: number; falhas_fonte: number; fontes_falha: string[];
+}
+
+// Núcleo compartilhado: provisiona proventos de ativos em USD via Polygon.
+// filtroUserId = null processa TODOS os usuários (cron); um id processa só
+// aquele usuário (disparo manual).
+async function provisionarProventosUsd(
+  admin: Db, filtroUserId: string | null,
+): Promise<ResultadoProvisaoProventos> {
+  const hoje      = hojeISO();
+  const dataCorte = recuarDias(hoje, DIAS_RETROATIVOS_PROVENTOS);
 
   // Ativos em USD (Polygon cobre papéis das bolsas americanas)
-  const { data: ativos, error } = await admin.from("inv_ativos")
+  let consulta = admin.from("inv_ativos")
     .select("id, user_id, ticker, tipo_ativo").eq("moeda", "USD");
-  if (error) { logError("dividendos-cron ativos", error); return erro(error.message); }
+  if (filtroUserId) consulta = consulta.eq("user_id", filtroUserId);
+  const { data: ativos, error } = await consulta;
+  if (error) { logError("dividendos-usd ativos", error); throw new Error(error.message); }
+  if (!ativos || ativos.length === 0) {
+    return { processados: 0, criados: 0, atualizados: 0, pulados: 0, falhas_fonte: 0, fontes_falha: [] };
+  }
 
-  let processados = 0, criados = 0, atualizados = 0, pulados = 0;
-  for (const ativo of (ativos ?? []) as { id: string; user_id: string; ticker: string; tipo_ativo: string }[]) {
+  const apiKey = Deno.env.get("POLYGON_API_KEY") ?? "";
+  if (!apiKey) { logError("dividendos-usd", "POLYGON_API_KEY ausente"); throw new Error("POLYGON_API_KEY não configurada"); }
+
+  // PTAX recente para conversão USD→BRL (mesma fonte/convenção do resto)
+  try { await garantirSincronizado(admin); } catch (e) { logError("dividendos-usd ptax", e); }
+  if (!(await ptaxVendaAte(admin, hoje))) { logError("dividendos-usd", "PTAX indisponível"); throw new Error("PTAX indisponível"); }
+
+  let processados = 0, criados = 0, atualizados = 0, pulados = 0, falhasFonte = 0;
+  const fontesFalha: string[] = [];
+  for (const ativo of ativos as { id: string; user_id: string; ticker: string; tipo_ativo: string }[]) {
     try {
       // Posições ATIVAS desse ativo, por conta
       const { data: posicoes } = await admin.from("inv_posicoes")
         .select("conta_id, quantidade").eq("ativo_id", ativo.id).eq("status", "ATIVA");
       if (!posicoes || posicoes.length === 0) continue;
 
-      // Tipo "Dividendos" do usuário, com categoria mapeada
-      const { data: tipoDiv } = await admin.from("inv_tipos_dividendo")
-        .select("id, categoria_id").eq("user_id", ativo.user_id).eq("nome", "Dividendos").maybeSingle();
+      // Tipo "Dividendos" do usuário, com categoria mapeada. Lista TODAS as
+      // linhas com esse nome e prioriza a mapeada: com tipos duplicados,
+      // .maybeSingle() estourava erro e o usuário era pulado inteiro.
+      const { data: tiposDiv } = await admin.from("inv_tipos_dividendo")
+        .select("id, categoria_id").eq("user_id", ativo.user_id).eq("nome", "Dividendos");
+      const tipoDiv = ((tiposDiv ?? []) as { id: string; categoria_id: string | null }[])
+        .find((t) => t.categoria_id) ?? (tiposDiv ?? [])[0];
       if (!tipoDiv?.categoria_id) { pulados++; continue; }
 
       // Pausa aleatória curta (250–1250ms) antes de cada requisição
       await new Promise((r) => setTimeout(r, 250 + Math.floor(Math.random() * 1000)));
       const divs = await buscarDividendosPolygon(ativo.ticker, apiKey);
+      if (divs === null) {
+        falhasFonte++;
+        if (fontesFalha.length < 10) fontesFalha.push(ativo.ticker);
+        continue;
+      }
       processados++;
 
-      // Soma por pay_date (mesmo tipo, mesmo dia → 1x); só futuros
+      // Soma por pay_date (mesmo tipo, mesmo dia → 1x). Janela: futuros +
+      // retroativos recentes (cobre dias em que o job não rodou e corrige a
+      // PTAX estimada quando a data de pagamento chega).
       const porData = new Map<string, number>();
       for (const d of divs) {
-        if (d.pay_date < hoje) continue;
+        if (d.pay_date < dataCorte) continue;
         porData.set(d.pay_date, (porData.get(d.pay_date) ?? 0) + d.cash_amount);
       }
 
@@ -2619,11 +2665,11 @@ async function rotaDividendosCron(req: Request, m: string) {
           if (r === "criado") criados++; else if (r === "atualizado") atualizados++;
         }
       }
-    } catch (e) { logError("dividendos-cron ativo", e); }
+    } catch (e) { logError("dividendos-usd ativo", e); }
   }
 
-  logSuccess("Dividendos cron", { processados, criados, atualizados, pulados });
-  return json({ dados: { processados, criados, atualizados, pulados } });
+  logSuccess("Dividendos USD", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados, falhasFonte });
+  return { processados, criados, atualizados, pulados, falhas_fonte: falhasFonte, fontes_falha: fontesFalha };
 }
 
 // Última PTAX (venda) com data <= alvo (último dia útil). Para datas
@@ -2636,6 +2682,12 @@ async function ptaxVendaAte(admin: Db, dataAlvo: string): Promise<number | null>
   return Number.isFinite(v) && v > 0 ? v : null;
 }
 
+// Janela retroativa (dias) das rotinas de provisão: além dos proventos
+// FUTUROS, reprocessa os pagos há até N dias. Cobre execuções perdidas do
+// job (provento anunciado e pago no intervalo) e corrige o valor/PTAX das
+// projeções quando a data de pagamento chega.
+const DIAS_RETROATIVOS_PROVENTOS = 30;
+
 // Primeiro dia do mês seguinte a "YYYY-MM" (limite exclusivo da janela do mês).
 function primeiroDiaProximoMes(payDate: string): string {
   let [y, mo] = payDate.slice(0, 7).split("-").map(Number);
@@ -2643,10 +2695,16 @@ function primeiroDiaProximoMes(payDate: string): string {
   return `${y}-${String(mo).padStart(2, "0")}-01`;
 }
 
-// Cria ou corrige uma provisão (PROJECAO) de provento. Reconcilia pela
-// chave (user, ativo, conta, tipo) dentro do MÊS do pay_date: se já houver
-// uma PROJECAO, atualiza valor/data (na dívida e na transação); senão cria
-// o par dividendo + transação RECEITA PROJECAO vinculados.
+// Cria ou corrige uma provisão de provento. Reconcilia pela chave
+// (user, ativo, conta, tipo) dentro do MÊS do pay_date:
+//   • pay_date FUTURO (>= hoje): se já houver uma PROJECAO, atualiza
+//     valor/data (no dividendo e na transação); senão cria o par
+//     dividendo + transação RECEITA PROJECAO vinculados.
+//   • pay_date PASSADO (janela retroativa): o provento JÁ FOI pago —
+//     uma PROJECAO existente é confirmada (status → PAGO, com o valor
+//     final da fonte); um lançamento já PAGO/PENDENTE no mês é respeitado
+//     (não sobrescreve o que o usuário registrou); sem nada no mês, cria
+//     direto como PAGO.
 async function upsertDividendoProvisionado(admin: Db, p: {
   userId: string; ativoId: string; contaId: string; tipoAtivo: string;
   tipoDivId: string; categoriaId: string; ticker: string; valor: number; payDate: string;
@@ -2655,6 +2713,7 @@ async function upsertDividendoProvisionado(admin: Db, p: {
   // Dividendo por cota (rate da fonte) na moeda do lançamento; usado por DY/YoC.
   const vpc = p.valorPorCota != null && Number.isFinite(p.valorPorCota) && p.valorPorCota > 0
     ? Number(p.valorPorCota) : null;
+  const pago   = p.payDate < hojeISO(); // data de pagamento já passou
   const mesIni = `${p.payDate.slice(0, 7)}-01`;
   const mesFim = primeiroDiaProximoMes(p.payDate);
 
@@ -2664,46 +2723,64 @@ async function upsertDividendoProvisionado(admin: Db, p: {
     .eq("tipo_dividendo_id", p.tipoDivId)
     .gte("data_pagamento", mesIni).lt("data_pagamento", mesFim);
 
-  const existente = (candidatos ?? []).find(
-    (d) => (d as { transacoes?: { status?: string } }).transacoes?.status === "PROJECAO",
-  ) as { id: string; transacao_extrato_id: string | null; valor: number; data_pagamento: string } | undefined;
+  type Cand = { id: string; transacao_extrato_id: string | null; valor: number; data_pagamento: string; transacoes?: { status?: string } | null };
+  const lista = (candidatos ?? []) as Cand[];
+  const existente = lista.find((d) => d.transacoes?.status === "PROJECAO");
+
+  // Provento passado que já tem registro NÃO-projeção no mês (pago/pendente
+  // pelo usuário, ou dividendo sem transação): não mexe — evita duplicar ou
+  // sobrescrever o valor que a pessoa de fato recebeu (ex.: JSCP líquido de IR).
+  if (pago && !existente && lista.length > 0) return "ignorado";
 
   if (existente) {
     const mudou = Number(existente.valor) !== p.valor || String(existente.data_pagamento).slice(0, 10) !== p.payDate;
-    if (!mudou && vpc == null) return "ignorado";
+    if (!mudou && vpc == null && !pago) return "ignorado";
     await admin.from("inv_dividendos")
       .update({ valor: p.valor, data_pagamento: p.payDate, ...(vpc != null ? { valor_por_cota: vpc } : {}) })
       .eq("id", existente.id);
     if (existente.transacao_extrato_id) {
-      await admin.from("transacoes")
-        .update({ valor: p.valor, data: p.payDate, valor_projetado: p.valor })
-        .eq("id", existente.transacao_extrato_id);
+      // Passado → confirma a projeção com o valor final da fonte (PTAX real
+      // no caso de USD); preserva valor_projetado como histórico da projeção.
+      const campos: Record<string, unknown> = pago
+        ? { valor: p.valor, data: p.payDate, status: "PAGO" }
+        : { valor: p.valor, data: p.payDate, valor_projetado: p.valor };
+      await admin.from("transacoes").update(campos).eq("id", existente.transacao_extrato_id);
     }
     return "atualizado";
   }
 
   // Sem inv_dividendos provisionado: tenta ADOTAR um lançamento manual que o
   // usuário já tenha criado na agenda para este provento (mesma conta +
-  // categoria do tipo + mês, RECEITA ainda não recebida e ainda não vinculada
-  // a nenhum dividendo). Evita duplicar quando a pessoa provisiona o aluguel
-  // na mão e o dia não bate com o anúncio da B3.
+  // categoria do tipo + mês, RECEITA ainda não vinculada a nenhum dividendo).
+  // Evita duplicar quando a pessoa provisiona o aluguel na mão e o dia não
+  // bate com o anúncio da B3. Para proventos passados considera também
+  // lançamentos já PAGOS (recebidos e registrados na mão).
   const manual = await adotarTransacaoManual(admin, {
     userId: p.userId, contaId: p.contaId, categoriaId: p.categoriaId,
     ticker: p.ticker, mesIni, mesFim,
+    statusIn: pago ? ["PROJECAO", "PENDENTE", "PAGO"] : ["PROJECAO", "PENDENTE"],
   });
   if (manual) {
+    // Lançamento já PAGO: só vincula — o valor/data que o usuário registrou
+    // (o que de fato caiu na conta) vence os números da fonte.
+    const soVinculo = manual.status === "PAGO";
     const { data: div, error: errDiv } = await admin.from("inv_dividendos").insert({
       user_id: p.userId, ativo_id: p.ativoId, conta_id: p.contaId,
-      valor: p.valor, data_pagamento: p.payDate, tipo_ativo: p.tipoAtivo,
+      valor: soVinculo ? manual.valor : p.valor,
+      data_pagamento: soVinculo ? manual.data : p.payDate,
+      tipo_ativo: p.tipoAtivo,
       tipo_dividendo_id: p.tipoDivId, descricao: null, transacao_extrato_id: manual.id,
       valor_por_cota: vpc,
     }).select("id").single();
     if (errDiv || !div) { logError("dividendos-cron adotar div", errDiv); return "ignorado"; }
-    // Atualiza valor/data do lançamento manual com os números reais da B3
-    // (o trigger trg_sync_transacao_dividendo mantém o dividendo alinhado).
-    const campos: Record<string, unknown> = { valor: p.valor, data: p.payDate };
-    if (manual.status === "PROJECAO") campos.valor_projetado = p.valor;
-    await admin.from("transacoes").update(campos).eq("id", manual.id);
+    if (!soVinculo) {
+      // Atualiza valor/data do lançamento manual com os números reais da fonte
+      // (o trigger trg_sync_transacao_dividendo mantém o dividendo alinhado).
+      const campos: Record<string, unknown> = { valor: p.valor, data: p.payDate };
+      if (manual.status === "PROJECAO") campos.valor_projetado = p.valor;
+      if (pago) campos.status = "PAGO"; // pagamento confirmado pela fonte
+      await admin.from("transacoes").update(campos).eq("id", manual.id);
+    }
     return "atualizado";
   }
 
@@ -2719,7 +2796,11 @@ async function upsertDividendoProvisionado(admin: Db, p: {
   const { data: tx, error: errTx } = await admin.from("transacoes").insert({
     user_id: p.userId, conta_id: p.contaId, categoria_id: p.categoriaId,
     data: p.payDate, descricao: desc.length >= 2 ? desc : `Dividendo ${desc}`.slice(0, 200),
-    valor: p.valor, tipo: "RECEITA", status: "PROJECAO", valor_projetado: p.valor,
+    valor: p.valor, tipo: "RECEITA",
+    // Passado = já pago (mesma convenção do lançamento manual de dividendo);
+    // futuro = provisionado (PROJECAO) até o usuário confirmar.
+    status: pago ? "PAGO" : "PROJECAO",
+    valor_projetado: pago ? null : p.valor,
   }).select("id").single();
   if (errTx || !tx) {
     await admin.from("inv_dividendos").delete().eq("id", div.id); // rollback
@@ -2738,15 +2819,15 @@ async function upsertDividendoProvisionado(admin: Db, p: {
 // nunca arrisca encostar em receita que possa ser de outro provento.
 async function adotarTransacaoManual(admin: Db, p: {
   userId: string; contaId: string; categoriaId: string;
-  ticker: string; mesIni: string; mesFim: string;
-}): Promise<{ id: string; status: string } | null> {
+  ticker: string; mesIni: string; mesFim: string; statusIn?: string[];
+}): Promise<{ id: string; status: string; valor: number; data: string } | null> {
   const { data: txs } = await admin.from("transacoes")
-    .select("id, descricao, status")
+    .select("id, descricao, status, valor, data")
     .eq("user_id", p.userId).eq("conta_id", p.contaId)
     .eq("categoria_id", p.categoriaId).eq("tipo", "RECEITA")
-    .in("status", ["PROJECAO", "PENDENTE"])
+    .in("status", p.statusIn ?? ["PROJECAO", "PENDENTE"])
     .gte("data", p.mesIni).lt("data", p.mesFim);
-  const lista = (txs ?? []) as { id: string; descricao: string | null; status: string }[];
+  const lista = (txs ?? []) as { id: string; descricao: string | null; status: string; valor: number; data: string }[];
   if (lista.length === 0) return null;
 
   // Descarta os que já pertencem a algum dividendo (já reconciliados).
@@ -2760,35 +2841,41 @@ async function adotarTransacaoManual(admin: Db, p: {
 
   // Desambigua por ticker na descrição; senão, só adota se houver um único livre.
   const alvo = p.ticker.trim().toUpperCase();
+  const paraResultado = (t: typeof livres[number]) =>
+    ({ id: t.id, status: t.status, valor: Number(t.valor), data: String(t.data).slice(0, 10) });
   const porTicker = livres.filter((t) => (t.descricao ?? "").toUpperCase().includes(alvo));
-  if (porTicker.length === 1) return { id: porTicker[0].id, status: porTicker[0].status };
-  if (porTicker.length === 0 && livres.length === 1) return { id: livres[0].id, status: livres[0].status };
+  if (porTicker.length === 1) return paraResultado(porTicker[0]);
+  if (porTicker.length === 0 && livres.length === 1) return paraResultado(livres[0]);
   return null; // ambíguo → não arrisca; segue para criar um novo
 }
 
 // Proventos da Polygon.io (v3 reference dividends; incluído no plano free).
 // Campos usados: pay_date, cash_amount (por ação, em USD), dividend_type.
+// Devolve null quando a FONTE falha (HTTP != 2xx, timeout) — o chamador
+// distingue "fonte fora do ar" de "ticker sem proventos".
 async function buscarDividendosPolygon(
   ticker: string, apiKey: string,
-): Promise<{ pay_date: string; cash_amount: number; dividend_type: string }[]> {
+): Promise<{ pay_date: string; cash_amount: number; dividend_type: string }[] | null> {
   const t = ticker.trim().toUpperCase();
   if (!t) return [];
   const url =
     `https://api.polygon.io/v3/reference/dividends?ticker=${encodeURIComponent(t)}` +
     `&limit=50&order=desc&sort=pay_date&apiKey=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-  if (!res.ok) { logError("Polygon dividends", `${t}: ${res.status}`); return []; }
-  const data = await res.json() as {
-    results?: { pay_date?: string; cash_amount?: number; dividend_type?: string }[];
-  };
-  const out: { pay_date: string; cash_amount: number; dividend_type: string }[] = [];
-  for (const d of data.results ?? []) {
-    const pay  = String(d.pay_date ?? "").slice(0, 10);
-    const cash = Number(d.cash_amount);
-    if (!RE_DATA.test(pay) || !Number.isFinite(cash) || cash <= 0) continue;
-    out.push({ pay_date: pay, cash_amount: cash, dividend_type: String(d.dividend_type ?? "") });
-  }
-  return out;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) { logError("Polygon dividends", `${t}: ${res.status}`); return null; }
+    const data = await res.json() as {
+      results?: { pay_date?: string; cash_amount?: number; dividend_type?: string }[];
+    };
+    const out: { pay_date: string; cash_amount: number; dividend_type: string }[] = [];
+    for (const d of data.results ?? []) {
+      const pay  = String(d.pay_date ?? "").slice(0, 10);
+      const cash = Number(d.cash_amount);
+      if (!RE_DATA.test(pay) || !Number.isFinite(cash) || cash <= 0) continue;
+      out.push({ pay_date: pay, cash_amount: cash, dividend_type: String(d.dividend_type ?? "") });
+    }
+    return out;
+  } catch (e) { logError("Polygon dividends", `${t}: ${e}`); return null; }
 }
 
 // ============================================================
@@ -2836,8 +2923,9 @@ async function rotaDividendosBuscarBr(_req: Request, m: string, userId: string) 
 // TODOS os usuários (cron); um id processa só aquele usuário (disparo manual).
 async function provisionarProventosBrl(
   admin: Db, filtroUserId: string | null,
-): Promise<{ processados: number; criados: number; atualizados: number; pulados: number }> {
-  const hoje = hojeISO();
+): Promise<ResultadoProvisaoProventos> {
+  const hoje      = hojeISO();
+  const dataCorte = recuarDias(hoje, DIAS_RETROATIVOS_PROVENTOS);
 
   // Ativos BRL cotados que a B3 cobre com proventos
   let consulta = admin.from("inv_ativos")
@@ -2874,7 +2962,8 @@ async function provisionarProventosBrl(
   // Novidades por usuário (criados/atualizados) para o aviso de login.
   const nov = new Map<string, { criados: number; atualizados: number; itens: NovidadeItem[] }>();
 
-  let processados = 0, criados = 0, atualizados = 0, pulados = 0;
+  let processados = 0, criados = 0, atualizados = 0, pulados = 0, falhasFonte = 0;
+  const fontesFalha: string[] = [];
   for (const ativo of (ativos ?? []) as AtivoBrl[]) {
     try {
       const { data: posicoes } = await admin.from("inv_posicoes")
@@ -2885,11 +2974,20 @@ async function provisionarProventosBrl(
       // Pausa aleatória curta (250–1250ms) — cordialidade com a B3
       await new Promise((r) => setTimeout(r, 250 + Math.floor(Math.random() * 1000)));
       const proventos = await coletarProventosB3(ativo);
+      if (proventos === null) {
+        // A B3 não respondeu para este ativo — antes isso passava como
+        // "processado sem novidades" e a falha ficava invisível.
+        falhasFonte++;
+        if (fontesFalha.length < 10) fontesFalha.push(ativo.ticker);
+        continue;
+      }
       processados++;
 
       const tipos = await tiposDoUsuario(ativo.user_id);
       for (const pv of proventos) {
-        if (pv.payDate < hoje) continue; // só futuros (PROJECAO)
+        // Futuros (PROJECAO) + retroativos recentes (lançados como PAGO);
+        // cobre dias em que o job não rodou.
+        if (pv.payDate < dataCorte) continue;
         const nomeTipo = tipoNomePorLabelB3(pv.label, ativo.tipo_ativo);
         const tipo = tipos.get(nomeTipo);
         if (!tipo?.categoria_id) {
@@ -2962,8 +3060,8 @@ async function provisionarProventosBrl(
     }
   }
 
-  logSuccess("Dividendos BR", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados });
-  return { processados, criados, atualizados, pulados };
+  logSuccess("Dividendos BR", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados, falhasFonte });
+  return { processados, criados, atualizados, pulados, falhas_fonte: falhasFonte, fontes_falha: fontesFalha };
 }
 
 // ============================================================
@@ -3001,7 +3099,7 @@ async function rotaDividendosBackfillRate(c: Db, m: string, userId: string) {
       await new Promise((r) => setTimeout(r, 250 + Math.floor(Math.random() * 1000)));
       const proventos = await coletarProventosB3(ativo);
       processados++;
-      if (proventos.length === 0) { semFonte += rows.length; continue; }
+      if (!proventos || proventos.length === 0) { semFonte += rows.length; continue; }
 
       // payDate → [{ rate, tipoNome }]
       const porData = new Map<string, { rate: number; tipoNome: string }[]>();
@@ -3218,10 +3316,13 @@ function tipoNomePorLabelB3(label: string, tipoAtivo: string): string {
 
 // Coleta proventos FUTUROS-inclusos da B3 e deduplica. Para ações filtra
 // a classe (ON/PN/UNIT) do papel; para FII junta as séries de mesma data.
-async function coletarProventosB3(ativo: AtivoBrl): Promise<ProventoB3[]> {
+// Devolve null quando a FONTE falha (HTTP != 2xx, timeout, resposta
+// inválida) — o chamador distingue de "ativo sem proventos anunciados".
+async function coletarProventosB3(ativo: AtivoBrl): Promise<ProventoB3[] | null> {
   const brutos = ativo.tipo_ativo === "FII"
     ? await buscarProventosFundoB3(emissorB3(ativo.ticker))
     : await buscarProventosCompanhiaB3(emissorB3(ativo.ticker));
+  if (brutos === null) return null;
   if (brutos.length === 0) return [];
 
   const classeAlvo = classeDoTicker(ativo.ticker, ativo.acoes_subtipo);
@@ -3261,21 +3362,25 @@ function classeDoIsin(isin: string): "ON" | "PN" | null {
 }
 
 // Proventos de COMPANHIA (ações/ETF) — GetListedSupplementCompany.
-async function buscarProventosCompanhiaB3(issuer: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null })[]> {
+// null = a B3 não respondeu (difere de "sem proventos anunciados").
+async function buscarProventosCompanhiaB3(issuer: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null })[] | null> {
   if (!issuer) return [];
   const params = btoa(JSON.stringify({ issuingCompany: issuer, language: "pt-br" }));
   const url = `https://sistemaswebb3-listados.b3.com.br/listedCompaniesProxy/CompanyCall/GetListedSupplementCompany/${params}`;
   const data = await fetchB3<{ cashDividends?: B3CashDividend[] }[]>(url, issuer);
+  if (data === "falha") return null;
   const reg = Array.isArray(data) ? data[0] : data;
   return mapearCashDividends(reg?.cashDividends);
 }
 
 // Proventos de FUNDO (FII) — GetListedSupplementFunds.
-async function buscarProventosFundoB3(identifier: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null })[]> {
+// null = a B3 não respondeu (difere de "sem proventos anunciados").
+async function buscarProventosFundoB3(identifier: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null })[] | null> {
   if (!identifier) return [];
   const params = btoa(JSON.stringify({ typeFund: 7, identifierFund: identifier }));
   const url = `https://sistemaswebb3-listados.b3.com.br/fundsProxy/fundsCall/GetListedSupplementFunds/${params}`;
   const data = await fetchB3<{ cashDividends?: B3CashDividend[] }>(url, identifier);
+  if (data === "falha") return null;
   const reg = Array.isArray(data) ? data[0] : data;
   return mapearCashDividends(reg?.cashDividends);
 }
@@ -3298,18 +3403,32 @@ function mapearCashDividends(lista?: B3CashDividend[]): (ProventoB3 & { classe: 
   return out;
 }
 
-// GET JSON na B3 com timeout e tratamento tolerante (igual Polygon/Yahoo).
-async function fetchB3<T>(url: string, ref: string): Promise<T | null> {
-  try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) { logError("B3 proventos", `${ref}: ${res.status}`); return null; }
-    const txt = await res.text();
-    if (!txt || txt === '""' || txt === "null") return null;
-    return JSON.parse(txt) as T;
-  } catch (e) { logError("B3 proventos", `${ref}: ${e}`); return null; }
+// GET JSON na B3 com timeout, headers de navegador e 1 retry. Distingue os
+// desfechos: T = resposta ok; null = resposta VAZIA legítima (ativo sem
+// dados); "falha" = a B3 não respondeu (HTTP != 2xx, timeout, corpo inválido).
+async function fetchB3<T>(url: string, ref: string): Promise<T | null | "falha"> {
+  for (let tentativa = 1; tentativa <= 2; tentativa++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          // Headers de navegador: o WAF da B3 (Akamai) recusa clients "crus"
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+          "Accept": "application/json, text/plain, */*",
+          "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+          "Referer": "https://sistemaswebb3-listados.b3.com.br/",
+          "Origin": "https://sistemaswebb3-listados.b3.com.br",
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) { logError("B3 proventos", `${ref}: HTTP ${res.status} (tentativa ${tentativa})`); continue; }
+      const txt = await res.text();
+      if (!txt || txt === '""' || txt === "null") return null;
+      return JSON.parse(txt) as T;
+    } catch (e) { logError("B3 proventos", `${ref}: ${e} (tentativa ${tentativa})`); }
+    // pequena espera antes do retry
+    await new Promise((r) => setTimeout(r, 600));
+  }
+  return "falha";
 }
 // Parsing de data/numero no formato BR ("dd/mm/yyyy", "1.234,56") está
 // centralizado em brDataISO/brNumero (definidos junto do bloco do Tesouro).

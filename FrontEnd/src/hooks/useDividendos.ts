@@ -119,6 +119,14 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
+  // Idem para ativos internacionais em USD (Polygon) — sem ativos USD a rota
+  // devolve zeros sem exigir a POLYGON_API_KEY.
+  const buscarUsd = async (): Promise<OpResult<ResultadoBuscaProventos>> => {
+    const res = await apiMutate<ResultadoBuscaProventos>('/investimentos/dividendos-buscar-usd', 'POST')
+    if (res.ok) await invalidar()
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   // Preenche o dividendo-por-cota (rate) dos proventos antigos re-buscando da
   // B3. É o que destrava DY/Yield on Cost no padrão investidor10 no histórico.
   const backfillRate = async (): Promise<OpResult<ResultadoBackfillRate>> => {
@@ -145,6 +153,7 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     confirmar,
     excluir,
     buscarBrl,
+    buscarUsd,
     backfillRate,
     associarMassa,
     invalidar,
@@ -169,4 +178,8 @@ export interface ResultadoBuscaProventos {
   criados:     number
   atualizados: number
   pulados:     number
+  // Ativos cuja fonte externa (B3/Polygon) não respondeu nesta execução —
+  // permite diferenciar "sem provento novo" de "a fonte falhou".
+  falhas_fonte?: number
+  fontes_falha?: string[]
 }

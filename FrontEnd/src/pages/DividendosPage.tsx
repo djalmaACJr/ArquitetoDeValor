@@ -94,19 +94,32 @@ export default function DividendosPage() {
   const [associando,   setAssociando]   = useState(false)
   const [toast,        setToast]        = useState<string | null>(null)
 
-  const { dividendos, loading, excluir, buscarBrl, backfillRate, associarMassa } = useDividendos()
+  const { dividendos, loading, excluir, buscarBrl, buscarUsd, backfillRate, associarMassa } = useDividendos()
 
-  function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 4000) }
+  function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 6000) }
 
+  // Busca proventos nas duas fontes: B3 (ativos BRL) e Polygon (ativos USD).
   async function buscarProventos() {
     setBuscando(true)
-    const res = await buscarBrl()
+    const [br, usd] = await Promise.all([buscarBrl(), buscarUsd()])
     setBuscando(false)
-    if (!res.ok) { showToast(res.erro ?? 'Erro ao buscar proventos'); return }
-    const d = res.dados
-    const mudou = (d?.criados ?? 0) + (d?.atualizados ?? 0)
-    if (mudou === 0) showToast('Busca concluída — nenhum provento novo na B3.')
-    else showToast(`Busca concluída — ${d?.criados ?? 0} novo(s), ${d?.atualizados ?? 0} atualizado(s).`)
+    if (!br.ok && !usd.ok) { showToast(br.erro ?? usd.erro ?? 'Erro ao buscar proventos'); return }
+
+    const soma = (k: 'criados' | 'atualizados' | 'pulados' | 'falhas_fonte') =>
+      (br.dados?.[k] ?? 0) + (usd.dados?.[k] ?? 0)
+    const criados = soma('criados'), atualizados = soma('atualizados')
+    const pulados = soma('pulados'), falhas = soma('falhas_fonte')
+    const tickersFalha = [...(br.dados?.fontes_falha ?? []), ...(usd.dados?.fontes_falha ?? [])]
+
+    const partes: string[] = []
+    partes.push(criados + atualizados === 0
+      ? 'Busca concluída — nenhum provento novo.'
+      : `Busca concluída — ${criados} novo(s), ${atualizados} atualizado(s).`)
+    if (falhas > 0) partes.push(`Fonte indisponível para ${falhas} ativo(s)${tickersFalha.length ? ` (${tickersFalha.slice(0, 5).join(', ')}${tickersFalha.length > 5 ? '…' : ''})` : ''} — tente de novo mais tarde.`)
+    if (pulados > 0) partes.push(`${pulados} provento(s) pulado(s) por tipo sem categoria — veja "Configurar tipos".`)
+    if (!usd.ok && usd.erro) partes.push(`Internacionais: ${usd.erro}`)
+    if (!br.ok && br.erro) partes.push(`B3: ${br.erro}`)
+    showToast(partes.join(' '))
   }
 
   async function backfillYoc() {
@@ -157,7 +170,7 @@ export default function DividendosPage() {
         <div className="flex items-center gap-2">
           <button onClick={buscarProventos} disabled={buscando}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
-            title="Busca proventos na B3 e provisiona os futuros (ações e FIIs em BRL)">
+            title="Busca proventos na B3 (ações, ETFs e FIIs em BRL) e na Polygon (ativos internacionais em USD): provisiona os futuros e lança os pagos nos últimos 30 dias">
             <RefreshCw size={15} className={buscando ? 'animate-spin' : ''} /> {buscando ? 'Buscando…' : 'Buscar proventos'}
           </button>
           <button onClick={backfillYoc} disabled={backfilling}
