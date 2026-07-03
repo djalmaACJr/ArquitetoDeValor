@@ -102,6 +102,7 @@ Deno.serve(async (req: Request) => {
       case "dividendos-buscar-br": return await rotaDividendosBuscarBr(req, m, userId);
       case "dividendos-buscar-usd": return await rotaDividendosBuscarUsd(req, m, userId);
       case "dividendos-backfill-rate": return await rotaDividendosBackfillRate(c, m, userId);
+      case "dividendos-diagnostico": return await rotaDividendosDiagnostico(c, m, userId);
       case "associar-extrato-massa": return await rotaAssociarExtratoMassa(c, m, userId);
       case "rendimento-cripto": return await rotaRendimentoCripto(c, m, userId);
       case "tipos-dividendo": return await rotaTiposDividendo(c, req, m, userId);
@@ -3135,6 +3136,130 @@ async function rotaDividendosBackfillRate(c: Db, m: string, userId: string) {
 }
 
 // ============================================================
+// /investimentos/dividendos-diagnostico (GET, JWT do usuário)
+//
+// DRY-RUN da busca de proventos: NÃO grava nada. Para cada ativo do
+// usuário mostra o estado de cada elo da corrente — posição ativa, fonte
+// coberta (B3/Polygon), status HTTP real da fonte, quantos proventos ela
+// devolveu, quantos caem na janela de provisão e quais tipos ainda estão
+// sem categoria mapeada. É o que responde "por que a busca voltou vazia?".
+// ============================================================
+interface DiagAtivo {
+  ticker: string; tipo_ativo: string; moeda: string;
+  posicao_ativa: boolean;
+  fonte: "B3" | "Polygon" | null;   // null = tipo/moeda sem fonte de proventos
+  http: number | null;              // status HTTP da fonte (null = não consultada)
+  erro: string | null;              // falha de rede/parse, se houver
+  proventos_fonte: number;          // itens válidos que a fonte devolveu
+  na_janela: number;                // com pagamento dentro da janela de provisão
+  futuros: number;                  // com pagamento >= hoje
+  tipos_pendentes: string[];        // tipos usados na janela e sem categoria
+}
+
+async function rotaDividendosDiagnostico(c: Db, m: string, userId: string) {
+  if (m !== "GET") return erro("Método não permitido", 405);
+  logRequest("GET", "/investimentos/dividendos-diagnostico", { userId });
+
+  const hoje      = hojeISO();
+  const dataCorte = recuarDias(hoje, DIAS_RETROATIVOS_PROVENTOS);
+
+  const { data: ativos, error: errAtv } = await c.from("inv_ativos")
+    .select("id, ticker, tipo_ativo, acoes_subtipo, moeda");
+  if (errAtv) { logError("diagnostico ativos", errAtv); return erro(errAtv.message); }
+
+  // Tipos do usuário (nome → mapeado?), com a mesma preferência da provisão
+  const { data: tiposRaw } = await c.from("inv_tipos_dividendo").select("nome, categoria_id");
+  const tipos = new Map<string, boolean>();
+  for (const t of (tiposRaw ?? []) as { nome: string; categoria_id: string | null }[]) {
+    tipos.set(t.nome, (tipos.get(t.nome) ?? false) || !!t.categoria_id);
+  }
+
+  // PTAX e chave da Polygon (pré-requisitos do fluxo USD)
+  const admin = dbAdmin();
+  try { await garantirSincronizado(admin); } catch (e) { logError("diagnostico ptax", e); }
+  const ptaxUltima = await ultimaCotacaoPtax(c);
+  const polygonKey = !!(Deno.env.get("POLYGON_API_KEY") ?? "");
+
+  const itens: DiagAtivo[] = [];
+  for (const ativo of (ativos ?? []) as (AtivoBrl & { moeda: string })[]) {
+    const { data: pos } = await c.from("inv_posicoes")
+      .select("id").eq("ativo_id", ativo.id).eq("status", "ATIVA").limit(1);
+    const posicaoAtiva = !!pos && pos.length > 0;
+
+    const ehBrl = ativo.moeda === "BRL" && ["ACOES", "ETF", "FII"].includes(ativo.tipo_ativo);
+    const ehUsd = ativo.moeda === "USD";
+    const item: DiagAtivo = {
+      ticker: ativo.ticker, tipo_ativo: ativo.tipo_ativo, moeda: ativo.moeda,
+      posicao_ativa: posicaoAtiva,
+      fonte: ehBrl ? "B3" : ehUsd ? "Polygon" : null,
+      http: null, erro: null, proventos_fonte: 0, na_janela: 0, futuros: 0,
+      tipos_pendentes: [],
+    };
+    itens.push(item);
+    // Sem posição ativa ou sem fonte: a provisão pula — não consulta a fonte
+    if (!posicaoAtiva || !item.fonte) continue;
+
+    // Cordialidade com as fontes (mesma pausa da provisão, mais curta)
+    await new Promise((r) => setTimeout(r, 150 + Math.floor(Math.random() * 350)));
+
+    if (ehBrl) {
+      const url = ativo.tipo_ativo === "FII"
+        ? urlSupplementFundoB3(emissorB3(ativo.ticker))
+        : urlSupplementCompanhiaB3(emissorB3(ativo.ticker));
+      try {
+        const res = await fetch(url, { headers: B3_HEADERS, signal: AbortSignal.timeout(8000) });
+        item.http = res.status;
+        const txt = await res.text();
+        if (!res.ok) { item.erro = `B3 respondeu HTTP ${res.status}`; continue; }
+        if (!txt || txt === '""' || txt === "null") continue; // sem dados p/ o ativo
+        const data = JSON.parse(txt) as { cashDividends?: B3CashDividend[] }[] | { cashDividends?: B3CashDividend[] };
+        const reg  = Array.isArray(data) ? data[0] : data;
+        const brutos = mapearCashDividends(reg?.cashDividends);
+        item.proventos_fonte = brutos.length;
+        const pendentes = new Set<string>();
+        for (const pv of brutos) {
+          if (pv.payDate >= hoje) item.futuros++;
+          if (pv.payDate < dataCorte) continue;
+          item.na_janela++;
+          const nomeTipo = tipoNomePorLabelB3(pv.label, ativo.tipo_ativo);
+          if (!tipos.get(nomeTipo)) pendentes.add(nomeTipo);
+        }
+        item.tipos_pendentes = [...pendentes];
+      } catch (e) { item.erro = String((e as Error).message ?? e); }
+    } else if (ehUsd) {
+      if (!polygonKey) { item.erro = "POLYGON_API_KEY não configurada"; continue; }
+      const t = ativo.ticker.trim().toUpperCase();
+      const url =
+        `https://api.polygon.io/v3/reference/dividends?ticker=${encodeURIComponent(t)}` +
+        `&limit=50&order=desc&sort=pay_date&apiKey=${encodeURIComponent(Deno.env.get("POLYGON_API_KEY") ?? "")}`;
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        item.http = res.status;
+        if (!res.ok) { item.erro = `Polygon respondeu HTTP ${res.status}`; continue; }
+        const data = await res.json() as { results?: { pay_date?: string; cash_amount?: number }[] };
+        for (const d of data.results ?? []) {
+          const pay  = String(d.pay_date ?? "").slice(0, 10);
+          const cash = Number(d.cash_amount);
+          if (!RE_DATA.test(pay) || !Number.isFinite(cash) || cash <= 0) continue;
+          item.proventos_fonte++;
+          if (pay >= hoje) item.futuros++;
+          if (pay >= dataCorte) item.na_janela++;
+        }
+        if (item.na_janela > 0 && !tipos.get("Dividendos")) item.tipos_pendentes = ["Dividendos"];
+      } catch (e) { item.erro = String((e as Error).message ?? e); }
+    }
+  }
+
+  logSuccess("Diagnóstico de proventos", { userId, ativos: itens.length });
+  return json({ dados: {
+    hoje, janela_dias: DIAS_RETROATIVOS_PROVENTOS, data_corte: dataCorte,
+    ptax_ultima: ptaxUltima, polygon_key: polygonKey,
+    tipos: [...tipos.entries()].map(([nome, mapeado]) => ({ nome, mapeado })),
+    ativos: itens,
+  } });
+}
+
+// ============================================================
 // /investimentos/rendimento-cripto (POST, JWT do usuário)
 //
 // Materializa o rendimento (yield) das criptos com cripto_rendimento_aa > 0
@@ -3361,13 +3486,21 @@ function classeDoIsin(isin: string): "ON" | "PN" | null {
   return null;
 }
 
+// URLs dos endpoints públicos da B3 (supplement = inclui cashDividends).
+function urlSupplementCompanhiaB3(issuer: string): string {
+  const params = btoa(JSON.stringify({ issuingCompany: issuer, language: "pt-br" }));
+  return `https://sistemaswebb3-listados.b3.com.br/listedCompaniesProxy/CompanyCall/GetListedSupplementCompany/${params}`;
+}
+function urlSupplementFundoB3(identifier: string): string {
+  const params = btoa(JSON.stringify({ typeFund: 7, identifierFund: identifier }));
+  return `https://sistemaswebb3-listados.b3.com.br/fundsProxy/fundsCall/GetListedSupplementFunds/${params}`;
+}
+
 // Proventos de COMPANHIA (ações/ETF) — GetListedSupplementCompany.
 // null = a B3 não respondeu (difere de "sem proventos anunciados").
 async function buscarProventosCompanhiaB3(issuer: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null })[] | null> {
   if (!issuer) return [];
-  const params = btoa(JSON.stringify({ issuingCompany: issuer, language: "pt-br" }));
-  const url = `https://sistemaswebb3-listados.b3.com.br/listedCompaniesProxy/CompanyCall/GetListedSupplementCompany/${params}`;
-  const data = await fetchB3<{ cashDividends?: B3CashDividend[] }[]>(url, issuer);
+  const data = await fetchB3<{ cashDividends?: B3CashDividend[] }[]>(urlSupplementCompanhiaB3(issuer), issuer);
   if (data === "falha") return null;
   const reg = Array.isArray(data) ? data[0] : data;
   return mapearCashDividends(reg?.cashDividends);
@@ -3377,9 +3510,7 @@ async function buscarProventosCompanhiaB3(issuer: string): Promise<(ProventoB3 &
 // null = a B3 não respondeu (difere de "sem proventos anunciados").
 async function buscarProventosFundoB3(identifier: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null })[] | null> {
   if (!identifier) return [];
-  const params = btoa(JSON.stringify({ typeFund: 7, identifierFund: identifier }));
-  const url = `https://sistemaswebb3-listados.b3.com.br/fundsProxy/fundsCall/GetListedSupplementFunds/${params}`;
-  const data = await fetchB3<{ cashDividends?: B3CashDividend[] }>(url, identifier);
+  const data = await fetchB3<{ cashDividends?: B3CashDividend[] }>(urlSupplementFundoB3(identifier), identifier);
   if (data === "falha") return null;
   const reg = Array.isArray(data) ? data[0] : data;
   return mapearCashDividends(reg?.cashDividends);
@@ -3403,23 +3534,22 @@ function mapearCashDividends(lista?: B3CashDividend[]): (ProventoB3 & { classe: 
   return out;
 }
 
+// Headers de navegador: o WAF da B3 (Akamai) recusa clients "crus".
+const B3_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+  "Accept": "application/json, text/plain, */*",
+  "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+  "Referer": "https://sistemaswebb3-listados.b3.com.br/",
+  "Origin": "https://sistemaswebb3-listados.b3.com.br",
+};
+
 // GET JSON na B3 com timeout, headers de navegador e 1 retry. Distingue os
 // desfechos: T = resposta ok; null = resposta VAZIA legítima (ativo sem
 // dados); "falha" = a B3 não respondeu (HTTP != 2xx, timeout, corpo inválido).
 async function fetchB3<T>(url: string, ref: string): Promise<T | null | "falha"> {
   for (let tentativa = 1; tentativa <= 2; tentativa++) {
     try {
-      const res = await fetch(url, {
-        headers: {
-          // Headers de navegador: o WAF da B3 (Akamai) recusa clients "crus"
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-          "Accept": "application/json, text/plain, */*",
-          "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-          "Referer": "https://sistemaswebb3-listados.b3.com.br/",
-          "Origin": "https://sistemaswebb3-listados.b3.com.br",
-        },
-        signal: AbortSignal.timeout(8000),
-      });
+      const res = await fetch(url, { headers: B3_HEADERS, signal: AbortSignal.timeout(8000) });
       if (!res.ok) { logError("B3 proventos", `${ref}: HTTP ${res.status} (tentativa ${tentativa})`); continue; }
       const txt = await res.text();
       if (!txt || txt === '""' || txt === "null") return null;

@@ -135,6 +135,13 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
+  // Diagnóstico DRY-RUN da busca de proventos: testa cada elo (posição,
+  // fonte, HTTP, janela, tipos mapeados) sem lançar nada.
+  const diagnostico = async (): Promise<OpResult<DiagnosticoProventos>> => {
+    const res = await apiFetch<DiagnosticoProventos>('/investimentos/dividendos-diagnostico')
+    return { ok: res.ok, dados: res.dados ?? null, erro: res.erro }
+  }
+
   // Vincula em lote proventos já no extrato (RECEITA em categoria de
   // investimento) que estão sem inv_dividendos — ex.: projeções de FII na mão.
   const associarMassa = async (): Promise<OpResult<ResultadoAssociarMassa>> => {
@@ -154,6 +161,7 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     excluir,
     buscarBrl,
     buscarUsd,
+    diagnostico,
     backfillRate,
     associarMassa,
     invalidar,
@@ -171,6 +179,30 @@ export interface ResultadoAssociarMassa {
   associados:     number
   sem_ativo:      number
   ja_vinculados:  number
+}
+
+export interface DiagnosticoProventosAtivo {
+  ticker:          string
+  tipo_ativo:      string
+  moeda:           string
+  posicao_ativa:   boolean
+  fonte:           'B3' | 'Polygon' | null
+  http:            number | null
+  erro:            string | null
+  proventos_fonte: number
+  na_janela:       number
+  futuros:         number
+  tipos_pendentes: string[]
+}
+
+export interface DiagnosticoProventos {
+  hoje:        string
+  janela_dias: number
+  data_corte:  string
+  ptax_ultima: string | null
+  polygon_key: boolean
+  tipos:       { nome: string; mapeado: boolean }[]
+  ativos:      DiagnosticoProventosAtivo[]
 }
 
 export interface ResultadoBuscaProventos {

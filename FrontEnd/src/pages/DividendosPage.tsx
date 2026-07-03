@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect, type ReactNode } from 'react'
-import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, ChevronDown, ChevronRight, Layers, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, ChevronDown, ChevronRight, Layers, AlertTriangle, RefreshCw, Stethoscope } from 'lucide-react'
 import { Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, type Plugin, type ChartType } from 'chart.js'
 import { Link } from 'react-router-dom'
-import { useDividendos, type CriarDividendoInput } from '../hooks/useDividendos'
+import { useDividendos, type CriarDividendoInput, type DiagnosticoProventos } from '../hooks/useDividendos'
 import { useObjetivos } from '../hooks/useObjetivos'
 import { useTiposDividendo } from '../hooks/useTiposDividendo'
 import { useAvisosDividendos, type AvisoTipoDividendo } from '../hooks/useAvisosDividendos'
@@ -86,6 +86,7 @@ export default function DividendosPage() {
   const [drawerNovo,   setDrawerNovo]   = useState(false)
   const [drawerConfig, setDrawerConfig] = useState(false)
   const [drawerAssoc,  setDrawerAssoc]  = useState(false)
+  const [drawerDiag,   setDrawerDiag]   = useState(false)
   const [excluindo,    setExcluindo]    = useState<InvestimentoDividendo | null>(null)
   const [confirmando,  setConfirmando]  = useState<InvestimentoDividendo | null>(null)
   const [salvando,     setSalvando]     = useState(false)
@@ -105,16 +106,17 @@ export default function DividendosPage() {
     setBuscando(false)
     if (!br.ok && !usd.ok) { showToast(br.erro ?? usd.erro ?? 'Erro ao buscar proventos'); return }
 
-    const soma = (k: 'criados' | 'atualizados' | 'pulados' | 'falhas_fonte') =>
+    const soma = (k: 'processados' | 'criados' | 'atualizados' | 'pulados' | 'falhas_fonte') =>
       (br.dados?.[k] ?? 0) + (usd.dados?.[k] ?? 0)
     const criados = soma('criados'), atualizados = soma('atualizados')
     const pulados = soma('pulados'), falhas = soma('falhas_fonte')
+    const processados = soma('processados')
     const tickersFalha = [...(br.dados?.fontes_falha ?? []), ...(usd.dados?.fontes_falha ?? [])]
 
     const partes: string[] = []
-    partes.push(criados + atualizados === 0
-      ? 'Busca concluída — nenhum provento novo.'
-      : `Busca concluída — ${criados} novo(s), ${atualizados} atualizado(s).`)
+    if (criados + atualizados > 0) partes.push(`Busca concluída — ${criados} novo(s), ${atualizados} atualizado(s).`)
+    else if (processados === 0 && falhas === 0) partes.push('Busca concluída — nenhum ativo elegível com posição ativa foi processado. Clique em "Diagnóstico" para ver o motivo.')
+    else partes.push('Busca concluída — nenhum provento novo. Use o "Diagnóstico" para ver o que cada fonte devolveu.')
     if (falhas > 0) partes.push(`Fonte indisponível para ${falhas} ativo(s)${tickersFalha.length ? ` (${tickersFalha.slice(0, 5).join(', ')}${tickersFalha.length > 5 ? '…' : ''})` : ''} — tente de novo mais tarde.`)
     if (pulados > 0) partes.push(`${pulados} provento(s) pulado(s) por tipo sem categoria — veja "Configurar tipos".`)
     if (!usd.ok && usd.erro) partes.push(`Internacionais: ${usd.erro}`)
@@ -173,6 +175,11 @@ export default function DividendosPage() {
             title="Busca proventos na B3 (ações, ETFs e FIIs em BRL) e na Polygon (ativos internacionais em USD): provisiona os futuros e lança os pagos nos últimos 30 dias">
             <RefreshCw size={15} className={buscando ? 'animate-spin' : ''} /> {buscando ? 'Buscando…' : 'Buscar proventos'}
           </button>
+          <button onClick={() => setDrawerDiag(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25"
+            title="Testa cada elo da busca de proventos (posição, fonte, tipos) sem lançar nada — use quando a busca voltar vazia">
+            <Stethoscope size={15} /> Diagnóstico
+          </button>
           <button onClick={backfillYoc} disabled={backfilling}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
             title="Re-busca da B3 o dividendo por cota dos proventos antigos — corrige DY e Yield on Cost no padrão investidor10">
@@ -222,6 +229,7 @@ export default function DividendosPage() {
       {drawerNovo   && <DrawerNovoDividendo onClose={() => setDrawerNovo(false)} onToast={showToast} />}
       {drawerConfig && <DrawerConfigTipos   onClose={() => setDrawerConfig(false)} onToast={showToast} />}
       {drawerAssoc  && <DrawerAssociar      onClose={() => setDrawerAssoc(false)} onToast={showToast} />}
+      {drawerDiag   && <DrawerDiagnostico   onClose={() => setDrawerDiag(false)} />}
       {confirmando  && <DrawerConfirmar dividendo={confirmando} onClose={() => setConfirmando(null)} onToast={showToast} />}
 
       {excluindo && (
@@ -1747,6 +1755,115 @@ function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m
             </div>
           )}
         </>
+      )}
+    </Drawer>
+  )
+}
+
+// ── Drawer: diagnóstico da busca de proventos (dry-run) ──────
+// Mostra, por ativo, cada elo da corrente de provisão: posição ativa,
+// fonte coberta, resposta HTTP da fonte, proventos devolvidos/na janela
+// e tipos sem categoria. Não lança nada — só explica por que a busca
+// voltou (ou voltaria) vazia.
+function DrawerDiagnostico({ onClose }: { onClose: () => void }) {
+  const { diagnostico } = useDividendos()
+  const [dados, setDados] = useState<DiagnosticoProventos | null>(null)
+  const [erro,  setErro]  = useState<string | null>(null)
+
+  useEffect(() => {
+    let vivo = true
+    diagnostico().then((r) => {
+      if (!vivo) return
+      if (r.ok && r.dados) setDados(r.dados)
+      else setErro(r.erro ?? 'Erro ao executar o diagnóstico')
+    })
+    return () => { vivo = false }
+    // roda uma única vez ao abrir o drawer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const OK  = '#00c896'
+  const BAD = '#ff6b6b'
+  const WRN = '#ffb74d'
+
+  // Conclusão por ativo: qual elo quebra a provisão deste ativo?
+  function conclusao(a: DiagnosticoProventos['ativos'][number]): { txt: string; cor: string } {
+    if (!a.fonte)            return { txt: 'sem fonte de proventos (tipo/moeda fora da cobertura B3/Polygon)', cor: MUTED }
+    if (!a.posicao_ativa)    return { txt: 'sem posição ATIVA — a busca pula este ativo', cor: WRN }
+    if (a.erro)              return { txt: `fonte falhou: ${a.erro}`, cor: BAD }
+    if (a.proventos_fonte === 0) return { txt: 'a fonte respondeu, mas sem nenhum provento anunciado para este ativo', cor: WRN }
+    if (a.na_janela === 0)   return { txt: `há ${a.proventos_fonte} provento(s) na fonte, mas nenhum com pagamento na janela (futuros + últimos 30 dias)`, cor: WRN }
+    if (a.tipos_pendentes.length > 0) return { txt: `seria lançado, mas o(s) tipo(s) ${a.tipos_pendentes.join(', ')} está(ão) sem categoria — mapeie em "Configurar tipos"`, cor: WRN }
+    return { txt: `${a.na_janela} provento(s) na janela — a busca deve lançar/atualizar`, cor: OK }
+  }
+
+  return (
+    <Drawer open onClose={onClose} titulo="Diagnóstico de proventos"
+      subtitulo="Testa a busca de ponta a ponta, sem lançar nada">
+      {!dados && !erro && (
+        <div className="flex items-center gap-2 text-[14px]" style={{ color: MUTED }}>
+          <RefreshCw size={15} className="animate-spin" /> Consultando B3/Polygon para cada ativo…
+        </div>
+      )}
+      {erro && <p className="text-[14px]" style={{ color: BAD }}>{erro}</p>}
+      {dados && (
+        <div className="space-y-4 text-[13px]">
+          {/* Pré-requisitos globais */}
+          <div className="rounded-lg border border-white/10 p-3 space-y-1">
+            <p className="font-semibold text-white mb-1">Pré-requisitos</p>
+            <p style={{ color: dados.ptax_ultima ? MUTED : BAD }}>
+              PTAX: {dados.ptax_ultima ? `sincronizada até ${formatData(dados.ptax_ultima)}` : 'INDISPONÍVEL — bloqueia proventos em USD'}
+            </p>
+            <p style={{ color: dados.polygon_key ? MUTED : WRN }}>
+              Chave Polygon (ativos USD): {dados.polygon_key ? 'configurada' : 'NÃO configurada — internacionais não são buscados'}
+            </p>
+            <p style={{ color: MUTED }}>
+              Janela de provisão: futuros + últimos {dados.janela_dias} dias (desde {formatData(dados.data_corte)})
+            </p>
+          </div>
+
+          {/* Tipos de provento */}
+          <div className="rounded-lg border border-white/10 p-3">
+            <p className="font-semibold text-white mb-2">Tipos de provento</p>
+            <div className="flex flex-wrap gap-1.5">
+              {dados.tipos.length === 0 && (
+                <p style={{ color: BAD }}>Nenhum tipo cadastrado — nada pode ser lançado.</p>
+              )}
+              {dados.tipos.map((t) => (
+                <span key={t.nome} className="px-2 py-0.5 rounded-full border text-[12px]"
+                  style={{ borderColor: t.mapeado ? `${OK}55` : `${WRN}88`, color: t.mapeado ? OK : WRN }}>
+                  {t.nome} {t.mapeado ? '✓' : '· sem categoria'}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Por ativo */}
+          <div className="rounded-lg border border-white/10 p-3 space-y-3">
+            <p className="font-semibold text-white">Ativos ({dados.ativos.length})</p>
+            {dados.ativos.length === 0 && (
+              <p style={{ color: BAD }}>Nenhum ativo cadastrado em investimentos.</p>
+            )}
+            {dados.ativos.map((a) => {
+              const c = conclusao(a)
+              return (
+                <div key={`${a.ticker}-${a.tipo_ativo}`} className="border-t border-white/5 pt-2 first:border-t-0 first:pt-0">
+                  <p className="text-white font-semibold">
+                    {a.ticker} <span className="font-normal" style={{ color: MUTED }}>· {a.tipo_ativo} · {a.moeda}</span>
+                  </p>
+                  <p style={{ color: MUTED }}>
+                    posição ativa: {a.posicao_ativa ? 'sim' : 'não'}
+                    {a.fonte ? ` · fonte: ${a.fonte}` : ''}
+                    {a.http != null ? ` · HTTP ${a.http}` : ''}
+                    {a.fonte && a.posicao_ativa && !a.erro
+                      ? ` · ${a.proventos_fonte} na fonte / ${a.na_janela} na janela / ${a.futuros} futuro(s)` : ''}
+                  </p>
+                  <p style={{ color: c.cor }}>→ {c.txt}</p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       )}
     </Drawer>
   )
