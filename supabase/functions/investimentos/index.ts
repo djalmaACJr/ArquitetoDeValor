@@ -3271,44 +3271,65 @@ async function rotaDividendosDiagnostico(c: Db, m: string, userId: string) {
 // ============================================================
 // /investimentos/migrar-conta (POST, JWT do usuário)
 //
-// Move TODOS os dados de investimento de uma conta para outra — caso
-// típico: a importação criou uma conta provisória ("Investimentos XP") e
-// o usuário quer consolidar na conta real. Migra em bloco:
-//   • inv_posicoes / inv_operacoes → update simples de conta_id;
+// Move os dados de investimento de uma conta para outra — caso típico:
+// a importação criou uma conta provisória ("Investimentos XP") e o
+// usuário quer consolidar na conta real. `ativo_ids` (opcional) restringe
+// a migração a ativos específicos: sem ele, migra a conta inteira.
+//   • inv_posicoes → update de conta_id; inv_operacoes acompanham as
+//     posições migradas (histórico da posição segue junto);
 //   • inv_dividendos → update de conta_id + as transações vinculadas no
 //     extrato acompanham (o saldo sai de uma conta e entra na outra);
 //   • inv_historico_mensal → tem UNIQUE (ativo, conta, mês): meses sem
 //     conflito são movidos; em conflito os valores são SOMADOS no destino
 //     (mesmo ativo nas duas contas) e a linha de origem removida.
-// Tudo via RLS do usuário (c) — só alcança as próprias linhas. A conta de
-// origem fica vazia de investimentos; pode ser inativada/excluída depois.
+// O destino precisa ser uma conta de INVESTIMENTO ativa. Tudo via RLS do
+// usuário (c) — só alcança as próprias linhas.
 // ============================================================
 async function rotaMigrarConta(c: Db, req: Request, m: string, _userId: string) {
   if (m !== "POST") return erro("Método não permitido", 405);
   const body = await req.json();
   const de   = String(body?.de_conta_id ?? "");
   const para = String(body?.para_conta_id ?? "");
-  logRequest("POST", "/investimentos/migrar-conta", { de, para });
+  const ativoIds = Array.isArray(body?.ativo_ids)
+    ? [...new Set((body.ativo_ids as unknown[]).map(String).filter(Boolean))]
+    : null; // null = migrar a conta inteira
+  logRequest("POST", "/investimentos/migrar-conta", { de, para, ativos: ativoIds?.length ?? "todos" });
 
   if (!de || !para)  return erro("Campos obrigatórios: de_conta_id, para_conta_id");
   if (de === para)   return erro("As contas de origem e destino devem ser diferentes");
-  if (!(await contaExiste(c, de)))   return erro("Conta de origem não encontrada", 404);
-  if (!(await contaExiste(c, para))) return erro("Conta de destino não encontrada", 404);
+  if (ativoIds && ativoIds.length === 0) return erro("Selecione ao menos um ativo para migrar");
+  if (!(await contaExiste(c, de))) return erro("Conta de origem não encontrada", 404);
+  const { data: contaPara } = await c.from("contas")
+    .select("id, tipo, ativa").eq("id", para).maybeSingle();
+  if (!contaPara) return erro("Conta de destino não encontrada", 404);
+  if (contaPara.tipo !== "INVESTIMENTO") return erro("A conta de destino deve ser do tipo INVESTIMENTO", 409);
+  if (!contaPara.ativa) return erro("A conta de destino precisa estar ativa", 409);
 
-  // 1) Posições e operações — update em bloco
-  const { data: posMov, error: errPos } = await c.from("inv_posicoes")
-    .update({ conta_id: para }).eq("conta_id", de).select("id");
+  // 1) Posições — update em bloco (da conta e, se pedido, só dos ativos)
+  let qPos = c.from("inv_posicoes").update({ conta_id: para }).eq("conta_id", de);
+  if (ativoIds) qPos = qPos.in("ativo_id", ativoIds);
+  const { data: posMov, error: errPos } = await qPos.select("id");
   if (errPos) { logError("migrar-conta posicoes", errPos); return erro(errPos.message); }
-  const { data: opMov, error: errOp } = await c.from("inv_operacoes")
-    .update({ conta_id: para }).eq("conta_id", de).select("id");
-  if (errOp) { logError("migrar-conta operacoes", errOp); return erro(errOp.message); }
 
-  // 2) Dividendos + transações vinculadas no extrato
-  const { data: divs, error: errDivSel } = await c.from("inv_dividendos")
-    .select("id, transacao_extrato_id").eq("conta_id", de);
+  // 2) Operações — seguem as posições migradas (histórico completo da posição)
+  const posIds = ((posMov ?? []) as { id: string }[]).map((p) => p.id);
+  let opMovidas = 0;
+  for (let i = 0; i < posIds.length; i += 200) {
+    const lote = posIds.slice(i, i + 200);
+    const { data: ops, error: errOp } = await c.from("inv_operacoes")
+      .update({ conta_id: para }).in("posicao_id", lote).select("id");
+    if (errOp) { logError("migrar-conta operacoes", errOp); return erro(errOp.message); }
+    opMovidas += (ops ?? []).length;
+  }
+
+  // 3) Dividendos + transações vinculadas no extrato
+  let qDivSel = c.from("inv_dividendos").select("id, transacao_extrato_id").eq("conta_id", de);
+  if (ativoIds) qDivSel = qDivSel.in("ativo_id", ativoIds);
+  const { data: divs, error: errDivSel } = await qDivSel;
   if (errDivSel) { logError("migrar-conta dividendos sel", errDivSel); return erro(errDivSel.message); }
-  const { error: errDiv } = await c.from("inv_dividendos")
-    .update({ conta_id: para }).eq("conta_id", de);
+  let qDivUpd = c.from("inv_dividendos").update({ conta_id: para }).eq("conta_id", de);
+  if (ativoIds) qDivUpd = qDivUpd.in("ativo_id", ativoIds);
+  const { error: errDiv } = await qDivUpd;
   if (errDiv) { logError("migrar-conta dividendos", errDiv); return erro(errDiv.message); }
 
   const txIds = ((divs ?? []) as { transacao_extrato_id: string | null }[])
@@ -3323,10 +3344,12 @@ async function rotaMigrarConta(c: Db, req: Request, m: string, _userId: string) 
     txMovidas += (txs ?? []).length;
   }
 
-  // 3) Histórico mensal — UNIQUE (ativo, conta, mes): move ou mescla
-  const { data: histOrig, error: errHo } = await c.from("inv_historico_mensal")
+  // 4) Histórico mensal — UNIQUE (ativo, conta, mes): move ou mescla
+  let qHist = c.from("inv_historico_mensal")
     .select("id, ativo_id, mes_ano, valor_mercado, quantidade, preco_medio, rentabilidade_mes")
     .eq("conta_id", de);
+  if (ativoIds) qHist = qHist.in("ativo_id", ativoIds);
+  const { data: histOrig, error: errHo } = await qHist;
   if (errHo) { logError("migrar-conta hist origem", errHo); return erro(errHo.message); }
   const { data: histDest } = await c.from("inv_historico_mensal")
     .select("id, ativo_id, mes_ano, valor_mercado, quantidade, preco_medio, rentabilidade_mes")
@@ -3365,7 +3388,7 @@ async function rotaMigrarConta(c: Db, req: Request, m: string, _userId: string) 
 
   const resultado = {
     posicoes:        (posMov ?? []).length,
-    operacoes:       (opMov ?? []).length,
+    operacoes:       opMovidas,
     dividendos:      (divs ?? []).length,
     transacoes:      txMovidas,
     historico_movido:   histMovidos,

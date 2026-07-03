@@ -12,6 +12,7 @@ import { useInvPesos } from '../hooks/useInvPesos'
 import { useResumoAposentadoria } from '../hooks/useResumoAposentadoria'
 import { estimarIdade, formatData, formatBRL } from '../lib/utils'
 import { Input, BtnSalvar, Toast, ModalExcluir, SelectDark } from '../components/ui/shared'
+import { MultiSelect } from '../components/ui/MultiSelect'
 import { useContas } from '../hooks/useContas'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import Mascote from '../components/ui/Mascote'
@@ -823,38 +824,67 @@ function SeloOrigem({ origem, provedor, modelo }: {
 // do extrato juntas) e o histórico mensal (mesclando meses em conflito).
 function SecaoMigrarConta({ onToast }: { onToast: (m: string) => void }) {
   const { contas } = useContas()
-  const { migrarConta } = useInvestimentosPosicoes()
+  const { posicoes, migrarConta } = useInvestimentosPosicoes()
   const [de,   setDe]   = useState('')
   const [para, setPara] = useState('')
+  const [sel,  setSel]  = useState<string[]>([])
   const [confirmando, setConfirmando] = useState(false)
   const [migrando,    setMigrando]    = useState(false)
 
-  const ativas = contas.filter((c) => c.ativa)
-  const nomeDe   = ativas.find((c) => c.conta_id === de)?.nome ?? ''
-  const nomePara = ativas.find((c) => c.conta_id === para)?.nome ?? ''
+  // Só contas de INVESTIMENTO ativas fazem sentido aqui (origem e destino)
+  const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa)
+  const nomeDe   = contasInvest.find((c) => c.conta_id === de)?.nome ?? ''
+  const nomePara = contasInvest.find((c) => c.conta_id === para)?.nome ?? ''
+
+  // Ativos com posição (qualquer status) na conta de origem
+  const opcoesAtivos = useMemo(() => {
+    const porAtivo = new Map<string, string>()
+    for (const p of posicoes) {
+      if (p.conta_id !== de || !p.ativo_id) continue
+      const rotulo = p.inv_ativos?.ticker
+        ? `${p.inv_ativos.ticker}${p.inv_ativos?.nome ? ` — ${p.inv_ativos.nome}` : ''}`
+        : p.ativo_id
+      porAtivo.set(p.ativo_id, rotulo)
+    }
+    return [...porAtivo.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [posicoes, de])
+
+  // Ao trocar a conta de origem, pré-seleciona todos os ativos dela
+  // (derived-state-on-change, mesmo padrão da SecaoPerfil).
+  const [deAnterior, setDeAnterior] = useState('')
+  if (de !== deAnterior) {
+    setDeAnterior(de)
+    setSel(opcoesAtivos.map((o) => o.value))
+  }
+
+  const todosSelecionados = sel.length === opcoesAtivos.length && opcoesAtivos.length > 0
 
   async function migrar() {
     setConfirmando(false)
     setMigrando(true)
-    const res = await migrarConta(de, para)
+    // Todos selecionados → migra a conta inteira (inclui dividendos/histórico
+    // de ativos sem posição na conta); seleção parcial → só os escolhidos.
+    const res = await migrarConta(de, para, todosSelecionados ? undefined : sel)
     setMigrando(false)
     if (!res.ok) { onToast(res.erro ?? 'Erro ao migrar conta'); return }
     const d = res.dados
     onToast(`Migração concluída: ${d?.posicoes ?? 0} posição(ões), ${d?.operacoes ?? 0} operação(ões), ` +
       `${d?.dividendos ?? 0} provento(s) (${d?.transacoes ?? 0} lançamento(s) do extrato) e ` +
       `${(d?.historico_movido ?? 0) + (d?.historico_mesclado ?? 0)} mês(es) de histórico.`)
-    setDe(''); setPara('')
+    setDe(''); setPara(''); setSel([])
   }
 
   return (
     <Secao icone={<ArrowRightLeft size={16} />} titulo="Migrar conta de investimentos"
-      subtitulo="Move TUDO de uma conta para outra: posições, operações, proventos (inclusive os lançamentos no extrato — o saldo acompanha) e o histórico mensal. Útil para consolidar a conta provisória criada pela importação na sua conta real. A conta de origem fica vazia e pode ser inativada depois.">
+      subtitulo="Move posições, operações, proventos (inclusive os lançamentos no extrato — o saldo acompanha) e o histórico mensal para outra conta. Escolha quais ativos migrar — útil para redistribuir a conta provisória criada pela importação entre as suas contas reais.">
       <div className="flex items-end gap-3 flex-wrap">
         <div>
           <p className="text-[12.5px] mb-1" style={{ color: MUTED }}>De (conta de origem)</p>
           <SelectDark value={de} onChange={(e) => setDe(e.target.value)} style={{ width: 260 }}>
             <option value="">Selecione…</option>
-            {ativas.map((c) => (
+            {contasInvest.map((c) => (
               <option key={c.conta_id} value={c.conta_id} disabled={c.conta_id === para}>{c.nome}</option>
             ))}
           </SelectDark>
@@ -863,12 +893,22 @@ function SecaoMigrarConta({ onToast }: { onToast: (m: string) => void }) {
           <p className="text-[12.5px] mb-1" style={{ color: MUTED }}>Para (conta de destino)</p>
           <SelectDark value={para} onChange={(e) => setPara(e.target.value)} style={{ width: 260 }}>
             <option value="">Selecione…</option>
-            {ativas.map((c) => (
+            {contasInvest.map((c) => (
               <option key={c.conta_id} value={c.conta_id} disabled={c.conta_id === de}>{c.nome}</option>
             ))}
           </SelectDark>
         </div>
-        <button onClick={() => setConfirmando(true)} disabled={!de || !para || de === para || migrando}
+        <div>
+          <p className="text-[12.5px] mb-1" style={{ color: MUTED }}>
+            Ativos a migrar {de && opcoesAtivos.length > 0 ? `(${sel.length}/${opcoesAtivos.length})` : ''}
+          </p>
+          <div style={{ width: 300 }}>
+            <MultiSelect options={opcoesAtivos} values={sel} onChange={setSel}
+              placeholder={!de ? 'Escolha a conta de origem…' : opcoesAtivos.length === 0 ? 'Sem posições nesta conta' : 'Selecionar ativos…'} />
+          </div>
+        </div>
+        <button onClick={() => setConfirmando(true)}
+          disabled={!de || !para || de === para || sel.length === 0 || migrando}
           className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg border text-[14px] font-semibold transition-all disabled:opacity-40"
           style={{ borderColor: `${AMBAR}66`, color: AMBAR }}>
           <ArrowRightLeft size={15} className={migrando ? 'animate-pulse' : ''} />
@@ -886,7 +926,8 @@ function SecaoMigrarConta({ onToast }: { onToast: (m: string) => void }) {
           <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-md mx-4 p-5">
             <p className="text-[18px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>Confirmar migração</p>
             <p className="text-[15px] mb-5" style={{ color: MUTED }}>
-              Mover todos os investimentos de <strong className="text-white">"{nomeDe}"</strong> para{' '}
+              Mover {todosSelecionados ? 'todos os investimentos' : `${sel.length} ativo(s)`} de{' '}
+              <strong className="text-white">"{nomeDe}"</strong> para{' '}
               <strong className="text-white">"{nomePara}"</strong>? Os lançamentos de proventos no extrato
               mudam de conta junto (o saldo sai de uma e entra na outra).
             </p>
