@@ -214,4 +214,7 @@ export interface ResultadoBuscaProventos {
   // permite diferenciar "sem provento novo" de "a fonte falhou".
   falhas_fonte?: number
   fontes_falha?: string[]
+  // Falhas ao gravar no banco (ex.: migration não aplicada)
+  erros?:        number
+  erro_exemplo?: string | null
 }

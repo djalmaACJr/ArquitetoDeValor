@@ -2583,6 +2583,8 @@ async function rotaDividendosBuscarUsd(_req: Request, m: string, userId: string)
 interface ResultadoProvisaoProventos {
   processados: number; criados: number; atualizados: number;
   pulados: number; falhas_fonte: number; fontes_falha: string[];
+  // Falhas ao GRAVAR no banco (insert/update) — ex.: migration faltando.
+  erros: number; erro_exemplo: string | null;
 }
 
 // Núcleo compartilhado: provisiona proventos de ativos em USD via Polygon.
@@ -2601,7 +2603,7 @@ async function provisionarProventosUsd(
   const { data: ativos, error } = await consulta;
   if (error) { logError("dividendos-usd ativos", error); throw new Error(error.message); }
   if (!ativos || ativos.length === 0) {
-    return { processados: 0, criados: 0, atualizados: 0, pulados: 0, falhas_fonte: 0, fontes_falha: [] };
+    return { processados: 0, criados: 0, atualizados: 0, pulados: 0, falhas_fonte: 0, fontes_falha: [], erros: 0, erro_exemplo: null };
   }
 
   const apiKey = Deno.env.get("POLYGON_API_KEY") ?? "";
@@ -2611,7 +2613,8 @@ async function provisionarProventosUsd(
   try { await garantirSincronizado(admin); } catch (e) { logError("dividendos-usd ptax", e); }
   if (!(await ptaxVendaAte(admin, hoje))) { logError("dividendos-usd", "PTAX indisponível"); throw new Error("PTAX indisponível"); }
 
-  let processados = 0, criados = 0, atualizados = 0, pulados = 0, falhasFonte = 0;
+  let processados = 0, criados = 0, atualizados = 0, pulados = 0, falhasFonte = 0, erros = 0;
+  let erroExemplo: string | null = null;
   const fontesFalha: string[] = [];
   for (const ativo of ativos as { id: string; user_id: string; ticker: string; tipo_ativo: string }[]) {
     try {
@@ -2663,14 +2666,16 @@ async function provisionarProventosUsd(
             // rate por ação convertido p/ BRL (mesma moeda do valor lançado)
             valorPorCota: Number((cashPorAcao * ptax).toFixed(8)),
           });
-          if (r === "criado") criados++; else if (r === "atualizado") atualizados++;
+          if (r === "criado") criados++;
+          else if (r === "atualizado") atualizados++;
+          else if (typeof r === "object") { erros++; erroExemplo ??= `${ativo.ticker}: ${r.erro}`; }
         }
       }
     } catch (e) { logError("dividendos-usd ativo", e); }
   }
 
-  logSuccess("Dividendos USD", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados, falhasFonte });
-  return { processados, criados, atualizados, pulados, falhas_fonte: falhasFonte, fontes_falha: fontesFalha };
+  logSuccess("Dividendos USD", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados, falhasFonte, erros });
+  return { processados, criados, atualizados, pulados, falhas_fonte: falhasFonte, fontes_falha: fontesFalha, erros, erro_exemplo: erroExemplo };
 }
 
 // Última PTAX (venda) com data <= alvo (último dia útil). Para datas
@@ -2710,7 +2715,7 @@ async function upsertDividendoProvisionado(admin: Db, p: {
   userId: string; ativoId: string; contaId: string; tipoAtivo: string;
   tipoDivId: string; categoriaId: string; ticker: string; valor: number; payDate: string;
   rotulo?: string; valorPorCota?: number | null;
-}): Promise<"criado" | "atualizado" | "ignorado"> {
+}): Promise<"criado" | "atualizado" | "ignorado" | { erro: string }> {
   // Dividendo por cota (rate da fonte) na moeda do lançamento; usado por DY/YoC.
   const vpc = p.valorPorCota != null && Number.isFinite(p.valorPorCota) && p.valorPorCota > 0
     ? Number(p.valorPorCota) : null;
@@ -2773,7 +2778,7 @@ async function upsertDividendoProvisionado(admin: Db, p: {
       tipo_dividendo_id: p.tipoDivId, descricao: null, transacao_extrato_id: manual.id,
       valor_por_cota: vpc,
     }).select("id").single();
-    if (errDiv || !div) { logError("dividendos-cron adotar div", errDiv); return "ignorado"; }
+    if (errDiv || !div) { logError("dividendos-cron adotar div", errDiv); return { erro: errDiv?.message ?? "falha ao adotar lançamento" }; }
     if (!soVinculo) {
       // Atualiza valor/data do lançamento manual com os números reais da fonte
       // (o trigger trg_sync_transacao_dividendo mantém o dividendo alinhado).
@@ -2791,7 +2796,7 @@ async function upsertDividendoProvisionado(admin: Db, p: {
     valor: p.valor, data_pagamento: p.payDate, tipo_ativo: p.tipoAtivo,
     tipo_dividendo_id: p.tipoDivId, descricao: null, valor_por_cota: vpc,
   }).select("id").single();
-  if (errDiv || !div) { logError("dividendos-cron criar div", errDiv); return "ignorado"; }
+  if (errDiv || !div) { logError("dividendos-cron criar div", errDiv); return { erro: errDiv?.message ?? "falha ao criar dividendo" }; }
 
   const desc = `${p.ticker} - ${p.rotulo ?? "Dividendos"}`.slice(0, 200);
   const { data: tx, error: errTx } = await admin.from("transacoes").insert({
@@ -2806,7 +2811,7 @@ async function upsertDividendoProvisionado(admin: Db, p: {
   if (errTx || !tx) {
     await admin.from("inv_dividendos").delete().eq("id", div.id); // rollback
     logError("dividendos-cron criar tx", errTx);
-    return "ignorado";
+    return { erro: errTx?.message ?? "falha ao lançar no extrato" };
   }
 
   await admin.from("inv_dividendos").update({ transacao_extrato_id: tx.id }).eq("id", div.id);
@@ -2963,7 +2968,8 @@ async function provisionarProventosBrl(
   // Novidades por usuário (criados/atualizados) para o aviso de login.
   const nov = new Map<string, { criados: number; atualizados: number; itens: NovidadeItem[] }>();
 
-  let processados = 0, criados = 0, atualizados = 0, pulados = 0, falhasFonte = 0;
+  let processados = 0, criados = 0, atualizados = 0, pulados = 0, falhasFonte = 0, erros = 0;
+  let erroExemplo: string | null = null;
   const fontesFalha: string[] = [];
   for (const ativo of (ativos ?? []) as AtivoBrl[]) {
     try {
@@ -3015,6 +3021,8 @@ async function provisionarProventosBrl(
               ticker: ativo.ticker, tipo: nomeTipo, data_pagamento: pv.payDate,
               valor: valorBRL, acao: r,
             });
+          } else if (typeof r === "object") {
+            erros++; erroExemplo ??= `${ativo.ticker}: ${r.erro}`;
           }
         }
       }
@@ -3061,8 +3069,8 @@ async function provisionarProventosBrl(
     }
   }
 
-  logSuccess("Dividendos BR", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados, falhasFonte });
-  return { processados, criados, atualizados, pulados, falhas_fonte: falhasFonte, fontes_falha: fontesFalha };
+  logSuccess("Dividendos BR", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados, falhasFonte, erros });
+  return { processados, criados, atualizados, pulados, falhas_fonte: falhasFonte, fontes_falha: fontesFalha, erros, erro_exemplo: erroExemplo };
 }
 
 // ============================================================

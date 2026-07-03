@@ -106,11 +106,12 @@ export default function DividendosPage() {
     setBuscando(false)
     if (!br.ok && !usd.ok) { showToast(br.erro ?? usd.erro ?? 'Erro ao buscar proventos'); return }
 
-    const soma = (k: 'processados' | 'criados' | 'atualizados' | 'pulados' | 'falhas_fonte') =>
+    const soma = (k: 'processados' | 'criados' | 'atualizados' | 'pulados' | 'falhas_fonte' | 'erros') =>
       (br.dados?.[k] ?? 0) + (usd.dados?.[k] ?? 0)
     const criados = soma('criados'), atualizados = soma('atualizados')
     const pulados = soma('pulados'), falhas = soma('falhas_fonte')
-    const processados = soma('processados')
+    const processados = soma('processados'), errosGravar = soma('erros')
+    const erroExemplo = br.dados?.erro_exemplo ?? usd.dados?.erro_exemplo ?? null
     const tickersFalha = [...(br.dados?.fontes_falha ?? []), ...(usd.dados?.fontes_falha ?? [])]
 
     const partes: string[] = []
@@ -119,6 +120,7 @@ export default function DividendosPage() {
     else partes.push('Busca concluída — nenhum provento novo. Use o "Diagnóstico" para ver o que cada fonte devolveu.')
     if (falhas > 0) partes.push(`Fonte indisponível para ${falhas} ativo(s)${tickersFalha.length ? ` (${tickersFalha.slice(0, 5).join(', ')}${tickersFalha.length > 5 ? '…' : ''})` : ''} — tente de novo mais tarde.`)
     if (pulados > 0) partes.push(`${pulados} provento(s) pulado(s) por tipo sem categoria — veja "Configurar tipos".`)
+    if (errosGravar > 0) partes.push(`${errosGravar} erro(s) ao gravar no banco${erroExemplo ? ` (${erroExemplo})` : ''}.`)
     if (!usd.ok && usd.erro) partes.push(`Internacionais: ${usd.erro}`)
     if (!br.ok && br.erro) partes.push(`B3: ${br.erro}`)
     showToast(partes.join(' '))
