@@ -1558,7 +1558,7 @@ async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
 
     // Carrega ativo (ticker p/ descrição) e tipo de dividendo (categoria mapeada)
     const [{ data: ativo }, { data: tipoDiv }] = await Promise.all([
-      c.from("inv_ativos").select("ticker").eq("id", body.ativo_id).maybeSingle(),
+      c.from("inv_ativos").select("ticker, nome").eq("id", body.ativo_id).maybeSingle(),
       c.from("inv_tipos_dividendo").select("id, nome, categoria_id").eq("id", body.tipo_dividendo_id).maybeSingle(),
     ]);
     if (!ativo)   return erro("Ativo não encontrado", 404);
@@ -1584,15 +1584,16 @@ async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
     const hoje    = new Date().toISOString().split("T")[0];
     const futuro  = String(body.data_pagamento) > hoje;
     const status  = futuro ? "PROJECAO" : "PAGO";
-    // descricao da transação: "TICKER - Nome do tipo" (2..200 chars)
-    const desc    = `${ativo.ticker} - ${tipoDiv.nome}`.slice(0, 200);
+    // descricao da transação: "TICKER - Nome do ativo" (mesma convenção do
+    // lançamento manual no extrato e da busca automática de proventos)
+    const desc    = descricaoProvento(ativo.ticker, ativo.nome);
 
     const { data: tx, error: errTx } = await c.from("transacoes").insert({
       user_id:         userId,
       conta_id:        body.conta_id,
       categoria_id:    tipoDiv.categoria_id,
       data:            String(body.data_pagamento),
-      descricao:       desc.length >= 2 ? desc : `Dividendo ${desc}`.slice(0, 200),
+      descricao:       desc,
       valor,
       tipo:            "RECEITA",
       status,
@@ -2599,7 +2600,7 @@ async function provisionarProventosUsd(
 
   // Ativos em USD (Polygon cobre papéis das bolsas americanas)
   let consulta = admin.from("inv_ativos")
-    .select("id, user_id, ticker, tipo_ativo").eq("moeda", "USD");
+    .select("id, user_id, ticker, nome, tipo_ativo").eq("moeda", "USD");
   if (filtroUserId) consulta = consulta.eq("user_id", filtroUserId);
   const { data: ativos, error } = await consulta;
   if (error) { logError("dividendos-usd ativos", error); throw new Error(error.message); }
@@ -2617,7 +2618,7 @@ async function provisionarProventosUsd(
   let processados = 0, criados = 0, atualizados = 0, pulados = 0, falhasFonte = 0, erros = 0;
   let erroExemplo: string | null = null;
   const fontesFalha: string[] = [];
-  for (const ativo of ativos as { id: string; user_id: string; ticker: string; tipo_ativo: string }[]) {
+  for (const ativo of ativos as { id: string; user_id: string; ticker: string; nome: string; tipo_ativo: string }[]) {
     try {
       // Posições ATIVAS desse ativo, por conta
       const { data: posicoes } = await admin.from("inv_posicoes")
@@ -2663,6 +2664,7 @@ async function provisionarProventosUsd(
             userId: ativo.user_id, ativoId: ativo.id, contaId: pos.conta_id,
             tipoAtivo: ativo.tipo_ativo, tipoDivId: String(tipoDiv.id),
             categoriaId: String(tipoDiv.categoria_id), ticker: ativo.ticker,
+            nome: ativo.nome,
             valor: valorBRL, payDate,
             // rate por ação convertido p/ BRL (mesma moeda do valor lançado)
             valorPorCota: Number((cashPorAcao * ptax).toFixed(8)),
@@ -2712,10 +2714,21 @@ function primeiroDiaProximoMes(payDate: string): string {
 //     final da fonte); um lançamento já PAGO/PENDENTE no mês é respeitado
 //     (não sobrescreve o que o usuário registrou); sem nada no mês, cria
 //     direto como PAGO.
+// Descrição padrão de um provento no extrato: "TICKER - Nome do ativo"
+// (mesma convenção do lançamento manual em DrawerLancamento). Se o nome
+// estiver vazio ou for igual ao ticker, usa só o ticker. Garante o mínimo
+// de 2 caracteres exigido pela transação.
+function descricaoProvento(ticker: string, nome?: string | null): string {
+  const tk = String(ticker ?? "").trim();
+  const nm = String(nome ?? "").trim();
+  const base = (nm && nm.toUpperCase() !== tk.toUpperCase() ? `${tk} - ${nm}` : tk).slice(0, 200);
+  return base.length >= 2 ? base : `Dividendo ${base}`.slice(0, 200);
+}
+
 async function upsertDividendoProvisionado(admin: Db, p: {
   userId: string; ativoId: string; contaId: string; tipoAtivo: string;
   tipoDivId: string; categoriaId: string; ticker: string; valor: number; payDate: string;
-  rotulo?: string; valorPorCota?: number | null;
+  nome?: string | null; valorPorCota?: number | null;
 }): Promise<"criado" | "atualizado" | "ignorado" | { erro: string }> {
   // Dividendo por cota (rate da fonte) na moeda do lançamento; usado por DY/YoC.
   const vpc = p.valorPorCota != null && Number.isFinite(p.valorPorCota) && p.valorPorCota > 0
@@ -2799,10 +2812,10 @@ async function upsertDividendoProvisionado(admin: Db, p: {
   }).select("id").single();
   if (errDiv || !div) { logError("dividendos-cron criar div", errDiv); return { erro: errDiv?.message ?? "falha ao criar dividendo" }; }
 
-  const desc = `${p.ticker} - ${p.rotulo ?? "Dividendos"}`.slice(0, 200);
+  const desc = descricaoProvento(p.ticker, p.nome);
   const { data: tx, error: errTx } = await admin.from("transacoes").insert({
     user_id: p.userId, conta_id: p.contaId, categoria_id: p.categoriaId,
-    data: p.payDate, descricao: desc.length >= 2 ? desc : `Dividendo ${desc}`.slice(0, 200),
+    data: p.payDate, descricao: desc,
     valor: p.valor, tipo: "RECEITA",
     // Passado = já pago (mesma convenção do lançamento manual de dividendo);
     // futuro = provisionado (PROJECAO) até o usuário confirmar.
@@ -2936,7 +2949,7 @@ async function provisionarProventosBrl(
 
   // Ativos BRL cotados que a B3 cobre com proventos
   let consulta = admin.from("inv_ativos")
-    .select("id, user_id, ticker, tipo_ativo, acoes_subtipo")
+    .select("id, user_id, ticker, nome, tipo_ativo, acoes_subtipo")
     .eq("moeda", "BRL").in("tipo_ativo", ["ACOES", "ETF", "FII"]);
   if (filtroUserId) consulta = consulta.eq("user_id", filtroUserId);
   const { data: ativos, error } = await consulta;
@@ -3013,7 +3026,7 @@ async function provisionarProventosBrl(
             userId: ativo.user_id, ativoId: ativo.id, contaId: pos.conta_id,
             tipoAtivo: ativo.tipo_ativo, tipoDivId: tipo.id,
             categoriaId: String(tipo.categoria_id), ticker: ativo.ticker,
-            valor: valorBRL, payDate: pv.payDate, rotulo: nomeTipo,
+            valor: valorBRL, payDate: pv.payDate, nome: ativo.nome,
             valorPorCota: pv.rate,
           });
           if (r === "criado" || r === "atualizado") {
@@ -3092,7 +3105,7 @@ async function rotaDividendosBackfillRate(c: Db, m: string, userId: string) {
 
   // Ativos BRL cobertos pela B3
   const { data: ativos, error: errAtv } = await c.from("inv_ativos")
-    .select("id, user_id, ticker, tipo_ativo, acoes_subtipo")
+    .select("id, user_id, ticker, nome, tipo_ativo, acoes_subtipo")
     .eq("moeda", "BRL").in("tipo_ativo", ["ACOES", "ETF", "FII"]);
   if (errAtv) { logError("backfill-rate ativos", errAtv); return erro(errAtv.message); }
 
@@ -3559,7 +3572,7 @@ function registrarPendencia(
 }
 
 interface AtivoBrl {
-  id: string; user_id: string; ticker: string;
+  id: string; user_id: string; ticker: string; nome: string;
   tipo_ativo: string; acoes_subtipo: string | null;
 }
 interface ProventoB3 { payDate: string; rate: number; label: string }
@@ -4329,9 +4342,13 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
     }
 
     // ── 1) Ativos — insere só os que ainda não existem ──────────────
-    const { data: existentes } = await c.from("inv_ativos").select("id, ticker");
+    const { data: existentes } = await c.from("inv_ativos").select("id, ticker, nome");
     const idPorTicker = new Map<string, string>();
-    for (const a of existentes ?? []) idPorTicker.set(up(a.ticker), String(a.id));
+    const nomePorTicker = new Map<string, string>();   // ticker → nome (p/ descrição do provento)
+    for (const a of existentes ?? []) {
+      idPorTicker.set(up(a.ticker), String(a.id));
+      nomePorTicker.set(up(a.ticker), String(a.nome ?? ""));
+    }
 
     const novosPorTicker = new Map<string, Record<string, unknown>>();
     for (const a of ativosIn) {
@@ -4366,6 +4383,9 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
         }
       }
     }
+
+    // Nomes dos ativos novos entram no mapa p/ descrição do provento.
+    for (const [tk, r] of novosPorTicker) nomePorTicker.set(tk, String(r.nome ?? ""));
 
     let ativosCriados = 0;
     if (novosPorTicker.size > 0) {
@@ -4506,7 +4526,7 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
 
     const hoje = new Date().toISOString().split("T")[0];
     const divSemExtrato: Record<string, unknown>[] = [];
-    const divComExtrato: { div: Record<string, unknown>; categoriaId: string; ticker: string; tipoNome: string }[] = [];
+    const divComExtrato: { div: Record<string, unknown>; categoriaId: string; ticker: string; nome: string }[] = [];
     let semCategoria = 0;
     for (const d of dividendosIn) {
       const ativoId = idPorTicker.get(up(d.ticker));
@@ -4523,7 +4543,7 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
         tipo_dividendo_id: tipo?.id ?? null,
       };
       if (gerarExtrato && tipo?.categoria_id) {
-        divComExtrato.push({ div: base, categoriaId: tipo.categoria_id, ticker: up(d.ticker), tipoNome: String(d.tipo_dividendo_nome) });
+        divComExtrato.push({ div: base, categoriaId: tipo.categoria_id, ticker: up(d.ticker), nome: nomePorTicker.get(up(d.ticker)) ?? "" });
       } else {
         if (gerarExtrato && d.tipo_dividendo_nome && !tipo?.categoria_id) semCategoria++;
         divSemExtrato.push(base);
@@ -4542,13 +4562,13 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
       if (errDiv || !div) { avisos.push(`Falha ao gravar dividendo ${item.ticker}: ${errDiv?.message ?? ""}`); continue; }
       dividendosCount++;
       const futuro = String((item.div as Record<string, unknown>).data_pagamento) > hoje;
-      const desc = `${item.ticker} - ${item.tipoNome}`.slice(0, 200);
+      const desc = descricaoProvento(item.ticker, item.nome);
       const { data: tx, error: errTx } = await c.from("transacoes").insert({
         user_id: userId,
         conta_id: (item.div as Record<string, unknown>).conta_id,
         categoria_id: item.categoriaId,
         data: (item.div as Record<string, unknown>).data_pagamento,
-        descricao: desc.length >= 2 ? desc : `Dividendo ${desc}`.slice(0, 200),
+        descricao: desc,
         valor: (item.div as Record<string, unknown>).valor,
         tipo: "RECEITA",
         status: futuro ? "PROJECAO" : "PAGO",

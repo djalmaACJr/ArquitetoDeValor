@@ -18,10 +18,12 @@ interface MultiSelectProps {
   onChange: (values: string[]) => void
   placeholder?: string
   className?: string
+  selecionarTodos?: boolean   // exibe o item "Adicionar todos" no topo da lista
 }
 
 export function MultiSelect({
-  options, values, onChange, placeholder = 'Selecionar...', className = ''
+  options, values, onChange, placeholder = 'Selecionar...', className = '',
+  selecionarTodos = false,
 }: MultiSelectProps) {
   const [open, setOpen]   = useState(false)
   const [busca, setBusca] = useState('')
@@ -113,6 +115,10 @@ export function MultiSelect({
     return resultado
   })()
 
+  // "Adicionar todos" — seleciona todas as opções (pais + filhos) ou limpa.
+  const todasValues = options.map(o => o.value)
+  const todasSelecionadas = todasValues.length > 0 && todasValues.every(v => values.includes(v))
+
   // Label resumido
   const labelResumo = () => {
     if (values.length === 0) return null
@@ -170,6 +176,25 @@ export function MultiSelect({
 
           {/* Opções — AUMENTADO ESPAÇAMENTO */}
           <div className="overflow-y-auto" style={{ maxHeight: '50vh', scrollbarWidth: 'thin' }}>
+            {/* Item "Adicionar todos" — atalho para selecionar/limpar tudo */}
+            {selecionarTodos && options.length > 0 && (
+              <button
+                onClick={() => onChange(todasSelecionadas ? [] : todasValues)}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left
+                  hover:bg-white/5 transition-colors border-b border-white/10"
+              >
+                <div className="w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-all"
+                  style={{
+                    borderColor: todasSelecionadas ? '#00c896' : 'rgba(255,255,255,0.2)',
+                    background: todasSelecionadas ? '#00c896' : 'transparent',
+                  }}>
+                  {todasSelecionadas && <Check size={10} style={{ color: '#0a0f1a' }} />}
+                </div>
+                <span className="flex-1 font-semibold" style={{ color: '#e8eaf0', fontSize: '13px' }}>
+                  {todasSelecionadas ? 'Limpar todos' : 'Adicionar todos'}
+                </span>
+              </button>
+            )}
             {opcoesordenadas.length === 0 ? (
               <p className="text-[16px] text-center py-6" style={{ color: '#8b92a8' }}>
                 Nenhum resultado

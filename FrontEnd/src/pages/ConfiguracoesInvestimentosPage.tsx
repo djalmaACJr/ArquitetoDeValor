@@ -12,7 +12,7 @@ import { useInvPesos } from '../hooks/useInvPesos'
 import { useResumoAposentadoria } from '../hooks/useResumoAposentadoria'
 import { estimarIdade, formatData, formatBRL } from '../lib/utils'
 import { Input, BtnSalvar, Toast, ModalExcluir, SelectDark } from '../components/ui/shared'
-import { MultiSelect } from '../components/ui/MultiSelect'
+import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelect'
 import { useContas } from '../hooks/useContas'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import Mascote from '../components/ui/Mascote'
@@ -836,20 +836,48 @@ function SecaoMigrarConta({ onToast }: { onToast: (m: string) => void }) {
   const nomeDe   = contasInvest.find((c) => c.conta_id === de)?.nome ?? ''
   const nomePara = contasInvest.find((c) => c.conta_id === para)?.nome ?? ''
 
-  // Ativos com posição (qualquer status) na conta de origem
-  const opcoesAtivos = useMemo(() => {
-    const porAtivo = new Map<string, string>()
+  // Ativos com posição (qualquer status) na conta de origem, agrupados por
+  // tipo de ativo. O MultiSelect trata cada tipo como um "pai" (clicar nele
+  // seleciona/deseleciona todos os ativos daquele tipo); os ativos são os
+  // "filhos". O valor do pai é um pseudo-id (`tipo:…`) que NÃO vai para a API.
+  const opcoesAtivos = useMemo<MultiSelectOption[]>(() => {
+    const porTipo = new Map<string, { value: string; label: string }[]>()
+    const rotuloTipo = new Map<string, string>()
+    const vistos = new Set<string>()
     for (const p of posicoes) {
-      if (p.conta_id !== de || !p.ativo_id) continue
+      if (p.conta_id !== de || !p.ativo_id || vistos.has(p.ativo_id)) continue
+      vistos.add(p.ativo_id)
+      const tipo = (p.inv_ativos?.tipo_ativo as TipoAtivoInvestimento | undefined) ?? undefined
+      const chave = tipo ?? '__outros'
       const rotulo = p.inv_ativos?.ticker
         ? `${p.inv_ativos.ticker}${p.inv_ativos?.nome ? ` — ${p.inv_ativos.nome}` : ''}`
         : p.ativo_id
-      porAtivo.set(p.ativo_id, rotulo)
+      if (!porTipo.has(chave)) {
+        porTipo.set(chave, [])
+        rotuloTipo.set(chave, tipo ? TIPO_ATIVO_LABEL[tipo] : 'Outros')
+      }
+      porTipo.get(chave)!.push({ value: p.ativo_id, label: rotulo })
     }
-    return [...porAtivo.entries()]
-      .map(([value, label]) => ({ value, label }))
-      .sort((a, b) => a.label.localeCompare(b.label))
+
+    const opts: MultiSelectOption[] = []
+    const tiposOrdenados = [...porTipo.keys()].sort((a, b) =>
+      (rotuloTipo.get(a) ?? a).localeCompare(rotuloTipo.get(b) ?? b))
+    for (const chave of tiposOrdenados) {
+      const grupo = rotuloTipo.get(chave) ?? chave
+      const paiValue = `tipo:${chave}`
+      const cor = chave === '__outros' ? undefined : TIPO_ATIVO_COR[chave as TipoAtivoInvestimento]
+      opts.push({ value: paiValue, label: grupo, cor })
+      const filhos = porTipo.get(chave)!.sort((a, b) => a.label.localeCompare(b.label))
+      for (const f of filhos) opts.push({ ...f, idPai: paiValue, grupo })
+    }
+    return opts
   }, [posicoes, de])
+
+  // Só os ativos "de verdade" (filhos) — exclui os pseudo-pais de tipo.
+  const idsReais = useMemo(
+    () => new Set(opcoesAtivos.filter((o) => o.idPai).map((o) => o.value)),
+    [opcoesAtivos])
+  const selReais = sel.filter((v) => idsReais.has(v))
 
   // Ao trocar a conta de origem, pré-seleciona todos os ativos dela
   // (derived-state-on-change, mesmo padrão da SecaoPerfil).
@@ -859,14 +887,14 @@ function SecaoMigrarConta({ onToast }: { onToast: (m: string) => void }) {
     setSel(opcoesAtivos.map((o) => o.value))
   }
 
-  const todosSelecionados = sel.length === opcoesAtivos.length && opcoesAtivos.length > 0
+  const todosSelecionados = selReais.length === idsReais.size && idsReais.size > 0
 
   async function migrar() {
     setConfirmando(false)
     setMigrando(true)
     // Todos selecionados → migra a conta inteira (inclui dividendos/histórico
     // de ativos sem posição na conta); seleção parcial → só os escolhidos.
-    const res = await migrarConta(de, para, todosSelecionados ? undefined : sel)
+    const res = await migrarConta(de, para, todosSelecionados ? undefined : selReais)
     setMigrando(false)
     if (!res.ok) { onToast(res.erro ?? 'Erro ao migrar conta'); return }
     const d = res.dados
@@ -900,15 +928,15 @@ function SecaoMigrarConta({ onToast }: { onToast: (m: string) => void }) {
         </div>
         <div>
           <p className="text-[12.5px] mb-1" style={{ color: MUTED }}>
-            Ativos a migrar {de && opcoesAtivos.length > 0 ? `(${sel.length}/${opcoesAtivos.length})` : ''}
+            Ativos a migrar {de && idsReais.size > 0 ? `(${selReais.length}/${idsReais.size})` : ''}
           </p>
           <div style={{ width: 300 }}>
-            <MultiSelect options={opcoesAtivos} values={sel} onChange={setSel}
+            <MultiSelect options={opcoesAtivos} values={sel} onChange={setSel} selecionarTodos
               placeholder={!de ? 'Escolha a conta de origem…' : opcoesAtivos.length === 0 ? 'Sem posições nesta conta' : 'Selecionar ativos…'} />
           </div>
         </div>
         <button onClick={() => setConfirmando(true)}
-          disabled={!de || !para || de === para || sel.length === 0 || migrando}
+          disabled={!de || !para || de === para || selReais.length === 0 || migrando}
           className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg border text-[14px] font-semibold transition-all disabled:opacity-40"
           style={{ borderColor: `${AMBAR}66`, color: AMBAR }}>
           <ArrowRightLeft size={15} className={migrando ? 'animate-pulse' : ''} />
@@ -926,7 +954,7 @@ function SecaoMigrarConta({ onToast }: { onToast: (m: string) => void }) {
           <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-md mx-4 p-5">
             <p className="text-[18px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>Confirmar migração</p>
             <p className="text-[15px] mb-5" style={{ color: MUTED }}>
-              Mover {todosSelecionados ? 'todos os investimentos' : `${sel.length} ativo(s)`} de{' '}
+              Mover {todosSelecionados ? 'todos os investimentos' : `${selReais.length} ativo(s)`} de{' '}
               <strong className="text-white">"{nomeDe}"</strong> para{' '}
               <strong className="text-white">"{nomePara}"</strong>? Os lançamentos de proventos no extrato
               mudam de conta junto (o saldo sai de uma e entra na outra).
