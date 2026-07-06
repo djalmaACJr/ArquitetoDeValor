@@ -269,6 +269,11 @@ export default function DetalheInvestimentoPage() {
               {provisionando ? 'Provisionando…' : 'Provisionar rendimento'}
             </button>
           )}
+          <button onClick={() => setGerenciar(true)} title="Registrar compra, venda ou outra movimentação"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold text-white"
+            style={{ background: '#3b82f6' }}>
+            <Plus size={14} /> Nova movimentação
+          </button>
           <button onClick={() => setEditandoAtivo(true)} title="Editar dados do ativo"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
             <Pencil size={14} style={{ color: MUTED }} /> Editar
@@ -422,13 +427,7 @@ export default function DetalheInvestimentoPage() {
 
         {/* Operações recentes */}
         <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[14px] font-semibold text-white/80">Operações recentes</h2>
-            <button onClick={() => setGerenciar(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 text-[12px] text-white hover:border-white/25">
-              <Plus size={13} /> Gerenciar
-            </button>
-          </div>
+          <h2 className="text-[14px] font-semibold text-white/80 mb-3">Operações recentes</h2>
           {compras.length === 0 && rendimentos.length === 0 ? (
             <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhuma operação registrada.</p>
           ) : (

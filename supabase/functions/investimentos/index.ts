@@ -1327,7 +1327,7 @@ async function recomputarPosicao(c: Db, posicaoId: string): Promise<void> {
     if (qtd > 0) precoMedio = custo / qtd;
   }
 
-  const { data: pos } = await c.from("inv_posicoes").select("data_compra").eq("id", posicaoId).maybeSingle();
+  const { data: pos } = await c.from("inv_posicoes").select("data_compra, ativo_id, conta_id").eq("id", posicaoId).maybeSingle();
   const campos = {
     quantidade:  qtd,
     preco_custo: precoMedio,
@@ -1335,7 +1335,40 @@ async function recomputarPosicao(c: Db, posicaoId: string): Promise<void> {
     status:      qtd > 0 ? "ATIVA" : "ENCERRADA",
   };
   const { error: errUpd } = await c.from("inv_posicoes").update(campos).eq("id", posicaoId);
-  if (errUpd) logError("Recomputar posição (update)", errUpd);
+  if (errUpd) { logError("Recomputar posição (update)", errUpd); return; }
+  if (pos?.ativo_id && pos?.conta_id) {
+    await recalcularProjecoesDividendos(c, String(pos.ativo_id), String(pos.conta_id), qtd);
+  }
+}
+
+// Uma operação retroativa (compra/venda lançada com data passada) muda a
+// quantidade da posição — e com ela, o valor dos dividendos ainda PROJETADOS
+// (futuros, calculados como valor_por_cota × quantidade). Sem isso, a projeção
+// ficava presa na quantidade de quando foi provisionada até o próximo cron/
+// clique manual em "buscar dividendos". Dividendos PAGO/PENDENTE (dinheiro que
+// a pessoa já recebeu ou lançou na mão) nunca são tocados aqui — mesma regra
+// de upsertDividendoProvisionado.
+async function recalcularProjecoesDividendos(c: Db, ativoId: string, contaId: string, quantidade: number): Promise<void> {
+  const { data: divs, error } = await c.from("inv_dividendos")
+    .select("id, valor, valor_por_cota, transacao_extrato_id, transacoes(status)")
+    .eq("ativo_id", ativoId).eq("conta_id", contaId)
+    .not("valor_por_cota", "is", null);
+  if (error) { logError("Recalcular projeções de dividendos", error); return; }
+
+  for (const d of (divs ?? []) as {
+    id: string; valor: number; valor_por_cota: number; transacao_extrato_id: string | null;
+    transacoes?: { status?: string } | { status?: string }[] | null;
+  }[]) {
+    const rawTx = d.transacoes;
+    const tx = Array.isArray(rawTx) ? rawTx[0] : rawTx;
+    if (tx?.status && tx.status !== "PROJECAO") continue; // pago/pendente: valor real recebido, não mexe
+    const novoValor = Number((Number(d.valor_por_cota) * quantidade).toFixed(2));
+    if (novoValor === Number(d.valor)) continue;
+    await c.from("inv_dividendos").update({ valor: novoValor }).eq("id", d.id);
+    if (d.transacao_extrato_id) {
+      await c.from("transacoes").update({ valor: novoValor, valor_projetado: novoValor }).eq("id", d.transacao_extrato_id);
+    }
+  }
 }
 
 // Mantém um RESGATE "programado" na data de vencimento da renda fixa/Tesouro,
@@ -4068,13 +4101,28 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
   const diagnostico: Record<string, unknown>[] = [];
 
   for (const g of lista) {
-    // meses que já têm snapshot — não sobrescreve
+    // meses já gravados — só reprocessa se a base (quantidade/preço médio)
+    // mudou desde então. Isso cobre o lançamento retroativo: uma compra/venda
+    // com data passada altera a quantidade de meses já snapshotados, que
+    // antes ficavam presos no valor antigo (só meses NOVOS eram varridos).
     const { data: existentes } = await c.from("inv_historico_mensal")
-      .select("mes_ano").eq("ativo_id", g.ativoId).eq("conta_id", g.contaId);
-    const jaTem = new Set((existentes ?? []).map((e) => String(e.mes_ano)));
+      .select("mes_ano, quantidade, preco_medio").eq("ativo_id", g.ativoId).eq("conta_id", g.contaId);
+    const baseExistente = new Map(
+      (existentes ?? []).map((e) => [String(e.mes_ano), { qtd: Number(e.quantidade) || 0, preco: Number(e.preco_medio) || 0 }]),
+    );
     // RF não gera histórico depois do vencimento.
     const fimGrupo = ehRF(g.tipo) ? fimSerieRF(g.vencimento, mesFim) : mesFim;
-    const faltantes = mesesEntre(g.inicio, fimGrupo).filter((me) => !jaTem.has(me));
+    const EPS = 1e-6;
+    const candidatos = mesesEntre(g.inicio, fimGrupo).map((me) => {
+      const posMes = g.posicoes.filter((p) => p.data_compra.slice(0, 7) <= me);
+      const qtdMes = posMes.reduce((s, p) => s + p.quantidade, 0);
+      const precoMedio = qtdMes > 0 ? posMes.reduce((s, p) => s + p.valor_custo, 0) / qtdMes : 0;
+      return { me, posMes, qtdMes, precoMedio };
+    }).filter((x) => x.qtdMes > 0);
+    const faltantes = candidatos.filter((x) => {
+      const base = baseExistente.get(x.me);
+      return !base || Math.abs(base.qtd - x.qtdMes) > EPS || Math.abs(base.preco - x.precoMedio) > EPS;
+    });
     if (faltantes.length === 0) continue;
 
     // série de preços por mês (cotados/cripto) + moeda real detectada
@@ -4097,14 +4145,7 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
     let gravouAlgum = false;
     let gravadosAtivo = 0, semCotacaoMes = 0, semPtax = 0;
 
-    for (const me of faltantes) {
-      // posições já compradas até este mês
-      const posMes = g.posicoes.filter((p) => p.data_compra.slice(0, 7) <= me);
-      if (posMes.length === 0) continue;
-      const qtdMes   = posMes.reduce((s, p) => s + p.quantidade, 0);
-      const custoMes = posMes.reduce((s, p) => s + p.valor_custo, 0);
-      if (qtdMes <= 0) continue;
-      const precoMedio = custoMes / qtdMes;
+    for (const { me, posMes, qtdMes, precoMedio } of faltantes) {
       const dataRef = new Date(Date.UTC(Number(me.slice(0, 4)), Number(me.slice(5, 7)), 0, 12)); // último dia do mês
 
       let valor: number;
