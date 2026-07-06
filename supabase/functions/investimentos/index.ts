@@ -2891,7 +2891,7 @@ async function buscarDividendosPolygon(
     for (const d of data.results ?? []) {
       const pay  = String(d.pay_date ?? "").slice(0, 10);
       const cash = Number(d.cash_amount);
-      if (!RE_DATA.test(pay) || !Number.isFinite(cash) || cash <= 0) continue;
+      if (!dataPagamentoPlausivel(pay) || !Number.isFinite(cash) || cash <= 0) continue;
       out.push({ pay_date: pay, cash_amount: cash, dividend_type: String(d.dividend_type ?? "") });
     }
     return out;
@@ -3262,7 +3262,7 @@ async function rotaDividendosDiagnostico(c: Db, m: string, userId: string) {
         for (const d of data.results ?? []) {
           const pay  = String(d.pay_date ?? "").slice(0, 10);
           const cash = Number(d.cash_amount);
-          if (!RE_DATA.test(pay) || !Number.isFinite(cash) || cash <= 0) continue;
+          if (!dataPagamentoPlausivel(pay) || !Number.isFinite(cash) || cash <= 0) continue;
           item.proventos_fonte++;
           if (pay >= hoje) item.futuros++;
           if (pay >= dataCorte) item.na_janela++;
@@ -3677,7 +3677,7 @@ function mapearCashDividends(lista?: B3CashDividend[]): (ProventoB3 & { classe: 
   for (const d of lista ?? []) {
     const payDate = brDataISO(String(d.paymentDate ?? ""));
     const rate    = brNumero(String(d.rate ?? ""));
-    if (!RE_DATA.test(payDate) || !Number.isFinite(rate) || rate <= 0) continue;
+    if (!dataPagamentoPlausivel(payDate) || !Number.isFinite(rate) || rate <= 0) continue;
     out.push({
       payDate, rate, label: String(d.label ?? ""),
       classe: classeDoIsin(String(d.isinCode ?? d.assetIssued ?? "")),
@@ -4533,6 +4533,8 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
       const valor = Number(d.valor);
       if (!ativoId || !d.conta_id || !contasValidas.has(d.conta_id)) continue;
       if (!(valor > 0) || !TIPOS_ATIVO.includes(String(d.tipo_ativo))) continue;
+      // Descarta datas-sentinela ("a definir" → 9999) vindas da importação.
+      if (!dataPagamentoPlausivel(String(d.data_pagamento).slice(0, 10))) continue;
       const k = divKey(ativoId, String(d.data_pagamento), valor, String(d.tipo_ativo));
       if (divExistSet.has(k)) continue;
       divExistSet.add(k);
@@ -5407,6 +5409,16 @@ async function buscaExterna(params: URLSearchParams) {
 
 const RE_DATA = /^\d{4}-\d{2}-\d{2}$/;
 const PTAX_DATA_CORTE = "2021-01-01"; // histórico a partir desta data
+
+// Data de pagamento de provento plausível. A B3 devolve datas-sentinela
+// (ex.: 31/12/9999) para proventos cujo pagamento ainda é "a definir";
+// sem este filtro elas viravam projeções lançadas no ano 9999. Aceita só
+// datas ISO válidas numa janela sã (ano 2000 até 3 anos à frente).
+function dataPagamentoPlausivel(iso: string): boolean {
+  if (!RE_DATA.test(iso)) return false;
+  const ano = Number(iso.slice(0, 4));
+  return ano >= 2000 && ano <= new Date().getUTCFullYear() + 3;
+}
 
 function hojeISO(): string { return new Date().toISOString().slice(0, 10); }
 function deslocarDias(dataISO: string, n: number): string {
