@@ -13,7 +13,7 @@ import { useDividendos } from '../hooks/useDividendos'
 import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
 import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
 import { usePtax } from '../hooks/usePtax'
-import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo } from '../components/ui/shared'
+import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo, SelectDark } from '../components/ui/shared'
 import DrawerAtivo from '../components/ui/DrawerAtivo'
 import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
 import LoadingMascote from '../components/ui/LoadingMascote'
@@ -49,6 +49,13 @@ function corValor(v: number): string {
   return MUTED
 }
 
+const PERIODOS_GRAFICO = [
+  { value: 'mes_atual', label: 'Mês atual' },
+  { value: '6',         label: '6 Meses' },
+  { value: '12',        label: '12 Meses' },
+  { value: 'tudo',      label: 'Tudo' },
+]
+
 const OPCOES_GRAFICO = {
   responsive: true,
   plugins: { legend: { display: false } },
@@ -75,6 +82,10 @@ export default function DetalheInvestimentoPage() {
   }
   const ativoId = id ?? null
   const [toast, setToast] = useState<string | null>(null)
+  // Toggle do gráfico de rentabilidade: somar os proventos do mês (total return)
+  const [rentComDividendos, setRentComDividendos] = useState(false)
+  // Período exibido nos gráficos mensais desta página (6/12 meses ou tudo)
+  const [periodoGraficos, setPeriodoGraficos] = useState('12')
   const [editandoNota, setEditandoNota] = useState(false)
   const [editandoAtivo, setEditandoAtivo] = useState(false)
   const [excluindo, setExcluindo] = useState(false)
@@ -121,22 +132,161 @@ export default function DetalheInvestimentoPage() {
     return { custo, mercado, ganho: mercado - custo, dividendos: totalDiv }
   }, [posicoes, historico, dividendos])
 
+  // Cotação estimada: valor de mercado do último snapshot (resumo.mercado) ÷
+  // quantidade ATUAL das posições (posicoes, sempre em dia) — não a quantidade
+  // que o snapshot tinha NA DATA dele, que fica desatualizada entre um
+  // fechamento mensal e outro (ex.: rendimento semanal de cripto aumenta a
+  // quantidade toda semana, mas o valor_mercado só é recalculado no mês
+  // seguinte). Mesmo método da coluna "Preço atual" do ranking. Usada só para
+  // dar um R$ aproximado ao total de RENDIMENTO, que só registra tokens (sem
+  // valor_total, pois é yield em cripto).
+  const precoAtualEstimado = useMemo(() => {
+    const qtdAtual = posicoes
+      .filter((p) => p.status === 'ATIVA')
+      .reduce((s, p) => s + Number(p.quantidade), 0)
+    return qtdAtual > 0 ? resumo.mercado / qtdAtual : null
+  }, [posicoes, resumo.mercado])
+
+  // Janela do período selecionado (6/12 meses ou "tudo") para os gráficos
+  // mensais desta página. mesInicio null = sem limite inferior (tudo).
+  const janela = useMemo(() => {
+    const hoje = new Date()
+    const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`
+    if (periodoGraficos === 'tudo') return { mesInicio: null as string | null, mesAtual }
+    if (periodoGraficos === 'mes_atual') return { mesInicio: mesAtual, mesAtual }
+    const n = Number(periodoGraficos)
+    const inicio = new Date(hoje.getFullYear(), hoje.getMonth() - (n - 1), 1)
+    const mesInicio = `${inicio.getFullYear()}-${String(inicio.getMonth() + 1).padStart(2, '0')}`
+    return { mesInicio, mesAtual }
+  }, [periodoGraficos])
+  const dentroJanela = (mes: string) =>
+    mes <= janela.mesAtual && (janela.mesInicio == null || mes >= janela.mesInicio)
+  const labelSemDados = periodoGraficos === 'tudo' ? 'no período'
+    : periodoGraficos === 'mes_atual' ? 'no mês atual'
+    : `nos últimos ${periodoGraficos} meses`
+
   // Evolução mensal (soma de todas as contas por mês, ordem cronológica)
   const evolucao = useMemo(() => {
     const porMes = new Map<string, number>()
-    for (const h of historico) porMes.set(h.mes_ano, (porMes.get(h.mes_ano) ?? 0) + Number(h.valor_mercado))
+    for (const h of historico) {
+      if (!dentroJanela(h.mes_ano)) continue
+      porMes.set(h.mes_ano, (porMes.get(h.mes_ano) ?? 0) + Number(h.valor_mercado))
+    }
     return [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [historico])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historico, janela])
 
-  // Dividendos agregados por mês (últimos 12 com lançamento)
-  const divPorMes = useMemo(() => {
+  // Proventos realizados por mês (todo o histórico, sem meses futuros) —
+  // usado pela opção "total return" do gráfico de rentabilidade.
+  const divPagoPorMes = useMemo(() => {
+    const hoje = new Date()
+    const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`
     const porMes = new Map<string, number>()
     for (const d of dividendos) {
       const mes = d.data_pagamento.slice(0, 7)
+      if (mes <= mesAtual) porMes.set(mes, (porMes.get(mes) ?? 0) + Number(d.valor))
+    }
+    return porMes
+  }, [dividendos])
+
+  // Rentabilidade mensal agregada entre contas: Σ rentabilidade_mes (já
+  // descontados aportes/resgates no backend) ÷ valor de mercado do mês
+  // anterior. Com o toggle ligado, soma os proventos do mês (total return).
+  // Calculada sobre a série INTEIRA (não a janela): o % de um mês depende do
+  // mês anterior, então cortar a série cedo demais distorceria o 1º ponto.
+  const rentPorMes = useMemo(() => {
+    const valor  = new Map<string, number>()
+    const rentab = new Map<string, number>()
+    for (const h of historico) {
+      valor.set(h.mes_ano, (valor.get(h.mes_ano) ?? 0) + Number(h.valor_mercado))
+      rentab.set(h.mes_ano, (rentab.get(h.mes_ano) ?? 0) + Number(h.rentabilidade_mes))
+    }
+    const meses = [...valor.keys()].sort()
+    const out: (readonly [string, number])[] = []
+    for (let i = 1; i < meses.length; i++) {
+      const prev = valor.get(meses[i - 1])!
+      if (!(prev > 0)) continue
+      const extra = rentComDividendos ? (divPagoPorMes.get(meses[i]) ?? 0) : 0
+      out.push([meses[i], ((rentab.get(meses[i])! + extra) / prev) * 100] as const)
+    }
+    return out
+  }, [historico, divPagoPorMes, rentComDividendos])
+
+  // Recorte da janela selecionada, só para exibição no gráfico de barras.
+  const rentPorMesJanela = useMemo(
+    () => rentPorMes.filter(([mes]) => dentroJanela(mes)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rentPorMes, janela],
+  )
+
+  // Rentabilidade acumulada dentro da janela: compõe os % mensais a partir do
+  // 1º mês exibido (rebase em 0%) — mostra o retorno total do período em tela.
+  const rentAcumulada = useMemo(() => {
+    let acc = 1
+    return rentPorMesJanela.map(([mes, v]) => {
+      acc *= 1 + v / 100
+      return [mes, (acc - 1) * 100] as const
+    })
+  }, [rentPorMesJanela])
+
+  // Dividendos dentro do período selecionado — exclui projeções de meses
+  // futuros tanto dos gráficos quanto da lista de dividendos.
+  const divFiltrados = useMemo(
+    () => dividendos.filter((d) => dentroJanela(d.data_pagamento.slice(0, 7))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dividendos, janela],
+  )
+
+  // Dividendos agregados por mês (período selecionado)
+  const divPorMes = useMemo(() => {
+    const porMes = new Map<string, number>()
+    for (const d of divFiltrados) {
+      const mes = d.data_pagamento.slice(0, 7)
       porMes.set(mes, (porMes.get(mes) ?? 0) + Number(d.valor))
     }
-    return [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-12)
-  }, [dividendos])
+    return [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [divFiltrados])
+
+  // Dividend Yield mensal POR COTA: rate do mês (dividendo por cota) ÷
+  // cotação do mês (valor de mercado ÷ quantidade do snapshot). Comprar mais
+  // cotas muda o valor recebido, não o rate — o % fica comparável mês a mês.
+  const dyPorMes = useMemo(() => {
+    // cotação do mês = Σ valor_mercado ÷ Σ quantidade (todas as contas)
+    const snapPorMes = new Map<string, { valor: number; qtd: number }>()
+    for (const h of historico) {
+      const s = snapPorMes.get(h.mes_ano) ?? { valor: 0, qtd: 0 }
+      s.valor += Number(h.valor_mercado)
+      s.qtd   += Number(h.quantidade) || 0
+      snapPorMes.set(h.mes_ano, s)
+    }
+    // rate do mês: 1× por pagamento (data|tipo) — há 1 linha por conta
+    const ratePorMes = new Map<string, number>()
+    const semRatePorMes = new Map<string, number>() // recebido sem rate gravado
+    const vistos = new Set<string>()
+    for (const d of divFiltrados) {
+      const mes = d.data_pagamento.slice(0, 7)
+      const vpc = d.valor_por_cota != null ? Number(d.valor_por_cota) : NaN
+      if (Number.isFinite(vpc) && vpc > 0) {
+        const k = `${d.data_pagamento}|${d.tipo_dividendo_id ?? ''}`
+        if (vistos.has(k)) continue
+        vistos.add(k)
+        ratePorMes.set(mes, (ratePorMes.get(mes) ?? 0) + vpc)
+      } else {
+        semRatePorMes.set(mes, (semRatePorMes.get(mes) ?? 0) + Number(d.valor))
+      }
+    }
+    const meses = [...new Set([...ratePorMes.keys(), ...semRatePorMes.keys()])].sort()
+    const out: (readonly [string, number])[] = []
+    for (const mes of meses) {
+      const s = snapPorMes.get(mes)
+      if (!s || !(s.qtd > 0) || !(s.valor > 0)) continue
+      const cotacao = s.valor / s.qtd
+      // sem rate gravado, estima pelo recebido ÷ cotas do snapshot do mês
+      const rate = (ratePorMes.get(mes) ?? 0) + (semRatePorMes.get(mes) ?? 0) / s.qtd
+      if (rate > 0) out.push([mes, (rate / cotacao) * 100] as const)
+    }
+    return out
+  }, [divFiltrados, historico])
 
   // Operações do ativo separadas: compras/aportes × rendimentos (yield).
   // Rendimentos (RENDIMENTO) têm valor_total 0 e podem ser muitos (semanais),
@@ -151,6 +301,25 @@ export default function DetalheInvestimentoPage() {
       totalRendimento: rend.reduce((s, o) => s + Number(o.quantidade), 0),
     }
   }, [operacoes, posicoes])
+
+  // Totais por tipo de operação NO PERÍODO selecionado (independe da lista
+  // "recentes" abaixo, que sempre mostra as últimas, sem filtro). RENDIMENTO
+  // só tem quantidade (tokens, valor_total sempre 0); os demais somam R$ E
+  // a quantidade de cotas/ações movimentada.
+  const totaisPorTipo = useMemo(() => {
+    const posIds = new Set(posicoes.map((p) => p.id))
+    const totais = new Map<string, { valor: number; quantidade: number }>()
+    for (const o of operacoes) {
+      if (!posIds.has(o.posicao_id)) continue
+      if (!dentroJanela(o.data_operacao.slice(0, 7))) continue
+      const t = totais.get(o.tipo_operacao) ?? { valor: 0, quantidade: 0 }
+      t.valor      += Number(o.valor_total)
+      t.quantidade += Number(o.quantidade)
+      totais.set(o.tipo_operacao, t)
+    }
+    return [...totais.entries()].filter(([, t]) => t.valor !== 0 || t.quantidade !== 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [operacoes, posicoes, janela])
   const fmtTokens = (q: number) => Number(q).toLocaleString('pt-BR', { maximumFractionDigits: 8 })
 
   // ── Conversão cambial (ativos em moeda estrangeira) ────────────
@@ -324,6 +493,14 @@ export default function DetalheInvestimentoPage() {
       {/* Características do título (renda fixa / Tesouro) e do FII */}
       <CaracteristicasAtivo ativo={ativo} />
 
+      <div className="flex items-center justify-end gap-2 mb-3">
+        <span className="text-[12px]" style={{ color: MUTED }}>Período dos gráficos:</span>
+        <SelectDark value={periodoGraficos} onChange={(e) => setPeriodoGraficos(e.target.value)}
+          style={{ width: 'auto' }} className="!text-[13px] !py-1.5">
+          {PERIODOS_GRAFICO.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </SelectDark>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Evolução do valor de mercado */}
         <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
@@ -354,25 +531,66 @@ export default function DetalheInvestimentoPage() {
 
         {/* Rentabilidade mensal */}
         <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <h2 className="text-[14px] font-semibold text-white/80 mb-3">Rentabilidade do mês (%)</h2>
-          {historico.length < 2 ? (
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h2 className="text-[14px] font-semibold text-white/80">Rentabilidade do mês (%)</h2>
+            {podeDividendos && (
+              <button onClick={() => setRentComDividendos((v) => !v)}
+                aria-pressed={rentComDividendos}
+                title="Soma os proventos recebidos no mês à variação de preço (total return)"
+                className={`px-2.5 py-1 rounded-lg text-[12px] font-medium border ${
+                  rentComDividendos
+                    ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200'
+                    : 'border-white/15 text-white/70 hover:border-white/30'
+                }`}>
+                + dividendos
+              </button>
+            )}
+          </div>
+          {rentPorMesJanela.length === 0 ? (
             <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>
               Sem dados suficientes de variação mensal.
             </p>
           ) : (
             <Bar
-              data={(() => {
-                const ordenado = [...historico].sort((a, b) => a.mes_ano.localeCompare(b.mes_ano))
-                return {
-                  labels: ordenado.map((h) => fmtMes(h.mes_ano)),
-                  datasets: [{
-                    label: 'Variação %',
-                    data: ordenado.map((h) => h.variacao_percentual),
-                    backgroundColor: ordenado.map((h) => h.variacao_percentual >= 0 ? '#00c896aa' : '#ff5c7aaa'),
-                    borderRadius: 4,
-                  }],
-                }
-              })()}
+              data={{
+                labels: rentPorMesJanela.map(([mes]) => fmtMes(mes)),
+                datasets: [{
+                  label: rentComDividendos ? 'Variação + dividendos %' : 'Variação %',
+                  data: rentPorMesJanela.map(([, v]) => Number(v.toFixed(2))),
+                  backgroundColor: rentPorMesJanela.map(([, v]) => v >= 0 ? '#00c896aa' : '#ff5c7aaa'),
+                  borderRadius: 4,
+                }],
+              }}
+              options={OPCOES_GRAFICO}
+            />
+          )}
+        </section>
+
+        {/* Rentabilidade acumulada no período (compõe os % mensais) */}
+        <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+          <h2 className="text-[14px] font-semibold text-white/80 mb-3"
+            title="Composição da variação mensal desde o início do período selecionado">
+            Rentabilidade acumulada (%){rentComDividendos ? ' — com dividendos' : ''}
+          </h2>
+          {rentAcumulada.length === 0 ? (
+            <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>
+              Sem dados suficientes de variação mensal.
+            </p>
+          ) : (
+            <Line
+              data={{
+                labels: rentAcumulada.map(([mes]) => fmtMes(mes)),
+                datasets: [{
+                  label: 'Acumulado %',
+                  data: rentAcumulada.map(([, v]) => Number(v.toFixed(2))),
+                  borderColor: cor,
+                  backgroundColor: `${cor}22`,
+                  fill: true,
+                  tension: 0.3,
+                  pointRadius: rentAcumulada.length <= 12 ? 4 : 2,
+                  pointBackgroundColor: cor,
+                }],
+              }}
               options={OPCOES_GRAFICO}
             />
           )}
@@ -383,7 +601,7 @@ export default function DetalheInvestimentoPage() {
           <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
             <h2 className="text-[14px] font-semibold text-white/80 mb-3">Dividendos por mês</h2>
             {divPorMes.length === 0 ? (
-              <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo lançado para este ativo.</p>
+              <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo {labelSemDados}.</p>
             ) : (
               <Bar
                 data={{
@@ -401,15 +619,37 @@ export default function DetalheInvestimentoPage() {
           </section>
         )}
 
+        {/* Dividend Yield mensal — só quando há provento E snapshot de mercado */}
+        {podeDividendos && dyPorMes.length > 0 && (
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <h2 className="text-[14px] font-semibold text-white/80 mb-3"
+              title="Dividendos recebidos no mês ÷ valor de mercado da posição no mês">
+              Dividend Yield por mês (%)
+            </h2>
+            <Bar
+              data={{
+                labels: dyPorMes.map(([mes]) => fmtMes(mes)),
+                datasets: [{
+                  label: 'DY %',
+                  data: dyPorMes.map(([, v]) => Number(v.toFixed(2))),
+                  backgroundColor: `${cor}aa`,
+                  borderRadius: 4,
+                }],
+              }}
+              options={OPCOES_GRAFICO}
+            />
+          </section>
+        )}
+
         {/* Últimos dividendos — só para ativos que pagam proventos */}
         {podeDividendos && (
           <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
             <h2 className="text-[14px] font-semibold text-white/80 mb-3">Últimos dividendos</h2>
-            {dividendos.length === 0 ? (
-              <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo lançado.</p>
+            {divFiltrados.length === 0 ? (
+              <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo {labelSemDados}.</p>
             ) : (
               <div className="space-y-2">
-                {dividendos.slice(0, 8).map((d) => (
+                {divFiltrados.map((d) => (
                   <div key={d.id} className="flex items-center justify-between gap-2 text-[13px]">
                     <div>
                       <p className="text-white font-medium">{d.inv_tipos_dividendo?.nome ?? 'Dividendo'}</p>
@@ -428,6 +668,41 @@ export default function DetalheInvestimentoPage() {
         {/* Operações recentes */}
         <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
           <h2 className="text-[14px] font-semibold text-white/80 mb-3">Operações recentes</h2>
+
+          {/* Totais por tipo de operação no período selecionado */}
+          {totaisPorTipo.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+              {totaisPorTipo.map(([tipo, t]) => (
+                <div key={tipo} className="rounded-lg border border-white/10 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
+                    {TIPO_OPERACAO_LABEL[tipo as keyof typeof TIPO_OPERACAO_LABEL] ?? tipo}
+                  </p>
+                  {/* RENDIMENTO não tem valor_total (sempre 0, é yield em tokens) —
+                      o R$ é uma ESTIMATIVA pela cotação atual, não o valor real
+                      recebido em cada crédito. Os demais mostram o valor (R$)
+                      real, com a quantidade sempre abaixo, rotulada. */}
+                  {tipo === 'RENDIMENTO' ? (
+                    <>
+                      <p className="text-white font-semibold text-[13px]">
+                        +{fmtTokens(t.quantidade)} {ativo.ticker}
+                      </p>
+                      {precoAtualEstimado != null && (
+                        <p className="text-[11px]" style={{ color: MUTED }}>
+                          ≈ {formatBRL(t.quantidade * precoAtualEstimado)} (preço atual)
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-white font-semibold text-[13px]">{formatBRL(t.valor)}</p>
+                      <p className="text-[11px]" style={{ color: MUTED }}>Qtd: {fmtTokens(t.quantidade)}</p>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {compras.length === 0 && rendimentos.length === 0 ? (
             <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhuma operação registrada.</p>
           ) : (

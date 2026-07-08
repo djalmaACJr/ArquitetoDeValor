@@ -2771,33 +2771,54 @@ async function upsertDividendoProvisionado(admin: Db, p: {
   const mesFim = primeiroDiaProximoMes(p.payDate);
 
   const { data: candidatos } = await admin.from("inv_dividendos")
-    .select("id, transacao_extrato_id, valor, data_pagamento, transacoes(status)")
+    .select("id, transacao_extrato_id, valor, data_pagamento, valor_por_cota, transacoes(status)")
     .eq("user_id", p.userId).eq("ativo_id", p.ativoId).eq("conta_id", p.contaId)
     .eq("tipo_dividendo_id", p.tipoDivId)
     .gte("data_pagamento", mesIni).lt("data_pagamento", mesFim);
 
-  type Cand = { id: string; transacao_extrato_id: string | null; valor: number; data_pagamento: string; transacoes?: { status?: string } | null };
+  type Cand = { id: string; transacao_extrato_id: string | null; valor: number; data_pagamento: string; valor_por_cota: number | null; transacoes?: { status?: string } | null };
   const lista = (candidatos ?? []) as Cand[];
   const existente = lista.find((d) => d.transacoes?.status === "PROJECAO");
 
-  // Provento passado que já tem registro NÃO-projeção no mês (pago/pendente
-  // pelo usuário, ou dividendo sem transação): não mexe — evita duplicar ou
-  // sobrescrever o valor que a pessoa de fato recebeu (ex.: JSCP líquido de IR).
-  if (pago && !existente && lista.length > 0) return "ignorado";
+  // Já existe um registro NÃO-projeção (pago/pendente pelo usuário, ou
+  // dividendo sem transação) para esta MESMA data de pagamento: não mexe,
+  // não duplica. Checa por data exata (não só "existe algo no mês") e
+  // independe de `pago` — `pago` usa payDate < hoje, então um provento com
+  // vencimento HOJE fica com pago=false mesmo que o usuário já tenha
+  // confirmado o recebimento mais cedo no mesmo dia; sem esse guard, a
+  // busca seguinte não achava o (agora não-PROJECAO) existente e criava um
+  // segundo lançamento duplicado com a mesma data/valor.
+  const mesmaData = lista.find((d) => String(d.data_pagamento).slice(0, 10) === p.payDate);
+  if (!existente && mesmaData) return "ignorado";
 
   if (existente) {
-    const mudou = Number(existente.valor) !== p.valor || String(existente.data_pagamento).slice(0, 10) !== p.payDate;
-    if (!mudou && vpc == null && !pago) return "ignorado";
+    // Pagamento já vencido: nunca mexe num provento que já foi provisionado
+    // — a confirmação (valor real + status Pago) é sempre manual (botão
+    // "Confirmar" ou editando o lançamento no extrato). Sem isso, o cron
+    // reconfirmava sozinho com o valor bruto da fonte (Polygon+PTAX, sem
+    // considerar retenção de IR de 30% em dividendos de ações americanas)
+    // e sobrescrevia qualquer correção manual do valor real recebido.
+    if (pago) return "ignorado";
+
+    // vpc quase sempre vem preenchido pela fonte (B3) — comparar só contra o
+    // valor/data anteriores fazia o cron marcar "atualizado" TODO dia para
+    // proventos futuros que não mudaram nada (o valor_por_cota "novo" era
+    // idêntico ao já salvo), inflando o aviso de login com os mesmos itens.
+    const round8 = (n: number) => Number(n.toFixed(8));
+    const vpcAtual = existente.valor_por_cota != null ? round8(Number(existente.valor_por_cota)) : null;
+    const vpcMudou = vpc != null && vpcAtual !== round8(vpc);
+    const mudou = Number(existente.valor) !== p.valor
+      || String(existente.data_pagamento).slice(0, 10) !== p.payDate
+      || vpcMudou;
+    if (!mudou) return "ignorado";
     await admin.from("inv_dividendos")
       .update({ valor: p.valor, data_pagamento: p.payDate, ...(vpc != null ? { valor_por_cota: vpc } : {}) })
       .eq("id", existente.id);
     if (existente.transacao_extrato_id) {
-      // Passado → confirma a projeção com o valor final da fonte (PTAX real
-      // no caso de USD); preserva valor_projetado como histórico da projeção.
-      const campos: Record<string, unknown> = pago
-        ? { valor: p.valor, data: p.payDate, status: "PAGO" }
-        : { valor: p.valor, data: p.payDate, valor_projetado: p.valor };
-      await admin.from("transacoes").update(campos).eq("id", existente.transacao_extrato_id);
+      // Ainda em projeção: acompanha o valor/data mais recentes da fonte.
+      await admin.from("transacoes")
+        .update({ valor: p.valor, data: p.payDate, valor_projetado: p.valor })
+        .eq("id", existente.transacao_extrato_id);
     }
     return "atualizado";
   }
@@ -3037,6 +3058,9 @@ async function provisionarProventosBrl(
       }
       processados++;
 
+      // Alimenta o cache do histórico do fundo (base do DY/YoC projetado)
+      await upsertProventosFundo(admin, ativo.user_id, ativo.id, proventos);
+
       const tipos = await tiposDoUsuario(ativo.user_id);
       for (const pv of proventos) {
         // Futuros (PROJECAO) + retroativos recentes (lançados como PAGO);
@@ -3095,11 +3119,19 @@ async function provisionarProventosBrl(
     const { data: cur } = await admin.from("usuarios")
       .select("inv_dividendos_novidades").eq("id", userId).single();
     const prev = (cur?.inv_dividendos_novidades ?? null) as NovidadesPayload | null;
+    // Dedup por ativo+tipo+data: se o mesmo provento mudar de novo antes do
+    // usuário ver o aviso anterior, mantém só a ocorrência mais recente
+    // (evita listar o mesmo item repetido a cada execução do cron).
+    const itensPorChave = new Map<string, NovidadeItem>();
+    for (const it of [...info.itens, ...(prev?.itens ?? [])]) {
+      const chave = `${it.ticker}|${it.tipo}|${it.data_pagamento}`;
+      if (!itensPorChave.has(chave)) itensPorChave.set(chave, it);
+    }
     const payload: NovidadesPayload = {
       gerado_em:   new Date().toISOString(),
       criados:     info.criados + (prev?.criados ?? 0),
       atualizados: info.atualizados + (prev?.atualizados ?? 0),
-      itens:       [...info.itens, ...(prev?.itens ?? [])].slice(0, 25),
+      itens:       [...itensPorChave.values()].slice(0, 25),
     };
     await admin.from("usuarios").update({ inv_dividendos_novidades: payload }).eq("id", userId);
 
@@ -3149,13 +3181,19 @@ async function rotaDividendosBackfillRate(c: Db, m: string, userId: string) {
       const { data: rows } = await c.from("inv_dividendos")
         .select("id, data_pagamento, valor, inv_tipos_dividendo(nome)")
         .eq("ativo_id", ativo.id).is("valor_por_cota", null);
-      if (!rows || rows.length === 0) continue;
 
       // Cortesia com a B3: pausa curta antes da requisição
       await new Promise((r) => setTimeout(r, 250 + Math.floor(Math.random() * 1000)));
       const proventos = await coletarProventosB3(ativo);
       processados++;
-      if (!proventos || proventos.length === 0) { semFonte += rows.length; continue; }
+      if (proventos === null) { semFonte += rows?.length ?? 0; continue; }
+
+      // Alimenta o cache do histórico do fundo mesmo sem pendência de rate:
+      // é daqui que o /ranking tira o DY/YoC projetado de posses <12m.
+      await upsertProventosFundo(c, userId, ativo.id, proventos);
+
+      if (!rows || rows.length === 0) continue;
+      if (proventos.length === 0) { semFonte += rows.length; continue; }
 
       // payDate → [{ rate, tipoNome }]
       const porData = new Map<string, { rate: number; tipoNome: string }[]>();
@@ -3648,6 +3686,32 @@ async function coletarProventosB3(ativo: AtivoBrl): Promise<ProventoB3[] | null>
     }
   }
   return [...escolhido.values()].map(({ payDate, rate, label }) => ({ payDate, rate, label }));
+}
+
+// ============================================================
+// Cache do histórico do FUNDO (inv_proventos_fundo)
+//
+// Grava os rates que a B3 devolveu para o ativo (janela ~13 meses),
+// independente de o usuário ter posição na data — inv_dividendos só
+// cobre o período de posse. É daqui que o /ranking tira o DY/YoC
+// projetado (padrão investidor10) de posições com <12m de posse.
+// Falha aqui não interrompe a rotina chamadora (cache é best-effort).
+// ============================================================
+async function upsertProventosFundo(c: Db, userId: string, ativoId: string, proventos: ProventoB3[]) {
+  const corte = new Date();
+  corte.setMonth(corte.getMonth() - 13);
+  const corteISO = corte.toISOString().split("T")[0];
+  const rows = proventos
+    .filter((p) => p.payDate >= corteISO && p.rate > 0)
+    .map((p) => ({
+      user_id: userId, ativo_id: ativoId, data_pagamento: p.payDate,
+      label: p.label ?? "", valor_por_cota: Number(p.rate.toFixed(8)),
+      atualizado_em: new Date().toISOString(),
+    }));
+  if (rows.length === 0) return;
+  const { error } = await c.from("inv_proventos_fundo")
+    .upsert(rows, { onConflict: "ativo_id,data_pagamento,label" });
+  if (error) logError("upsertProventosFundo", error);
 }
 
 // Classe-alvo do papel: prioriza acoes_subtipo; senão deduz do sufixo
@@ -5109,7 +5173,7 @@ async function ranking(c: Db, params: URLSearchParams) {
   const corteISO = corte12m.toISOString().split("T")[0];
   const hojeRanking = hojeISO();
 
-  const [posRes, histRes, divRes, opsRes] = await Promise.all([
+  const [posRes, histRes, divRes, opsRes, fundoRes] = await Promise.all([
     (() => {
       let q = c.from("inv_posicoes")
         .select("id, ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, nota_usuario)")
@@ -5130,12 +5194,21 @@ async function ranking(c: Db, params: URLSearchParams) {
       .select("posicao_id, tipo_operacao, quantidade, data_operacao")
       .order("data_operacao", { ascending: true })
       .order("created_at", { ascending: true }),
+    // Cache do histórico do FUNDO (B3): distribuição por cota nos 12m
+    // completos, independente de posse — base do DY/YoC projetado para
+    // ativos comprados há menos de 1 ano.
+    c.from("inv_proventos_fundo").select("ativo_id, data_pagamento, valor_por_cota")
+      .gte("data_pagamento", corteISO).lte("data_pagamento", hojeRanking),
   ]);
 
   if (posRes.error)  { logError("Ranking posicoes", posRes.error);   return erro(posRes.error.message); }
   if (histRes.error) { logError("Ranking historico", histRes.error); return erro(histRes.error.message); }
   if (divRes.error)  { logError("Ranking dividendos", divRes.error); return erro(divRes.error.message); }
   if (opsRes.error)  { logError("Ranking operacoes", opsRes.error);  return erro(opsRes.error.message); }
+  // Cache do fundo é best-effort: sem a migration aplicada (ou vazio),
+  // o cálculo cai no Σ rate de inv_dividendos como antes.
+  if (fundoRes.error) logError("Ranking proventos_fundo", fundoRes.error);
+  const fundoRows = fundoRes.error ? [] : (fundoRes.data ?? []);
 
   // Último valor_mercado por ativo+conta (view já entrega 1 linha por par)
   const ultimoMercado = mapaUltimoMercado(histRes.data ?? []);
@@ -5148,6 +5221,10 @@ async function ranking(c: Db, params: URLSearchParams) {
   const porAtivo = new Map<string, AggAtivo>();
   // ativo_id → posições (id) ATIVAS, para somar o custo histórico do ativo
   const posicoesPorAtivo = new Map<string, string[]>();
+  // ativo_id → primeira data de posse (min data_compra/1ª operação). Se a
+  // posse tem menos de 12m, o DY/YoC real (recebido) diverge do projetado
+  // (ritmo do fundo) e o frontend exibe os dois.
+  const primeiraPosse = new Map<string, string>();
 
   // Custo agrupado por ativo+conta (snapshot cobre o par inteiro)
   const custoPorPar = new Map<string, { ativo: AggAtivo; custo: number }>();
@@ -5164,6 +5241,8 @@ async function ranking(c: Db, params: URLSearchParams) {
       });
     }
     porAtivo.get(aid)!.quantidade += Number(p.quantidade) || 0;
+    const dc = String(p.data_compra ?? "").slice(0, 10);
+    if (dc && (!primeiraPosse.has(aid) || dc < primeiraPosse.get(aid)!)) primeiraPosse.set(aid, dc);
     const pids = posicoesPorAtivo.get(aid) ?? [];
     pids.push(String(p.id));
     posicoesPorAtivo.set(aid, pids);
@@ -5187,6 +5266,14 @@ async function ranking(c: Db, params: URLSearchParams) {
     }
   }
 
+  // Refina a primeira posse com a data da 1ª operação de cada posição ativa
+  for (const [aid, pids] of posicoesPorAtivo) {
+    for (const pid of pids) {
+      const d0 = checkpoints.get(pid)?.[0]?.data?.slice(0, 10);
+      if (d0 && (!primeiraPosse.has(aid) || d0 < primeiraPosse.get(aid)!)) primeiraPosse.set(aid, d0);
+    }
+  }
+
   // Agrupa proventos por (ativo|data|tipo): o dividendo-por-cota (rate) é o
   // mesmo entre contas, então só conta UMA vez por pagamento. Soma o valor
   // recebido (todas as contas) p/ a estimativa e p/ dividendos_12m.
@@ -5206,8 +5293,9 @@ async function ranking(c: Db, params: URLSearchParams) {
     grupos.set(k, g);
   }
 
-  // ativo_id → Σ dividendo_por_cota nos 12m (do FUNDO, independe da posição)
-  const divPorCota = new Map<string, number>();
+  // ativo_id → (data_pagamento → Σ rate do dia), a partir de inv_dividendos.
+  // Cobre com precisão o período de POSSE (o que o usuário recebeu).
+  const divPorData = new Map<string, Map<string, number>>();
   for (const g of grupos.values()) {
     let rate = g.rate;
     if (rate == null) {
@@ -5216,33 +5304,83 @@ async function ranking(c: Db, params: URLSearchParams) {
         (s, pid) => s + qtdNaData(checkpoints.get(pid), g.data), 0);
       rate = qtd > 0 ? g.valorTotal / qtd : 0;
     }
-    if (rate > 0) divPorCota.set(g.ativo, (divPorCota.get(g.ativo) ?? 0) + rate);
+    if (rate > 0) {
+      const porData = divPorData.get(g.ativo) ?? new Map<string, number>();
+      porData.set(g.data, (porData.get(g.data) ?? 0) + rate);
+      divPorData.set(g.ativo, porData);
+    }
+  }
+
+  // Idem a partir do cache do FUNDO (B3) — inclui meses SEM posse.
+  const cachePorData = new Map<string, Map<string, number>>();
+  for (const f of fundoRows as { ativo_id: string; data_pagamento: string; valor_por_cota: number }[]) {
+    const aid  = String(f.ativo_id);
+    const data = String(f.data_pagamento).slice(0, 10);
+    const rate = Number(f.valor_por_cota) || 0;
+    if (rate <= 0) continue;
+    const porData = cachePorData.get(aid) ?? new Map<string, number>();
+    porData.set(data, (porData.get(data) ?? 0) + rate);
+    cachePorData.set(aid, porData);
+  }
+
+  // Fusão POR DATA: o cache acrescenta os meses sem posse, e inv_dividendos
+  // garante pagamentos que o supplement da B3 já não lista (ele corta os mais
+  // antigos). Mesma data nas duas fontes = mesmo pagamento → usa o maior.
+  const divPorCota = new Map<string, number>();
+  for (const aid of new Set([...divPorData.keys(), ...cachePorData.keys()])) {
+    const datas = new Set([
+      ...(divPorData.get(aid)?.keys() ?? []),
+      ...(cachePorData.get(aid)?.keys() ?? []),
+    ]);
+    // Agrupa por MÊS-calendário: a janela corrida de 12m pode capturar 13
+    // meses (pagamento no início do mês corrente + o do mês do corte ainda
+    // dentro da janela). O investidor10 conta 12 → descarta o(s) mais antigo(s).
+    const porMes = new Map<string, number>();
+    for (const dt of datas) {
+      const r = Math.max(divPorData.get(aid)?.get(dt) ?? 0, cachePorData.get(aid)?.get(dt) ?? 0);
+      if (r <= 0) continue;
+      const mes = dt.slice(0, 7);
+      porMes.set(mes, (porMes.get(mes) ?? 0) + r);
+    }
+    const meses = [...porMes.keys()].sort();
+    while (meses.length > 12) meses.shift();
+    const soma = meses.reduce((s, m) => s + porMes.get(m)!, 0);
+    if (soma > 0) divPorCota.set(aid, soma);
   }
 
   const totalMercado = [...porAtivo.values()].reduce((s, a) => s + a.valor_mercado, 0);
 
-  const ativos = [...porAtivo.values()].map((a) => ({
-    ativo_id:           a.ativo_id,
-    ticker:             a.ticker,
-    nome:               a.nome,
-    tipo_ativo:         a.tipo_ativo,
-    quantidade:         a.quantidade,
-    nota_usuario:       a.nota_usuario,
-    valor_custo:        Number(a.valor_custo.toFixed(2)),
-    valor_mercado:      Number(a.valor_mercado.toFixed(2)),
-    ganho_perda:        Number((a.valor_mercado - a.valor_custo).toFixed(2)),
-    rentabilidade_pct:  a.valor_custo > 0 ? Number((((a.valor_mercado - a.valor_custo) / a.valor_custo) * 100).toFixed(2)) : 0,
-    dividendos_12m:     Number(a.dividendos_12m.toFixed(2)),
-    // Padrão investidor10: dividendo-por-cota 12m do fundo × qtd atual / preço.
-    // (DY usa valor de mercado; YoC usa o custo.)
-    dividend_yield_pct: a.valor_mercado > 0
-      ? Number((((divPorCota.get(a.ativo_id) ?? 0) * a.quantidade / a.valor_mercado) * 100).toFixed(2))
-      : 0,
-    yield_on_cost_pct:  a.valor_custo > 0
-      ? Number((((divPorCota.get(a.ativo_id) ?? 0) * a.quantidade / a.valor_custo) * 100).toFixed(2))
-      : 0,
-    participacao_pct:   totalMercado > 0 ? Number(((a.valor_mercado / totalMercado) * 100).toFixed(2)) : 0,
-  })).sort((x, y) => y.rentabilidade_pct - x.rentabilidade_pct);
+  const ativos = [...porAtivo.values()].map((a) => {
+    // Padrão investidor10: dividendo-por-cota 12m do FUNDO × qtd atual / preço.
+    // (fusão inv_dividendos + cache B3 por data de pagamento)
+    const rate12m = divPorCota.get(a.ativo_id) ?? 0;
+    return {
+      ativo_id:           a.ativo_id,
+      ticker:             a.ticker,
+      nome:               a.nome,
+      tipo_ativo:         a.tipo_ativo,
+      quantidade:         a.quantidade,
+      nota_usuario:       a.nota_usuario,
+      valor_custo:        Number(a.valor_custo.toFixed(2)),
+      valor_mercado:      Number(a.valor_mercado.toFixed(2)),
+      ganho_perda:        Number((a.valor_mercado - a.valor_custo).toFixed(2)),
+      rentabilidade_pct:  a.valor_custo > 0 ? Number((((a.valor_mercado - a.valor_custo) / a.valor_custo) * 100).toFixed(2)) : 0,
+      dividendos_12m:     Number(a.dividendos_12m.toFixed(2)),
+      // (DY usa valor de mercado; YoC usa o custo.)
+      dividend_yield_pct: a.valor_mercado > 0
+        ? Number(((rate12m * a.quantidade / a.valor_mercado) * 100).toFixed(2))
+        : 0,
+      yield_on_cost_pct:  a.valor_custo > 0
+        ? Number(((rate12m * a.quantidade / a.valor_custo) * 100).toFixed(2))
+        : 0,
+      // Visão REAL: o que efetivamente caiu na conta nos 12m ÷ mercado/custo.
+      // Diverge do projetado quando a posse tem menos de 12 meses.
+      dy_real_pct:        a.valor_mercado > 0 ? Number(((a.dividendos_12m / a.valor_mercado) * 100).toFixed(2)) : 0,
+      yoc_real_pct:       a.valor_custo   > 0 ? Number(((a.dividendos_12m / a.valor_custo)   * 100).toFixed(2)) : 0,
+      posse_12m:          (primeiraPosse.get(a.ativo_id) ?? hojeRanking) <= corteISO,
+      participacao_pct:   totalMercado > 0 ? Number(((a.valor_mercado / totalMercado) * 100).toFixed(2)) : 0,
+    };
+  }).sort((x, y) => y.rentabilidade_pct - x.rentabilidade_pct);
 
   return json({ dados: { total_mercado: Number(totalMercado.toFixed(2)), ativos } });
 }

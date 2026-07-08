@@ -347,6 +347,8 @@ export interface InvestimentoDividendo {
   ativo_id:             string
   conta_id:             string
   valor:                number
+  // Dividendo por cota (rate B3/Polygon) — NULL em lançamento manual antigo
+  valor_por_cota?:      number | null
   data_pagamento:       string
   tipo_ativo:           TipoAtivoInvestimento
   tipo_dividendo_id:    string | null
@@ -522,8 +524,14 @@ export interface InvestimentoRankingAtivo {
   ganho_perda:        number
   rentabilidade_pct:  number
   dividendos_12m:     number
+  // Projetado (padrão investidor10): rate 12m do FUNDO × qtd atual ÷ mercado/custo
   dividend_yield_pct: number
   yield_on_cost_pct:  number
+  // Real: proventos efetivamente recebidos nos 12m ÷ mercado/custo
+  dy_real_pct:        number
+  yoc_real_pct:       number
+  // false = posse < 12 meses (real e projetado divergem; UI mostra os dois)
+  posse_12m:          boolean
   participacao_pct:   number
 }
 

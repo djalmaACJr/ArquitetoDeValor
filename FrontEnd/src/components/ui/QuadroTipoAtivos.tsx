@@ -263,8 +263,28 @@ export default function QuadroTipoAtivos({
     pm:     { id: 'pm', label: 'Preço médio', align: 'right', sortKey: 'pm', cell: (l) => <span className="text-white/80">{formatBRL(precoMedio(l))}</span> },
     pa:     { id: 'pa', label: 'Preço atual', align: 'right', sortKey: 'pa', cell: (l) => <span className="text-white/80">{formatBRL(precoAtual(l))}</span> },
     rent:   { id: 'rent', label: 'Variação', align: 'right', sortKey: 'rent', cell: (l) => <span style={{ color: corValor(l.rentabilidade_pct) }}>{fmtPct(l.rentabilidade_pct)}</span> },
-    dy:     { id: 'dy', label: 'DY', align: 'right', sortKey: 'dy', title: 'Dividend Yield (12m)', cell: (l) => <span style={{ color: l.dividend_yield_pct > 0 ? VERDE : MUTED }}>{pct2(l.dividend_yield_pct)}</span> },
-    yoc:    { id: 'yoc', label: 'YoC', align: 'right', sortKey: 'yoc', title: 'Yield on Cost (12m)', cell: (l) => <span className="text-white/70">{pct2(l.yield_on_cost_pct)}</span> },
+    // Posse < 12 meses: o projetado (ritmo do fundo, padrão investidor10) e o
+    // real (efetivamente recebido) divergem — mostra os dois.
+    dy:     { id: 'dy', label: 'DY', align: 'right', sortKey: 'dy', title: 'Dividend Yield (12m) — distribuição do fundo × posição atual', cell: (l) => (
+      <>
+        <span style={{ color: l.dividend_yield_pct > 0 ? VERDE : MUTED }}>{pct2(l.dividend_yield_pct)}</span>
+        {!l.posse_12m && l.dy_real_pct !== l.dividend_yield_pct && (
+          <span className="block text-[10px]" style={{ color: MUTED }} title="Recebido nos últimos 12m ÷ saldo atual (posse menor que 12 meses)">
+            real {pct2(l.dy_real_pct)}
+          </span>
+        )}
+      </>
+    ) },
+    yoc:    { id: 'yoc', label: 'YoC', align: 'right', sortKey: 'yoc', title: 'Yield on Cost (12m) — distribuição do fundo × posição atual ÷ custo', cell: (l) => (
+      <>
+        <span className="text-white/70">{pct2(l.yield_on_cost_pct)}</span>
+        {!l.posse_12m && l.yoc_real_pct !== l.yield_on_cost_pct && (
+          <span className="block text-[10px]" style={{ color: MUTED }} title="Recebido nos últimos 12m ÷ custo (posse menor que 12 meses)">
+            real {pct2(l.yoc_real_pct)}
+          </span>
+        )}
+      </>
+    ) },
     saldo:  { id: 'saldo', label: 'Saldo', align: 'right', sortKey: 'saldo', cell: (l) => <span className="text-white font-medium">{formatBRL(l.valor_mercado)}</span> },
     nota:   { id: 'nota', label: 'Nota', align: 'center', sortKey: 'nota', cell: (l) => l.nota_usuario != null
       ? <span className="inline-block px-1.5 rounded bg-white/10 text-white text-[11px] font-semibold">{l.nota_usuario}</span> : traco },

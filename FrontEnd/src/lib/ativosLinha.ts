@@ -34,6 +34,9 @@ export interface AtivoLinha {
   rentabilidade_pct:  number
   dividend_yield_pct: number
   yield_on_cost_pct:  number
+  dy_real_pct:        number
+  yoc_real_pct:       number
+  posse_12m:          boolean
   participacao_pct:   number
   // Metadado original — necessário para as ações de Posições/Histórico/Editar
   meta:               InvestimentoAtivo | null
@@ -49,7 +52,9 @@ export function linhaDeRanking(
     categoria: meta ? rotuloCategoriaAtivo(meta) : null, contas,
     quantidade: Number(a.quantidade) || 0, valor_custo: a.valor_custo, valor_mercado: a.valor_mercado,
     rentabilidade_pct: a.rentabilidade_pct, dividend_yield_pct: a.dividend_yield_pct,
-    yield_on_cost_pct: a.yield_on_cost_pct, participacao_pct: a.participacao_pct, meta: meta ?? null,
+    yield_on_cost_pct: a.yield_on_cost_pct, dy_real_pct: a.dy_real_pct ?? 0,
+    yoc_real_pct: a.yoc_real_pct ?? 0, posse_12m: a.posse_12m ?? true,
+    participacao_pct: a.participacao_pct, meta: meta ?? null,
   }
 }
 
@@ -63,6 +68,8 @@ export function linhaDeMeta(
     categoria: rotuloCategoriaAtivo(meta), contas,
     quantidade: Number(r?.quantidade) || 0, valor_custo: r?.valor_custo ?? 0, valor_mercado: r?.valor_mercado ?? 0,
     rentabilidade_pct: r?.rentabilidade_pct ?? 0, dividend_yield_pct: r?.dividend_yield_pct ?? 0,
-    yield_on_cost_pct: r?.yield_on_cost_pct ?? 0, participacao_pct: r?.participacao_pct ?? 0, meta,
+    yield_on_cost_pct: r?.yield_on_cost_pct ?? 0, dy_real_pct: r?.dy_real_pct ?? 0,
+    yoc_real_pct: r?.yoc_real_pct ?? 0, posse_12m: r?.posse_12m ?? true,
+    participacao_pct: r?.participacao_pct ?? 0, meta,
   }
 }
