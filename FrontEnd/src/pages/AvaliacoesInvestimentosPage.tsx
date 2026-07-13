@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import {
-  ArrowLeft, Sparkles, RefreshCw, Bot, AlertTriangle, Settings, ChevronDown, CheckCircle2,
+  Sparkles, RefreshCw, Bot, AlertTriangle, Settings, ChevronDown, CheckCircle2,
   Trophy, Medal, ShieldCheck, TrendingUp, Coins, Scale, Star, CalendarClock,
   ArrowUp, ArrowDown, Minus, X, CircleStop, Clock, Info, type LucideIcon,
 } from 'lucide-react'
@@ -23,6 +23,8 @@ import { provedorPorId } from '../lib/iaProvedores'
 import { SelectDark } from '../components/ui/shared'
 import Mascote, { type MascoteNome } from '../components/ui/Mascote'
 import LoadingMascote from '../components/ui/LoadingMascote'
+import InvestimentosNav from '../components/ui/InvestimentosNav'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPOS_ATIVO_INV, CRITERIOS_QUESTAO, CRITERIO_LABEL } from '../lib/constants'
 import type { InvAvaliacao, InvAvaliacaoMentor, InvestimentoAtivo, CriterioQuestao, TipoAtivoInvestimento, NivelConsenso, FrequenciaAgenda, PerguntaAvaliacao, PesosCriterio } from '../types'
 
@@ -147,9 +149,10 @@ function TempoExecucao({ ms }: { ms: number }) {
 // Aviso de decisão quando uma ou mais IAs são pausadas por erros repetidos.
 // Mostra o LOG COMPLETO de execução de cada IA (não só o último erro) e
 // deixa o usuário ignorar a IA e concluir, ou esperar e tentar depois.
-function AvisoDecisao({ decisao, processando, onIgnorar, onEsperar }: {
+function AvisoDecisao({ decisao, processando, onRetomar, onIgnorar, onEsperar }: {
   decisao: DecisaoPendente
   processando: boolean
+  onRetomar: () => void
   onIgnorar: () => void
   onEsperar: () => void
 }) {
@@ -161,7 +164,7 @@ function AvisoDecisao({ decisao, processando, onIgnorar, onEsperar }: {
         <div>
           <p className="text-[14px] font-semibold text-white">IA(s) pausada(s) por erros repetidos</p>
           <p className="text-[12.5px]" style={{ color: MUTED }}>
-            Veja o log completo de execução e decida: ignorar esta(s) IA(s) e concluir agora, ou
+            Retome agora pra tentar de novo na hora, ignore esta(s) IA(s) e conclua agora, ou
             esperar e tentar mais tarde (os ativos sem avaliação completa ficam pendentes).
           </p>
         </div>
@@ -199,6 +202,10 @@ function AvisoDecisao({ decisao, processando, onIgnorar, onEsperar }: {
       </div>
 
       <div className="flex flex-wrap gap-2 mt-3">
+        <button onClick={onRetomar} disabled={processando}
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50" style={{ background: '#00a37a' }}>
+          <RefreshCw size={14} /> Retomar agora
+        </button>
         <button onClick={onIgnorar} disabled={processando}
           className="px-3.5 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50" style={{ background: '#8b5cf6' }}>
           Ignorar esta(s) IA(s) e concluir
@@ -407,36 +414,65 @@ function formatDuracao(ms: number): string {
 // Modal com o log individual de execução de um mentor (clicável na lista).
 function ModalLogMentor({ nome, log, onClose }: { nome: string; log: LogEntry[]; onClose: () => void }) {
   const erros = log.filter((e) => !e.ok).length
+
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', fn)
+    return () => document.removeEventListener('keydown', fn)
+  }, [onClose])
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-xl border border-white/10 bg-[#141929] p-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
+    <>
+      {/* Overlay */}
+      <div className="fixed inset-0 bg-black/60 z-[200]" onClick={onClose} />
+
+      {/* Modal */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed z-[201] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
+          w-[min(560px,calc(100vw-32px))] rounded-2xl border border-white/10 flex flex-col"
+        style={{ background: '#1a1f2e' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <div className="flex items-center gap-2 min-w-0">
-            <Bot size={16} style={{ color: '#8b5cf6' }} />
-            <h3 className="text-[14px] font-semibold text-white truncate">Log · {nome}</h3>
-            {erros > 0 && <span className="text-[12px]" style={{ color: '#ffb74d' }}>{erros} erro(s)</span>}
+            <Bot size={15} style={{ color: '#8b5cf6' }} />
+            <span className="text-[18px] font-semibold truncate" style={{ color: '#e8eaf0' }}>
+              Log · {nome}
+            </span>
+            {erros > 0 && <span className="text-[13px]" style={{ color: '#ffb74d' }}>{erros} erro(s)</span>}
           </div>
-          <button onClick={onClose} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/30" style={{ color: MUTED }}>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center
+              transition-all hover:border-white/30"
+            style={{ color: '#8b92a8' }}
+          >
             <X size={14} />
           </button>
         </div>
-        {log.length === 0 ? (
-          <p className="text-[13px]" style={{ color: MUTED }}>Sem execução registrada nesta rodada.</p>
-        ) : (
-          <div className="max-h-[60vh] overflow-y-auto space-y-1 text-[12.5px] font-mono">
-            {log.map((e, i) => (
-              <div key={i} className="flex gap-2">
-                <span style={{ color: e.ok ? '#00c896' : '#ff5c7a' }}>{e.ok ? '✓' : '✕'}</span>
-                <span className="text-white/85 shrink-0">{e.ticker}</span>
-                {e.ok
-                  ? <span style={{ color: MUTED }}>nota {e.nota ?? '—'} · {e.respostas ?? 0} respostas</span>
-                  : e.erro && <span style={{ color: MUTED }}>{e.erro}</span>}
-              </div>
-            ))}
-          </div>
-        )}
+
+        {/* Body */}
+        <div className="p-5">
+          {log.length === 0 ? (
+            <p className="text-[15px]" style={{ color: MUTED }}>Sem execução registrada nesta rodada.</p>
+          ) : (
+            <div className="max-h-[60vh] overflow-y-auto space-y-1.5 text-[13.5px] font-mono">
+              {log.map((e, i) => (
+                <div key={i} className="flex gap-2">
+                  <span style={{ color: e.ok ? '#00c896' : '#ff5c7a' }}>{e.ok ? '✓' : '✕'}</span>
+                  <span className="text-white/85 shrink-0">{e.ticker}</span>
+                  {e.ok
+                    ? <span style={{ color: MUTED }}>nota {e.nota ?? '—'} · {e.respostas ?? 0} respostas</span>
+                    : e.erro && <span style={{ color: MUTED }}>{e.erro}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -563,6 +599,15 @@ export default function AvaliacoesInvestimentosPage() {
     setProgMentores((prev) => prev?.map((p) =>
       p.configId === configId ? { ...p, pausado: false } : p) ?? prev)
   }
+  // Lista a retomar automaticamente assim que a decisão pendente terminar de
+  // ser finalizada. Não dá pra chamar avaliar() direto no clique de "Retomar
+  // agora": a função lê `rodando`/`pendenteDecisao` do closure do render ATUAL
+  // (ainda com o painel aberto), e `finalizarDecisao` só atualiza esses
+  // estados de forma assíncrona — chamar avaliar() em seguida, na mesma
+  // função, ainda veria pendenteDecisao != null e abortaria. Guardando a
+  // lista numa ref e dependendo do useEffect abaixo, avaliar() só roda no
+  // PRÓXIMO render, quando os estados já refletem o painel fechado.
+  const retomarListaRef = useRef<InvestimentoAtivo[] | null>(null)
   // Guarda de montagem — encerra loops/esperas de mentores pausados se o
   // usuário sair da tela (evita polling infinito após desmontar).
   const montadoRef = useRef(true)
@@ -962,6 +1007,27 @@ export default function AvaliacoesInvestimentosPage() {
     await finalizarSalvando(d.lista, d.efPorAtivo, d.resultadosPorAtivo, modo, d.abortados, d.configsRun)
   }
 
+  // "Retomar agora": mesmo efeito de "Esperar e tentar depois" (persiste o
+  // que já foi concluído; os ativos que o(s) mentor(es) pausado(s) não
+  // terminaram ficam pendentes) — só que já dispara uma nova rodada na hora,
+  // sem o usuário precisar sair do painel e clicar em "Continuar avaliação"
+  // à parte. Reusa o cache: mentores que já avaliaram não pesquisam de novo,
+  // só o(s) que abortou(aram) tenta(m) de novo os ativos que faltaram.
+  async function retomarAgora() {
+    const d = decisaoRef.current
+    if (!d) return
+    retomarListaRef.current = d.lista
+    await finalizarDecisao('esperar')
+  }
+  useEffect(() => {
+    if (pendenteDecisao || rodando) return
+    const lista = retomarListaRef.current
+    if (!lista) return
+    retomarListaRef.current = null
+    void avaliar(lista)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendenteDecisao, rodando])
+
   // CONCLUIR agora: salva os ativos pendentes com o que já está em cache (sem
   // rodar mais nada). Ativos com ao menos um mentor avaliado são consolidados;
   // os sem nenhum resultado continuam pendentes.
@@ -1158,6 +1224,27 @@ export default function AvaliacoesInvestimentosPage() {
     await finalizarSalvando(lista, efPorAtivo, resultadosPorAtivo, 'todos', abortados, idsParticipantes)
   }
 
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  useRegistrarContextoIA(useMemo(() => {
+    if (carregandoIA || loadingAtivos || loadingAval || avaliacoes.length === 0) return null
+    const tickerDe = (ativoId: string) => ativos.find((a) => a.id === ativoId)?.ticker ?? ativoId
+    return {
+      titulo:    'Investimentos · Mentor (Avaliações)',
+      descricao: 'Notas de avaliação dos ativos pelos mentores de IA configurados',
+      dados: {
+        qtd_mentores_configurados: configs.length,
+        avaliacoes: avaliacoes.map((av) => ({
+          ticker:     tickerDe(av.ativo_id),
+          nota_final: av.nota_final,
+          gerado_em:  av.gerado_em,
+          mentores: av.consenso.mentores.map((m) => ({
+            nome: rotuloMentor(m.nome, m.provedor), nota: m.nota, erro: m.erro,
+          })),
+        })),
+      },
+    }
+  }, [carregandoIA, loadingAtivos, loadingAval, avaliacoes, ativos, configs.length]))
+
   if (carregandoIA || loadingAtivos || loadingAval || loadingRanking) return <LoadingMascote />
 
   // Gating: precisa de ≥1 mentor configurado.
@@ -1169,11 +1256,9 @@ export default function AvaliacoesInvestimentosPage() {
 
   return (
     <div className="p-5">
+      <InvestimentosNav />
       {/* Header */}
       <div className="flex items-center gap-3 mb-5">
-        <Link to="/investimentos/ativos" className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
-          <ArrowLeft size={15} />
-        </Link>
         <div>
           <h1 className="text-[22px] font-bold text-white">Avaliações</h1>
           <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>
@@ -1296,6 +1381,7 @@ export default function AvaliacoesInvestimentosPage() {
           {/* Decisão pendente: IA(s) pausada(s) por erros repetidos */}
           {pendenteDecisao && (
             <AvisoDecisao decisao={pendenteDecisao} processando={salvandoFase}
+              onRetomar={retomarAgora}
               onIgnorar={() => finalizarDecisao('ignorar')}
               onEsperar={() => finalizarDecisao('esperar')} />
           )}

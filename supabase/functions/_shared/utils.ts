@@ -3,7 +3,7 @@
 // supabase/functions/_shared/utils.ts
 // Alteração: CORS com origem configurável via ALLOWED_ORIGIN
 // ============================================================
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ── CORS — origem restrita em produção ────────────────────────────────────────
 // Em produção, defina a variável de ambiente:
@@ -36,7 +36,10 @@ export function erro(mensagem: string, status = 400): Response {
 }
 
 // ── Cliente Supabase com schema arqvalor (anon key + JWT do usuário) ──
-export function db(req: Request): SupabaseClient {
+// Sem anotação de retorno explícita: createClient() com { schema: "arqvalor" }
+// devolve SupabaseClient<..., "arqvalor", ...>, incompatível com o genérico
+// default "public" de SupabaseClient — deixar o TS inferir evita o mismatch.
+export function db(req: Request) {
   return createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_ANON_KEY")!,
@@ -47,8 +50,13 @@ export function db(req: Request): SupabaseClient {
   );
 }
 
+// Tipo do cliente no schema arqvalor — use este (não o SupabaseClient bare,
+// que tem schema default "public") em qualquer função compartilhada que
+// receba o cliente de db()/dbAdmin() como parâmetro.
+export type Db = ReturnType<typeof db>;
+
 // ── Cliente Supabase com service_role (bypassa RLS) ───────────
-export function dbAdmin(): SupabaseClient {
+export function dbAdmin() {
   return createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -56,21 +64,42 @@ export function dbAdmin(): SupabaseClient {
   );
 }
 
-// ── Extrai user_id do JWT com suporte a base64url ─────────────
-export function getUserId(req: Request): string | null {
-  const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
-  if (!token) return null;
-  try {
-    const payload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(payload)).sub ?? null;
-  } catch { return null; }
+// ── Verificador de JWT (singleton do módulo) ──────────────────
+// Cliente dedicado só para validar tokens. Singleton para o cache de JWKS
+// do supabase-js persistir entre requests do mesmo isolate — a verificação
+// ES256 roda local (Web Crypto), sem chamada de rede por request.
+let _verificador: ReturnType<typeof createClient> | null = null;
+function verificador() {
+  _verificador ??= createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  return _verificador;
 }
 
 // ── Valida autenticação — retorna userId ou Response 401 ──────
-export function autenticar(req: Request): string | Response {
-  const userId = getUserId(req);
-  if (!userId) return erro("Usuário não autenticado", 401);
-  return userId;
+// Verifica ASSINATURA e EXPIRAÇÃO do JWT (não só decodifica): o payload de
+// um token forjado/expirado não pode virar userId — rotas que usam dbAdmin()
+// (service_role, sem RLS) confiam neste valor. getClaims valida via JWKS
+// local; se a lib em runtime não o tiver, cai no getUser (validação no Auth).
+export async function autenticar(req: Request): Promise<string | Response> {
+  const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
+  if (!token) return erro("Usuário não autenticado", 401);
+  try {
+    const auth = verificador().auth;
+    if (typeof auth.getClaims === "function") {
+      const { data, error } = await auth.getClaims(token);
+      const sub = data?.claims?.sub;
+      if (error || !sub) return erro("Usuário não autenticado", 401);
+      return String(sub);
+    }
+    const { data, error } = await auth.getUser(token);
+    if (error || !data?.user?.id) return erro("Usuário não autenticado", 401);
+    return data.user.id;
+  } catch {
+    return erro("Usuário não autenticado", 401);
+  }
 }
 
 // ── Extrai UUID do path ───────────────────────────────────────
@@ -93,7 +122,7 @@ export function extrairAcao(req: Request, recurso: string): string | null {
 
 // ── Verifica existência e posse do registro ───────────────────
 export async function verificarExistencia(
-  c: SupabaseClient,
+  c: Db,
   tabela: string,
   id: string,
   mensagem: string,

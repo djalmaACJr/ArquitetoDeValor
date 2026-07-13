@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import {
   TrendingUp, TrendingDown, Wallet, Coins, PieChart, Percent, Trophy,
-  HandCoins, BarChart3, Calendar, Upload, Settings, RefreshCw, History,
+  HandCoins, BarChart3, Calendar, Upload, RefreshCw, History,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
@@ -16,9 +16,11 @@ import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useDividendos } from '../hooks/useDividendos'
 import { useContas } from '../hooks/useContas'
 import { useAuth } from '../hooks/useAuth'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { SelectDark, Toast } from '../components/ui/shared'
 import QuadroTipoAtivos from '../components/ui/QuadroTipoAtivos'
+import InvestimentosNav from '../components/ui/InvestimentosNav'
 import { linhaDeRanking, type AtivoLinha } from '../lib/ativosLinha'
 import { formatBRL } from '../lib/utils'
 import {
@@ -685,15 +687,43 @@ export default function InvestimentosPage() {
     return m
   }, [ranking, metaPorAtivo, contasPorAtivo])
 
-  // Proventos recebidos nos últimos 12 meses
+  // Proventos RECEBIDOS nos últimos 12 meses — exclui projeções futuras
+  // (transação PROJECAO), senão o card somava proventos ainda não pagos e
+  // ficava maior que o total real do extrato (mesmo bug do "Recebidos" vs
+  // "Provisionado" já tratado em DividendosPage/ehProvisionado).
   const proventos12m = useMemo(() => {
     const corte = new Date()
     corte.setMonth(corte.getMonth() - 12)
     const corteISO = corte.toISOString().split('T')[0]
     return dividendos
-      .filter((d) => d.data_pagamento >= corteISO)
+      .filter((d) => d.data_pagamento >= corteISO && d.transacoes?.status !== 'PROJECAO')
       .reduce((s, d) => s + Number(d.valor), 0)
   }, [dividendos])
+
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  useRegistrarContextoIA(useMemo(() => {
+    const tiposD = dashboard?.tipos ?? []
+    if (loading || tiposD.length === 0) return null
+    return {
+      titulo:    'Investimentos · Painel',
+      descricao: 'Resumo consolidado da carteira por tipo de ativo',
+      dados: {
+        conta_filtro:               contaId || 'todas',
+        total_investido:            dashboard?.total_custo ?? 0,
+        total_mercado:              dashboard?.total_mercado ?? 0,
+        ganho_capital:              dashboard?.ganho_perda ?? 0,
+        dividendos_totais:          dashboard?.total_dividendos ?? 0,
+        proventos_ultimos_12_meses: proventos12m,
+        composicao_por_tipo: tiposD.map((t) => ({
+          tipo: t.tipo_ativo, valor_mercado: t.valor_mercado, percentual: t.percentual_atual,
+        })),
+        destaques: (ranking?.ativos ?? []).slice(0, 15).map((a) => ({
+          ticker: a.ticker, tipo: a.tipo_ativo, rentabilidade_pct: a.rentabilidade_pct,
+          dividend_yield_pct: a.dividend_yield_pct, participacao_pct: a.participacao_pct,
+        })),
+      },
+    }
+  }, [loading, dashboard, ranking, proventos12m, contaId]))
 
   if (loading) return <LoadingMascote />
 
@@ -703,6 +733,7 @@ export default function InvestimentosPage() {
 
   return (
     <div className="p-5">
+      <InvestimentosNav />
       {/* Header */}
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
@@ -739,21 +770,6 @@ export default function InvestimentosPage() {
               {preenchendo ? 'Preenchendo…' : 'Preencher histórico'}
             </button>
           )}
-          <Link to="/investimentos/configuracoes"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
-              text-[13px] text-white transition-all hover:border-white/25">
-            <Settings size={15} /> Configurações
-          </Link>
-          <Link to="/investimentos/dividendos"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
-              text-[13px] text-white transition-all hover:border-white/25">
-            <Coins size={15} /> Proventos
-          </Link>
-          <Link to="/investimentos/ativos"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
-              text-[13px] text-white transition-all hover:border-white/25">
-            <Wallet size={15} /> Meus ativos
-          </Link>
           <Link to="/importexport?import=investimentos"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
               text-[13px] text-white transition-all hover:border-white/25">

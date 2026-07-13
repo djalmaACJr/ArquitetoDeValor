@@ -19,7 +19,7 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
   ativo: InvestimentoAtivo; onClose: () => void; onToast: (m: string) => void
 }) {
   const { posicoes } = useInvestimentosPosicoes({ ativo_id: ativo.id })
-  const { operacoes, loading, criar, editar, excluir } = useInvestimentosOperacoes()
+  const { operacoes, loading, criar, editar, excluir } = useInvestimentosOperacoes({ ativo_id: ativo.id })
   const { contas } = useContas()
   const { preencher } = useBackfillHistorico()
   // Movimentações aplicáveis ao tipo do ativo (bolsa → Compra/Venda; RF/Tesouro → Aplicação/Resgate).

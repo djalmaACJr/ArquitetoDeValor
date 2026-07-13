@@ -21,11 +21,13 @@ export type EditarOperacaoInput = Partial<CriarOperacaoInput>
 
 export interface FiltrosOperacoes {
   posicao_id?: string
+  ativo_id?:   string
 }
 
 async function fetchOperacoes(filtros: FiltrosOperacoes): Promise<InvestimentoOperacao[]> {
   const params = new URLSearchParams()
   if (filtros.posicao_id) params.set('posicao_id', filtros.posicao_id)
+  if (filtros.ativo_id)   params.set('ativo_id', filtros.ativo_id)
   const qs  = params.toString()
   const res = await apiFetch<InvestimentoOperacao[]>(`/investimentos/operacoes${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar operações')

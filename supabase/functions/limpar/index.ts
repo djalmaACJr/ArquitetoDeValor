@@ -28,7 +28,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return corsPreFlight();
   if (req.method !== "DELETE") return erro("Método não permitido", 405);
 
-  const auth = autenticar(req);
+  const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;
 

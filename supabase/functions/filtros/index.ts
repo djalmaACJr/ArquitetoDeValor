@@ -10,7 +10,7 @@ import { logError, logRequest, logResponse, logSuccess } from "../_shared/logger
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return corsPreFlight();
-  const auth = autenticar(req);
+  const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;
 

@@ -98,7 +98,7 @@ export default function DetalheInvestimentoPage() {
   const { posicoes }  = useInvestimentosPosicoes(ativoId ? { ativo_id: ativoId } : {})
   const { historico } = useInvestimentosHistorico(ativoId ? { ativo_id: ativoId } : {})
   const { dividendos } = useDividendos(ativoId ? { ativo_id: ativoId } : {})
-  const { operacoes } = useInvestimentosOperacoes()
+  const { operacoes } = useInvestimentosOperacoes(ativoId ? { ativo_id: ativoId } : {})
   const { dashboard } = useInvestimentosDashboard()
 
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 3000) }
@@ -351,7 +351,12 @@ export default function DetalheInvestimentoPage() {
     for (const p of ativas) {
       if (!ultimoPorConta.has(p.conta_id)) mercado += Number(p.valor_custo) * (taxaEm(p.data_compra) ?? taxaAtual)
     }
-    const divs = dividendos.reduce((s, d) => s + Number(d.valor) * (taxaEm(d.data_pagamento) ?? taxaAtual), 0)
+    // Dividendos NÃO entram nessa conversão: ao contrário de posições
+    // (inv_posicoes/inv_historico_mensal, na moeda do ativo), inv_dividendos.
+    // valor já é gravado em BRL no backend (mesma regra do extrato/
+    // transacoes, que só existe em BRL) — reconverter aqui dobrava o valor
+    // dos proventos de ativos estrangeiros.
+    const divs = dividendos.reduce((s, d) => s + Number(d.valor), 0)
     return { custo, mercado, ganho: mercado - custo, dividendos: divs }
   }, [ehMoedaEstrangeira, posicoes, historico, dividendos, taxaEm, ptaxAtual])
 
@@ -491,7 +496,7 @@ export default function DetalheInvestimentoPage() {
       })()}
 
       {/* Características do título (renda fixa / Tesouro) e do FII */}
-      <CaracteristicasAtivo ativo={ativo} />
+      <CaracteristicasAtivo ativo={ativo} valorInvestido={resumo.custo} />
 
       <div className="flex items-center justify-end gap-2 mb-3">
         <span className="text-[12px]" style={{ color: MUTED }}>Período dos gráficos:</span>
@@ -783,7 +788,28 @@ function ItemCaracteristica({ rotulo, valor, cor }: { rotulo: string; valor: str
   )
 }
 
-function CaracteristicasAtivo({ ativo }: { ativo: InvestimentoAtivo }) {
+// Projeta o valor no vencimento pelos juros compostos da taxa contratada
+// (rf_taxa) sobre o custo de aquisição — sem considerar novos aportes/
+// resgates. Só PREFIXADO/HIBRIDO têm uma taxa nominal própria para compor;
+// pós-fixado (SELIC/CDI) mostra só o spread sobre um índice futuro
+// desconhecido, então uma composição com ele seria enganosa.
+function projecaoVencimento(
+  ativo: InvestimentoAtivo, valorInvestido: number,
+): { valor: number } | null {
+  if (!ativo.rf_vencimento || !ativo.rf_taxa || valorInvestido <= 0) return null
+  if (ativo.rf_indexador !== 'PREFIXADO' && ativo.rf_indexador !== 'HIBRIDO') return null
+  const m = ativo.rf_taxa.match(/(\d+(?:,\d+)?)\s*%/)
+  if (!m) return null
+  const taxaAnual = Number(m[1].replace(',', '.')) / 100
+  if (!Number.isFinite(taxaAnual)) return null
+  const hoje = new Date()
+  const venc = new Date(`${ativo.rf_vencimento}T00:00:00`)
+  const anos = (venc.getTime() - hoje.getTime()) / (365.25 * 24 * 3600 * 1000)
+  if (anos <= 0) return null
+  return { valor: valorInvestido * Math.pow(1 + taxaAnual, anos) }
+}
+
+function CaracteristicasAtivo({ ativo, valorInvestido }: { ativo: InvestimentoAtivo; valorInvestido: number }) {
   const ehRF  = ativo.tipo_ativo === 'RENDA_FIXA' || ativo.tipo_ativo === 'TESOURO_DIRETO'
   const ehFII = ativo.tipo_ativo === 'FII'
   if (!ehRF && !ehFII) return null
@@ -809,6 +835,7 @@ function CaracteristicasAtivo({ ativo }: { ativo: InvestimentoAtivo }) {
 
   const temAlgo = ativo.rf_subtipo || ativo.rf_indexador || ativo.rf_taxa || ativo.rf_vencimento || ativo.rf_emissor
   if (!temAlgo) return null
+  const proj = projecaoVencimento(ativo, valorInvestido)
   return (
     <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-4">
       <h2 className="text-[14px] font-semibold text-white/80 mb-3">Características do título</h2>
@@ -822,6 +849,9 @@ function CaracteristicasAtivo({ ativo }: { ativo: InvestimentoAtivo }) {
         )}
         {ativo.rf_emissor && <ItemCaracteristica rotulo="Emissor" valor={ativo.rf_emissor} />}
         {ativo.rf_vencimento && <ItemCaracteristica rotulo="Vencimento" valor={formatData(ativo.rf_vencimento)} />}
+        {proj && (
+          <ItemCaracteristica rotulo="Valor estimado no vencimento" valor={formatBRL(proj.valor)} cor="#00c896" />
+        )}
         <ItemCaracteristica rotulo="Garantia do FGC"
           valor={ativo.rf_garantia_fgc ? 'Sim (até R$ 250 mil)' : ativo.rf_subtipo === 'TESOURO' ? 'Não (garantia soberana)' : 'Não'}
           cor={ativo.rf_garantia_fgc || ativo.rf_subtipo === 'TESOURO' ? '#00c896' : '#f0b429'} />
@@ -832,6 +862,12 @@ function CaracteristicasAtivo({ ativo }: { ativo: InvestimentoAtivo }) {
       {ativo.rf_indexador && (
         <p className="text-[12px] mt-3" style={{ color: MUTED }}>
           {INDEXADOR_RF_DESCRICAO[ativo.rf_indexador]}
+        </p>
+      )}
+      {proj && (
+        <p className="text-[12px] mt-1.5" style={{ color: MUTED }}>
+          Projeção pela taxa contratada sobre o custo de aquisição, sem considerar novos aportes/resgates.
+          {ativo.rf_indexador === 'HIBRIDO' && ' Como a taxa do IPCA+ é real, o valor está em poder de compra de hoje — não prevê a inflação até lá.'}
         </p>
       )}
     </section>

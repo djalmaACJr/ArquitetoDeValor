@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, ArrowLeft, Search, RefreshCw, Sparkles, Wallet } from 'lucide-react'
+import { Plus, Trash2, Search, RefreshCw, Wallet, Sparkles } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, type Plugin, type ChartData } from 'chart.js'
@@ -13,6 +13,8 @@ import {
 import DrawerAtivo from '../components/ui/DrawerAtivo'
 import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
 import QuadroTipoAtivos, { type Dimensao } from '../components/ui/QuadroTipoAtivos'
+import InvestimentosNav from '../components/ui/InvestimentosNav'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { linhaDeMeta, type AtivoLinha } from '../lib/ativosLinha'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL } from '../lib/utils'
@@ -424,20 +426,37 @@ export default function AtivosInvestimentosPage() {
   function abrirNovo() { setEditando(null); setDrawer(true) }
   function abrirEditar(a: InvestimentoAtivo) { setEditando(a); setDrawer(true) }
 
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  useRegistrarContextoIA(useMemo(() => {
+    if (loading || ativos.length === 0) return null
+    return {
+      titulo:    'Investimentos · Meus ativos',
+      descricao: 'Ativos cadastrados na carteira, agrupados por tipo',
+      dados: {
+        filtro_tipo:     tipoFiltro || null,
+        filtro_pesquisa: pesquisa || null,
+        so_com_valor:    soComValor,
+        grupos: grupos.map((g) => ({
+          tipo: g.tipo,
+          ativos: g.linhas.map((l) => ({
+            ticker: l.ticker, nome: l.nome, valor_mercado: l.valor_mercado,
+            rentabilidade_pct: l.rentabilidade_pct, participacao_pct: l.participacao_pct,
+          })),
+        })),
+      },
+    }
+  }, [loading, ativos.length, grupos, tipoFiltro, pesquisa, soComValor]))
+
   if (loading) return <LoadingMascote />
 
   return (
     <div className="p-5">
+      <InvestimentosNav />
       {/* Header */}
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <Link to="/investimentos" className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
-            <ArrowLeft size={15} />
-          </Link>
-          <div>
-            <h1 className="text-[22px] font-bold text-white">Meus ativos</h1>
-            <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>Cartela de ativos e posições</p>
-          </div>
+        <div>
+          <h1 className="text-[22px] font-bold text-white">Meus ativos</h1>
+          <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>Cartela de ativos e posições</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">

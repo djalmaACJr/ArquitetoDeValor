@@ -22,7 +22,8 @@ import { useSugestoes, salvarSugestao } from '../hooks/useAssistente'
 import { fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
-import { STATUS_LABEL } from '../lib/utils'
+import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelect'
+import { STATUS_LABEL, STATUS_OPCOES } from '../lib/utils'
 import { qk } from '../lib/queryKeys'
 
 type Feedback = { tipo: 'ok' | 'erro'; msg: string }
@@ -75,6 +76,90 @@ function Alerta({ fb }: { fb: Feedback | null }) {
     }`}>
       {ok ? <Check size={13}/> : <AlertCircle size={13}/>}
       {fb.msg}
+    </div>
+  )
+}
+
+// Editor inline dos itens de um filtro salvo. Mesmos multi-selects usados nas
+// páginas (contas/categorias/status) + os toggles que cada página conhece:
+//   • extrato    → comSaldo    (padrão true  = mostra saldo anterior)
+//   • relatorios → incluirTransf (padrão false = exclui transferências)
+// O objeto `dados` já vem como rascunho (cópia); ao salvar, o chamador
+// preserva as chaves não editadas aqui.
+function ToggleFiltro({ ativo, onToggle, label }: { ativo: boolean; onToggle: () => void; label: string }) {
+  return (
+    <button type="button" onClick={onToggle}
+      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border transition-all"
+      style={{
+        borderColor: ativo ? 'rgba(0,200,150,0.4)' : 'rgba(255,255,255,0.1)',
+        background:  ativo ? 'rgba(0,200,150,0.08)' : 'transparent',
+        color:       ativo ? '#00c896' : '#8b92a8',
+      }}>
+      <span className="w-8 h-[18px] rounded-full relative transition-colors flex-shrink-0"
+        style={{ background: ativo ? '#00c896' : 'rgba(255,255,255,0.12)' }}>
+        <span className="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-all"
+          style={{ left: ativo ? '17px' : '2px' }}/>
+      </span>
+      <span className="text-[15px] font-medium">{label}</span>
+    </button>
+  )
+}
+
+function EditorItensFiltro({
+  pagina, dados, setDados, rascunhoIds, opcoesContas, opcoesCategorias, salvando, onSalvar, onCancelar,
+}: {
+  pagina: string
+  dados: Record<string, unknown>
+  setDados: (patch: Record<string, unknown>) => void
+  rascunhoIds: (key: string) => string[]
+  opcoesContas: MultiSelectOption[]
+  opcoesCategorias: MultiSelectOption[]
+  salvando: boolean
+  onSalvar: () => void
+  onCancelar: () => void
+}) {
+  const comSaldo      = dados.comSaldo !== false       // padrão true (extrato)
+  const incluirTransf = dados.incluirTransf === true   // padrão false (relatorios)
+  return (
+    <div className="mx-2 mb-1 px-3 py-3 rounded-lg space-y-3"
+      style={{ background: 'rgba(77,166,255,0.04)', border: '1px solid rgba(77,166,255,0.18)' }}>
+      <div className="space-y-2">
+        <div>
+          <span className="text-[14px] font-semibold block mb-1" style={{ color: '#8b92a8' }}>Contas</span>
+          <MultiSelect placeholder="Todas as contas" className="w-full" values={rascunhoIds('filtContas')}
+            onChange={v => setDados({ filtContas: v })} options={opcoesContas}/>
+        </div>
+        <div>
+          <span className="text-[14px] font-semibold block mb-1" style={{ color: '#8b92a8' }}>Categorias</span>
+          <MultiSelect placeholder="Todas as categorias" className="w-full" values={rascunhoIds('filtCats')}
+            onChange={v => setDados({ filtCats: v })} options={opcoesCategorias}/>
+        </div>
+        <div>
+          <span className="text-[14px] font-semibold block mb-1" style={{ color: '#8b92a8' }}>Status</span>
+          <MultiSelect placeholder="Todos status" className="w-full" values={rascunhoIds('filtStatus')}
+            onChange={v => setDados({ filtStatus: v })} options={STATUS_OPCOES}/>
+        </div>
+        {pagina === 'extrato' && (
+          <ToggleFiltro ativo={comSaldo} label="Mostrar saldo anterior"
+            onToggle={() => setDados({ comSaldo: !comSaldo })}/>
+        )}
+        {pagina === 'relatorios' && (
+          <ToggleFiltro ativo={incluirTransf} label="Incluir transferências"
+            onToggle={() => setDados({ incluirTransf: !incluirTransf })}/>
+        )}
+      </div>
+      <div className="flex justify-end gap-2 pt-1">
+        <button onClick={onCancelar} disabled={salvando}
+          className="px-3 py-1.5 rounded-lg text-[15px] font-semibold border transition-colors disabled:opacity-40"
+          style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#8b92a8' }}>
+          Cancelar
+        </button>
+        <button onClick={onSalvar} disabled={salvando}
+          className="px-3 py-1.5 rounded-lg text-[15px] font-semibold transition-colors disabled:opacity-40"
+          style={{ background: '#4da6ff', color: '#0a0f1a' }}>
+          {salvando ? 'Salvando…' : 'Salvar itens'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -1040,7 +1125,7 @@ export default function PerfilPage() {
   }
 
   // ── Filtros salvos ──────────────────────────────────────────
-  const { filtros, carregando: carregandoFiltros, renomear: renomearFiltro, excluir: excluirFiltro, excluirTodos } =
+  const { filtros, carregando: carregandoFiltros, renomear: renomearFiltro, atualizarDados: atualizarDadosFiltro, excluir: excluirFiltro, excluirTodos } =
     useFiltrosSalvos()
   const [editandoId,   setEditandoId]   = useState<string | null>(null)
   const [editandoNome, setEditandoNome] = useState('')
@@ -1049,6 +1134,7 @@ export default function PerfilPage() {
 
   const iniciarEdicao = (id: string, nomeAtual: string) => {
     setEditandoId(id); setEditandoNome(nomeAtual); setFiltroExpandido(null)
+    setEditandoItensId(null)
   }
   const confirmarEdicao = async (id: string) => {
     const n = editandoNome.trim()
@@ -1059,8 +1145,46 @@ export default function PerfilPage() {
     setEditandoId(null)
   }
 
+  // ── Edição dos ITENS do filtro (contas/categorias/status/extras) ──
+  // O rascunho parte de uma cópia de `dados`; ao salvar, sobrescreve só as
+  // chaves editadas e PRESERVA as demais (ex.: campos que só a página conhece).
+  const [editandoItensId, setEditandoItensId] = useState<string | null>(null)
+  const [rascunhoDados,   setRascunhoDados]   = useState<Record<string, unknown>>({})
+  const [salvandoItens,   setSalvandoItens]   = useState(false)
+
   const { contas }     = useContas()
   const { categorias } = useCategorias()
+
+  // Opções dos multi-selects (mesma montagem de FiltrosLancamentos)
+  const opcoesContas = useMemo(() =>
+    contas.filter(c => c.ativa).slice()
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+      .map(c => ({ value: c.conta_id, label: c.nome, cor: c.cor ?? undefined })),
+  [contas])
+  const opcoesCategorias = useMemo(() => {
+    const catsPai = categorias.filter(c => !c.id_pai && !c.protegida && c.ativa)
+    const catsSub = categorias.filter(c => !!c.id_pai && c.ativa)
+    return [
+      ...catsPai.map(p => ({ value: p.id, label: p.descricao, icone: p.icone ?? undefined, cor: p.cor ?? undefined })),
+      ...catsSub.map(s => {
+        const pai = catsPai.find(p => p.id === s.id_pai)
+        return { value: s.id, label: s.descricao, icone: s.icone ?? undefined, cor: s.cor ?? undefined, grupo: pai?.descricao ?? '', idPai: s.id_pai ?? undefined }
+      }),
+    ]
+  }, [categorias])
+
+  const iniciarEdicaoItens = (id: string, dados: Record<string, unknown>) => {
+    setEditandoItensId(id); setRascunhoDados({ ...dados })
+    setFiltroExpandido(id); setEditandoId(null)
+  }
+  const setRascunho = (patch: Record<string, unknown>) => setRascunhoDados(d => ({ ...d, ...patch }))
+  const confirmarEdicaoItens = async (id: string) => {
+    setSalvandoItens(true)
+    const ok = await atualizarDadosFiltro(id, rascunhoDados)
+    setSalvandoItens(false)
+    if (ok) setEditandoItensId(null)
+  }
+  const rascunhoIds = (key: string) => (rascunhoDados[key] as string[] | undefined) ?? []
 
   // ── Assistente de Lançamentos ────────────────────────────────
   // qc já declarado no topo da função
@@ -1321,9 +1445,10 @@ export default function PerfilPage() {
               <>
                 <div className="space-y-0.5">
                   {filtros.map(f => {
-                    const expandido = filtroExpandido === f.id
-                    const editando  = editandoId === f.id
-                    const detalhes  = detalhesFiltro(f.dados)
+                    const expandido     = filtroExpandido === f.id
+                    const editando      = editandoId === f.id
+                    const editandoItens = editandoItensId === f.id
+                    const detalhes      = detalhesFiltro(f.dados)
                     return (
                       <div key={f.id}>
                         {editando ? (
@@ -1365,7 +1490,7 @@ export default function PerfilPage() {
                               style={{ color: '#f87171' }}><X size={12}/></button>
                           </div>
                         )}
-                        {expandido && !editando && (
+                        {expandido && !editando && !editandoItens && (
                           <div className="mx-2 mb-1 px-3 py-2 rounded-lg"
                             style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
                             {detalhes.length === 0 ? (
@@ -1380,7 +1505,27 @@ export default function PerfilPage() {
                                 ))}
                               </div>
                             )}
+                            <div className="flex justify-end mt-2 pt-2 border-t border-white/5">
+                              <button onClick={() => iniciarEdicaoItens(f.id, f.dados)}
+                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[14px] font-semibold transition-colors"
+                                style={{ background: 'rgba(77,166,255,0.10)', color: '#4da6ff', border: '1px solid rgba(77,166,255,0.20)' }}>
+                                <Pencil size={11}/> Editar itens
+                              </button>
+                            </div>
                           </div>
+                        )}
+                        {expandido && editandoItens && (
+                          <EditorItensFiltro
+                            pagina={f.pagina}
+                            dados={rascunhoDados}
+                            setDados={setRascunho}
+                            rascunhoIds={rascunhoIds}
+                            opcoesContas={opcoesContas}
+                            opcoesCategorias={opcoesCategorias}
+                            salvando={salvandoItens}
+                            onSalvar={() => confirmarEdicaoItens(f.id)}
+                            onCancelar={() => setEditandoItensId(null)}
+                          />
                         )}
                       </div>
                     )

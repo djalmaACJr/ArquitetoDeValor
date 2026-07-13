@@ -31,7 +31,10 @@ function base64Encode(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-function base64Decode(s: string): Uint8Array {
+// Uint8Array<ArrayBuffer> (não o bare Uint8Array = Uint8Array<ArrayBufferLike>)
+// — a Web Crypto API (importKey/decrypt) exige BufferSource apoiado em
+// ArrayBuffer; ArrayBufferLike também aceita SharedArrayBuffer, que não serve.
+function base64Decode(s: string): Uint8Array<ArrayBuffer> {
   const bin = atob(s);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);

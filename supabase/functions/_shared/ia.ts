@@ -11,7 +11,7 @@
 // Usado por `chat_mascote` (chat com mascote) e por `investimentos`
 // (geração do questionário de avaliação pelo Mentor).
 
-import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import type { Db } from "./utils.ts";
 import { decriptar, ehBlob } from "./cripto.ts";
 
 // Teto padrão de tokens da resposta. Chamadas que esperam saídas longas
@@ -410,7 +410,7 @@ export type ResultadoConfigIA =
  * sem trocar a ativa do usuário.
  */
 export async function lerConfigIAAtiva(
-  cliente: SupabaseClient,
+  cliente: Db,
   userId: string,
   configId?: string,
 ): Promise<ResultadoConfigIA> {
@@ -473,7 +473,7 @@ export type ResultadoMentoresIA =
  * blob criptografado) são ignoradas. Usado pela avaliação da carteira,
  * onde todos os mentores configurados opinam sobre cada ativo.
  */
-export async function lerMentoresIA(cliente: SupabaseClient, userId: string): Promise<ResultadoMentoresIA> {
+export async function lerMentoresIA(cliente: Db, userId: string): Promise<ResultadoMentoresIA> {
   const { data: prefs, error } = await cliente
     .from("usuarios")
     .select("ia_configs")

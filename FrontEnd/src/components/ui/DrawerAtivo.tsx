@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Search, RefreshCw } from 'lucide-react'
 import {
   useInvestimentosAtivos, useBuscaAtivoExterno,
@@ -130,6 +130,10 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
   const [busca, setBusca] = useState('')
   const [buscaDeb, setBuscaDeb] = useState('')
   const [selecionado, setSelecionado] = useState(!!ativo)  // edição já tem nome definido
+  // Item destacado na lista de resultados p/ navegação por teclado (↑/↓ +
+  // Enter). Zera sempre que a lista muda (nova busca ou digitação nova).
+  const [destaqueIdx, setDestaqueIdx] = useState(0)
+  const itemsRef = useRef<(HTMLButtonElement | null)[]>([])
   const [manualLivre, setManualLivre] = useState(false)    // fallback de cadastro manual
   const [precoSel, setPrecoSel] = useState<number | null>(null)
   // Pós-fixado: modo da taxa — multiplicativo ("110% CDI") vs aditivo ("CDI + 2%").
@@ -181,6 +185,12 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
   const { resultados, buscando, erroBusca } = useBuscaAtivoExterno(
     form.tipo_ativo || 'ACOES', form.tipo_ativo && !editando ? buscaDeb : '')
 
+  // Mantém o item destacado (↑/↓) visível dentro do container com scroll —
+  // sem isso o destaque passa a existir fora da área rolada e "some da tela".
+  useEffect(() => {
+    itemsRef.current[destaqueIdx]?.scrollIntoView({ block: 'nearest' })
+  }, [destaqueIdx, resultados])
+
   // Resultado escolhido na lista: preenche ticker, nome e características
   function selecionarResultado(r: ResultadoBuscaAtivo) {
     setForm({
@@ -193,6 +203,11 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       ...(r.vencimento ? { rf_vencimento: r.vencimento } : {}),
       ...(r.indexador  ? { rf_indexador: r.indexador } : {}),
     })
+    // Tesouro: "com Juros Semestrais" não vem como campo próprio da busca —
+    // deriva do nome oficial (mesma heurística usada ao editar um ativo já
+    // cadastrado), senão o checkbox fica sempre desmarcado ao escolher um
+    // resultado, mesmo pra títulos NTN-F/NTN-B com cupom semestral.
+    if (r.indexador) setTesouroSemestral(ehSemestral(r.nome))
     setPrecoSel(r.preco)
     if (r.preco != null) setCompra((c) => ({ ...c, preco_unitario: String(r.preco) }))
     setSelecionado(true)
@@ -426,22 +441,41 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
           <Field label="Buscar ativo (ticker ou nome)">
             <div className="relative">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: MUTED }} />
-              <Input value={busca} onChange={(e) => { setBusca(e.target.value); setSelecionado(false) }}
+              <Input value={busca}
+                onChange={(e) => { setBusca(e.target.value); setSelecionado(false); setDestaqueIdx(0) }}
+                onKeyDown={(e) => {
+                  if (resultados.length === 0) return
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setDestaqueIdx((i) => Math.min(i + 1, resultados.length - 1))
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setDestaqueIdx((i) => Math.max(i - 1, 0))
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const r = resultados[destaqueIdx]
+                    if (r) selecionarResultado(r)
+                  }
+                }}
                 placeholder={form.tipo_ativo === 'TESOURO_DIRETO' ? 'Ex.: IPCA 2029, Selic...' : 'Ex.: PETR, Vale, BTC...'}
                 className="!pl-8" />
               {buscando && <RefreshCw size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin" style={{ color: MUTED }} />}
             </div>
           </Field>
 
-          {/* Resultados */}
+          {/* Resultados — navegáveis com ↑/↓ (destaque) + Enter (seleciona) */}
           {buscaDeb.length >= 2 && !buscando && !selecionado && (
             resultados.length === 0 && !erroBusca ? (
               <p className="text-[12px]" style={{ color: MUTED }}>Nada encontrado para "{buscaDeb}".</p>
             ) : (
               <div className="max-h-52 overflow-y-auto space-y-1">
-                {resultados.map((r) => (
+                {resultados.map((r, i) => (
                   <button key={`${r.ticker}-${r.nome}`} type="button" onClick={() => selecionarResultado(r)}
-                    className="w-full text-left px-2.5 py-1.5 rounded-md border border-white/10 hover:border-blue-400/50 hover:bg-blue-500/10 flex items-center justify-between gap-2">
+                    ref={(el) => { itemsRef.current[i] = el }}
+                    onMouseEnter={() => setDestaqueIdx(i)}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md border flex items-center justify-between gap-2 ${
+                      i === destaqueIdx ? 'border-blue-400/60 bg-blue-500/15' : 'border-white/10 hover:border-blue-400/50 hover:bg-blue-500/10'
+                    }`}>
                     <span className="min-w-0">
                       <span className="text-white text-[13px] font-semibold">{r.ticker}</span>
                       <span className="text-[12px] ml-2 truncate" style={{ color: MUTED }}>{r.nome}</span>

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowLeft, UserCog, Target, ClipboardList, Sparkles, RotateCcw, Save, Wand2, PiggyBank, Plus, Trash2,
-  SlidersHorizontal, AlertTriangle, Eraser, ArrowRightLeft,
+  UserCog, Target, ClipboardList, Sparkles, RotateCcw, Save, Wand2, PiggyBank, Plus, Trash2,
+  SlidersHorizontal, AlertTriangle, Eraser, ArrowRightLeft, Coins,
 } from 'lucide-react'
 import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvQuestionarios, type QuestionarioEfetivo } from '../hooks/useInvQuestionarios'
@@ -10,9 +10,15 @@ import { useInvestimentosAlocacao, type AlocacaoInput } from '../hooks/useInvest
 import { useUsuarioPerfil } from '../hooks/useUsuarioPerfil'
 import { useInvPesos } from '../hooks/useInvPesos'
 import { useResumoAposentadoria } from '../hooks/useResumoAposentadoria'
+import { useTiposDividendo } from '../hooks/useTiposDividendo'
+import { useCategorias } from '../hooks/useCategorias'
 import { estimarIdade, formatData, formatBRL } from '../lib/utils'
-import { Input, BtnSalvar, Toast, ModalExcluir, SelectDark } from '../components/ui/shared'
+import {
+  Input, BtnSalvar, Toast, ModalExcluir, SelectDark, Drawer, Field, SearchableSelect, Segmented,
+} from '../components/ui/shared'
 import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelect'
+import InvestimentosNav from '../components/ui/InvestimentosNav'
+import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { useContas } from '../hooks/useContas'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import Mascote from '../components/ui/Mascote'
@@ -26,7 +32,7 @@ import {
 import { provedorPorId } from '../lib/iaProvedores'
 import type {
   PerfilInvestidor, PerguntaAvaliacao, PesosCriterio,
-  TipoAtivoInvestimento, CriterioQuestao,
+  TipoAtivoInvestimento, CriterioQuestao, InvestimentoTipoDividendo,
 } from '../types'
 
 const MUTED = '#8b92a8'
@@ -37,12 +43,27 @@ export default function ConfiguracoesInvestimentosPage() {
   const [toast, setToast] = useState<string | null>(null)
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500) }
 
+  // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  const { perfil } = useInvPerfil()
+  const { alocacoes } = useInvestimentosAlocacao()
+  const { pesos } = useInvPesos()
+  useRegistrarContextoIA(useMemo(() => ({
+    titulo:    'Investimentos · Configurações',
+    descricao: 'Perfil do investidor, metas de alocação e pesos de avaliação por critério',
+    dados: {
+      perfil_investidor: perfil?.perfil ?? null,
+      idade_aposentadoria: perfil?.idade_aposentadoria ?? null,
+      renda_a_substituir: perfil?.renda_substituir ?? null,
+      metas_alocacao: alocacoes.filter((a) => a.percentual_ideal > 0)
+        .map((a) => ({ tipo: a.tipo_ativo, percentual_ideal: a.percentual_ideal })),
+      pesos_por_criterio: pesos,
+    },
+  }), [perfil, alocacoes, pesos]))
+
   return (
     <div className="p-5">
+      <InvestimentosNav />
       <div className="flex items-center gap-2 mb-5">
-        <Link to="/investimentos" className="p-1.5 rounded-lg border border-white/10 hover:border-white/25 text-white">
-          <ArrowLeft size={16} />
-        </Link>
         <h1 className="text-[19px] font-semibold text-white">Configurações de Investimentos</h1>
       </div>
 
@@ -51,6 +72,7 @@ export default function ConfiguracoesInvestimentosPage() {
       <SecaoMetas onToast={showToast} />
       <SecaoPesos onToast={showToast} />
       <SecaoQuestionarios onToast={showToast} />
+      <SecaoTiposDividendo onToast={showToast} />
       <SecaoMigrarConta onToast={showToast} />
 
       <Toast msg={toast} />
@@ -813,6 +835,152 @@ function SeloOrigem({ origem, provedor, modelo }: {
     )
   }
   return <span className="text-[11.5px] px-2 py-1 rounded-md border border-white/10 text-white/70">Personalizado</span>
+}
+
+// ════════════════════════════════════════════════════════════
+// 5) Tipos de dividendo (mapeamento tipo → categoria do extrato)
+// Movida de DividendosPage — era a única configuração do módulo que vivia
+// fora desta página (drawer "Configurar tipos" + aviso de mapeamento).
+// ════════════════════════════════════════════════════════════
+function SecaoTiposDividendo({ onToast }: { onToast: (m: string) => void }) {
+  const [aberto, setAberto] = useState(false)
+  const { tipos } = useTiposDividendo()
+  const semMapeamento = tipos.filter((t) => !t.categoria_id).length
+
+  return (
+    <Secao icone={<Coins size={16} />} titulo="Tipos de dividendo"
+      subtitulo="Cada tipo de provento (Dividendos, JSCP, Aluguel de FII, Rend. Trib. …) é lançado na categoria do extrato mapeada aqui. Sem mapeamento, a busca automática não lança o provento.">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-[12.5px]" style={{ color: semMapeamento > 0 ? AMBAR : MUTED }}>
+          {tipos.length} tipo(s) cadastrado(s){semMapeamento > 0 ? ` — ${semMapeamento} sem categoria mapeada` : ''}
+        </p>
+        <button onClick={() => setAberto(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
+          <Coins size={15} /> Gerenciar tipos
+        </button>
+      </div>
+      {aberto && <DrawerConfigTipos onClose={() => setAberto(false)} onToast={onToast} />}
+    </Secao>
+  )
+}
+
+function DrawerConfigTipos({ onClose, onToast }: { onClose: () => void; onToast: (m: string) => void }) {
+  const { tipos, criar: criarTipo } = useTiposDividendo()
+  const [novoNome, setNovoNome] = useState('')
+  const [salvando, setSalvando] = useState(false)
+
+  async function adicionarTipo() {
+    const nome = novoNome.trim()
+    if (!nome) return
+    setSalvando(true)
+    const res = await criarTipo({ nome })
+    setSalvando(false)
+    if (res.ok) { setNovoNome(''); onToast('Tipo adicionado.') }
+    else onToast(res.erro ?? 'Erro ao adicionar tipo')
+  }
+
+  return (
+    <Drawer open onClose={onClose} titulo="Tipos de dividendo" subtitulo="Cada tipo é lançado na sua categoria do extrato">
+      <div className="space-y-3">
+        {tipos.map((t) => <MapRow key={t.id} tipo={t} onToast={onToast} />)}
+      </div>
+
+      {/* Adicionar novo tipo */}
+      <div className="rounded-lg border border-dashed border-white/15 p-3 mt-2">
+        <Field label="Novo tipo de dividendo">
+          <div className="flex gap-2">
+            <Input value={novoNome} onChange={(e) => setNovoNome(e.target.value)} placeholder="Ex.: Bonificação" maxLength={40}
+              onKeyDown={(e) => { if (e.key === 'Enter') adicionarTipo() }} />
+            <button onClick={adicionarTipo} disabled={salvando || !novoNome.trim()}
+              className="px-3 rounded-lg text-[14px] font-semibold text-white disabled:opacity-50" style={{ background: '#3b82f6' }}>
+              <Plus size={15} />
+            </button>
+          </div>
+        </Field>
+      </div>
+    </Drawer>
+  )
+}
+
+// Linha de mapeamento de um tipo → categoria, com as 2 opções:
+// usar categoria existente OU criar nova (informando pai ou como pai).
+function MapRow({ tipo, onToast }: { tipo: InvestimentoTipoDividendo; onToast: (m: string) => void }) {
+  const { editar, excluir } = useTiposDividendo()
+  const { categorias, criar: criarCategoria } = useCategorias()
+
+  const [modo, setModo] = useState<'existente' | 'nova'>('existente')
+  const [catId, setCatId] = useState(tipo.categoria_id ?? '')
+  const [novaDesc, setNovaDesc] = useState('')
+  const [novoPai, setNovoPai] = useState('')   // '' = será categoria-pai
+  const [salvando, setSalvando] = useState(false)
+
+  const catsOpcoes = categorias.map((c) => ({
+    id: c.id, label: c.descricao,
+    sublabel: c.id_pai ? categorias.find((p) => p.id === c.id_pai)?.descricao : undefined,
+    idPai: c.id_pai ?? undefined,
+  }))
+  const paiOpcoes = categorias.filter((c) => !c.id_pai)
+  const catAtual = categorias.find((c) => c.id === tipo.categoria_id)
+
+  async function salvar() {
+    setSalvando(true)
+    let categoriaId = catId
+    if (modo === 'nova') {
+      const desc = novaDesc.trim()
+      if (!desc) { onToast('Informe a descrição da nova categoria'); setSalvando(false); return }
+      const resCat = await criarCategoria({ descricao: desc, id_pai: novoPai || null })
+      if (!resCat.ok || !resCat.dados) { onToast(resCat.erro ?? 'Erro ao criar categoria'); setSalvando(false); return }
+      categoriaId = resCat.dados.id
+    }
+    if (!categoriaId) { onToast('Selecione ou crie uma categoria'); setSalvando(false); return }
+    const res = await editar(tipo.id, { categoria_id: categoriaId })
+    setSalvando(false)
+    if (res.ok) { onToast(`"${tipo.nome}" mapeado.`); setModo('existente'); setNovaDesc('') }
+    else onToast(res.erro ?? 'Erro ao mapear')
+  }
+
+  async function remover() {
+    const res = await excluir(tipo.id)
+    onToast(res.ok ? 'Tipo removido.' : (res.erro ?? 'Erro ao remover'))
+  }
+
+  return (
+    <div className="rounded-lg border border-white/10 p-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div>
+          <p className="text-white font-medium text-[14px]">{tipo.nome}</p>
+          <p className="text-[12px]" style={{ color: catAtual ? '#00c896' : '#ffb74d' }}>
+            {catAtual ? `→ ${catAtual.descricao}` : 'sem categoria mapeada'}
+          </p>
+        </div>
+        <button onClick={remover} title="Remover tipo"
+          className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
+          <Trash2 size={13} />
+        </button>
+      </div>
+
+      <Segmented value={modo} onChange={(v) => setModo(v as 'existente' | 'nova')}
+        opcoes={[{ value: 'existente', label: 'Usar existente' }, { value: 'nova', label: 'Criar nova' }]} />
+
+      <div className="mt-2 space-y-2">
+        {modo === 'existente' ? (
+          <SearchableSelect value={catId} onChange={setCatId} placeholder="Buscar categoria..." opcoes={catsOpcoes} />
+        ) : (
+          <>
+            <Input value={novaDesc} onChange={(e) => setNovaDesc(e.target.value)} placeholder="Nome da categoria (até 20)" maxLength={20} />
+            <SelectDark value={novoPai} onChange={(e) => setNovoPai(e.target.value)}>
+              <option value="">Será categoria-pai (sem pai)</option>
+              {paiOpcoes.map((p) => <option key={p.id} value={p.id}>Sob: {p.descricao}</option>)}
+            </SelectDark>
+          </>
+        )}
+        <button onClick={salvar} disabled={salvando}
+          className="w-full py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50" style={{ background: '#3b82f6' }}>
+          {salvando ? 'Salvando...' : 'Salvar mapeamento'}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 // ════════════════════════════════════════════════════════════

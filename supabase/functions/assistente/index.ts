@@ -13,13 +13,13 @@ import {
   erro,
   extrairId,
   json,
+  type Db,
 } from "../_shared/utils.ts";
-import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return corsPreFlight();
 
-  const auth = autenticar(req);
+  const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;
 
@@ -42,7 +42,7 @@ Deno.serve(async (req: Request) => {
 //   2. ordenados por atualizado_em DESC (mais recente primeiro),
 //   3. limite default 10 (máx 50).
 async function buscar(
-  c: SupabaseClient,
+  c: Db,
   params: URLSearchParams,
   userId: string,
 ): Promise<Response> {
@@ -97,7 +97,7 @@ async function buscar(
 //   }
 // Conflito: (user_id, lower(descricao)) — UPDATE em vez de INSERT.
 async function upsert(
-  c: SupabaseClient,
+  c: Db,
   req: Request,
   userId: string,
 ): Promise<Response> {
@@ -167,7 +167,7 @@ async function upsert(
 // ── PUT /assistente/:id ───────────────────────────────────────
 // Body: { descricao? } — atualiza apenas os campos enviados.
 async function atualizar(
-  c: SupabaseClient,
+  c: Db,
   req: Request,
   id: string,
   userId: string,
@@ -203,7 +203,7 @@ async function atualizar(
 
 // ── DELETE /assistente/:id ────────────────────────────────────
 async function excluir(
-  c: SupabaseClient,
+  c: Db,
   id: string,
   userId: string,
 ): Promise<Response> {

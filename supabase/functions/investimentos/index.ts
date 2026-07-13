@@ -85,7 +85,7 @@ Deno.serve(async (req: Request) => {
     catch (e) { logError("Handler rendimento-cripto-cron", e); return erro("Erro interno", 500); }
   }
 
-  const auth = autenticar(req);
+  const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;
   const c       = db(req);
@@ -1150,7 +1150,19 @@ async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
     logRequest("GET", "/investimentos/operacoes", { params: Object.fromEntries(params) });
     let q = c.from("inv_operacoes").select("*").order("data_operacao", { ascending: false });
     const posicaoId = params.get("posicao_id");
+    const ativoId   = params.get("ativo_id");
     if (posicaoId) q = q.eq("posicao_id", posicaoId);
+    if (ativoId) {
+      // inv_operacoes não tem ativo_id direto — resolve via posições do
+      // ativo (RLS de inv_posicoes já escopa por user_id). Evita trazer as
+      // operações de TODOS os ativos só para filtrar no cliente.
+      const { data: pos, error: errPos } = await c.from("inv_posicoes")
+        .select("id").eq("ativo_id", ativoId);
+      if (errPos) { logError("Listar operacoes (posicoes do ativo)", errPos); return erro(errPos.message); }
+      const posIds = (pos ?? []).map((p) => p.id);
+      if (posIds.length === 0) return json({ dados: [] });
+      q = q.in("posicao_id", posIds);
+    }
     const { data, error } = await q;
     if (error) { logError("Listar operacoes", error); return erro(error.message); }
     return json({ dados: data });
@@ -1202,7 +1214,6 @@ async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
     }).select().single();
     if (error) { logError("Criar operacao", error); return erro(error.message); }
     await recomputarPosicao(c, posicaoId);
-    await sincronizarResgateVencimento(c, posicaoId);
     logSuccess("Operação criada", { id: data.id });
     return json({ dados: data }, 201);
   }
@@ -1250,7 +1261,7 @@ async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
     const posAfetadas = new Set<string>();
     if (antes?.posicao_id) posAfetadas.add(String(antes.posicao_id));
     if (data?.posicao_id)  posAfetadas.add(String(data.posicao_id));
-    for (const pid of posAfetadas) { await recomputarPosicao(c, pid); await sincronizarResgateVencimento(c, pid); }
+    for (const pid of posAfetadas) await recomputarPosicao(c, pid);
     return json({ dados: data });
   }
 
@@ -1261,7 +1272,6 @@ async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
     const { error } = await c.from("inv_operacoes").delete().eq("id", id);
     if (error) { logError("Excluir operacao", error); return erro(error.message); }
     await recomputarPosicao(c, String(op.posicao_id));
-    await sincronizarResgateVencimento(c, String(op.posicao_id));
     return json({ mensagem: "Operação excluída com sucesso" });
   }
 
@@ -1371,50 +1381,21 @@ async function recalcularProjecoesDividendos(c: Db, ativoId: string, contaId: st
   }
 }
 
-// Mantém um RESGATE "programado" na data de vencimento da renda fixa/Tesouro,
-// para que a posição se encerre sozinha quando o título vencer. A operação é
-// futura (vencimento > hoje) → recomputarPosicao a ignora até a data chegar.
-// Espelha sempre o saldo remanescente atual: chamada após cada recompute.
-//   • vencimento futuro e saldo > 0 → cria/atualiza o resgate = saldo remanescente
-//   • vencimento futuro e saldo = 0 → remove o resgate programado (nada a resgatar)
-//   • vencimento já passado → não mexe (o resgate, se existir, já é histórico)
-async function sincronizarResgateVencimento(c: Db, posicaoId: string): Promise<void> {
-  const { data: pos } = await c.from("inv_posicoes")
-    .select("id, user_id, conta_id, quantidade, preco_custo, inv_ativos(tipo_ativo, rf_vencimento)")
-    .eq("id", posicaoId).maybeSingle();
-  if (!pos) return;
-  const rawA  = (pos as { inv_ativos?: Record<string, unknown> | Record<string, unknown>[] }).inv_ativos;
-  const ativo = (Array.isArray(rawA) ? rawA[0] : rawA) ?? {};
-  const tipo  = String(ativo.tipo_ativo ?? "");
-  const venc  = (ativo.rf_vencimento as string | null) ?? null;
-  if ((tipo !== "RENDA_FIXA" && tipo !== "TESOURO_DIRETO") || !venc) return;
-  if (venc <= hojeISO()) return; // só gerencia enquanto o resgate é futuro
-
-  const { data: existentes } = await c.from("inv_operacoes")
-    .select("id").eq("posicao_id", posicaoId).eq("tipo_operacao", "RESGATE").eq("data_operacao", venc);
-  const prog = (existentes ?? [])[0] as { id: string } | undefined;
-  const qtd   = Number(pos.quantidade) || 0;
-  const preco = Number(pos.preco_custo) || 0;
-
-  if (qtd <= 0) {
-    if (prog) await c.from("inv_operacoes").delete().eq("id", prog.id);
-    return;
-  }
-  const campos = { quantidade: qtd, preco_unitario: preco, valor_total: qtd * preco };
-  if (prog) {
-    await c.from("inv_operacoes").update(campos).eq("id", prog.id);
-  } else {
-    await c.from("inv_operacoes").insert({
-      user_id: pos.user_id, posicao_id: posicaoId, tipo_operacao: "RESGATE",
-      conta_id: pos.conta_id, data_operacao: venc, ...campos,
-    });
-  }
-}
-
 // Encerra posições de renda fixa/Tesouro cujo vencimento já passou e que ainda
-// estão ATIVA: garante um RESGATE na data de vencimento (caso de posições
-// antigas/importadas sem resgate programado) e recomputa — o resgate, agora no
-// passado, zera o saldo → ENCERRADA. Idempotente (ignora as já encerradas).
+// estão ATIVA: cria o RESGATE na data de vencimento (com a quantidade/preço de
+// custo vigentes NAQUELE momento) e recomputa — o resgate, já no passado, zera
+// o saldo → ENCERRADA. É a ÚNICA via de fechamento automático: roda a cada
+// snapshot-auto/snapshot-cron (diário), então cobre o dia em que o vencimento
+// chega sem precisar de nenhuma operação manual do usuário. Idempotente
+// (ignora as já encerradas e as que já têm o resgate daquela data).
+//
+// Antes havia também um mecanismo que pré-criava esse RESGATE com ANTECEDÊNCIA
+// (no momento de qualquer compra/edição), só que "programado" para o futuro.
+// Isso poluía a lista de operações do usuário com um lançamento de resgate
+// datado no vencimento (ex.: 2032) aparecendo hoje, e distorcia totais que não
+// filtram por data. Removido — o saldo/valor até o vencimento já pode ser
+// acompanhado pela marcação a mercado (cotação atual) sem precisar de uma
+// operação fictícia no banco.
 async function fecharPosicoesVencidas(c: Db, userId: string): Promise<void> {
   const hoje = hojeISO();
   const { data: posicoes } = await c.from("inv_posicoes")
@@ -1584,20 +1565,36 @@ async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
     if (!TIPOS_ATIVO.includes(String(body.tipo_ativo))) {
       return erro(`tipo_ativo inválido: ${TIPOS_ATIVO.join(" | ")}`);
     }
-    const valor = Number(body.valor);
+    const valorInformado = Number(body.valor);
     // A transação do extrato exige valor > 0 (CHECK valor > 0 em transacoes)
-    if (!Number.isFinite(valor) || valor <= 0) return erro("valor deve ser > 0");
+    if (!Number.isFinite(valorInformado) || valorInformado <= 0) return erro("valor deve ser > 0");
     if (!(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
 
-    // Carrega ativo (ticker p/ descrição) e tipo de dividendo (categoria mapeada)
+    // Carrega ativo (ticker/moeda p/ descrição e conversão) e tipo de
+    // dividendo (categoria mapeada)
     const [{ data: ativo }, { data: tipoDiv }] = await Promise.all([
-      c.from("inv_ativos").select("ticker, nome").eq("id", body.ativo_id).maybeSingle(),
+      c.from("inv_ativos").select("ticker, nome, moeda").eq("id", body.ativo_id).maybeSingle(),
       c.from("inv_tipos_dividendo").select("id, nome, categoria_id").eq("id", body.tipo_dividendo_id).maybeSingle(),
     ]);
     if (!ativo)   return erro("Ativo não encontrado", 404);
     if (!tipoDiv) return erro("Tipo de dividendo não encontrado", 404);
     if (!tipoDiv.categoria_id) {
       return erro(`Configure a categoria do tipo de dividendo "${tipoDiv.nome}" antes de lançar`, 409);
+    }
+
+    // O extrato (arqvalor.transacoes) só tem uma moeda implícita (BRL) — para
+    // ativos em moeda estrangeira, o valor digitado é o que o usuário recebeu
+    // NA MOEDA DO ATIVO (ex.: USD, como no comprovante da corretora) e precisa
+    // ser convertido antes de gravar, igual à busca automática de proventos
+    // (provisionarProventosUsd/upsertDividendoProvisionado, que já converte
+    // via PTAX). Sem isso, o valor em dólar era gravado cru como se fosse
+    // reais, subestimando o extrato/saldo da conta em ~5x.
+    let valor = valorInformado;
+    const moedaAtivo = String(ativo.moeda ?? "BRL").toUpperCase();
+    if (moedaAtivo !== "BRL") {
+      const ptax = await ptaxVendaAte(c, String(body.data_pagamento));
+      if (!ptax) return erro("Cotação PTAX indisponível para converter o valor em moeda estrangeira", 502);
+      valor = Number((valorInformado * ptax).toFixed(2));
     }
 
     // 1) Cria o dividendo (sem vínculo ainda)
@@ -4447,12 +4444,14 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
     }
 
     // ── 1) Ativos — insere só os que ainda não existem ──────────────
-    const { data: existentes } = await c.from("inv_ativos").select("id, ticker, nome");
+    const { data: existentes } = await c.from("inv_ativos").select("id, ticker, nome, moeda");
     const idPorTicker = new Map<string, string>();
     const nomePorTicker = new Map<string, string>();   // ticker → nome (p/ descrição do provento)
+    const moedaPorTicker = new Map<string, string>();  // ticker → moeda (p/ converter proventos)
     for (const a of existentes ?? []) {
       idPorTicker.set(up(a.ticker), String(a.id));
       nomePorTicker.set(up(a.ticker), String(a.nome ?? ""));
+      moedaPorTicker.set(up(a.ticker), String(a.moeda ?? "BRL").toUpperCase());
     }
 
     const novosPorTicker = new Map<string, Record<string, unknown>>();
@@ -4489,8 +4488,11 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
       }
     }
 
-    // Nomes dos ativos novos entram no mapa p/ descrição do provento.
-    for (const [tk, r] of novosPorTicker) nomePorTicker.set(tk, String(r.nome ?? ""));
+    // Nomes/moeda dos ativos novos entram nos mapas p/ descrição e conversão do provento.
+    for (const [tk, r] of novosPorTicker) {
+      nomePorTicker.set(tk, String(r.nome ?? ""));
+      moedaPorTicker.set(tk, String(r.moeda ?? "BRL").toUpperCase());
+    }
 
     let ativosCriados = 0;
     if (novosPorTicker.size > 0) {
@@ -4633,13 +4635,27 @@ async function rotaImportar(c: Db, req: Request, m: string, userId: string) {
     const divSemExtrato: Record<string, unknown>[] = [];
     const divComExtrato: { div: Record<string, unknown>; categoriaId: string; ticker: string; nome: string }[] = [];
     let semCategoria = 0;
+    // PTAX por data já resolvida nesta importação (evita repetir a consulta
+    // para vários proventos do mesmo dia).
+    const ptaxCache = new Map<string, number | null>();
     for (const d of dividendosIn) {
       const ativoId = idPorTicker.get(up(d.ticker));
-      const valor = Number(d.valor);
+      let valor = Number(d.valor);
       if (!ativoId || !d.conta_id || !contasValidas.has(d.conta_id)) continue;
       if (!(valor > 0) || !TIPOS_ATIVO.includes(String(d.tipo_ativo))) continue;
       // Descarta datas-sentinela ("a definir" → 9999) vindas da importação.
       if (!dataPagamentoPlausivel(String(d.data_pagamento).slice(0, 10))) continue;
+      // Provento de ativo em moeda estrangeira: converte p/ BRL antes de
+      // gravar — inv_dividendos.valor/transacoes.valor só existem em BRL
+      // (mesma regra do lançamento manual e da busca automática de USD).
+      const moedaAtivo = moedaPorTicker.get(up(d.ticker)) ?? "BRL";
+      if (moedaAtivo !== "BRL") {
+        const dataPag = String(d.data_pagamento).slice(0, 10);
+        if (!ptaxCache.has(dataPag)) ptaxCache.set(dataPag, await ptaxVendaAte(c, dataPag));
+        const ptax = ptaxCache.get(dataPag);
+        if (!ptax) continue; // sem PTAX p/ essa data: não dá p/ converter com segurança
+        valor = Number((valor * ptax).toFixed(2));
+      }
       const k = divKey(ativoId, String(d.data_pagamento), valor, String(d.tipo_ativo));
       if (divExistSet.has(k)) continue;
       divExistSet.add(k);
@@ -5411,8 +5427,6 @@ interface ResultadoBusca {
   indexador?:  string;       // PREFIXADO | POS_FIXADO | HIBRIDO
 }
 
-const TD_URL = "https://www.tesourodireto.com.br/json/br/com/b3/tesourodireto/service/api/treasurybondsinfo.json";
-
 function brapiToken(): string {
   const t = Deno.env.get("BRAPI_TOKEN") ?? "";
   return t ? `&token=${encodeURIComponent(t)}` : "";
@@ -5470,38 +5484,113 @@ function taxaDoTesouro(nome: string, rate: number): string {
   return `IPCA + ${pct}`;
 }
 
-async function buscaTesouro(q: string): Promise<ResultadoBusca[]> {
-  const data = await fetchJson(TD_URL) as {
-    response?: { TrsrBdTradgList?: { TrsrBd?: Record<string, unknown> }[] };
-  };
-  const lista = data.response?.TrsrBdTradgList ?? [];
-  const termo = q.toLowerCase();
-  const out: ResultadoBusca[] = [];
-  for (const item of lista) {
-    const bd = item.TrsrBd;
-    if (!bd) continue;
-    const nome  = String(bd.nm ?? "");
-    const preco = Number(bd.untrInvstmtVal ?? 0);
-    if (preco <= 0) continue;                       // só títulos disponíveis para compra
-    if (!nome.toLowerCase().includes(termo)) continue;
-    const rate = Number(bd.anulInvstmtRate ?? 0);
-    const indexador  = indexadorDoTesouro(nome);
-    const vencimento = String(bd.mtrtyDt ?? "").slice(0, 10) || undefined;
-    const legivel    = vencimento ? tickerTesouro(indexador, vencimento, /semestr/i.test(nome)) : "";
-    out.push({
-      ticker:     legivel ||
-        nome.replace(/tesouro\s*/i, "").replace(/[^A-Za-z0-9+]/g, "").toUpperCase().slice(0, 20),
-      nome,
-      preco,
-      moeda:      "BRL",
-      emissor:    "Governo Federal",
-      taxa:       taxaDoTesouro(nome, rate),
-      vencimento,
-      indexador,
-    });
-    if (out.length >= 10) break;
+interface TituloTesouro { tipo: string; venc: string; base: string; puVenda: number; taxaVenda: number }
+
+// Cache em memória do módulo (instância da Edge Function): o CSV do Tesouro
+// Transparente tem ~14MB — baixar tudo de novo a cada busca (uma por termo
+// digitado, mesmo com debounce/staleTime no front) desperdiça banda para
+// extrair ~50 linhas do dia mais recente. Reusa por até COTACAO_STALE_MS
+// (6h — as taxas do Tesouro só são republicadas ~2×/dia), igual ao cache de
+// cotações de ações. Sobrevive só enquanto a instância ficar "quente"; num
+// cold start, refaz o download normalmente (sem quebrar nada).
+let tesouroCache: { titulos: TituloTesouro[]; maxBase: string; baixadoEm: number } | null = null;
+
+async function titulosTesouroAtual(): Promise<{ titulos: TituloTesouro[]; maxBase: string }> {
+  if (tesouroCache && Date.now() - tesouroCache.baixadoEm < COTACAO_STALE_MS) {
+    return tesouroCache;
   }
-  return out;
+
+  const res = await fetch(TESOURO_CSV_URL, { signal: AbortSignal.timeout(120000) });
+  if (!res.ok || !res.body) throw new Error(`Tesouro Transparente respondeu ${res.status}`);
+
+  const reader = res.body.pipeThrough(new TextDecoderStream("latin1")).getReader();
+  const porTitulo = new Map<string, TituloTesouro>();
+  let maxBase = "";
+  let buf = "";
+  let cabecalho = true;
+
+  const processar = (linha: string) => {
+    if (!linha) return;
+    if (cabecalho) { cabecalho = false; return; }        // pula o header
+    const col = linha.split(";");
+    if (col.length < 7) return;
+    const tipo = col[0].trim();
+    const venc = brDataISO(col[1]);
+    const base = brDataISO(col[2]);
+    if (!venc || !base) return;
+    if (base > maxBase) maxBase = base;
+    const puVenda = brNumero(col[6]);                     // PU Venda Manha
+    if (!Number.isFinite(puVenda) || puVenda <= 0) return; // só títulos com preço de compra
+    const taxaVenda = brNumero(col[4]);                   // Taxa Venda Manha
+    const chave = `${tipo}|${venc}`;
+    const atual = porTitulo.get(chave);
+    if (!atual || base > atual.base) {
+      porTitulo.set(chave, { tipo, venc, base, puVenda, taxaVenda: Number.isFinite(taxaVenda) ? taxaVenda : 0 });
+    }
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      processar(buf.slice(0, nl).replace(/\r$/, ""));
+      buf = buf.slice(nl + 1);
+    }
+  }
+  processar(buf.replace(/\r$/, ""));
+
+  // Só os títulos negociados no ÚLTIMO dia disponível no CSV — é o proxy
+  // de "disponível para compra hoje" (título encerrado para de aparecer).
+  const titulos = [...porTitulo.values()].filter((t) => t.base === maxBase);
+  tesouroCache = { titulos, maxBase, baixadoEm: Date.now() };
+  return tesouroCache;
+}
+
+// A antiga API JSON do Tesouro Direto (tesourodireto.com.br/.../
+// treasurybondsinfo.json) foi desativada (HTTP 410) — o novo canal da B3
+// (developers.b3.com.br) é B2B, sem acesso gratuito para pessoa física. Por
+// isso a busca reusa o CSV público do Tesouro Transparente (mesma fonte já
+// usada no backfill de marcação a mercado, TESOURO_CSV_URL — grátis, sem
+// chave), pegando a linha mais recente (Data Base) de cada título.
+async function buscaTesouro(q: string): Promise<ResultadoBusca[]> {
+  const { titulos } = await titulosTesouroAtual();
+  // Normaliza: minúsculo e sem símbolos (o nome da B3 usa "+" no IPCA+/IGPM+,
+  // o ticker usa "-"). Cada PALAVRA do termo digitado precisa aparecer em
+  // ALGUM LUGAR do texto-alvo — não como uma substring contínua única. Isso
+  // importa porque o ano do vencimento só existe dentro do ticker
+  // ("TD-IPCA-2032"), colado sem espaço; se o usuário digita "Tesouro IPCA+
+  // 2032" (o nome amigável, igual ao cadastro manual), a frase INTEIRA nunca
+  // seria uma substring contígua de "tesouroipca+ tdipca2032" — cada palavra
+  // batendo separadamente resolve isso.
+  const normaliza = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const termos = q.toLowerCase().split(/\s+/).map(normaliza).filter(Boolean);
+  const todos: ResultadoBusca[] = [];
+  for (const item of titulos) {
+    const indexador = indexadorDoTesouro(item.tipo);
+    const semestral = /semestr/i.test(item.tipo);
+    const legivel   = tickerTesouro(indexador, item.venc, semestral);
+    const ticker    = legivel ||
+      item.tipo.replace(/tesouro\s*/i, "").replace(/[^A-Za-z0-9+]/g, "").toUpperCase().slice(0, 20);
+    // Busca no nome oficial (B3) + ticker legível (TD-IPCA-2040) + nome
+    // amigável com ano ("Tesouro IPCA+ 2032", igual ao cadastro manual) —
+    // cobre "ipca", "ipca-", "ipca+", "juros", "selic", "2040", frases
+    // combinando nome e ano em qualquer ordem…
+    const alvo = normaliza(`${item.tipo} ${ticker} ${nomeTesouro(indexador, item.venc, semestral)}`);
+    if (!termos.every((t) => alvo.includes(t))) continue;
+    todos.push({
+      ticker, nome: item.tipo, preco: item.puVenda, moeda: "BRL",
+      emissor: "Governo Federal", taxa: taxaDoTesouro(item.tipo, item.taxaVenda),
+      vencimento: item.venc, indexador,
+    });
+  }
+  // Ordena por ticker ANTES de cortar em 10 — sem isso, buscas amplas (ex.:
+  // "ipca") podiam nunca mostrar a variante sem juros semestrais, porque há
+  // mais de 10 vencimentos "com Juros Semestrais" antes dela na ordem do CSV.
+  // Ticker ordenado também deixa "-2032" antes de "-JS-2032" (dígito < letra).
+  todos.sort((a, b) => a.ticker.localeCompare(b.ticker));
+  return todos.slice(0, 10);
 }
 
 // Busca de criptomoedas via CoinGecko (grátis, sem chave). /search devolve as
@@ -6037,30 +6126,20 @@ async function sincronizarTesouroResposta() {
   }
 }
 
-// Feed de preços ATUAIS do Tesouro Direto (B3): um único JSON com todos os
-// títulos ofertados e o PU de resgate (marcação a mercado) do dia. É a fonte
-// "como nas ações" para o mês corrente — leve e sem o CSV.
-const TESOURO_B3_URL =
-  "https://www.tesourodireto.com.br/json/br/com/b3/tesourodireto/service/api/treasurybondsinfo.json";
-
+// Feed de preços ATUAIS do Tesouro Direto p/ o mês corrente. A antiga API JSON
+// da B3 (tesourodireto.com.br/.../treasurybondsinfo.json) foi desativada
+// (HTTP 410, mesmo problema já corrigido em buscaTesouro) — reusa o cache em
+// memória do CSV do Tesouro Transparente (titulosTesouroAtual, já filtrado
+// pela Data Base mais recente), evitando um novo download.
 async function buscarTesouroAtualB3(mesCorrente: string): Promise<CotacaoTesouro[]> {
-  const res = await fetch(TESOURO_B3_URL, { signal: AbortSignal.timeout(15000), headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error(`Tesouro Direto (B3) respondeu ${res.status}`);
-  const j = await res.json() as { response?: { TrsrBdTradgList?: { TrsrBd?: Record<string, unknown> }[] } };
+  const { titulos, maxBase } = await titulosTesouroAtual();
   const out: CotacaoTesouro[] = [];
-  for (const it of j.response?.TrsrBdTradgList ?? []) {
-    const bd = it.TrsrBd ?? {};
-    const nm = String(bd.nm ?? "").trim();
-    if (!TESOURO_FAMILIAS.some((f) => nm.startsWith(f))) continue;
-    const venc = String(bd.mtrtyDt ?? "").slice(0, 10);             // "YYYY-MM-DD..."
-    if (!RE_DATA.test(venc)) continue;
-    const pu = Number(bd.untrRedVal);                               // PU de resgate (venda)
-    if (!Number.isFinite(pu) || pu <= 0) continue;
-    const taxa = Number(bd.anulRedRate);
+  for (const t of titulos) {
+    if (!TESOURO_FAMILIAS.some((f) => t.tipo.startsWith(f))) continue;
     out.push({
-      tipo_titulo: nm.replace(/\s+\d{4}$/, "").trim(),              // remove o ano → casa com o CSV
-      vencimento: venc, mes_ano: mesCorrente, data_base: hojeISO(),
-      pu_venda: pu, taxa_venda: Number.isFinite(taxa) ? taxa : null,
+      tipo_titulo: t.tipo, vencimento: t.venc, mes_ano: mesCorrente,
+      data_base: maxBase, pu_venda: t.puVenda,
+      taxa_venda: Number.isFinite(t.taxaVenda) ? t.taxaVenda : null,
     });
   }
   return out;
