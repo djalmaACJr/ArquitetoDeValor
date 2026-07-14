@@ -186,72 +186,55 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   const intervalo     = body.intervalo_recorrencia ? parseInt(String(body.intervalo_recorrencia)) : 1;
   const isRecorrente  = totalParcelas > 1 && frequencia && FREQUENCIAS.includes(frequencia);
 
-  // ── Transferência simples ───────────────────────────────────
-  if (!isRecorrente) {
-    const idPar = crypto.randomUUID();
-    const base = {
-      user_id: userId, categoria_id: catId, valor, data: dataBase,
-      status: statusOriginal, id_par_transferencia: idPar,
-      id_recorrencia: null, nr_parcela: null, total_parcelas: null, tipo_recorrencia: null,
-    };
-    const { data: debito, error: e1 } = await c.from("transacoes").insert({
-      ...base, conta_id: body.conta_origem_id, tipo: "DESPESA",
-      descricao: `[Transf. saída] ${desc}`.trim(),
-    }).select().single();
-    if (e1 || !debito) { logError("Criar transferência — débito", e1); return erro("Erro ao criar lançamento de saída", 500); }
+  // Monta TODAS as linhas (débito+crédito por parcela) e grava de uma vez via
+  // RPC transacional — se qualquer linha falhar (constraint/trigger/RLS), o
+  // Postgres faz ROLLBACK de tudo, garantindo a invariante "nunca meio par".
+  // Toda a lógica de negócio (datas, status, parcelas) permanece aqui.
+  const idRecorrencia = isRecorrente ? crypto.randomUUID() : null;
+  const tipoRecBanco  = statusOriginal === "PROJECAO" ? "PROJECAO" : "PARCELA";
+  const nParcelas     = isRecorrente ? totalParcelas : 1;
 
-    const { data: credito, error: e2 } = await c.from("transacoes").insert({
-      ...base, conta_id: body.conta_destino_id, tipo: "RECEITA",
-      descricao: `[Transf. entrada] ${desc}`.trim(),
-    }).select().single();
-    if (e2 || !credito) {
-      await c.from("transacoes").delete().eq("id", debito.id);
-      logError("Criar transferência — crédito", e2);
-      return erro("Erro ao criar lançamento de entrada", 500);
-    }
-    return json(montarTransferencia(debito as Transacao, credito as Transacao), 201);
-  }
-
-  // ── Transferência recorrente — criar N pares ────────────────
-  const idRecorrencia  = crypto.randomUUID();
-  const tipoRecBanco   = statusOriginal === "PROJECAO" ? "PROJECAO" : "PARCELA";
-  const resultado: ReturnType<typeof montarTransferencia>[] = [];
-
-  for (let i = 0; i < totalParcelas; i++) {
-    const dataParcela = calcularDataParcela(dataBase, frequencia!, i * intervalo);
+  const linhas: Record<string, unknown>[] = [];
+  for (let i = 0; i < nParcelas; i++) {
+    const dataParcela = isRecorrente ? calcularDataParcela(dataBase, frequencia!, i * intervalo) : dataBase;
     let statusParcela: string;
-    if (dataParcela <= hoje)             statusParcela = "PAGO";
+    if (!isRecorrente)                      statusParcela = statusOriginal;
+    else if (dataParcela <= hoje)           statusParcela = "PAGO";
     else if (statusOriginal === "PROJECAO") statusParcela = "PROJECAO";
-    else                                 statusParcela = "PENDENTE";
+    else                                    statusParcela = "PENDENTE";
 
-    const idPar = crypto.randomUUID();
-    const base = {
+    const comum = {
       user_id: userId, categoria_id: catId, valor, data: dataParcela,
-      status: statusParcela, id_par_transferencia: idPar,
-      id_recorrencia: idRecorrencia, nr_parcela: i + 1,
-      total_parcelas: totalParcelas, tipo_recorrencia: tipoRecBanco,
+      status: statusParcela, id_par_transferencia: crypto.randomUUID(),
+      id_recorrencia: idRecorrencia,
+      nr_parcela:       isRecorrente ? i + 1 : null,
+      total_parcelas:   isRecorrente ? totalParcelas : null,
+      tipo_recorrencia: isRecorrente ? tipoRecBanco : null,
     };
-
-    const { data: debito, error: e1 } = await c.from("transacoes").insert({
-      ...base, conta_id: body.conta_origem_id, tipo: "DESPESA",
-      descricao: `[Transf. saída] ${desc}`.trim(),
-    }).select().single();
-    if (e1 || !debito) { logError(`Criar par ${i+1} — débito`, e1); return erro(`Erro ao criar parcela ${i+1}`, 500); }
-
-    const { data: credito, error: e2 } = await c.from("transacoes").insert({
-      ...base, conta_id: body.conta_destino_id, tipo: "RECEITA",
-      descricao: `[Transf. entrada] ${desc}`.trim(),
-    }).select().single();
-    if (e2 || !credito) {
-      await c.from("transacoes").delete().eq("id", debito.id);
-      logError(`Criar par ${i+1} — crédito`, e2);
-      return erro(`Erro ao criar parcela ${i+1}`, 500);
-    }
-    resultado.push(montarTransferencia(debito as Transacao, credito as Transacao));
+    linhas.push({ ...comum, conta_id: body.conta_origem_id,  tipo: "DESPESA", descricao: `[Transf. saída] ${desc}`.trim() });
+    linhas.push({ ...comum, conta_id: body.conta_destino_id, tipo: "RECEITA", descricao: `[Transf. entrada] ${desc}`.trim() });
   }
 
-  logSuccess("Transferência recorrente criada", { id_recorrencia: idRecorrencia, parcelas: totalParcelas });
-  return json({ id_recorrencia: idRecorrencia, total: resultado.length, parcelas: resultado }, 201);
+  const { data: inseridas, error } = await c.rpc("fn_criar_transferencia", { p_rows: linhas });
+  if (error || !inseridas) { logError("Criar transferência (rpc atômica)", error); return erro("Erro ao criar transferência", 500); }
+
+  // Reagrupa as linhas inseridas em pares por id_par_transferencia (a ordem
+  // do RETURNING não é garantida — casamos por id e ordenamos por parcela).
+  const porPar = new Map<string, { debito?: Transacao; credito?: Transacao }>();
+  for (const t of inseridas as Transacao[]) {
+    const g = porPar.get(t.id_par_transferencia!) ?? {};
+    if (t.tipo === "DESPESA") g.debito = t; else g.credito = t;
+    porPar.set(t.id_par_transferencia!, g);
+  }
+  const pares = [...porPar.values()]
+    .filter((p) => p.debito && p.credito)
+    .map((p) => montarTransferencia(p.debito!, p.credito!))
+    .sort((a, b) => (a.parcela_atual ?? 0) - (b.parcela_atual ?? 0));
+
+  if (!isRecorrente) return json(pares[0], 201);
+
+  logSuccess("Transferência recorrente criada", { id_recorrencia: idRecorrencia, parcelas: pares.length });
+  return json({ id_recorrencia: idRecorrencia, total: pares.length, parcelas: pares }, 201);
 }
 
 async function editar(c: ReturnType<typeof db>, idPar: string, body: Record<string, unknown>, userId: string, escopo: string) {
