@@ -235,6 +235,13 @@ otp_expiry = 3600
 subject = "Confirme seu e-mail · Arquiteto de Valor"
 content_path = "./supabase/templates/confirmacao.html"
 
+# Template do e-mail de recuperação de senha ("Esqueci minha senha").
+# No projeto HOSPEDADO, cole o conteúdo de recuperar-senha.html no Dashboard
+# (Auth → Email Templates → Reset Password).
+[auth.email.template.recovery]
+subject = "Redefinir sua senha · Arquiteto de Valor"
+content_path = "./supabase/templates/recuperar-senha.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"
