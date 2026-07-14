@@ -226,6 +226,15 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# Template do e-mail de confirmação de cadastro (texto amigável e cortês).
+# O arquivo é versionado em supabase/templates/confirmacao.html.
+# ⚠️ No projeto HOSPEDADO, o template vive no Dashboard (Auth → Email Templates
+# → Confirm signup). Cole lá o conteúdo de confirmacao.html. Esta entrada vale
+# para `supabase start` local e para quem usa `supabase config push`.
+[auth.email.template.confirmation]
+subject = "Confirme seu e-mail · Arquiteto de Valor"
+content_path = "./supabase/templates/confirmacao.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"

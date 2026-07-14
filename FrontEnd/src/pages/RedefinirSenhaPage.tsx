@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { CampoSenha } from '../components/ui/CampoSenha'
 
 export default function RedefinirSenhaPage() {
   const navigate = useNavigate()
@@ -101,14 +102,12 @@ export default function RedefinirSenhaPage() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-[16px] text-white/50 mb-1.5">Nova senha</label>
-                  <input type="password" required value={nova}
-                    onChange={e => setNova(e.target.value)}
+                  <CampoSenha value={nova} onChange={setNova} required autoComplete="new-password"
                     className={inputCls} placeholder="Mínimo 6 caracteres" />
                 </div>
                 <div>
                   <label className="block text-[16px] text-white/50 mb-1.5">Confirmar senha</label>
-                  <input type="password" required value={confirma}
-                    onChange={e => setConfirma(e.target.value)}
+                  <CampoSenha value={confirma} onChange={setConfirma} required autoComplete="new-password"
                     className={inputCls} placeholder="••••••••" />
                 </div>
                 {error && (

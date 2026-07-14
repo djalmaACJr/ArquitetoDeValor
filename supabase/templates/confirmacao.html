@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Confirme seu e-mail · Arquiteto de Valor</title>
+  </head>
+  <body style="margin:0; padding:0; background-color:#0d1220; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#0d1220; padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px; background-color:#111a2e; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden;">
+            <!-- Cabeçalho -->
+            <tr>
+              <td align="center" style="padding:36px 32px 8px 32px;">
+                <div style="font-size:22px; font-weight:700; color:#ffffff;">Arquiteto de Valor</div>
+                <div style="font-size:12px; letter-spacing:3px; color:#00c896; margin-top:6px;">CONTROLE FINANCEIRO PESSOAL</div>
+              </td>
+            </tr>
+
+            <!-- Corpo -->
+            <tr>
+              <td style="padding:20px 36px 8px 36px;">
+                <h1 style="font-size:20px; font-weight:600; color:#ffffff; margin:16px 0 12px 0;">Boas-vindas! 👋</h1>
+                <p style="font-size:15px; line-height:1.6; color:#c5cad8; margin:0 0 16px 0;">
+                  Que bom ter você aqui. Falta só um passo para começar a organizar suas
+                  finanças com o Arquiteto de Valor: confirmar o seu e-mail.
+                </p>
+                <p style="font-size:15px; line-height:1.6; color:#c5cad8; margin:0 0 24px 0;">
+                  É só clicar no botão abaixo e sua conta estará pronta para uso.
+                </p>
+              </td>
+            </tr>
+
+            <!-- Botão -->
+            <tr>
+              <td align="center" style="padding:0 36px 28px 36px;">
+                <a href="{{ .ConfirmationURL }}"
+                   style="display:inline-block; background-color:#00c896; color:#0a0f1a; font-size:16px; font-weight:600; text-decoration:none; padding:14px 32px; border-radius:10px;">
+                  Confirmar meu e-mail
+                </a>
+              </td>
+            </tr>
+
+            <!-- Link alternativo -->
+            <tr>
+              <td style="padding:0 36px 28px 36px;">
+                <p style="font-size:13px; line-height:1.6; color:#8b92a8; margin:0 0 6px 0;">
+                  Se o botão não funcionar, copie e cole este endereço no seu navegador:
+                </p>
+                <p style="font-size:13px; line-height:1.5; color:#4da6ff; word-break:break-all; margin:0;">
+                  {{ .ConfirmationURL }}
+                </p>
+              </td>
+            </tr>
+
+            <!-- Rodapé -->
+            <tr>
+              <td style="padding:20px 36px 32px 36px; border-top:1px solid rgba(255,255,255,0.06);">
+                <p style="font-size:13px; line-height:1.6; color:#8b92a8; margin:0 0 4px 0;">
+                  Se você não criou uma conta no Arquiteto de Valor, pode ignorar este
+                  e-mail com tranquilidade — nada será feito sem a sua confirmação.
+                </p>
+                <p style="font-size:13px; line-height:1.6; color:#8b92a8; margin:16px 0 0 0;">
+                  Um abraço,<br />
+                  Equipe Arquiteto de Valor
+                </p>
+              </td>
+            </tr>
+          </table>
+
+          <p style="font-size:12px; color:#4a5168; margin:20px 0 0 0;">
+            Arquiteto de Valor · BLUEPRINT
+          </p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

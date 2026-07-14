@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
 import { consumirRotaPosExpiracao } from '../lib/retornoPosExpiracao'
+import { CampoSenha } from '../components/ui/CampoSenha'
 
 const LogoSVG = () => (
   <svg width="48" height="48" viewBox="210 30 260 260">
@@ -163,8 +164,8 @@ export default function LoginPage() {
                       Esqueci minha senha
                     </button>
                   </div>
-                  <input type="password" required value={password}
-                    onChange={e => setPassword(e.target.value)}
+                  <CampoSenha value={password} onChange={setPassword}
+                    required autoComplete="current-password"
                     className={inputCls} placeholder="••••••••" />
                 </div>
                 {error && (
