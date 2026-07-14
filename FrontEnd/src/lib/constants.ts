@@ -39,6 +39,14 @@ export type TipoObjetivo = typeof TIPOS_OBJETIVO[number]
 export const STATUS_OBJETIVO = ['EM_PROGRESSO', 'ATINGIDO', 'CANCELADO'] as const
 export type StatusObjetivo = typeof STATUS_OBJETIVO[number]
 
+// Rótulo das páginas que salvam filtros nomeados (Extrato/Relatórios/Dashboard).
+// Centralizado aqui para não repetir em FiltrosSalvosBtn e PerfilPage.
+export const PAGINA_FILTRO_LABEL: Record<string, string> = {
+  extrato:    'Extrato',
+  relatorios: 'Relatórios',
+  dashboard:  'Dashboard',
+}
+
 // Rótulos de APRESENTAÇÃO dos tipos de objetivo. Os valores internos
 // (banco/API) permanecem SONHO/OBJETIVO/PROJETO/CRESCIMENTO — só muda
 // a exibição, mesmo padrão do mascote "sabio" → "Conselheiro".

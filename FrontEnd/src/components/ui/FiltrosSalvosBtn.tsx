@@ -5,12 +5,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Bookmark } from 'lucide-react'
 import { useFiltrosSalvos } from '../../hooks/useFiltrosSalvos'
-
-const PAGINA_LABEL: Record<string, string> = {
-  extrato:    'Extrato',
-  relatorios: 'Relatórios',
-  dashboard:  'Dashboard',
-}
+import { PAGINA_FILTRO_LABEL as PAGINA_LABEL } from '../../lib/constants'
 
 interface Props {
   /** Identificador da página — ex.: 'extrato', 'relatorios' */

@@ -24,6 +24,7 @@ import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelect'
 import { STATUS_LABEL, STATUS_OPCOES } from '../lib/utils'
+import { PAGINA_FILTRO_LABEL as PAGINA_LABEL } from '../lib/constants'
 import { qk } from '../lib/queryKeys'
 
 type Feedback = { tipo: 'ok' | 'erro'; msg: string }
@@ -1311,10 +1312,6 @@ export default function PerfilPage() {
   }
 
   // ── Filtros: metadados ──────────────────────────────────────
-  const PAGINA_LABEL: Record<string, string> = {
-    extrato: 'Extrato', relatorios: 'Relatórios', dashboard: 'Dashboard',
-  }
-
   function detalhesFiltro(dados: Record<string, unknown>): { label: string; valor: string }[] {
     const linhas: { label: string; valor: string }[] = []
     const ids = (key: string) => (dados[key] as string[] | undefined) ?? []
