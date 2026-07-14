@@ -5,28 +5,56 @@
 // ============================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// ── CORS — origem restrita em produção ────────────────────────────────────────
-// Em produção, defina a variável de ambiente:
-//   supabase secrets set ALLOWED_ORIGIN=https://seu-dominio.com
-// Em desenvolvimento local, deixe em branco para usar "*".
-const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
+// ── CORS — allowlist de origens ───────────────────────────────────────────────
+// ALLOWED_ORIGIN aceita uma LISTA separada por vírgula (produção):
+//   supabase secrets set ALLOWED_ORIGIN=https://app1.com,https://app2.com
+// Além dela, qualquer localhost / 127.0.0.1 (em qualquer porta) é SEMPRE
+// aceito — facilita rodar o front local contra este mesmo backend sem afrouxar
+// a produção. Um site atacante não consegue forjar Origin: localhost no
+// navegador da vítima, então isso não abre brecha. Sem ALLOWED_ORIGIN → "*".
+const ORIGENS_CONFIG = (Deno.env.get("ALLOWED_ORIGIN") ?? "*")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+const CORS_CURINGA  = ORIGENS_CONFIG.includes("*");
+const ORIGEM_PADRAO = CORS_CURINGA ? "*" : (ORIGENS_CONFIG[0] ?? "*");
 
-export const CORS_HEADERS = {
-  "Access-Control-Allow-Origin":  ALLOWED_ORIGIN,
-  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type",
-};
+function resolverOrigem(origin: string): string {
+  if (CORS_CURINGA) return "*";
+  if (origin && ORIGENS_CONFIG.includes(origin)) return origin;
+  if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return origin;
+  return ORIGEM_PADRAO; // origem não permitida → devolve a primária (o navegador bloqueia)
+}
+
+// Origem resolvida da requisição atual. App de usuário único: não há
+// concorrência de origens distintas no mesmo isolate, então guardar a origem
+// por requisição num módulo é seguro na prática. É um trade-off consciente — a
+// alternativa sem estado exigiria envolver o handler de todas as funções.
+let _origemAtual = ORIGEM_PADRAO;
+
+// ── Registra a origem da requisição (chame como 1ª linha do handler) ──
+export function registrarOrigem(req: Request): void {
+  _origemAtual = resolverOrigem(req.headers.get("Origin") ?? "");
+}
+
+// ── Headers CORS com a origem resolvida da requisição atual ───
+export function corsHeaders(): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin":  _origemAtual,
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type",
+    "Vary":                         "Origin",
+  };
+}
 
 // ── Resposta para preflight OPTIONS ──────────────────────────
 export function corsPreFlight(): Response {
-  return new Response(null, { status: 200, headers: CORS_HEADERS });
+  return new Response(null, { status: 200, headers: corsHeaders() });
 }
 
 // ── Resposta JSON padronizada ─────────────────────────────────
 export function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    headers: { "Content-Type": "application/json", ...corsHeaders() },
   });
 }
 

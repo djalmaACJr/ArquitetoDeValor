@@ -31,6 +31,7 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import {
   json, erro, db, autenticar, corsPreFlight, extrairId, extrairAcao,
 } from "../_shared/utils.ts";
+import { registrarOrigem } from "../_shared/utils.ts";
 import { logError, logRequest, logResponse } from "../_shared/logger.ts";
 import { encriptar, decriptar, mascarar, type BlobCriptografado } from "../_shared/cripto.ts";
 
@@ -139,6 +140,7 @@ async function gravarConfigs(
 }
 
 Deno.serve(async (req: Request) => {
+  registrarOrigem(req);
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;

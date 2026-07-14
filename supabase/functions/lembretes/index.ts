@@ -8,8 +8,10 @@ import {
   verificarExistencia,
   type Db,
 } from "../_shared/utils.ts";
+import { registrarOrigem } from "../_shared/utils.ts";
 
 Deno.serve(async (req: Request) => {
+  registrarOrigem(req);
   if (req.method === "OPTIONS") return corsPreFlight();
 
   const auth = await autenticar(req);

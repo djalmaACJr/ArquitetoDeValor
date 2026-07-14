@@ -4,9 +4,11 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId,
          verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight } from "../_shared/utils.ts";
+import { registrarOrigem } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWarn } from "../_shared/logger.ts";
 
 Deno.serve(async (req: Request) => {
+  registrarOrigem(req);
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;

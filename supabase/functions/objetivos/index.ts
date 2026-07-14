@@ -6,6 +6,7 @@ import {
   json, erro, db, autenticar, extrairId,
   verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight,
 } from "../_shared/utils.ts";
+import { registrarOrigem } from "../_shared/utils.ts";
 import {
   logError, logRequest, logResponse, logSuccess,
 } from "../_shared/logger.ts";
@@ -15,6 +16,7 @@ const STATUS_OBJETIVO = ["EM_PROGRESSO", "ATINGIDO", "CANCELADO"];
 const FREQUENCIAS     = ["DIARIA", "SEMANAL", "MENSAL", "ANUAL"];
 
 Deno.serve(async (req: Request) => {
+  registrarOrigem(req);
   if (req.method === "OPTIONS") return corsPreFlight();
 
   const auth = await autenticar(req);

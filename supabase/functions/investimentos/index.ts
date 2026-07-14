@@ -11,6 +11,7 @@ import {
   json, erro, db, dbAdmin, autenticar, extrairId, extrairAcao,
   verificarExistencia, camposParaAtualizar, corsPreFlight,
 } from "../_shared/utils.ts";
+import { registrarOrigem } from "../_shared/utils.ts";
 import { logError, logRequest, logResponse, logSuccess } from "../_shared/logger.ts";
 import { chamarProvedorIA, ErroIA, lerConfigIAAtiva, lerMentoresIA } from "../_shared/ia.ts";
 
@@ -49,6 +50,7 @@ const CATEGORIAS_FII = ["TIJOLO", "PAPEL", "FOF", "DESENVOLVIMENTO", "OUTRO"];
 const SUBTIPOS_ACOES = ["ON", "PN", "UNIT", "BDR"];
 
 Deno.serve(async (req: Request) => {
+  registrarOrigem(req);
   if (req.method === "OPTIONS") return corsPreFlight();
 
   const url     = new URL(req.url);

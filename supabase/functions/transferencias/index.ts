@@ -7,6 +7,7 @@ import {
   json, erro, db, autenticar, extrairId,
   validarStatus, calcularDataParcela, corsPreFlight
 } from "../_shared/utils.ts";
+import { registrarOrigem } from "../_shared/utils.ts";
 import { logError, logSuccess, logRequest, logResponse } from "../_shared/logger.ts";
 
 const FREQUENCIAS = ["DIARIA","SEMANAL","MENSAL","ANUAL"];
@@ -86,6 +87,7 @@ function validarPayload(body: Record<string, unknown>, modoEdicao = false): stri
 }
 
 Deno.serve(async (req: Request) => {
+  registrarOrigem(req);
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;

@@ -28,6 +28,7 @@ import {
   erro,
   json,
 } from "../_shared/utils.ts";
+import { registrarOrigem } from "../_shared/utils.ts";
 import { chamarProvedorIA, ErroIA, lerConfigIAAtiva, parsearImagem } from "../_shared/ia.ts";
 
 // ── Persona dos mascotes ──────────────────────────────────────────────
@@ -204,6 +205,7 @@ interface HistoricoItem {
 // ── Handler principal ────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
+  registrarOrigem(req);
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
