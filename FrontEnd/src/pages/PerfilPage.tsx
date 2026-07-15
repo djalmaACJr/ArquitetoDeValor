@@ -546,7 +546,7 @@ function SecaoConvite() {
   }
 
   const compartilharWhatsapp = () => {
-    const texto = `Vem organizar suas finanças comigo no Arquiteto de Valor! 💰 ${linkCadastro}`
+    const texto = `Vem organizar suas finanças comigo no Arquiteto de Valor! 📊 Dashboard, metas, relatórios e um mentor com IA pra te ajudar — de graça. ${linkCadastro}`
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank', 'noopener,noreferrer')
   }
 
