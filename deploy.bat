@@ -23,11 +23,12 @@ echo  13 - ia_configs
 echo  14 - faturas
 echo  15 - objetivos
 echo  16 - investimentos
-echo  17 - Configurar nivel de logs
-echo  18 - Configurar IA_KEYS_ENCRYPTION_KEY (cripto das api_keys de IA)
-echo  19 - Deploy com --debug (usar nesta maquina)
+echo  17 - convite
+echo  18 - Configurar nivel de logs
+echo  19 - Configurar IA_KEYS_ENCRYPTION_KEY (cripto das api_keys de IA)
+echo  20 - Deploy com --debug (usar nesta maquina)
 echo.
-set /p opcao="Digite a opcao desejada (1-19): "
+set /p opcao="Digite a opcao desejada (1-20): "
 
 if "%opcao%"=="1"  goto todos
 if "%opcao%"=="2"  goto contas
@@ -45,9 +46,10 @@ if "%opcao%"=="13" goto ia_configs
 if "%opcao%"=="14" goto faturas
 if "%opcao%"=="15" goto objetivos
 if "%opcao%"=="16" goto investimentos
-if "%opcao%"=="17" goto config_log
-if "%opcao%"=="18" goto config_ia_key
-if "%opcao%"=="19" goto debug_mode
+if "%opcao%"=="17" goto convite
+if "%opcao%"=="18" goto config_log
+if "%opcao%"=="19" goto config_ia_key
+if "%opcao%"=="20" goto debug_mode
 echo Opcao invalida! & pause & exit /b
 
 :debug_mode
@@ -73,8 +75,9 @@ echo  13 - ia_configs
 echo  14 - faturas
 echo  15 - objetivos
 echo  16 - investimentos
+echo  17 - convite
 echo.
-set /p mod_debug="Digite o modulo (1-16): "
+set /p mod_debug="Digite o modulo (1-17): "
 
 if "%mod_debug%"=="1"  goto debug_todos
 if "%mod_debug%"=="2"  goto debug_contas
@@ -92,159 +95,170 @@ if "%mod_debug%"=="13" goto debug_ia_configs
 if "%mod_debug%"=="14" goto debug_faturas
 if "%mod_debug%"=="15" goto debug_objetivos
 if "%mod_debug%"=="16" goto debug_investimentos
+if "%mod_debug%"=="17" goto debug_convite
 echo Opcao invalida! & pause & exit /b
 
 :debug_contas
 echo.
 echo [DEPLOY --debug] contas...
-supabase functions deploy contas --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy contas --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] contas deployed
 goto fim
 
 :debug_categorias
 echo.
 echo [DEPLOY --debug] categorias...
-supabase functions deploy categorias --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy categorias --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] categorias deployed
 goto fim
 
 :debug_transacoes
 echo.
 echo [DEPLOY --debug] transacoes...
-supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] transacoes deployed
 goto fim
 
 :debug_transferencias
 echo.
 echo [DEPLOY --debug] transferencias...
-supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] transferencias deployed
 goto fim
 
 :debug_versao
 echo.
 echo [DEPLOY --debug] versao...
-supabase functions deploy version --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy version --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] versao deployed
 goto fim
 
 :debug_limpar
 echo.
 echo [DEPLOY --debug] limpar...
-supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] limpar deployed
 goto fim
 
 :debug_excluir_conta
 echo.
 echo [DEPLOY --debug] excluir_conta...
-supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] excluir_conta deployed
 goto fim
 
 :debug_filtros
 echo.
 echo [DEPLOY --debug] filtros...
-supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] filtros deployed
 goto fim
 
 :debug_assistente
 echo.
 echo [DEPLOY --debug] assistente...
-supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] assistente deployed
 goto fim
 
 :debug_lembretes
 echo.
 echo [DEPLOY --debug] lembretes...
-supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] lembretes deployed
 goto fim
 
 :debug_chat_mascote
 echo.
 echo [DEPLOY --debug] chat_mascote...
-supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] chat_mascote deployed
 goto fim
 
 :debug_ia_configs
 echo.
 echo [DEPLOY --debug] ia_configs...
-supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] ia_configs deployed
 goto fim
 
 :debug_faturas
 echo.
 echo [DEPLOY --debug] faturas...
-supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] faturas deployed
 goto fim
 
 :debug_objetivos
 echo.
 echo [DEPLOY --debug] objetivos...
-supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] objetivos deployed
 goto fim
 
 :debug_investimentos
 echo.
 echo [DEPLOY --debug] investimentos...
-supabase functions deploy investimentos --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy investimentos --project-ref ftpelncgrakpphytfrfo --debug
 echo [OK] investimentos deployed
+goto fim
+
+:debug_convite
+echo.
+echo [DEPLOY --debug] convite...
+call supabase functions deploy convite --project-ref ftpelncgrakpphytfrfo --debug
+echo [OK] convite deployed
 goto fim
 
 :debug_todos
 echo.
 echo [DEPLOY --debug] contas...
-supabase functions deploy contas --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy contas --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] categorias...
-supabase functions deploy categorias --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy categorias --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] transacoes...
-supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] transferencias...
-supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] versao...
-supabase functions deploy version --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy version --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] limpar...
-supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] excluir_conta...
-supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] filtros...
-supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] assistente...
-supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] lembretes...
-supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] chat_mascote...
-supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] ia_configs...
-supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] faturas...
-supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] objetivos...
-supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [DEPLOY --debug] investimentos...
-supabase functions deploy investimentos --project-ref ftpelncgrakpphytfrfo --debug
+call supabase functions deploy investimentos --project-ref ftpelncgrakpphytfrfo --debug
+echo.
+echo [DEPLOY --debug] convite...
+call supabase functions deploy convite --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [OK] Todos os modulos deployados com --debug
 goto fim
@@ -287,7 +301,7 @@ if /i not "%confirma_aplica%"=="s" (
   goto fim
 )
 
-supabase secrets set --project-ref ftpelncgrakpphytfrfo IA_KEYS_ENCRYPTION_KEY=%IA_KEY%
+call supabase secrets set --project-ref ftpelncgrakpphytfrfo IA_KEYS_ENCRYPTION_KEY=%IA_KEY%
 echo.
 echo [OK] IA_KEYS_ENCRYPTION_KEY configurado.
 echo [LEMBRETE] Faca deploy de ia_configs e chat_mascote para usarem o novo valor.
@@ -316,7 +330,7 @@ if "%nivel_log%"=="4" set LOG_LEVEL=none
 
 echo.
 echo Aplicando configuracao...
-supabase secrets set --project-ref ftpelncgrakpphytfrfo LOG_LEVEL=%LOG_LEVEL% ENVIRONMENT=production
+call supabase secrets set --project-ref ftpelncgrakpphytfrfo LOG_LEVEL=%LOG_LEVEL% ENVIRONMENT=production
 echo.
 echo [OK] Logs configurados para: %LOG_LEVEL%
 echo.
@@ -326,154 +340,164 @@ goto fim
 :contas
 echo.
 echo [DEPLOY] contas...
-supabase functions deploy contas --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy contas --project-ref ftpelncgrakpphytfrfo
 echo [OK] contas deployed
 goto fim
 
 :categorias
 echo.
 echo [DEPLOY] categorias...
-supabase functions deploy categorias --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy categorias --project-ref ftpelncgrakpphytfrfo
 echo [OK] categorias deployed
 goto fim
 
 :transacoes
 echo.
 echo [DEPLOY] transacoes...
-supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo
 echo [OK] transacoes deployed
 goto fim
 
 :transferencias
 echo.
 echo [DEPLOY] transferencias...
-supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo
 echo [OK] transferencias deployed
 goto fim
 
 :versao
 echo.
 echo [DEPLOY] versao...
-supabase functions deploy version --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy version --project-ref ftpelncgrakpphytfrfo
 echo [OK] versao deployed
 goto fim
 
 :limpar
 echo.
 echo [DEPLOY] limpar...
-supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo
 echo [OK] limpar deployed
 goto fim
 
 :excluir_conta
 echo.
 echo [DEPLOY] excluir_conta...
-supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo
 echo [OK] excluir_conta deployed
 goto fim
 
 :filtros
 echo.
 echo [DEPLOY] filtros...
-supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo
 echo [OK] filtros deployed
 goto fim
 
 :assistente
 echo.
 echo [DEPLOY] assistente...
-supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo
 echo [OK] assistente deployed
 goto fim
 
 :lembretes
 echo.
 echo [DEPLOY] lembretes...
-supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo
 echo [OK] lembretes deployed
 goto fim
 
 :chat_mascote
 echo.
 echo [DEPLOY] chat_mascote...
-supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo
 echo [OK] chat_mascote deployed
 goto fim
 
 :ia_configs
 echo.
 echo [DEPLOY] ia_configs...
-supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo
 echo [OK] ia_configs deployed
 goto fim
 
 :faturas
 echo.
 echo [DEPLOY] faturas...
-supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo
 echo [OK] faturas deployed
 goto fim
 
 :objetivos
 echo.
 echo [DEPLOY] objetivos...
-supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo
 echo [OK] objetivos deployed
 goto fim
 
 :investimentos
 echo.
 echo [DEPLOY] investimentos...
-supabase functions deploy investimentos --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy investimentos --project-ref ftpelncgrakpphytfrfo
 echo [OK] investimentos deployed
+goto fim
+
+:convite
+echo.
+echo [DEPLOY] convite...
+call supabase functions deploy convite --project-ref ftpelncgrakpphytfrfo
+echo [OK] convite deployed
 goto fim
 
 :todos
 echo.
 echo [DEPLOY] contas...
-supabase functions deploy contas --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy contas --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] categorias...
-supabase functions deploy categorias --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy categorias --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] transacoes...
-supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy transacoes --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] transferencias...
-supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy transferencias --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] versao...
-supabase functions deploy version --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy version --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] limpar...
-supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy limpar --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] excluir_conta...
-supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy excluir_conta --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] filtros...
-supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy filtros --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] assistente...
-supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy assistente --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] lembretes...
-supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy lembretes --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] chat_mascote...
-supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy chat_mascote --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] ia_configs...
-supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy ia_configs --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] faturas...
-supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy faturas --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] objetivos...
-supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy objetivos --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] investimentos...
-supabase functions deploy investimentos --project-ref ftpelncgrakpphytfrfo
+call supabase functions deploy investimentos --project-ref ftpelncgrakpphytfrfo
+echo.
+echo [DEPLOY] convite...
+call supabase functions deploy convite --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [OK] Todos os modulos deployados
 goto fim

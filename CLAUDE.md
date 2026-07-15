@@ -89,6 +89,7 @@ Permite:
 | `functions/limpar/` | Limpeza usada nos testes (reativa contas inativas para destravar UPDATE) |
 | `functions/ia_configs/` | CRUD das configs de IA por provedor (apelido, modelo, api_key). API key é criptografada em AES-256-GCM antes de ser persistida; frontend só vê máscara (`sk-...f4a2`). Inclui ping para testar credencial. |
 | `functions/chat_mascote/` | Recebe mensagem + contexto opcional (texto + screenshot base64) da página, descriptografa a api_key da config escolhida e proxia a chamada para o provedor (Claude / GPT / Gemini / DeepSeek / OpenRouter / Mistral / Cohere). |
+| `functions/convite/` | Envia convite de cadastro por e-mail via Brevo (sem rastreamento — não há tabela de convites). Chamada pela seção "Convidar amigos" do Perfil; o compartilhamento via WhatsApp é só um link `wa.me` gerado no frontend, sem endpoint próprio. |
 | `migrations/` | DDL idempotente (schema, ENUMs, triggers, views, RLS, seed de usuário) |
 
 ### Testes
@@ -331,6 +332,10 @@ TEST_PASSWORD=...
 
 ```
 ALLOWED_ORIGIN=https://seu-dominio.com   # CORS em produção
+# Aceita lista separada por vírgulas (dev e prod compartilham o mesmo
+# projeto Supabase aqui): "https://prod.com,https://outro-dominio.com,http://localhost:5173"
+# O primeiro item é o "canônico" (usado por quem ainda não repassa `req`
+# para corsHeaders/json/erro, e como base de links tipo o de /convite).
 
 # Chave-mestra de 32 bytes (256-bit) para AES-256-GCM. Criptografa as
 # api_keys de IA armazenadas em arqvalor.usuarios.ia_configs.
@@ -339,6 +344,12 @@ ALLOWED_ORIGIN=https://seu-dominio.com   # CORS em produção
 # IMPORTANTE: se perder esta chave, todas as IA configs ficam inacessíveis
 # e usuários precisam re-cadastrar.
 IA_KEYS_ENCRYPTION_KEY=...
+
+# Envio de e-mail transacional via Brevo — usado pela função `convite`
+# BREVO_API_KEY: chave de API (não a SMTP key) gerada em Brevo → Configurações → SMTP e API
+# BREVO_SENDER_EMAIL: remetente autenticado no domínio configurado no Brevo (opcional, tem default)
+BREVO_API_KEY=...
+BREVO_SENDER_EMAIL=convites@arquitetodevalor.com.br
 ```
 
 ### 🔐 Configuração de sessão (Supabase Auth)

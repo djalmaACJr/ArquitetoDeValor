@@ -6,33 +6,51 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ── CORS — origem restrita em produção ────────────────────────────────────────
-// Em produção, defina a variável de ambiente:
-//   supabase secrets set ALLOWED_ORIGIN=https://seu-dominio.com
-// Em desenvolvimento local, deixe em branco para usar "*".
-const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
+// ALLOWED_ORIGIN aceita uma lista separada por vírgulas (ex.: produção +
+// domínio próprio + localhost do mesmo projeto Supabase, já que dev e prod
+// compartilham o mesmo projeto aqui). Quando quem chama passa `req`, a
+// origem da requisição é refletida de volta SE estiver na lista; senão cai
+// no primeiro item (comportamento antigo, single-origin, para quem não
+// passa `req`). Em desenvolvimento local sem o secret definido, usa "*".
+//   supabase secrets set ALLOWED_ORIGIN="https://seu-dominio.com,http://localhost:5173"
+const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") ?? "*")
+  .split(",")
+  .map(o => o.trim())
+  .filter(Boolean);
 
-export const CORS_HEADERS = {
-  "Access-Control-Allow-Origin":  ALLOWED_ORIGIN,
-  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type",
-};
+function origemPermitida(req?: Request): string {
+  if (ALLOWED_ORIGINS.includes("*")) return "*";
+  const origem = req?.headers.get("Origin") ?? "";
+  return ALLOWED_ORIGINS.includes(origem) ? origem : ALLOWED_ORIGINS[0];
+}
+
+export function corsHeaders(req?: Request): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin":  origemPermitida(req),
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type",
+  };
+}
+
+// Mantido para as funções que ainda não passam `req` — mesmo valor de antes.
+export const CORS_HEADERS = corsHeaders();
 
 // ── Resposta para preflight OPTIONS ──────────────────────────
-export function corsPreFlight(): Response {
-  return new Response(null, { status: 200, headers: CORS_HEADERS });
+export function corsPreFlight(req?: Request): Response {
+  return new Response(null, { status: 200, headers: corsHeaders(req) });
 }
 
 // ── Resposta JSON padronizada ─────────────────────────────────
-export function json(data: unknown, status = 200): Response {
+export function json(data: unknown, status = 200, req?: Request): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    headers: { "Content-Type": "application/json", ...corsHeaders(req) },
   });
 }
 
 // ── Resposta de erro padronizada ──────────────────────────────
-export function erro(mensagem: string, status = 400): Response {
-  return json({ erro: mensagem }, status);
+export function erro(mensagem: string, status = 400, req?: Request): Response {
+  return json({ erro: mensagem }, status, req);
 }
 
 // ── Cliente Supabase com schema arqvalor (anon key + JWT do usuário) ──
@@ -85,20 +103,20 @@ function verificador() {
 // local; se a lib em runtime não o tiver, cai no getUser (validação no Auth).
 export async function autenticar(req: Request): Promise<string | Response> {
   const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
-  if (!token) return erro("Usuário não autenticado", 401);
+  if (!token) return erro("Usuário não autenticado", 401, req);
   try {
     const auth = verificador().auth;
     if (typeof auth.getClaims === "function") {
       const { data, error } = await auth.getClaims(token);
       const sub = data?.claims?.sub;
-      if (error || !sub) return erro("Usuário não autenticado", 401);
+      if (error || !sub) return erro("Usuário não autenticado", 401, req);
       return String(sub);
     }
     const { data, error } = await auth.getUser(token);
-    if (error || !data?.user?.id) return erro("Usuário não autenticado", 401);
+    if (error || !data?.user?.id) return erro("Usuário não autenticado", 401, req);
     return data.user.id;
   } catch {
-    return erro("Usuário não autenticado", 401);
+    return erro("Usuário não autenticado", 401, req);
   }
 }
 
