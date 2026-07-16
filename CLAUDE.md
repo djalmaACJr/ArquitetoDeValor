@@ -48,7 +48,7 @@ Permite:
 - PostgreSQL — schema próprio **`arqvalor`** (não `public`)
 - Edge Functions em **Deno + TypeScript** (`supabase/functions/`)
 - Supabase Auth (JWT) + RLS por `user_id = auth.uid()`
-- Trigger `auth.users → arqvalor.usuarios` cria contas e categorias seed automaticamente
+- Trigger `auth.users → arqvalor.usuarios` cria contas, categorias e lançamentos de exemplo automaticamente (datas relativas a `CURRENT_DATE`, descrições sufixadas "(exemplo)")
 
 ### Testes
 

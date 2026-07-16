@@ -17,7 +17,7 @@ import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo, SelectD
 import DrawerAtivo from '../components/ui/DrawerAtivo'
 import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
 import LoadingMascote from '../components/ui/LoadingMascote'
-import { formatBRL, formatData } from '../lib/utils'
+import { formatBRL, formatData, formatUSD as fmtUSD } from '../lib/utils'
 import {
   TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPO_OPERACAO_LABEL,
   INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO, SUBTIPO_RF_INFO, FII_CATEGORIA_INFO,
@@ -34,9 +34,6 @@ ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, Line
 
 const MUTED = '#8b92a8'
 const MESES_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-
-const fmtUSD = (v: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v)
 
 function fmtMes(anoMes: string): string {
   const [ano, m] = anoMes.split('-')
@@ -323,11 +320,16 @@ export default function DetalheInvestimentoPage() {
   const fmtTokens = (q: number) => Number(q).toLocaleString('pt-BR', { maximumFractionDigits: 8 })
 
   // ── Conversão cambial (ativos em moeda estrangeira) ────────────
-  // Valores das posições estão na moeda do ativo (ex.: USD). Convertemos
-  // para BRL no front com o PTAX: custo pela cotação da DATA DA COMPRA;
-  // mercado/dividendos pela cotação aplicável (atual / data do pagamento).
+  // Só as POSIÇÕES (inv_posicoes.valor_custo) ficam na moeda do ativo (ex.:
+  // USD) — convertemos o CUSTO para BRL com a PTAX da DATA DA COMPRA. Já os
+  // snapshots (inv_historico_mensal.valor_mercado) e os dividendos
+  // (inv_dividendos.valor) são gravados EM BRL pelo backend (cotação × PTAX
+  // na hora da gravação) — usar direto, reconverter aqui multiplicava tudo
+  // pela PTAX de novo (~5× no caso USD).
   const moeda = (ativo?.moeda ?? 'BRL').toUpperCase()
   const ehMoedaEstrangeira = moeda !== 'BRL'
+  // Operações ficam na moeda do ativo → exibe com o símbolo certo (US$/R$).
+  const fmtNativo = ehMoedaEstrangeira ? fmtUSD : formatBRL
   const datasPtax = useMemo(
     () => [...new Set(posicoes.map((p) => p.data_compra).filter(Boolean))],
     [posicoes],
@@ -339,25 +341,29 @@ export default function DetalheInvestimentoPage() {
     const taxaAtual = ptaxAtual ?? 0
     const ativas = posicoes.filter((p) => p.status === 'ATIVA')
     const custo = ativas.reduce((s, p) => s + Number(p.valor_custo) * (taxaEm(p.data_compra) ?? taxaAtual), 0)
-    // mercado: snapshot mais recente por conta (na moeda do ativo) × PTAX atual;
-    // posições sem snapshot caem para o custo convertido na data da compra.
+    // mercado: snapshot mais recente por conta (já em BRL); posições sem
+    // snapshot caem para o custo convertido na data da compra.
     const ultimoPorConta = new Map<string, number>()
     const mesPorConta = new Map<string, string>()
     for (const h of historico) {
       const m = mesPorConta.get(h.conta_id)
       if (!m || h.mes_ano > m) { mesPorConta.set(h.conta_id, h.mes_ano); ultimoPorConta.set(h.conta_id, Number(h.valor_mercado)) }
     }
-    let mercado = [...ultimoPorConta.values()].reduce((s, v) => s + v * taxaAtual, 0)
+    let mercado = [...ultimoPorConta.values()].reduce((s, v) => s + v, 0)
     for (const p of ativas) {
       if (!ultimoPorConta.has(p.conta_id)) mercado += Number(p.valor_custo) * (taxaEm(p.data_compra) ?? taxaAtual)
     }
-    // Dividendos NÃO entram nessa conversão: ao contrário de posições
-    // (inv_posicoes/inv_historico_mensal, na moeda do ativo), inv_dividendos.
-    // valor já é gravado em BRL no backend (mesma regra do extrato/
-    // transacoes, que só existe em BRL) — reconverter aqui dobrava o valor
-    // dos proventos de ativos estrangeiros.
     const divs = dividendos.reduce((s, d) => s + Number(d.valor), 0)
-    return { custo, mercado, ganho: mercado - custo, dividendos: divs }
+    // Originais em USD para o subtítulo dos cards: custo é nativo (soma das
+    // posições); mercado/dividendos estão em BRL → divide pela PTAX atual.
+    const custoUSD = ativas.reduce((s, p) => s + Number(p.valor_custo), 0)
+    const usd = taxaAtual > 0 ? {
+      custo:      custoUSD,
+      mercado:    mercado / taxaAtual,
+      ganho:      mercado / taxaAtual - custoUSD,
+      dividendos: divs / taxaAtual,
+    } : null
+    return { custo, mercado, ganho: mercado - custo, dividendos: divs, usd }
   }, [ehMoedaEstrangeira, posicoes, historico, dividendos, taxaEm, ptaxAtual])
 
   if (loading) return <LoadingMascote />
@@ -482,15 +488,16 @@ export default function DetalheInvestimentoPage() {
       {/* Cards de resumo — em BRL (com o valor original em USD quando estrangeiro) */}
       {(() => {
         const r = resumoConvertido ?? resumo
-        const sub = (v: number) => ehMoedaEstrangeira ? fmtUSD(v) : undefined
+        const usd = resumoConvertido?.usd
+        const sub = (v?: number) => (v != null ? fmtUSD(v) : undefined)
         return (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-            <CardMini icone={<Wallet size={14} />} titulo="Valor de mercado" valor={formatBRL(r.mercado)} sub={sub(resumo.mercado)} />
-            <CardMini icone={<Coins size={14} />} titulo="Custo" valor={formatBRL(r.custo)} sub={sub(resumo.custo)} />
+            <CardMini icone={<Wallet size={14} />} titulo="Valor de mercado" valor={formatBRL(r.mercado)} sub={sub(usd?.mercado)} />
+            <CardMini icone={<Coins size={14} />} titulo="Custo" valor={formatBRL(r.custo)} sub={sub(usd?.custo)} />
             <CardMini icone={r.ganho >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
               titulo="Ganho / Prejuízo"
-              valor={`${r.ganho >= 0 ? '+' : ''}${formatBRL(r.ganho)}`} cor={corValor(r.ganho)} sub={sub(resumo.ganho)} />
-            <CardMini icone={<Coins size={14} />} titulo="Dividendos" valor={formatBRL(r.dividendos)} cor="#00c896" sub={sub(resumo.dividendos)} />
+              valor={`${r.ganho >= 0 ? '+' : ''}${formatBRL(r.ganho)}`} cor={corValor(r.ganho)} sub={sub(usd?.ganho)} />
+            <CardMini icone={<Coins size={14} />} titulo="Dividendos" valor={formatBRL(r.dividendos)} cor="#00c896" sub={sub(usd?.dividendos)} />
           </div>
         )
       })()}
@@ -699,7 +706,7 @@ export default function DetalheInvestimentoPage() {
                     </>
                   ) : (
                     <>
-                      <p className="text-white font-semibold text-[13px]">{formatBRL(t.valor)}</p>
+                      <p className="text-white font-semibold text-[13px]">{fmtNativo(t.valor)}</p>
                       <p className="text-[11px]" style={{ color: MUTED }}>Qtd: {fmtTokens(t.quantidade)}</p>
                     </>
                   )}
@@ -721,9 +728,9 @@ export default function DetalheInvestimentoPage() {
                     <div key={o.id} className="flex items-center justify-between gap-2 text-[13px]">
                       <div>
                         <p className="text-white font-medium">{TIPO_OPERACAO_LABEL[o.tipo_operacao]}</p>
-                        <p style={{ color: MUTED }}>{o.quantidade} × {formatBRL(o.preco_unitario)} · {formatData(o.data_operacao)}</p>
+                        <p style={{ color: MUTED }}>{o.quantidade} × {fmtNativo(o.preco_unitario)} · {formatData(o.data_operacao)}</p>
                       </div>
-                      <span className="text-white font-semibold">{formatBRL(o.valor_total)}</span>
+                      <span className="text-white font-semibold">{fmtNativo(o.valor_total)}</span>
                     </div>
                   ))}
                 </div>

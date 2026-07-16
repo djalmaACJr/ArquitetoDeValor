@@ -831,8 +831,9 @@ function LayoutTema({ onConcluir }: { onConcluir: () => void }) {
 
 // ─── LayoutAvisoDados ─────────────────────────────────────────────────
 // Tela final do 1º acesso: avisa que dados de exemplo foram criados pelo
-// seed (Carteira, cartões pré-cadastrados, categorias-base) e onde achar
-// a opção de limpar tudo.
+// seed (Carteira, cartões pré-cadastrados, categorias-base e lançamentos
+// de exemplo com datas relativas ao mês do cadastro) e onde achar a
+// opção de limpar tudo.
 function LayoutAvisoDados({ mascote, onConcluir }: {
   mascote: MascoteNome
   onConcluir: () => void
@@ -866,9 +867,11 @@ function LayoutAvisoDados({ mascote, onConcluir }: {
             <p className="text-[15px] leading-relaxed"
               style={{ color: 'var(--text-secondary)' }}>
               Pra você navegar e conhecer o app com calma, já deixei criadas
-              algumas <strong>contas</strong> (Carteira, Nubank, Inter, C6) e
-              <strong> categorias</strong> de exemplo (Moradia, Alimentação,
-              Transporte, Saúde, Renda e Transferências).
+              algumas <strong>contas</strong> (Carteira, Nubank, Inter, C6),
+              <strong> categorias</strong> (Moradia, Alimentação, Transporte,
+              Saúde, Renda e Transferências) e alguns{' '}
+              <strong>lançamentos de exemplo</strong> — receitas, despesas e
+              uma transferência, todos marcados com "(exemplo)".
             </p>
           </div>
         </div>

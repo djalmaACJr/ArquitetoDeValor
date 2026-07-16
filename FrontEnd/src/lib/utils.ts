@@ -18,6 +18,21 @@ export function formatBRL(value: number): string {
   return _BRL.format(value)
 }
 
+const _USD = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+})
+export function formatUSD(value: number): string {
+  return _USD.format(value)
+}
+
+// Formata na moeda NATIVA do ativo de investimento (posições e operações são
+// gravadas na moeda do ativo — ex.: USD para stocks/ETFs internacionais).
+export function formatMoeda(value: number, moeda?: string | null): string {
+  return (moeda ?? 'BRL').toUpperCase() === 'BRL' ? formatBRL(value) : formatUSD(value)
+}
+
 // Parse de string no formato BR ("1.234,56" → 1234.56). Aceita também
 // formato direto ("1234.56"). Retorna 0 quando não consegue interpretar.
 export function parsearValorBR(v: string): number {

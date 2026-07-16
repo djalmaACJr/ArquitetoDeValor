@@ -2275,6 +2275,50 @@ async function ptaxAtual(c: Db): Promise<number> {
   return Number.isFinite(v) && v > 0 ? v : 0;
 }
 
+// ── Conversor de custo → BRL (posições de ativos em moeda estrangeira) ───────
+// inv_posicoes.valor_custo fica na MOEDA DO ATIVO (ex.: USD), mas os snapshots
+// de valor_mercado são gravados EM BRL (cotação × PTAX) — comparar os dois sem
+// converter o custo infla a rentabilidade (US$ tratado como R$). Converte pela
+// PTAX (venda) da DATA DA COMPRA (mesma convenção da página de detalhe do
+// ativo), com fallback na PTAX mais recente; sem PTAX na tabela, devolve o
+// valor cru (comportamento antigo, degradação visível mas não silenciosa nos
+// logs do snapshot, que também depende da PTAX).
+type PosicaoCusto = { valor_custo?: unknown; data_compra?: unknown; inv_ativos?: unknown };
+async function conversorCustoBRL(c: Db, posicoes: PosicaoCusto[]): Promise<(p: PosicaoCusto) => number> {
+  const moedaDe = (p: PosicaoCusto) =>
+    String((p.inv_ativos as { moeda?: string } | null)?.moeda ?? "BRL").toUpperCase();
+  const datas = [...new Set(
+    posicoes.filter((p) => moedaDe(p) !== "BRL")
+      .map((p) => String(p.data_compra ?? "").slice(0, 10))
+      .filter((d) => RE_DATA.test(d)),
+  )].sort();
+
+  const porData = new Map<string, number>();
+  let atual = 0;
+  if (datas.length > 0) {
+    // Uma query só: da compra mais antiga (−15 dias p/ cobrir fds/feriado) até
+    // hoje; cada data resolve para a última cotação <= data (como na rotaPtax).
+    const { data } = await c.from("cotacoes_ptax")
+      .select("data, cotacao_venda")
+      .gte("data", recuarDias(datas[0], 15)).lte("data", hojeISO())
+      .order("data", { ascending: true });
+    const rows = (data ?? []) as { data: string; cotacao_venda: number }[];
+    for (const d of datas) {
+      let aplicavel = 0;
+      for (const r of rows) { if (r.data <= d) aplicavel = Number(r.cotacao_venda); else break; }
+      if (aplicavel > 0) porData.set(d, aplicavel);
+    }
+    atual = rows.length ? Number(rows[rows.length - 1].cotacao_venda) : 0;
+  }
+
+  return (p: PosicaoCusto): number => {
+    const v = Number(p.valor_custo) || 0;
+    if (moedaDe(p) === "BRL") return v;
+    const taxa = porData.get(String(p.data_compra ?? "").slice(0, 10)) || atual;
+    return taxa > 0 ? v * taxa : v;
+  };
+}
+
 // ── Cache COMPARTILHADO de cotações (arqvalor.cotacoes_ativos) ───
 // O preço de um ticker é igual para todos os usuários, então é cacheado
 // numa tabela sem user_id. Leitura via JWT (RLS libera SELECT); escrita
@@ -5087,7 +5131,7 @@ async function dashboard(c: Db, params: URLSearchParams) {
   const [posRes, alocRes, histRes, divRes] = await Promise.all([
     (() => {
       let q = c.from("inv_posicoes")
-        .select("id, ativo_id, conta_id, quantidade, valor_custo, status, inv_ativos(tipo_ativo)")
+        .select("id, ativo_id, conta_id, quantidade, valor_custo, data_compra, status, inv_ativos(tipo_ativo, moeda)")
         .eq("status", "ATIVA");
       if (contaFiltro) q = q.eq("conta_id", contaFiltro);
       return q;
@@ -5115,6 +5159,9 @@ async function dashboard(c: Db, params: URLSearchParams) {
     return porTipo.get(tipo)!;
   };
 
+  // Custo de ativos em moeda estrangeira → BRL (PTAX da data da compra)
+  const custoBRL = await conversorCustoBRL(c, (posRes.data ?? []) as PosicaoCusto[]);
+
   // Agrupa posições por ativo+conta antes de aplicar o snapshot — o
   // snapshot mensal cobre TODAS as posições do par; somar por posição
   // contaria o mesmo valor de mercado mais de uma vez.
@@ -5124,7 +5171,7 @@ async function dashboard(c: Db, params: URLSearchParams) {
     if (!tipo) continue;
     const k = `${p.ativo_id}|${p.conta_id}`;
     const atual = porAtivoConta.get(k) ?? { tipo, custo: 0 };
-    atual.custo += Number(p.valor_custo) || 0;
+    atual.custo += custoBRL(p);
     porAtivoConta.set(k, atual);
   }
   for (const [k, ac] of porAtivoConta) {
@@ -5194,7 +5241,7 @@ async function ranking(c: Db, params: URLSearchParams) {
   const [posRes, histRes, divRes, opsRes, fundoRes] = await Promise.all([
     (() => {
       let q = c.from("inv_posicoes")
-        .select("id, ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, nota_usuario)")
+        .select("id, ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, nota_usuario, moeda)")
         .eq("status", "ATIVA");
       if (contaFiltro) q = q.eq("conta_id", contaFiltro);
       return q;
@@ -5244,6 +5291,9 @@ async function ranking(c: Db, params: URLSearchParams) {
   // (ritmo do fundo) e o frontend exibe os dois.
   const primeiraPosse = new Map<string, string>();
 
+  // Custo de ativos em moeda estrangeira → BRL (PTAX da data da compra)
+  const custoBRL = await conversorCustoBRL(c, (posRes.data ?? []) as PosicaoCusto[]);
+
   // Custo agrupado por ativo+conta (snapshot cobre o par inteiro)
   const custoPorPar = new Map<string, { ativo: AggAtivo; custo: number }>();
   for (const p of posRes.data ?? []) {
@@ -5266,7 +5316,7 @@ async function ranking(c: Db, params: URLSearchParams) {
     posicoesPorAtivo.set(aid, pids);
     const k = `${aid}|${p.conta_id}`;
     const par = custoPorPar.get(k) ?? { ativo: porAtivo.get(aid)!, custo: 0 };
-    par.custo += Number(p.valor_custo) || 0;
+    par.custo += custoBRL(p);
     custoPorPar.set(k, par);
   }
   for (const [k, par] of custoPorPar) {

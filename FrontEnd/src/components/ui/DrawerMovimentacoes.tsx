@@ -5,7 +5,7 @@ import { useInvestimentosPosicoes } from '../../hooks/useInvestimentosPosicoes'
 import { useInvestimentosOperacoes, type CriarOperacaoInput } from '../../hooks/useInvestimentosOperacoes'
 import { useBackfillHistorico } from '../../hooks/useInvestimentosHistorico'
 import { useContas } from '../../hooks/useContas'
-import { formatBRL, formatData } from '../../lib/utils'
+import { formatMoeda, formatData } from '../../lib/utils'
 import { TIPO_OPERACAO_LABEL, tiposOperacaoPara, tipoEntradaPara, tipoSaidaPara } from '../../lib/constants'
 import type { InvestimentoAtivo, InvestimentoOperacao, InvestimentoPosicao, TipoOperacaoInvestimento } from '../../types'
 
@@ -36,6 +36,8 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
   const [encData, setEncData] = useState(hoje())
   const [encValor, setEncValor] = useState('')
   const ehSaida = TIPO_OPERACAO_LABEL[tipoSaidaPara(ativo.tipo_ativo)].toLowerCase()
+  // Posições/operações ficam na moeda do ativo → exibe com o símbolo certo (US$/R$).
+  const fmt = (v: number) => formatMoeda(v, ativo.moeda)
 
   // Opções de conta: contas de investimento ativas + contas onde o ativo já tem posição.
   const contasOpcoes = useMemo(() => {
@@ -152,7 +154,7 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
                   <span className="text-white font-medium">{p.contas?.nome ?? nomeConta(p.conta_id)}</span>
                   <div className="flex items-center gap-2">
                     <span style={{ color: MUTED }}>
-                      {p.quantidade} un. · PM {formatBRL(p.preco_custo)} · <span className="text-white">{formatBRL(p.valor_custo)}</span>
+                      {p.quantidade} un. · PM {fmt(p.preco_custo)} · <span className="text-white">{fmt(p.valor_custo)}</span>
                     </span>
                     <button onClick={() => abrirEncerramento(p)} title="Encerrar posição"
                       className="flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-md border border-white/10 hover:border-red-400/40"
@@ -173,7 +175,7 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
                       </Field>
                       <Field label="Valor recebido (opcional)">
                         <Input type="number" min={0} step="any" value={encValor}
-                          onChange={(e) => setEncValor(e.target.value)} placeholder={formatBRL(p.valor_custo)} />
+                          onChange={(e) => setEncValor(e.target.value)} placeholder={fmt(p.valor_custo)} />
                       </Field>
                     </div>
                     <div className="flex items-center gap-2">
@@ -239,7 +241,7 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
         <div className="flex items-center justify-between text-[12px]" style={{ color: MUTED }}>
           <span>Valor total</span>
           <span className="text-white font-medium">
-            {formatBRL((Number(form.quantidade) || 0) * (Number(form.preco_unitario) || 0))}
+            {fmt((Number(form.quantidade) || 0) * (Number(form.preco_unitario) || 0))}
           </span>
         </div>
         <button onClick={salvar} disabled={salvando}
@@ -272,7 +274,7 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
                 <p className="text-[12px]" style={{ color: MUTED }}>
                   {programado
                     ? `${o.quantidade} un. · vencimento ${formatData(o.data_operacao)}`
-                    : `${o.quantidade} × ${formatBRL(o.preco_unitario)} = ${formatBRL(o.valor_total)} · ${formatData(o.data_operacao)}`}
+                    : `${o.quantidade} × ${fmt(o.preco_unitario)} = ${fmt(o.valor_total)} · ${formatData(o.data_operacao)}`}
                 </p>
               </div>
               {!programado && (

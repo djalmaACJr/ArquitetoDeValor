@@ -67,6 +67,21 @@ Deno.serve(async (req: Request) => {
 
   const linkCadastro = `${APP_URL}/cadastro`;
 
+  // Versão texto-puro do convite: e-mail só-HTML pontua mais alto nos filtros
+  // de spam; o multipart (text + html) é o formato esperado de remetente
+  // legítimo. Mesmo conteúdo do HTML, sem markup.
+  const texto = [
+    "Você foi convidado!",
+    "",
+    `${nomeConvidanteRaw} usa o Arquiteto de Valor para organizar as finanças e achou que você também ia gostar.`,
+    "",
+    ...RECURSOS_EMAIL.map((r) => `- ${r.titulo}: ${r.texto}`),
+    "",
+    `Crie sua conta em: ${linkCadastro}`,
+    "",
+    `Você recebeu este e-mail porque ${nomeConvidanteRaw} indicou seu endereço no Arquiteto de Valor. Se não esperava este convite, pode ignorá-lo com tranquilidade.`,
+  ].join("\n");
+
   const recursosHtml = RECURSOS_EMAIL.map(r => `
                 <tr>
                   <td style="padding:8px 0; vertical-align:top; width:32px;">
@@ -124,7 +139,7 @@ Deno.serve(async (req: Request) => {
               <td align="center" style="padding:24px 36px 28px 36px;">
                 <a href="${linkCadastro}"
                    style="display:inline-block; background-color:#00c896; color:#0a0f1a; font-size:16px; font-weight:600; text-decoration:none; padding:14px 32px; border-radius:10px;">
-                  Criar minha conta grátis
+                  Criar minha conta
                 </a>
               </td>
             </tr>
@@ -133,7 +148,9 @@ Deno.serve(async (req: Request) => {
             <tr>
               <td style="padding:20px 36px 32px 36px; border-top:1px solid rgba(255,255,255,0.06);">
                 <p style="font-size:13px; line-height:1.6; color:#8b92a8; margin:0;">
-                  Se você não esperava este e-mail, pode ignorá-lo com tranquilidade.
+                  Você recebeu este e-mail porque <strong style="color:#c5cad8;">${nomeConvidante}</strong> indicou
+                  seu endereço no Arquiteto de Valor. Se não esperava este convite, pode ignorá-lo com tranquilidade —
+                  nenhuma conta foi criada em seu nome.
                 </p>
               </td>
             </tr>
@@ -160,6 +177,7 @@ Deno.serve(async (req: Request) => {
         to:          [{ email }],
         subject:     `${nomeConvidanteRaw} te convidou para o Arquiteto de Valor`,
         htmlContent: html,
+        textContent: texto,
       }),
     });
     if (!r.ok) {
