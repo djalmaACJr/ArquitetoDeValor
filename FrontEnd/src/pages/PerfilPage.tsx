@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import {
   User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown,
   Pencil, Sparkles, ArrowRight, Wand2, RefreshCw, Search, ChevronLeft, ChevronRight,
-  Palette, Users, MessageCircle, Info,
+  Palette, Users, MessageCircle, Info, UserPlus, Mail, Share2,
 } from 'lucide-react'
 import ChatMascote from '../components/ui/ChatMascote'
 import { useTheme } from '../hooks/useTheme'
@@ -516,6 +516,84 @@ function SecaoTema() {
       <p className="text-[13px] text-white/30 mt-3 leading-relaxed">
         Preferência salva em <code>arqvalor.usuarios.layout</code> e sincronizada entre dispositivos.
       </p>
+    </Secao>
+  )
+}
+
+/** Convite de amigos — sem rastreamento: apenas dispara um e-mail (via
+ *  Brevo, na Edge Function /convite) ou abre o WhatsApp do próprio usuário
+ *  com uma mensagem pronta (link fixo de cadastro, wa.me — sem API paga). */
+function SecaoConvite() {
+  const [emailConvite, setEmailConvite] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [fb, setFb] = useState<Feedback | null>(null)
+
+  const linkCadastro = `${window.location.origin}/cadastro`
+
+  const enviarPorEmail = async (e: FormEvent) => {
+    e.preventDefault()
+    const email = emailConvite.trim()
+    if (!email) return
+    setFb(null)
+    setEnviando(true)
+    const r = await apiMutate('/convite', 'POST', { email })
+    setEnviando(false)
+    if (r.ok) {
+      setFb({ tipo: 'ok', msg: 'Convite enviado!' })
+      setEmailConvite('')
+    } else {
+      setFb({ tipo: 'erro', msg: r.erro ?? 'Não foi possível enviar o convite.' })
+    }
+  }
+
+  const compartilharWhatsapp = () => {
+    // WhatsApp aceita *negrito* e quebra de linha no texto pré-preenchido.
+    const texto =
+      `🏗️ *Arquiteto de Valor* — organize suas finanças sem planilha complicada.\n\n` +
+      `📊 Dashboard completo\n` +
+      `🎯 Metas e objetivos\n` +
+      `📈 Relatórios inteligentes\n` +
+      `💹 Investimentos e carteira\n` +
+      `🤖 Mentor com IA de graça\n\n` +
+      `Migrei minhas finanças pra lá e tá valendo muito. Bora?\n` +
+      `👉 ${linkCadastro}`
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank', 'noopener,noreferrer')
+  }
+
+  return (
+    <Secao titulo="Convidar amigos" icone={<UserPlus size={15}/>}>
+      <p className="text-[15px] mb-3 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+        Conhece alguém que também precisa organizar as finanças? Envie um convite por e-mail ou compartilhe pelo WhatsApp.
+      </p>
+      <form onSubmit={enviarPorEmail} className="flex flex-col sm:flex-row gap-2">
+        <input
+          type="email"
+          value={emailConvite}
+          onChange={e => { setEmailConvite(e.target.value); setFb(null) }}
+          disabled={enviando}
+          placeholder="e-mail do seu amigo"
+          className="flex-1 rounded-lg px-3 py-2.5 text-[16px] focus:outline-none disabled:opacity-50"
+          style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)' }}
+          autoComplete="off"
+        />
+        <button
+          type="submit"
+          disabled={enviando || !emailConvite.trim()}
+          className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-colors disabled:opacity-50"
+          style={{ background: '#00c896', color: '#0a0f1a' }}
+        >
+          <Mail size={14}/> {enviando ? 'Enviando…' : 'Enviar convite'}
+        </button>
+        <button
+          type="button"
+          onClick={compartilharWhatsapp}
+          className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-colors"
+          style={{ background: 'rgba(0,200,150,0.10)', color: '#00c896', border: '1px solid rgba(0,200,150,0.3)' }}
+        >
+          <Share2 size={14}/> WhatsApp
+        </button>
+      </form>
+      <Alerta fb={fb}/>
     </Secao>
   )
 }
@@ -1712,6 +1790,9 @@ export default function PerfilPage() {
             </div>
           )}
         </div>
+
+        {/* ── Convidar amigos (largura cheia) ─────────────────── */}
+        <SecaoConvite/>
 
         {/* ── Sobre o app ───────────────────────────────────────── */}
         <Secao titulo="Sobre o app" icone={<Info size={15}/>}>

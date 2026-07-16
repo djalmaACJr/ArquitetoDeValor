@@ -516,3 +516,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/investimentos/deno.json"
 entrypoint = "./functions/investimentos/index.ts"
+
+[functions.convite]
+enabled = true
+verify_jwt = false
+import_map = "./functions/convite/deno.json"
+entrypoint = "./functions/convite/index.ts"
