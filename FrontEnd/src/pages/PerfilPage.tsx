@@ -546,7 +546,16 @@ function SecaoConvite() {
   }
 
   const compartilharWhatsapp = () => {
-    const texto = `Vem organizar suas finanças comigo no Arquiteto de Valor! 📊 Dashboard, metas, relatórios e um mentor com IA pra te ajudar — de graça. ${linkCadastro}`
+    // WhatsApp aceita *negrito* e quebra de linha no texto pré-preenchido.
+    const texto =
+      `🏗️ *Arquiteto de Valor* — organize suas finanças sem planilha complicada.\n\n` +
+      `📊 Dashboard completo\n` +
+      `🎯 Metas e objetivos\n` +
+      `📈 Relatórios inteligentes\n` +
+      `💹 Investimentos e carteira\n` +
+      `🤖 Mentor com IA de graça\n\n` +
+      `Migrei minhas finanças pra lá e tá valendo muito. Bora?\n` +
+      `👉 ${linkCadastro}`
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank', 'noopener,noreferrer')
   }
 

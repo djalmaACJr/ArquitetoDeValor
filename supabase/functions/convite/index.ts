@@ -36,6 +36,7 @@ const RECURSOS_EMAIL = [
   { emoji: "📊", titulo: "Dashboard",     texto: "Visão geral do mês: saldo, calendário e evolução." },
   { emoji: "🎯", titulo: "Objetivos",     texto: "Patrimônio e renda recorrente com progresso mês a mês." },
   { emoji: "📈", titulo: "Relatórios",    texto: "Receitas e despesas por categoria, em qualquer período." },
+  { emoji: "💹", titulo: "Investimentos", texto: "Ativos, dividendos e evolução da carteira num só lugar." },
   { emoji: "🤖", titulo: "Mentor com IA", texto: "Converse com um mentor financeiro escolhido por você." },
 ];
 
