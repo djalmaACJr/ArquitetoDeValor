@@ -24,6 +24,10 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
   const { preencher } = useBackfillHistorico()
   // Movimentações aplicáveis ao tipo do ativo (bolsa → Compra/Venda; RF/Tesouro → Aplicação/Resgate).
   const tiposDisp = tiposOperacaoPara(ativo.tipo_ativo)
+  // Renda fixa privada (CDB/LCI/LCA/CRI/CRA/Debênture) não tem preço unitário
+  // real — é sempre um valor aplicado (convenção: quantidade = valor, preço = 1).
+  // Tesouro Direto fica de fora: tem título com PU marcado a mercado de verdade.
+  const rfSemQtde = ativo.tipo_ativo === 'RENDA_FIXA'
   const vazio = () => ({
     conta_id: '', tipo_operacao: tipoEntradaPara(ativo.tipo_ativo),
     quantidade: '', preco_unitario: '', data_operacao: hoje(),
@@ -31,6 +35,11 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
   const [form, setForm] = useState(vazio)
   const [editId, setEditId] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
+  // RF sem PU real: no resgate, "valor resgatado" (reduz a posição, nominal)
+  // e "valor recebido" (dinheiro de fato, pode incluir juros acumulados) são
+  // números diferentes — mesma separação já usada no encerramento de posição.
+  const [valorRecebido, setValorRecebido] = useState('')
+  const opSaida = rfSemQtde && form.tipo_operacao === tipoSaidaPara(ativo.tipo_ativo)
   // Encerramento de posição: zera o saldo via uma saída (venda/resgate) total.
   const [encerrar, setEncerrar] = useState<InvestimentoPosicao | null>(null)
   const [encData, setEncData] = useState(hoje())
@@ -63,24 +72,48 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
     [operacoes, posIds],
   )
 
-  function cancelarEdicao() { setEditId(null); setForm(vazio()) }
+  function cancelarEdicao() { setEditId(null); setForm(vazio()); setValorRecebido('') }
 
   function iniciarEdicao(o: InvestimentoOperacao) {
     setEditId(o.id)
+    const ehSaidaOp = rfSemQtde && o.tipo_operacao === tipoSaidaPara(ativo.tipo_ativo)
     setForm({
       conta_id: o.conta_id,
       tipo_operacao: o.tipo_operacao,
-      quantidade: String(o.quantidade),
+      // Aporte RF sem PU real: usa o valor_total (nominal) — não a quantidade
+      // bruta, que pode vir de um lançamento antigo com unidades arbitrárias.
+      // Resgate: quantidade já é o valor nominal retirado da posição (é o que
+      // o backend usa para abater o saldo) — mantém como está.
+      quantidade: String(rfSemQtde && !ehSaidaOp ? o.valor_total : o.quantidade),
       preco_unitario: String(o.preco_unitario),
       data_operacao: o.data_operacao,
     })
+    // Resgate RF: valor_total é o dinheiro de fato recebido (pode diferir do
+    // nominal por juros acumulados) — só mostra o campo quando fizer diferença.
+    setValorRecebido(ehSaidaOp && Number(o.valor_total) !== Number(o.quantidade) ? String(o.valor_total) : '')
   }
 
   async function salvar() {
     if (!form.conta_id) { onToast('Selecione a conta'); return }
-    const qtd = Number(form.quantidade), preco = Number(form.preco_unitario)
-    if (!(qtd > 0)) { onToast('Quantidade inválida'); return }
-    if (!(preco >= 0)) { onToast('Preço inválido'); return }
+    const qtd = Number(form.quantidade)
+    if (!(qtd > 0)) {
+      onToast(rfSemQtde ? (opSaida ? 'Valor resgatado inválido' : 'Valor aplicado inválido') : 'Quantidade inválida')
+      return
+    }
+    let preco: number
+    if (rfSemQtde) {
+      if (opSaida) {
+        const recebidoStr = valorRecebido.trim()
+        const recebido = recebidoStr !== '' ? Number(recebidoStr) : qtd
+        if (!(recebido >= 0)) { onToast('Valor recebido inválido'); return }
+        preco = recebido / qtd
+      } else {
+        preco = 1
+      }
+    } else {
+      preco = Number(form.preco_unitario)
+      if (!(preco >= 0)) { onToast('Preço inválido'); return }
+    }
     setSalvando(true)
     const payload: CriarOperacaoInput = {
       ativo_id: ativo.id,
@@ -154,7 +187,9 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
                   <span className="text-white font-medium">{p.contas?.nome ?? nomeConta(p.conta_id)}</span>
                   <div className="flex items-center gap-2">
                     <span style={{ color: MUTED }}>
-                      {p.quantidade} un. · PM {fmt(p.preco_custo)} · <span className="text-white">{fmt(p.valor_custo)}</span>
+                      {rfSemQtde
+                        ? <>Valor aplicado · <span className="text-white">{fmt(p.valor_custo)}</span></>
+                        : <>{p.quantidade} un. · PM {fmt(p.preco_custo)} · <span className="text-white">{fmt(p.valor_custo)}</span></>}
                     </span>
                     <button onClick={() => abrirEncerramento(p)} title="Encerrar posição"
                       className="flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-md border border-white/10 hover:border-red-400/40"
@@ -167,7 +202,7 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
                   <div className="rounded-lg border border-red-400/30 bg-red-400/[0.04] p-3 space-y-3">
                     <p className="text-[12px]" style={{ color: MUTED }}>
                       Encerra a posição registrando um(a) <span className="text-white">{ehSaida}</span> de{' '}
-                      <span className="text-white">{p.quantidade} un.</span> na data informada.
+                      <span className="text-white">{rfSemQtde ? fmt(p.valor_custo) : `${p.quantidade} un.`}</span> na data informada.
                     </p>
                     <div className="grid grid-cols-2 gap-3">
                       <Field label="Data do encerramento">
@@ -224,26 +259,46 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
             </SelectDark>
           </Field>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Quantidade">
+        {rfSemQtde ? opSaida ? (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Valor resgatado">
+              <Input type="number" min={0} step="any" value={form.quantidade}
+                onChange={(e) => setForm({ ...form, quantidade: e.target.value })} placeholder="0,00" />
+            </Field>
+            <Field label="Valor recebido (opcional)">
+              <Input type="number" min={0} step="any" value={valorRecebido}
+                onChange={(e) => setValorRecebido(e.target.value)} placeholder={form.quantidade || '0,00'} />
+            </Field>
+          </div>
+        ) : (
+          <Field label="Valor aplicado">
             <Input type="number" min={0} step="any" value={form.quantidade}
-              onChange={(e) => setForm({ ...form, quantidade: e.target.value })} placeholder="0" />
+              onChange={(e) => setForm({ ...form, quantidade: e.target.value })} placeholder="0,00" />
           </Field>
-          <Field label="Preço unitário">
-            <Input type="number" min={0} step="any" value={form.preco_unitario}
-              onChange={(e) => setForm({ ...form, preco_unitario: e.target.value })} placeholder="0,00" />
-          </Field>
-        </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Quantidade">
+              <Input type="number" min={0} step="any" value={form.quantidade}
+                onChange={(e) => setForm({ ...form, quantidade: e.target.value })} placeholder="0" />
+            </Field>
+            <Field label="Preço unitário">
+              <Input type="number" min={0} step="any" value={form.preco_unitario}
+                onChange={(e) => setForm({ ...form, preco_unitario: e.target.value })} placeholder="0,00" />
+            </Field>
+          </div>
+        )}
         <Field label="Data">
           <Input type="date" value={form.data_operacao}
             onChange={(e) => setForm({ ...form, data_operacao: e.target.value })} />
         </Field>
-        <div className="flex items-center justify-between text-[12px]" style={{ color: MUTED }}>
-          <span>Valor total</span>
-          <span className="text-white font-medium">
-            {fmt((Number(form.quantidade) || 0) * (Number(form.preco_unitario) || 0))}
-          </span>
-        </div>
+        {!rfSemQtde && (
+          <div className="flex items-center justify-between text-[12px]" style={{ color: MUTED }}>
+            <span>Valor total</span>
+            <span className="text-white font-medium">
+              {fmt((Number(form.quantidade) || 0) * (Number(form.preco_unitario) || 0))}
+            </span>
+          </div>
+        )}
         <button onClick={salvar} disabled={salvando}
           className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-semibold text-white disabled:opacity-50"
           style={{ background: '#3b82f6' }}>
@@ -272,9 +327,13 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
                   )}
                 </p>
                 <p className="text-[12px]" style={{ color: MUTED }}>
-                  {programado
-                    ? `${o.quantidade} un. · vencimento ${formatData(o.data_operacao)}`
-                    : `${o.quantidade} × ${fmt(o.preco_unitario)} = ${fmt(o.valor_total)} · ${formatData(o.data_operacao)}`}
+                  {rfSemQtde
+                    ? programado
+                      ? `${fmt(o.valor_total)} · vencimento ${formatData(o.data_operacao)}`
+                      : `${fmt(o.valor_total)} · ${formatData(o.data_operacao)}`
+                    : programado
+                      ? `${o.quantidade} un. · vencimento ${formatData(o.data_operacao)}`
+                      : `${o.quantidade} × ${fmt(o.preco_unitario)} = ${fmt(o.valor_total)} · ${formatData(o.data_operacao)}`}
                 </p>
               </div>
               {!programado && (

@@ -182,22 +182,32 @@ const PERIODOS = [
 
 // Plugin: desenha abaixo de cada coluna os valores de cada série (aplicado /
 // ganho / proventos) nas cores do gráfico — funciona como legenda no eixo X.
+// Números alinhados à direita da coluna (mais fácil de comparar entre meses)
+// e uma linha de total (soma das séries) ao final, em destaque.
 const valoresEixoX = {
   id: 'valoresEixoX',
   afterDatasetsDraw(chart: ChartJS) {
     const x = chart.scales.x
     if (!x) return
     const { ctx } = chart
+    const labels = chart.data.labels as string[]
+    const larguraCategoria = x.width / labels.length
     ctx.save()
-    ctx.font = '600 11px system-ui, sans-serif'
-    ctx.textAlign = 'center'
+    ctx.textAlign = 'right'
     const baseY = x.bottom + 18
-    ;(chart.data.labels as string[]).forEach((_, i) => {
-      const px = x.getPixelForTick(i)
+    labels.forEach((_, i) => {
+      const rightEdge = Math.round(x.getPixelForTick(i) + larguraCategoria / 2 - 4)
+      let total = 0
       chart.data.datasets.forEach((ds, di) => {
+        const v = Number(ds.data[i])
+        total += v
+        ctx.font = '600 11px system-ui, sans-serif'
         ctx.fillStyle = ds.backgroundColor as string
-        ctx.fillText(fmtCompacto(Number(ds.data[i])), px, baseY + di * 14)
+        ctx.fillText(fmtCompacto(v), rightEdge, baseY + di * 14)
       })
+      ctx.font = '700 11px system-ui, sans-serif'
+      ctx.fillStyle = '#fff'
+      ctx.fillText(fmtCompacto(total), rightEdge, baseY + chart.data.datasets.length * 14 + 4)
     })
     ctx.restore()
   },
@@ -301,7 +311,7 @@ function EvolucaoPatrimonio({ contaId, dividendos }: {
           }}
           options={{
             ...OPCOES_GRAFICO,
-            layout: { padding: { bottom: 52 } },
+            layout: { padding: { bottom: 78 } },
             interaction: { mode: 'index', intersect: false },
             plugins: {
               legend: {
@@ -329,9 +339,28 @@ function EvolucaoPatrimonio({ contaId, dividendos }: {
               },
               tooltip: {
                 mode: 'index', intersect: false,
+                bodyFont: { family: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+                footerFont: { family: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', weight: 'normal' },
                 callbacks: {
-                  label: (ctx) => `${ctx.dataset.label}: ${formatBRL(Number(ctx.parsed.y))}`,
-                  footer: (items) => `Total: ${formatBRL(items.reduce((s, it) => s + Number(it.parsed.y), 0))}`,
+                  // Rótulo à esquerda, valor à direita — colunas alinhadas via
+                  // padding em fonte monoespaçada (label:valor de cada linha
+                  // tem o mesmo comprimento total).
+                  label: (ctx) => {
+                    const ds = ctx.chart.data.datasets
+                    const rotulos = ds.map((d) => String(d.label))
+                    const valores = ds.map((_, i) => formatBRL(Number(ds[i].data[ctx.dataIndex])))
+                    const maxRotulo = Math.max(...rotulos.map((r) => r.length))
+                    const maxValor = Math.max(...valores.map((v) => v.length))
+                    return `${String(ctx.dataset.label).padEnd(maxRotulo)}: ${formatBRL(Number(ctx.parsed.y)).padStart(maxValor)}`
+                  },
+                  footer: (items) => {
+                    const maxRotulo = Math.max('Total'.length, ...items.map((it) => String(it.dataset.label).length))
+                    const valores = items.map((it) => formatBRL(Number(it.parsed.y)))
+                    const maxValor = Math.max(...valores.map((v) => v.length))
+                    const total = items.reduce((s, it) => s + Number(it.parsed.y), 0)
+                    const largura = maxRotulo + 2 + maxValor
+                    return ['='.repeat(largura), `${'Total'.padEnd(maxRotulo)}: ${formatBRL(total).padStart(maxValor)}`]
+                  },
                 },
               },
             },

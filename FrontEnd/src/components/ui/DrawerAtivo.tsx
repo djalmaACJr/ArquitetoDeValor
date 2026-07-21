@@ -44,6 +44,12 @@ const FORM_VAZIO: FormAtivo = {
 
 const ehRendaFixa = (tipo: TipoAtivoInvestimento | '') => tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
 
+// Renda fixa privada (CDB/LCI/LCA/CRI/CRA/Debênture) não tem preço unitário
+// real — é sempre um valor aplicado. Diferente do Tesouro Direto, que tem
+// título com PU marcado a mercado (quantidade fracionária de verdade).
+// Convenção: quantidade = valor aplicado, preco_unitario = 1.
+const ehRFSemQtde = (tipo: TipoAtivoInvestimento | '') => tipo === 'RENDA_FIXA'
+
 const COMPRA_VAZIA = { conta_id: '', quantidade: '', preco_unitario: '', data: new Date().toISOString().split('T')[0] }
 
 // Subtipo da ação derivado do sufixo do ticker B3 (3=ON, 4/5/6=PN, 11=Unit,
@@ -307,10 +313,13 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
     const termo = ehRF ? 'aplicação' : 'compra'
     const querCompra = !editando &&
       (compra.conta_id !== '' || compra.quantidade !== '' || compra.preco_unitario !== '')
+    const rfSemQtde = ehRFSemQtde(form.tipo_ativo)
     if (querCompra) {
       if (!compra.conta_id) { onToast(`Selecione a conta da ${termo} inicial`); return }
-      if (!(Number(compra.quantidade) > 0)) { onToast(`Quantidade da ${termo} inválida`); return }
-      if (!(Number(compra.preco_unitario) >= 0)) { onToast(`Preço da ${termo} inválido`); return }
+      if (!(Number(compra.quantidade) > 0)) {
+        onToast(rfSemQtde ? 'Valor aplicado inválido' : `Quantidade da ${termo} inválida`); return
+      }
+      if (!rfSemQtde && !(Number(compra.preco_unitario) >= 0)) { onToast(`Preço da ${termo} inválido`); return }
     }
 
     setSalvando(true)
@@ -341,7 +350,7 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
     // Registra a movimentação inicial (cria a posição via operação) e reconstrói
     // o histórico de renda fixa a partir dela.
     if (querCompra && res.dados?.id) {
-      const q = Number(compra.quantidade), p = Number(compra.preco_unitario)
+      const q = Number(compra.quantidade), p = rfSemQtde ? 1 : Number(compra.preco_unitario)
       const opRes = await criarOperacao({
         ativo_id: res.dados.id, conta_id: compra.conta_id, tipo_operacao: tipoEntradaPara(form.tipo_ativo),
         quantidade: q, preco_unitario: p, valor_total: q * p, data_operacao: compra.data,
@@ -594,25 +603,34 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
               {contasInvest.map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
             </SelectDark>
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Quantidade">
+          {ehRFSemQtde(form.tipo_ativo) ? (
+            <Field label="Valor aplicado">
               <Input type="number" min={0} step="any" value={compra.quantidade}
-                onChange={(e) => setCompra({ ...compra, quantidade: e.target.value })} placeholder="0" />
+                onChange={(e) => setCompra({ ...compra, quantidade: e.target.value })} placeholder="0,00" />
             </Field>
-            <Field label="Preço unitário">
-              <Input type="number" min={0} step="any" value={compra.preco_unitario}
-                onChange={(e) => setCompra({ ...compra, preco_unitario: e.target.value })} placeholder="0,00" />
-            </Field>
-          </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Quantidade">
+                <Input type="number" min={0} step="any" value={compra.quantidade}
+                  onChange={(e) => setCompra({ ...compra, quantidade: e.target.value })} placeholder="0" />
+              </Field>
+              <Field label="Preço unitário">
+                <Input type="number" min={0} step="any" value={compra.preco_unitario}
+                  onChange={(e) => setCompra({ ...compra, preco_unitario: e.target.value })} placeholder="0,00" />
+              </Field>
+            </div>
+          )}
           <Field label={ehRendaFixa(form.tipo_ativo) ? 'Data da aplicação' : 'Data da compra'}>
             <Input type="date" value={compra.data} onChange={(e) => setCompra({ ...compra, data: e.target.value })} />
           </Field>
-          <div className="flex items-center justify-between text-[12px]" style={{ color: MUTED }}>
-            <span>Valor total</span>
-            <span className="text-white font-medium">
-              {formatBRL((Number(compra.quantidade) || 0) * (Number(compra.preco_unitario) || 0))}
-            </span>
-          </div>
+          {!ehRFSemQtde(form.tipo_ativo) && (
+            <div className="flex items-center justify-between text-[12px]" style={{ color: MUTED }}>
+              <span>Valor total</span>
+              <span className="text-white font-medium">
+                {formatBRL((Number(compra.quantidade) || 0) * (Number(compra.preco_unitario) || 0))}
+              </span>
+            </div>
+          )}
         </div>
       )}
 

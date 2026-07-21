@@ -9,7 +9,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import {
   json, erro, db, dbAdmin, autenticar, extrairId, extrairAcao,
-  verificarExistencia, camposParaAtualizar, corsPreFlight,
+  verificarExistencia, camposParaAtualizar, corsPreFlight, buscarTodasLinhas,
 } from "../_shared/utils.ts";
 import { registrarOrigem } from "../_shared/utils.ts";
 import { logError, logRequest, logResponse, logSuccess } from "../_shared/logger.ts";
@@ -1317,6 +1317,7 @@ async function recomputarPosicao(c: Db, posicaoId: string): Promise<void> {
   const hoje = hojeISO();
   let qtd = 0, custo = 0, precoMedio = 0;
   let dataCompra: string | null = null;
+  let ultimaDataAplicada: string | null = null;
   for (const o of ops ?? []) {
     if (String(o.data_operacao) > hoje) continue; // operação programada (futura)
     const q = Number(o.quantidade) || 0;
@@ -1337,6 +1338,7 @@ async function recomputarPosicao(c: Db, posicaoId: string): Promise<void> {
     }
     // DIVIDENDO: não altera a posição
     if (qtd > 0) precoMedio = custo / qtd;
+    ultimaDataAplicada = String(o.data_operacao);
   }
 
   const { data: pos } = await c.from("inv_posicoes").select("data_compra, ativo_id, conta_id").eq("id", posicaoId).maybeSingle();
@@ -1350,6 +1352,17 @@ async function recomputarPosicao(c: Db, posicaoId: string): Promise<void> {
   if (errUpd) { logError("Recomputar posição (update)", errUpd); return; }
   if (pos?.ativo_id && pos?.conta_id) {
     await recalcularProjecoesDividendos(c, String(pos.ativo_id), String(pos.conta_id), qtd);
+    // Posição zerada (ex.: resgate/venda lançado retroativamente pelo robô
+    // investidor10) — os snapshots mensais gravados DEPOIS do fechamento real
+    // ficam órfãos (o ativo+conta segue sendo "marcado a mercado" todo mês
+    // mesmo sem posição), inflando o ganho de capital agregado. Remove os
+    // meses posteriores ao do último evento aplicado.
+    if (qtd === 0 && ultimaDataAplicada) {
+      const mesFechamento = ultimaDataAplicada.slice(0, 7);
+      const { error: errDel } = await c.from("inv_historico_mensal").delete()
+        .eq("ativo_id", pos.ativo_id).eq("conta_id", pos.conta_id).gt("mes_ano", mesFechamento);
+      if (errDel) logError("Limpar snapshots órfãos (posição encerrada)", errDel);
+    }
   }
 }
 
@@ -1527,13 +1540,17 @@ async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
   if (m === "GET" && !id) {
     const params = new URL(req.url).searchParams;
     logRequest("GET", "/investimentos/dividendos", { params: Object.fromEntries(params) });
-    let q = c.from("inv_dividendos")
-      .select("*, inv_ativos(ticker, nome, tipo_ativo), inv_tipos_dividendo(nome), transacoes(status)")
-      .order("data_pagamento", { ascending: false });
     const ativoId = params.get("ativo_id");
     const tipo    = params.get("tipo_ativo");
-    if (ativoId) q = q.eq("ativo_id", ativoId);
-    const { data, error } = await q;
+    const montar = (de: number, ate: number) => {
+      let q = c.from("inv_dividendos")
+        .select("*, inv_ativos(ticker, nome, tipo_ativo), inv_tipos_dividendo(nome), transacoes(status)")
+        .order("data_pagamento", { ascending: false })
+        .range(de, ate);
+      if (ativoId) q = q.eq("ativo_id", ativoId);
+      return q;
+    };
+    const { data, error } = await buscarTodasLinhas(montar);
     if (error) { logError("Listar dividendos", error); return erro(error.message); }
     // inv_dividendos.tipo_ativo é uma cópia desnormalizada que pode ficar
     // defasada (ex.: ativo reclassificado de FII p/ ETF). Para o gráfico de
@@ -1932,20 +1949,24 @@ async function rotaHistorico(c: Db, req: Request, m: string, userId: string) {
   if (m === "GET" && !id) {
     const params = new URL(req.url).searchParams;
     logRequest("GET", "/investimentos/historico-mensal", { params: Object.fromEntries(params) });
-    let q = c.from("inv_historico_mensal")
-      .select("*, inv_ativos(ticker, nome, tipo_ativo)")
-      .order("mes_ano", { ascending: false });
     const ativoId = params.get("ativo_id");
     const contaId = params.get("conta_id");
     const mesAno  = params.get("mes_ano");
     const de      = params.get("de");
     const ate     = params.get("ate");
-    if (ativoId) q = q.eq("ativo_id", ativoId);
-    if (contaId) q = q.eq("conta_id", contaId);
-    if (mesAno && RE_MES_ANO.test(mesAno)) q = q.eq("mes_ano", mesAno);
-    if (de  && RE_MES_ANO.test(de))  q = q.gte("mes_ano", de);
-    if (ate && RE_MES_ANO.test(ate)) q = q.lte("mes_ano", ate);
-    const { data, error } = await q;
+    const montar = (dePag: number, atePag: number) => {
+      let q = c.from("inv_historico_mensal")
+        .select("*, inv_ativos(ticker, nome, tipo_ativo)")
+        .order("mes_ano", { ascending: false })
+        .range(dePag, atePag);
+      if (ativoId) q = q.eq("ativo_id", ativoId);
+      if (contaId) q = q.eq("conta_id", contaId);
+      if (mesAno && RE_MES_ANO.test(mesAno)) q = q.eq("mes_ano", mesAno);
+      if (de  && RE_MES_ANO.test(de))  q = q.gte("mes_ano", de);
+      if (ate && RE_MES_ANO.test(ate)) q = q.lte("mes_ano", ate);
+      return q;
+    };
+    const { data, error } = await buscarTodasLinhas(montar);
     if (error) { logError("Listar historico", error); return erro(error.message); }
     return json({ dados: data });
   }
@@ -1969,10 +1990,13 @@ async function rotaHistorico(c: Db, req: Request, m: string, userId: string) {
     let precoMedio = body.preco_medio != null ? Number(body.preco_medio) : null;
     if (quantidade == null || precoMedio == null) {
       const { data: pos } = await c.from("inv_posicoes")
-        .select("quantidade, valor_custo")
+        .select("quantidade, valor_custo, data_compra, inv_ativos(moeda)")
         .eq("ativo_id", body.ativo_id).eq("conta_id", body.conta_id).eq("status", "ATIVA");
+      // Custo em BRL (PTAX da data da compra) — mesma conversão do dashboard,
+      // senão o preço médio derivado fica na moeda do ativo (ex.: USD).
+      const custoBRL = await conversorCustoBRL(c, (pos ?? []) as PosicaoCusto[]);
       const qtdTotal   = (pos ?? []).reduce((s, p) => s + Number(p.quantidade), 0);
-      const custoTotal = (pos ?? []).reduce((s, p) => s + Number(p.valor_custo), 0);
+      const custoTotal = (pos ?? []).reduce((s, p) => s + custoBRL(p as PosicaoCusto), 0);
       if (quantidade == null) quantidade = qtdTotal;
       if (precoMedio == null) precoMedio = qtdTotal > 0 ? custoTotal / qtdTotal : 0;
     }
@@ -2435,10 +2459,12 @@ async function gravarSnapshot(
     qtdTotal = qtdOverride; precoMedio = precoMedioOverride;
   } else {
     const { data: pos } = await c.from("inv_posicoes")
-      .select("quantidade, valor_custo")
+      .select("quantidade, valor_custo, data_compra, inv_ativos(moeda)")
       .eq("ativo_id", ativoId).eq("conta_id", contaId).eq("status", "ATIVA");
+    // Custo em BRL (PTAX da data da compra) — mesma conversão do dashboard.
+    const custoBRL = await conversorCustoBRL(c, (pos ?? []) as PosicaoCusto[]);
     qtdTotal   = (pos ?? []).reduce((s, p) => s + Number(p.quantidade), 0);
-    const custoTotal = (pos ?? []).reduce((s, p) => s + Number(p.valor_custo), 0);
+    const custoTotal = (pos ?? []).reduce((s, p) => s + custoBRL(p as PosicaoCusto), 0);
     precoMedio = qtdTotal > 0 ? custoTotal / qtdTotal : 0;
   }
   const prev = await snapshotVizinho(c, ativoId, contaId, mesAno, "anterior");
@@ -2475,6 +2501,12 @@ async function executarSnapshotMes(
   const { data: posicoes, error } = await q;
   if (error) { logError("snapshot posicoes", error); throw new Error(error.message); }
 
+  // Custo em BRL (PTAX da data da compra) — mesma conversão do dashboard.
+  // valor_custo de ativo em moeda estrangeira vem cru (USD); sem isso o
+  // preço médio do snapshot fica em USD enquanto o valor_mercado é BRL,
+  // inflando artificialmente o ganho de capital do ativo.
+  const custoBRL = await conversorCustoBRL(client, (posicoes ?? []) as PosicaoCusto[]);
+
   // Agrupa por (ativo, conta)
   const grupos = new Map<string, GrupoPosicao>();
   for (const p of posicoes ?? []) {
@@ -2493,7 +2525,7 @@ async function executarSnapshotMes(
       });
     }
     grupos.get(key)!.posicoes.push({
-      quantidade: Number(p.quantidade) || 0, valor_custo: Number(p.valor_custo) || 0,
+      quantidade: Number(p.quantidade) || 0, valor_custo: custoBRL(p as PosicaoCusto),
       data_compra: String(p.data_compra),
     });
   }
@@ -2723,9 +2755,19 @@ async function provisionarProventosUsd(
       // Soma por pay_date (mesmo tipo, mesmo dia → 1x). Janela: futuros +
       // retroativos recentes (cobre dias em que o job não rodou e corrige a
       // PTAX estimada quando a data de pagamento chega).
+      // A Polygon às vezes reemite o MESMO evento (pay_date + tipo + valor
+      // idênticos) em consultas diferentes — sem filtrar isso, a soma por
+      // pay_date inflava o provento (viu-se ETFs internacionais com valor
+      // várias vezes maior que o real). Dedup por (pay_date, tipo, valor)
+      // antes de somar: descarta repetições exatas, preserva eventos
+      // legitimamente distintos (ex.: dividendo + ganho de capital no mesmo dia).
       const porData = new Map<string, number>();
+      const vistos = new Set<string>();
       for (const d of divs) {
         if (d.pay_date < dataCorte) continue;
+        const chave = `${d.pay_date}|${d.dividend_type}|${d.cash_amount}`;
+        if (vistos.has(chave)) continue;
+        vistos.add(chave);
         porData.set(d.pay_date, (porData.get(d.pay_date) ?? 0) + d.cash_amount);
       }
 
@@ -4136,6 +4178,11 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
   const { data: posicoes, error } = await q;
   if (error) { logError("backfill posicoes", error); return erro(error.message); }
 
+  // Custo em BRL (PTAX da data da compra) — mesma conversão do dashboard e
+  // do snapshot do mês corrente; senão o preço médio fica em USD enquanto
+  // o valor_mercado do backfill é BRL, inflando o ganho de capital do ativo.
+  const custoBRL = await conversorCustoBRL(c, (posicoes ?? []) as PosicaoCusto[]);
+
   const grupos = new Map<string, GrupoPosicao & { inicio: string }>();
   for (const p of posicoes ?? []) {
     const raw = (p as { inv_ativos?: Record<string, unknown> | Record<string, unknown>[] }).inv_ativos;
@@ -4155,7 +4202,7 @@ async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: stri
     }
     const g = grupos.get(key)!;
     g.posicoes.push({
-      quantidade: Number(p.quantidade) || 0, valor_custo: Number(p.valor_custo) || 0,
+      quantidade: Number(p.quantidade) || 0, valor_custo: custoBRL(p as PosicaoCusto),
       data_compra: String(p.data_compra),
     });
     if (mesCompra < g.inicio) g.inicio = mesCompra;

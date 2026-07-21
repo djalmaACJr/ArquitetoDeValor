@@ -728,7 +728,11 @@ export default function DetalheInvestimentoPage() {
                     <div key={o.id} className="flex items-center justify-between gap-2 text-[13px]">
                       <div>
                         <p className="text-white font-medium">{TIPO_OPERACAO_LABEL[o.tipo_operacao]}</p>
-                        <p style={{ color: MUTED }}>{o.quantidade} × {fmtNativo(o.preco_unitario)} · {formatData(o.data_operacao)}</p>
+                        <p style={{ color: MUTED }}>
+                          {ativo.tipo_ativo === 'RENDA_FIXA'
+                            ? formatData(o.data_operacao)
+                            : `${o.quantidade} × ${fmtNativo(o.preco_unitario)} · ${formatData(o.data_operacao)}`}
+                        </p>
                       </div>
                       <span className="text-white font-semibold">{fmtNativo(o.valor_total)}</span>
                     </div>

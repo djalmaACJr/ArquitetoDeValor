@@ -158,9 +158,27 @@ export default function QuadroTipoAtivos({
 
   const cor = TIPO_ATIVO_COR[tipo]
   const ehFII = tipo === 'FII'
+  // Mesmo critério de DetalheInvestimentoPage (podeDividendos): renda fixa,
+  // Tesouro e cripto não pagam dividendo de verdade — o campo sempre vem
+  // zerado do backend (inv_dividendos não tem linha pra esses tipos).
+  const mostraDividendos = !['RENDA_FIXA', 'TESOURO_DIRETO', 'CRIPTOMOEDAS'].includes(tipo)
   const ganhoPerda = dados?.ganho_perda ?? 0
   const variacaoPct = dados && dados.valor_custo > 0 ? (dados.ganho_perda / dados.valor_custo) * 100 : 0
   const idealRef = dados && dados.percentual_ideal > 0 ? dados.desvio_pct : null
+
+  // DY/YoC médios do quadro (só FII) — ponderados por valor de mercado/custo,
+  // não é a média simples dos %: um FII pequeno com DY alto não pode pesar
+  // igual a um FII grande. Equivale a Σdividendos_12m ÷ Σvalor, sem precisar
+  // do valor bruto do dividendo (só temos o % pronto em cada linha).
+  const dyYocMedio = useMemo(() => {
+    if (!ehFII) return null
+    const somaMercado = linhas.reduce((s, l) => s + l.valor_mercado, 0)
+    const somaCusto   = linhas.reduce((s, l) => s + l.valor_custo, 0)
+    return {
+      dy:  somaMercado > 0 ? linhas.reduce((s, l) => s + l.dividend_yield_pct * l.valor_mercado, 0) / somaMercado : 0,
+      yoc: somaCusto   > 0 ? linhas.reduce((s, l) => s + l.yield_on_cost_pct  * l.valor_custo,   0) / somaCusto   : 0,
+    }
+  }, [ehFII, linhas])
 
   // Agrupamentos que fazem sentido para estas linhas: só oferece "Categoria"
   // se algum ativo tiver categoria, e "Segmento" se algum tiver setor — assim
@@ -359,7 +377,8 @@ export default function QuadroTipoAtivos({
         borderColor: destaque && destaqueChave === null ? cor : 'rgba(255,255,255,0.1)',
         boxShadow: destaque && destaqueChave === null ? `0 0 0 2px ${cor}, 0 0 26px ${cor}88` : 'none',
       }}>
-      <button onClick={() => setAberto(!aberto)} className="w-full px-4 py-3 grid grid-cols-2 md:grid-cols-4 gap-3 items-center text-left">
+      <button onClick={() => setAberto(!aberto)}
+        className={`w-full px-4 py-3 grid grid-cols-2 gap-3 items-center text-left ${mostraDividendos ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
         {/* Tipo + contagem */}
         <div className="flex items-center gap-2 min-w-0">
           <span className="w-2 h-2 rounded-full shrink-0" style={{ background: cor }} />
@@ -379,13 +398,21 @@ export default function QuadroTipoAtivos({
           </p>
         </div>
 
-        {/* Dividendos do tipo */}
-        <div className="hidden md:block text-center">
-          <p className="text-[12px]" style={{ color: MUTED }}>Dividendos</p>
-          <p className="text-[13px] font-medium" style={{ color: dados && dados.dividendos > 0 ? VERDE : MUTED }}>
-            {dados ? formatBRL(dados.dividendos) : '—'}
-          </p>
-        </div>
+        {/* Dividendos do tipo — não existe para renda fixa/Tesouro/cripto */}
+        {mostraDividendos && (
+          <div className="hidden md:block text-center">
+            <p className="text-[12px]" style={{ color: MUTED }}>Dividendos</p>
+            <p className="text-[13px] font-medium" style={{ color: dados && dados.dividendos > 0 ? VERDE : MUTED }}>
+              {dados ? formatBRL(dados.dividendos) : '—'}
+            </p>
+            {dyYocMedio && (
+              <p className="text-[11px] mt-0.5" style={{ color: MUTED }}>
+                DY méd. <span className="text-white/80">{pct2(dyYocMedio.dy)}</span>
+                {' · '}YoC méd. <span className="text-white/80">{pct2(dyYocMedio.yoc)}</span>
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Valor + participação */}
         <div className="flex items-center justify-end gap-2">

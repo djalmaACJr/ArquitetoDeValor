@@ -6,7 +6,7 @@ import type {
   InvestimentoDashboard, InvestimentoAlocacaoTipo, InvestimentoRanking, TipoAtivoInvestimento,
 } from '../types'
 
-async function fetchDashboard(contaId?: string | null): Promise<InvestimentoDashboard> {
+export async function fetchDashboard(contaId?: string | null): Promise<InvestimentoDashboard> {
   const params = new URLSearchParams()
   if (contaId) params.set('conta_id', contaId)
   const qs  = params.toString()

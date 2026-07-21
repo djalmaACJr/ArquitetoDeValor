@@ -163,6 +163,30 @@ export async function verificarExistencia(
   return null;
 }
 
+// ── Busca TODAS as linhas de uma query, ignorando o limite padrão do
+// PostgREST (max_rows=1000 — ver supabase/config.toml). Sem isso, tabelas
+// que crescem além de 1000 linhas (histórico mensal, dividendos de usuários
+// antigos) são silenciosamente truncadas — o front nunca vê o erro, só
+// recebe menos dados do que existe. Pagina em blocos de 1000 até esgotar.
+// `montar` deve devolver um builder NOVO a cada chamada (não reaproveitar
+// a mesma instância com .range() repetido).
+export async function buscarTodasLinhas<T>(
+  montar: (de: number, ate: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const PAGINA = 1000;
+  let offset = 0;
+  const tudo: T[] = [];
+  for (;;) {
+    const { data, error } = await montar(offset, offset + PAGINA - 1);
+    if (error) return { data: tudo, error };
+    const linhas = data ?? [];
+    tudo.push(...linhas);
+    if (linhas.length < PAGINA) break;
+    offset += PAGINA;
+  }
+  return { data: tudo, error: null };
+}
+
 // ── Valida formato de cor hex ─────────────────────────────────
 export function validarCor(cor: unknown): Response | null {
   if (cor != null && !/^#[0-9A-Fa-f]{6}$/.test(String(cor)))
