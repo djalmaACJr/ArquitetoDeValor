@@ -562,7 +562,11 @@ export default function DrawerLancamento({
           intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
         } : {}),
       }
-      const url = editando ? `/transferencias/${editando.id_par_transferencia ?? editando.id}` : '/transferencias'
+      // Transferência recorrente respeita o escopo escolhido no seletor
+      // (o backend aplica SOMENTE_ESTE por padrão quando omitido).
+      const url = editando
+        ? `/transferencias/${editando.id_par_transferencia ?? editando.id}?escopo=${escopo}`
+        : '/transferencias'
       const res = await apiMutate(url, editando ? 'PUT' : 'POST', payload)
       setSalvando(false)
       if (res.ok) {
@@ -585,8 +589,9 @@ export default function DrawerLancamento({
       form.recorrente && (parseInt(form.total_parcelas) || 0) > 1
 
     if (convertendoParaRecorrente) {
-      const delRes = await apiMutate(`/transacoes/${editando!.id}?escopo=SOMENTE_ESTE`, 'DELETE', {})
-      if (!delRes.ok) { setSalvando(false); setErro(delRes.erro ?? 'Erro ao converter lançamento.'); return }
+      // Cria a série ANTES de excluir o original: se a criação falhar, nada
+      // foi perdido. Se a exclusão do original falhar depois, desfaz a série
+      // recém-criada — o pior cenário é ficar como estava, nunca perder dado.
       const res = await apiMutate('/transacoes', 'POST', {
         tipo:                  form.tipo,
         descricao:             form.descricao.trim(),
@@ -600,6 +605,20 @@ export default function DrawerLancamento({
         tipo_recorrencia:      form.tipo_recorrencia,
         intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
       })
+      if (!res.ok) {
+        setSalvando(false)
+        setErro(res.erro ?? 'Erro ao converter lançamento.')
+        return
+      }
+      const delRes = await apiMutate(`/transacoes/${editando!.id}?escopo=SOMENTE_ESTE`, 'DELETE', {})
+      if (!delRes.ok) {
+        const criadas = res.dados as { parcelas?: { id: string }[] } | null
+        const primeiraId = criadas?.parcelas?.[0]?.id
+        if (primeiraId) await apiMutate(`/transacoes/${primeiraId}?escopo=TODOS`, 'DELETE', {})
+        setSalvando(false)
+        setErro(delRes.erro ?? 'Erro ao converter lançamento — nada foi alterado.')
+        return
+      }
       setSalvando(false)
       if (res.ok) {
         const dadosResp = res.dados as { parcelas?: { id: string }[]; id?: string } | null
@@ -694,7 +713,7 @@ export default function DrawerLancamento({
     setExcluindo(true)
     const isTransf = !!editando.id_par_transferencia
     const url = isTransf
-      ? `/transferencias/${editando.id_par_transferencia}`
+      ? `/transferencias/${editando.id_par_transferencia}?escopo=${escopo}`
       : `/transacoes/${editando.id}?escopo=${escopo}`
     const res = await apiMutate(url, 'DELETE', {})
     setExcluindo(false)

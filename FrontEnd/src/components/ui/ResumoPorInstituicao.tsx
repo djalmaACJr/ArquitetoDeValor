@@ -57,7 +57,7 @@ export default function ResumoPorInstituicao() {
       .sort((a, b) => b.valor - a.valor)
   ), [instituicoes, dashboards])
 
-  const dashboardDaInstituicao = nivel.n >= 1
+  const dashboardDaInstituicao = nivel.n !== 0
     ? dashboards[instituicoes.findIndex((c) => c.conta_id === nivel.contaId)]?.data ?? null
     : null
 
@@ -94,7 +94,7 @@ export default function ResumoPorInstituicao() {
     ? {
         fatias: fatiasInstituicoes,
         centro: 'Patrimônio',
-        onClique: (i: number, _e: unknown) => {
+        onClique: (i: number) => {
           const f = fatiasInstituicoes[i]
           setNivel({ n: 1, contaId: f.contaId, contaNome: f.label })
         },
@@ -104,7 +104,7 @@ export default function ResumoPorInstituicao() {
     ? {
         fatias: fatiasTipos,
         centro: nivel.contaNome,
-        onClique: (i: number, _e: unknown) => {
+        onClique: (i: number) => {
           const f = fatiasTipos[i]
           setNivel({ n: 2, contaId: nivel.contaId, contaNome: nivel.contaNome, tipo: f.tipo })
         },
@@ -132,7 +132,7 @@ export default function ResumoPorInstituicao() {
           className={nivel.n === 0 ? 'text-white font-medium' : 'hover:text-white'}>
           Instituições
         </button>
-        {nivel.n >= 1 && (
+        {nivel.n !== 0 && (
           <>
             <ChevronRight size={12} />
             <button onClick={() => setNivel({ n: 1, contaId: nivel.contaId, contaNome: nivel.contaNome })}

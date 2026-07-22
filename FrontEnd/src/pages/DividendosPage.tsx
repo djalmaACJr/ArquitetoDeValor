@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, type ReactNode } from 'react'
+import { useState, useMemo, useEffect, Fragment, type ReactNode } from 'react'
 import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, ChevronDown, ChevronRight, Layers, AlertTriangle, RefreshCw, Stethoscope } from 'lucide-react'
 import { Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, type Plugin, type ChartType } from 'chart.js'
@@ -509,7 +509,10 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
   const sel = IDX_GRAF[periodo]
   // Trocar o período reordena o resumo pela coluna correspondente (mantém o
   // gráfico e a tabela coerentes); o usuário ainda pode clicar outro cabeçalho.
-  useEffect(() => { setSortResumo({ key: sel, dir: 'desc' }) }, [sel])
+  const trocarPeriodo = (v: PeriodoGraf) => {
+    setPeriodo(v)
+    setSortResumo({ key: IDX_GRAF[v], dir: 'desc' })
+  }
   // Tipos/ativos com valor no período escolhido, do maior p/ o menor
   const tipos = useMemo(() =>
     linhas.filter((l) => l.totais[sel] > 0)
@@ -662,8 +665,9 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
   const setaR = (k: 'nome' | number) =>
     sortResumo.key === k ? (sortResumo.dir === 'asc' ? ' ▲' : ' ▼') : ''
   // Cabeçalho clicável. A coluna do período selecionado aparece também no
-  // mobile; as demais só em telas ≥ sm (como antes).
-  const ThR = ({ k, label, cls }: { k: 'nome' | number; label: string; cls?: string }) => (
+  // mobile; as demais só em telas ≥ sm (como antes). Função helper (não
+  // componente): chamada direto no JSX para não criar componente no render.
+  const thR = (k: 'nome' | number, label: string, cls?: string) => (
     <th onClick={() => clickSortResumo(k)}
       className={`px-3 py-2.5 font-medium cursor-pointer select-none hover:text-white ${cls ?? ''}`}>
       {label}{setaR(k)}
@@ -675,7 +679,7 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <h2 className="text-[15px] font-semibold text-white">Ativos por categoria</h2>
         {/* trocar o período mantém o tipo focado (drill-down) */}
-        <Segmented value={periodo} onChange={(v) => setPeriodo(v as PeriodoGraf)} opcoes={PERIODOS_GRAF} />
+        <Segmented value={periodo} onChange={(v) => trocarPeriodo(v as PeriodoGraf)} opcoes={PERIODOS_GRAF} />
       </div>
 
       {/* Voltar do drill-down: abaixo do label, em linha própria */}
@@ -760,10 +764,11 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
         <table className="w-full text-[13px] whitespace-nowrap">
           <thead>
             <tr style={{ color: MUTED }}>
-              <ThR k="nome" label="Categoria" cls="text-left" />
+              {thR('nome', 'Categoria', 'text-left')}
               {COLS_GRAF.map((c, i) => (
-                <ThR key={i} k={i} label={c}
-                  cls={`text-right ${i === sel ? 'table-cell' : 'hidden sm:table-cell'}`} />
+                <Fragment key={i}>
+                  {thR(i, c, `text-right ${i === sel ? 'table-cell' : 'hidden sm:table-cell'}`)}
+                </Fragment>
               ))}
               <th className="px-2 py-2.5 w-6"></th>
             </tr>

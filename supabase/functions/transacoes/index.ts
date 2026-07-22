@@ -193,10 +193,26 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams, userId:
 
 async function buscarPorId(c: ReturnType<typeof db>, id: string) {
   logRequest("GET", `/transacoes/${id}`);
-  const { data, error } = await c.from("vw_transacoes_com_saldo").select("*").eq("id", id).single();
-  if (error) { logResponse(404); return erro("Lançamento não encontrado", 404); }
+  // Lê da TABELA, não da vw_transacoes_com_saldo: a view roda window function
+  // sobre o histórico inteiro do usuário (o gargalo já medido em 349ms) para
+  // devolver 1 linha. O consumidor (DrawerLancamento) usa os campos crus +
+  // decoração de conta/categoria — sem saldo_acumulado.
+  const { data: t, error } = await c.from("transacoes").select("*").eq("id", id).single();
+  if (error || !t) { logResponse(404); return erro("Lançamento não encontrado", 404); }
+
+  const [catRes, contaRes] = await Promise.all([
+    c.from("categorias").select("id, descricao, icone, cor, id_pai"),
+    c.from("contas").select("id, nome, icone, cor").eq("id", t.conta_id),
+  ]);
+  const catMap = new Map<string, CatInfo>(
+    (catRes.data ?? []).map((c2) => [c2.id, { descricao: c2.descricao, icone: c2.icone, cor: c2.cor, id_pai: c2.id_pai }]),
+  );
+  const contaMap = new Map<string, ContaInfo>(
+    (contaRes.data ?? []).map((c2) => [c2.id, { nome: c2.nome, icone: c2.icone, cor: c2.cor }]),
+  );
+
   logResponse(200, { id });
-  return json(data);
+  return json(decorarTransacao(t as TxRow, catMap, contaMap));
 }
 
 // ── Vínculo com investimentos (proventos) ────────────────────
@@ -311,7 +327,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
 
   // ── Lançamento simples (sem recorrência) ────────────────────
   if (!isRecorrente) {
-    const { data, error } = await c.from("transacoes").insert({
+    const linha = {
       user_id:         userId,
       tipo:            body.tipo,
       data:            dataBase,
@@ -325,32 +341,36 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
       nr_parcela:      null,
       total_parcelas:  null,
       id_recorrencia:  null,
-    }).select().single();
+    };
+
+    // Com provento: transação + espelho em inv_dividendos numa RPC atômica
+    // (rollback do Postgres se qualquer lado falhar — sem compensação manual).
+    if (proventoAtivo) {
+      const { data: criadas, error } = await c.rpc("fn_criar_transacoes_com_dividendos", {
+        p_rows: [linha],
+        p_dividendo: {
+          ativo_id:          proventoAtivo.id,
+          tipo_ativo:        proventoAtivo.tipo_ativo,
+          tipo_dividendo_id: proventoTipoDividendoId,
+        },
+      });
+      if (error || !criadas?.length) {
+        logError("Criar transação com provento (rpc)", error);
+        if (error?.message.includes("CONTA_INVALIDA"))    return erro("RV-004: conta inexistente ou inativa", 422);
+        if (error?.message.includes("CATEGORIA_INVALIDA")) return erro("categoria inexistente ou inativa", 422);
+        return erro(error?.message ?? "Erro ao criar transação");
+      }
+      logSuccess("Transação criada", { id: criadas[0].id });
+      return json(criadas[0], 201);
+    }
+
+    const { data, error } = await c.from("transacoes").insert(linha).select().single();
 
     if (error) {
       logError("Criar transação", error);
       if (error.message.includes("CONTA_INVALIDA"))    return erro("RV-004: conta inexistente ou inativa", 422);
       if (error.message.includes("CATEGORIA_INVALIDA")) return erro("categoria inexistente ou inativa", 422);
       return erro(error.message);
-    }
-    // Espelhar provento em investimentos (atômico: rollback da transação se falhar)
-    if (proventoAtivo) {
-      const { error: eDiv } = await c.from("inv_dividendos").insert({
-        user_id:              userId,
-        ativo_id:             proventoAtivo.id,
-        conta_id:             body.conta_id,
-        valor:                body.valor,
-        data_pagamento:       dataBase,
-        tipo_ativo:           proventoAtivo.tipo_ativo,
-        descricao:            body.descricao,
-        tipo_dividendo_id:    proventoTipoDividendoId,
-        transacao_extrato_id: data.id,
-      });
-      if (eDiv) {
-        logError("Replicar provento (simples)", eDiv);
-        await c.from("transacoes").delete().eq("id", data.id);
-        return erro("Falha ao replicar o provento em investimentos: " + eDiv.message, 500);
-      }
     }
 
     logSuccess("Transação criada", { id: data.id });
@@ -396,33 +416,34 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
     });
   }
 
-  const { data, error } = await c.from("transacoes").insert(parcelas).select();
-  if (error) {
-    logError("Criar recorrência", error);
-    if (error.message.includes("CONTA_INVALIDA"))    return erro("RV-004: conta inexistente ou inativa", 422);
-    if (error.message.includes("CATEGORIA_INVALIDA")) return erro("categoria inexistente ou inativa", 422);
-    return erro(error.message);
-  }
-
-  // Espelhar provento em investimentos — um inv_dividendos por parcela criada
+  // Com provento: parcelas + espelhos em inv_dividendos numa RPC atômica.
+  // Sem provento: INSERT em lote (um statement só, já atômico).
+  let data: Record<string, unknown>[];
   if (proventoAtivo) {
-    const divs = (data as Record<string, unknown>[]).map(tx => ({
-      user_id:              userId,
-      ativo_id:             proventoAtivo!.id,
-      conta_id:             tx.conta_id,
-      valor:                tx.valor,
-      data_pagamento:       tx.data,
-      tipo_ativo:           proventoAtivo!.tipo_ativo,
-      descricao:            tx.descricao,
-      tipo_dividendo_id:    proventoTipoDividendoId,
-      transacao_extrato_id: tx.id,
-    }));
-    const { error: eDiv } = await c.from("inv_dividendos").insert(divs);
-    if (eDiv) {
-      logError("Replicar provento (recorrência)", eDiv);
-      await c.from("transacoes").delete().eq("id_recorrencia", idRecorrencia);
-      return erro("Falha ao replicar os proventos em investimentos: " + eDiv.message, 500);
+    const { data: criadas, error } = await c.rpc("fn_criar_transacoes_com_dividendos", {
+      p_rows: parcelas,
+      p_dividendo: {
+        ativo_id:          proventoAtivo.id,
+        tipo_ativo:        proventoAtivo.tipo_ativo,
+        tipo_dividendo_id: proventoTipoDividendoId,
+      },
+    });
+    if (error || !criadas?.length) {
+      logError("Criar recorrência com provento (rpc)", error);
+      if (error?.message.includes("CONTA_INVALIDA"))    return erro("RV-004: conta inexistente ou inativa", 422);
+      if (error?.message.includes("CATEGORIA_INVALIDA")) return erro("categoria inexistente ou inativa", 422);
+      return erro(error?.message ?? "Erro ao criar recorrência");
     }
+    data = criadas as Record<string, unknown>[];
+  } else {
+    const { data: criadas, error } = await c.from("transacoes").insert(parcelas).select();
+    if (error) {
+      logError("Criar recorrência", error);
+      if (error.message.includes("CONTA_INVALIDA"))    return erro("RV-004: conta inexistente ou inativa", 422);
+      if (error.message.includes("CATEGORIA_INVALIDA")) return erro("categoria inexistente ou inativa", 422);
+      return erro(error.message);
+    }
+    data = criadas as Record<string, unknown>[];
   }
 
   logSuccess("Recorrência criada", { id_recorrencia: idRecorrencia, parcelas: totalParcelas });
@@ -456,31 +477,71 @@ async function sincronizarProventoTransacoes(c: ReturnType<typeof db>, ids: stri
     if (tid) divPorTx.set(String(tid), String((d as { id: string }).id));
   }
 
-  for (const tx of txs as {
+  type TxSel = {
     id: string; user_id: string; tipo: string; descricao: string | null;
     valor: number; data: string; conta_id: string; categoria_id: string | null;
-  }[]) {
-    const vinc  = await vinculoProvento(c, tx.categoria_id);
-    const ativo = (vinc.vinculado && tx.tipo === "RECEITA")
-      ? await ativoPorTicker(c, tickerDaDescricao(String(tx.descricao ?? ""))) : null;
+  };
+  const linhas = txs as TxSel[];
+
+  // Resolve o vínculo UMA vez por categoria e o ativo UMA vez por ticker —
+  // numa série de N parcelas (mesma categoria/descrição) isso troca ~3·N
+  // queries por ~3 no total.
+  const vincPorCat = new Map<string, { vinculado: boolean; tipoDividendoId: string | null }>();
+  for (const catId of new Set(linhas.map((t) => t.categoria_id).filter(Boolean) as string[])) {
+    vincPorCat.set(catId, await vinculoProvento(c, catId));
+  }
+  const ativoPorTick = new Map<string, { id: string; tipo_ativo: string } | null>();
+  for (const tx of linhas) {
+    const vinc = tx.categoria_id ? vincPorCat.get(tx.categoria_id) : undefined;
+    if (vinc?.vinculado && tx.tipo === "RECEITA") {
+      const tick = tickerDaDescricao(String(tx.descricao ?? ""));
+      if (!ativoPorTick.has(tick)) ativoPorTick.set(tick, await ativoPorTicker(c, tick));
+    }
+  }
+
+  // Classifica cada transação e agrupa as escritas para executar em lote
+  const inserts: Record<string, unknown>[] = [];
+  const updatesPorAtivo = new Map<string, { ativo: { id: string; tipo_ativo: string }; tipoDividendoId: string | null; divIds: string[] }>();
+  const deletes: string[] = [];
+
+  for (const tx of linhas) {
+    const vinc  = tx.categoria_id ? vincPorCat.get(tx.categoria_id) : undefined;
+    const ativo = (vinc?.vinculado && tx.tipo === "RECEITA")
+      ? ativoPorTick.get(tickerDaDescricao(String(tx.descricao ?? ""))) ?? null
+      : null;
     const divId = divPorTx.get(tx.id);
 
     if (ativo) {
       if (divId) {
-        await c.from("inv_dividendos").update({
-          ativo_id: ativo.id, tipo_ativo: ativo.tipo_ativo, tipo_dividendo_id: vinc.tipoDividendoId,
-        }).eq("id", divId);
+        const k = `${ativo.id}|${vinc!.tipoDividendoId ?? ""}`;
+        const g = updatesPorAtivo.get(k) ?? { ativo, tipoDividendoId: vinc!.tipoDividendoId, divIds: [] };
+        g.divIds.push(divId);
+        updatesPorAtivo.set(k, g);
       } else {
-        const { error } = await c.from("inv_dividendos").insert({
+        inserts.push({
           user_id: tx.user_id, ativo_id: ativo.id, conta_id: tx.conta_id, valor: tx.valor,
-          data_pagamento: tx.data, tipo_ativo: ativo.tipo_ativo, tipo_dividendo_id: vinc.tipoDividendoId,
+          data_pagamento: tx.data, tipo_ativo: ativo.tipo_ativo, tipo_dividendo_id: vinc!.tipoDividendoId,
           descricao: tx.descricao, transacao_extrato_id: tx.id,
         });
-        if (error) logError("Sincronizar provento (criar)", error);
       }
-    } else if (divId && !vinc.vinculado) {
-      await c.from("inv_dividendos").delete().eq("id", divId);
+    } else if (divId && !vinc?.vinculado) {
+      deletes.push(divId);
     }
+  }
+
+  for (const g of updatesPorAtivo.values()) {
+    const { error } = await c.from("inv_dividendos").update({
+      ativo_id: g.ativo.id, tipo_ativo: g.ativo.tipo_ativo, tipo_dividendo_id: g.tipoDividendoId,
+    }).in("id", g.divIds);
+    if (error) logError("Sincronizar provento (atualizar)", error);
+  }
+  if (inserts.length > 0) {
+    const { error } = await c.from("inv_dividendos").insert(inserts);
+    if (error) logError("Sincronizar provento (criar)", error);
+  }
+  if (deletes.length > 0) {
+    const { error } = await c.from("inv_dividendos").delete().in("id", deletes);
+    if (error) logError("Sincronizar provento (remover)", error);
   }
 }
 
@@ -539,12 +600,9 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
       
       if (parcelasParaExcluir.data && parcelasParaExcluir.data.length > 0) {
         const idsParaExcluir = parcelasParaExcluir.data.map((p: { id: string }) => p.id);
-        // Replica em investimentos: remove os inv_dividendos espelho ANTES de
-        // apagar as parcelas (a FK é ON DELETE SET NULL — sem isto, órfãos).
-        const { error: eDivDel } = await c.from("inv_dividendos")
-          .delete().in("transacao_extrato_id", idsParaExcluir);
-        if (eDivDel) { logError("Excluir proventos das parcelas excedentes", eDivDel); return erro(eDivDel.message); }
-        const { error: eExcluir } = await c.from("transacoes").delete().in("id", idsParaExcluir);
+        // Remove parcelas + inv_dividendos espelhados atomicamente (RPC) —
+        // a FK é ON DELETE SET NULL, então sem isto sobrariam órfãos.
+        const { error: eExcluir } = await c.rpc("fn_excluir_transacoes_e_dividendos", { p_ids: idsParaExcluir });
         if (eExcluir) {
           logError("Erro ao excluir parcelas excedentes", eExcluir);
           return erro("Erro ao excluir parcelas excedentes");
@@ -687,54 +745,71 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   const frequenciaFoiAlterada = novaFrequenciaBody !== null;
   const precisaRecalcularDatas = dataFoiAlterada || frequenciaFoiAlterada;
 
-  // ── Atualizar cada parcela individualmente ───────────────────
+  // ── Atualizar as parcelas ────────────────────────────────────
   const nrAtual = atual.nr_parcela ?? 1;
   let atualizados = 0;
 
-  for (const parcela of parcelas) {
-    const update: Record<string, unknown> = { ...dadosUpdate };
-
-    // Recalcular data proporcional ao offset desta parcela na série
-    if (precisaRecalcularDatas && frequencia) {
-      const offset = (parcela.nr_parcela - nrAtual);
-      const novaData = calcularDataParcela(novaDataBase, frequencia, offset * intervalo);
-      update.data = novaData;
-      
-      // Recalcular status baseado na nova data
-      if (novaData <= hoje) {
-        update.status = "PAGO";
-      } else if (atual.status === "PROJECAO") {
-        update.status = "PROJECAO";
-      } else {
-        update.status = "PENDENTE";
-      }
-      
-      logDebug(`Parcela ${parcela.nr_parcela}: novaData=${novaData}, status=${update.status}`);
-    } else if (dataFoiAlterada) {
-      // Sem frequência detectada — manter offset de dias original
-      const dataOriginalParcela = new Date(parcela.data);
-      const dataOriginalBase    = new Date(atual.data);
-      const dataNovaBase        = new Date(novaDataBase);
-      const diffMs = dataNovaBase.getTime() - dataOriginalBase.getTime();
-      const novaData = new Date(dataOriginalParcela.getTime() + diffMs);
-      update.data = novaData.toISOString().split("T")[0];
-      
-      // Recalcular status baseado na nova data
-      const dataUpdate = String(update.data);
-      if (dataUpdate <= hoje) {
-        update.status = "PAGO";
-      } else if (atual.status === "PROJECAO") {
-        update.status = "PROJECAO";
-      } else {
-        update.status = "PENDENTE";
-      }
-      
-      logDebug(`Parcela ${parcela.nr_parcela}: novaData=${update.data}, status=${update.status}`);
+  if (!precisaRecalcularDatas) {
+    // Sem recálculo de data, o update é idêntico para toda a série —
+    // um único UPDATE ... IN (ids) no lugar de N round-trips.
+    // `data` sai do payload: aqui ela não mudou (senão estaríamos no branch
+    // de recálculo) e propagá-la colapsaria todas as parcelas na mesma data.
+    const { data: _dataIgual, ...updateSerie } = dadosUpdate;
+    if (Object.keys(updateSerie).length > 0) {
+      const idsParcelas = parcelas.map((p) => String(p.id));
+      const { error: eUp } = await c.from("transacoes").update(updateSerie).in("id", idsParcelas);
+      if (eUp) { logError("Editar série (lote)", eUp); return erro(eUp.message); }
+      atualizados = idsParcelas.length;
+    } else {
+      atualizados = parcelas.length;
     }
+  } else {
+    // Data/frequência mudaram: cada parcela recebe data (e status) próprios
+    for (const parcela of parcelas) {
+      const update: Record<string, unknown> = { ...dadosUpdate };
 
-    const { error: eUp } = await c.from("transacoes").update(update).eq("id", parcela.id);
-    if (eUp) { logError(`Editar parcela ${parcela.id}`, eUp); }
-    else atualizados++;
+      // Recalcular data proporcional ao offset desta parcela na série
+      if (frequencia) {
+        const offset = (parcela.nr_parcela - nrAtual);
+        const novaData = calcularDataParcela(novaDataBase, frequencia, offset * intervalo);
+        update.data = novaData;
+
+        // Recalcular status baseado na nova data
+        if (novaData <= hoje) {
+          update.status = "PAGO";
+        } else if (atual.status === "PROJECAO") {
+          update.status = "PROJECAO";
+        } else {
+          update.status = "PENDENTE";
+        }
+
+        logDebug(`Parcela ${parcela.nr_parcela}: novaData=${novaData}, status=${update.status}`);
+      } else if (dataFoiAlterada) {
+        // Sem frequência detectada — manter offset de dias original
+        const dataOriginalParcela = new Date(parcela.data);
+        const dataOriginalBase    = new Date(atual.data);
+        const dataNovaBase        = new Date(novaDataBase);
+        const diffMs = dataNovaBase.getTime() - dataOriginalBase.getTime();
+        const novaData = new Date(dataOriginalParcela.getTime() + diffMs);
+        update.data = novaData.toISOString().split("T")[0];
+
+        // Recalcular status baseado na nova data
+        const dataUpdate = String(update.data);
+        if (dataUpdate <= hoje) {
+          update.status = "PAGO";
+        } else if (atual.status === "PROJECAO") {
+          update.status = "PROJECAO";
+        } else {
+          update.status = "PENDENTE";
+        }
+
+        logDebug(`Parcela ${parcela.nr_parcela}: novaData=${update.data}, status=${update.status}`);
+      }
+
+      const { error: eUp } = await c.from("transacoes").update(update).eq("id", parcela.id);
+      if (eUp) { logError(`Editar parcela ${parcela.id}`, eUp); }
+      else atualizados++;
+    }
   }
 
   // Replica/espelha o provento em investimentos para TODAS as parcelas do escopo.
@@ -765,20 +840,16 @@ async function excluir(c: ReturnType<typeof db>, id: string, escopo: string) {
 
   // Excluir um lançamento no extrato REFLETE em investimentos: se a
   // transação espelha um provento (inv_dividendos.transacao_extrato_id),
-  // o dividendo é removido junto. Feito ANTES de apagar a transação (depois
-  // o FK ON DELETE SET NULL zeraria o vínculo e perderíamos a referência).
+  // o dividendo é removido junto — na MESMA transação do Postgres (RPC
+  // fn_excluir_transacoes_e_dividendos): ou os dois saem, ou nenhum.
   //
   // Isto vale só para a exclusão individual pela UI do extrato. A rotina de
   // limpeza (/limpar) NÃO passa por aqui: ela apaga transações direto e
   // preserva os dividendos (apenas desvincula via SET NULL). Por isso a
-  // propagação fica na Edge Function, não num trigger de DELETE em transacoes
+  // propagação fica nesta rota, não num trigger de DELETE em transacoes
   // (um trigger dispararia também na limpeza e apagaria os dividendos).
-  const { error: eDiv } = await c.from("inv_dividendos")
-    .delete().in("transacao_extrato_id", ids);
-  if (eDiv) { logError("Excluir dividendos vinculados", eDiv); return erro(eDiv.message); }
-
-  const { error } = await c.from("transacoes").delete().in("id", ids);
-  if (error) { logError("Excluir transação", error); return erro(error.message); }
+  const { error } = await c.rpc("fn_excluir_transacoes_e_dividendos", { p_ids: ids });
+  if (error) { logError("Excluir transação (rpc)", error); return erro(error.message); }
 
   logSuccess("Transação(ões) excluída(s)", { count: ids.length });
   return json({ excluidos: ids.length, ids });

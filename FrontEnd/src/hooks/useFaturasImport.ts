@@ -245,11 +245,9 @@ export function useFaturaImportSessao(id: string | null) {
     if (r.ok) {
       await invalidarSessao()
       await qc.invalidateQueries({ queryKey: qk.faturasImport(uid) })
-      // Confirmação cria/atualiza transações reais — invalida caches do
-      // domínio para o resto do app refletir imediatamente.
-      await qc.invalidateQueries({ queryKey: ['lancamentos', uid] })
-      await qc.invalidateQueries({ queryKey: ['dashboard-fase1', uid] })
-      await qc.invalidateQueries({ queryKey: ['transacoes-mes', uid] })
+      // Confirmação cria/atualiza transações reais — invalida o cache
+      // canônico de transações para o resto do app refletir imediatamente.
+      await qc.invalidateQueries({ queryKey: qk.transacoesMesPref(uid) })
       await qc.invalidateQueries({ queryKey: qk.contas(uid) })
     }
     return { ok: r.ok, dados: r.dados ?? null, erro: r.erro }

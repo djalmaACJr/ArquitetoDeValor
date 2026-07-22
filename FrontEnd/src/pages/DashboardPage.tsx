@@ -640,6 +640,15 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
 })
 
 // -- Grafico donut de categoria ---------------------------
+
+// Propriedades geométricas de uma fatia do donut (Chart.js ArcElement.getProps)
+interface DonutArcProps {
+  x: number; y: number; startAngle: number; endAngle: number
+  innerRadius: number; outerRadius: number
+}
+
+const rotuloCurto = (s: string, max = 13) => s.length > max ? `${s.slice(0, max - 1)}…` : s
+
 const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dados, topN = 5 }: {
   titulo: string; subtitulo: string; total: number
   dados: DespesaCategoria[]; corCentro: string
@@ -683,35 +692,41 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
     : tops.map((_, i) => suavizarCor(CORES_CATEGORIA[i % CORES_CATEGORIA.length]))
 
   const formatPct = (v: number) => total > 0 ? ((v / total) * 100).toFixed(1) : '0.0'
-  const rotuloCurto = (s: string, max = 13) => s.length > max ? `${s.slice(0, max - 1)}…` : s
+
+  // Chave estável do conteúdo do gráfico — evita expressão complexa no
+  // array de dependências do useMemo (exigência do lint react-hooks).
+  const labelsKey = labelsChart.join('|')
+  const valuesKey = valuesChart.join('|')
 
   const donutLabelsPlugin = useMemo(() => ({
     id: `donut-labels-${titulo.replace(/\W+/g, '-').toLowerCase()}`,
-    afterDatasetsDraw(chart: any) {
+    afterDatasetsDraw(chart: ChartJS) {
       const meta = chart.getDatasetMeta(0)
-      const dataset = chart.data.datasets[0]
+      const dataset = chart.data.datasets[0] as { data: number[]; backgroundColor: string[] } | undefined
       if (!meta?.data?.length || !dataset?.data?.length) return
 
-      const ctx = chart.ctx as CanvasRenderingContext2D
+      const ctx = chart.ctx
       const area = chart.chartArea
       const chartW = area.right - area.left
       const compact = chartW < 380
-      const totalDataset = (dataset.data as number[]).reduce((s, v) => s + Number(v || 0), 0)
+      const totalDataset = dataset.data.reduce((s, v) => s + Number(v || 0), 0)
       if (totalDataset <= 0) return
 
       ctx.save()
       ctx.textBaseline = 'middle'
 
-      meta.data.forEach((arc: any, i: number) => {
+      meta.data.forEach((arcEl, i) => {
         const value = Number(dataset.data[i] || 0)
         if (value <= 0) return
 
         const pct = totalDataset > 0 ? (value / totalDataset) * 100 : 0
-        const props = arc.getProps(['x', 'y', 'startAngle', 'endAngle', 'innerRadius', 'outerRadius'], true)
+        const props = (arcEl as unknown as {
+          getProps(p: (keyof DonutArcProps)[], final: boolean): DonutArcProps
+        }).getProps(['x', 'y', 'startAngle', 'endAngle', 'innerRadius', 'outerRadius'], true)
         const angle = (props.startAngle + props.endAngle) / 2
         const cos = Math.cos(angle)
         const sin = Math.sin(angle)
-        const color = dataset.backgroundColor[i] as string
+        const color = dataset.backgroundColor[i]
         const label = String(chart.data.labels?.[i] ?? '')
         const valueLabel = formatBRL(value)
         const pctLabel = `${pct.toFixed(1)}%`
@@ -766,7 +781,8 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
 
       ctx.restore()
     },
-  }), [titulo, labelsChart.join('|'), valuesChart.join('|')])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [titulo, labelsKey, valuesKey])
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">

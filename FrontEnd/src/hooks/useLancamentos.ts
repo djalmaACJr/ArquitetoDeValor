@@ -1,6 +1,6 @@
 // src/hooks/useLancamentos.ts
 import { useQuery, useQueryClient, keepPreviousData, type QueryClient } from '@tanstack/react-query'
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useMemo } from 'react'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
@@ -91,25 +91,40 @@ export function mesAdjacente(mes: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+// staleTime do cache canônico de transações por mês. Os dados só mudam por
+// mutation — e toda mutation invalida `transacoes-mes` explicitamente — então
+// não há motivo para refetch em navegação dentro dessa janela.
+export const TRANSACOES_MES_STALE = 5 * 60_000
+
 /**
- * Pré-aquece o cache do React Query com os meses vizinhos ao mês informado,
- * usando filtros padrão (sem conta/categoria/status). Ideal para chamar logo
- * após o login (ex.: AppLayout) para que LancamentosPage encontre o cache pronto.
+ * Fetch CANÔNICO de um mês de transações (sem filtros, com saldo corrente).
+ * É a única fonte de dados de transações do app: Extrato, Dashboard (fase 1
+ * e histórico) e prefetches compartilham a MESMA query key
+ * (`qk.transacoesMes`), então cada mês trafega uma única vez e uma única
+ * invalidação propaga para todas as visões.
+ */
+export async function fetchTransacoesMes(mes: string, signal?: AbortSignal): Promise<Lancamento[]> {
+  const res = await apiFetch<{ dados: Lancamento[] }>(`/transacoes?mes=${mes}&per_page=1000&saldo=true`, signal)
+  if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar lançamentos')
+  const raw = res.dados
+  return (raw as unknown as { dados: Lancamento[] })?.dados
+    ?? (raw as unknown as Lancamento[])
+    ?? []
+}
+
+/**
+ * Pré-aquece o cache canônico com os meses vizinhos ao mês informado. Ideal
+ * para chamar logo após o login (AppLayout): Extrato E Dashboard encontram o
+ * cache pronto, pois ambos leem de `qk.transacoesMes`.
  */
 export function prefetchLancamentosVizinhos(qc: QueryClient, uid: string | null, mes: string) {
   if (!uid) return
   for (let delta = -3; delta <= 3; delta++) {
-    const filtroAdj: FiltrosLancamento = {
-      mes:          mesAdjacente(mes, delta),
-      conta_ids:    [],
-      categoria_ids:[],
-      status_ids:   [],
-      com_saldo:    true,
-    }
+    const mesAdj = mesAdjacente(mes, delta)
     qc.prefetchQuery({
-      queryKey: qk.lancamentos(uid, filtroAdj),
-      queryFn:  ({ signal }) => fetchLancamentos(filtroAdj, signal),
-      staleTime: 30_000,
+      queryKey: qk.transacoesMes(uid, mesAdj),
+      queryFn:  ({ signal }) => fetchTransacoesMes(mesAdj, signal),
+      staleTime: TRANSACOES_MES_STALE,
     })
   }
 }
@@ -119,74 +134,83 @@ export function useLancamentos(filtros: FiltrosLancamento) {
   const { session } = useAuth()
   const uid = session?.user?.id ?? null
 
-  const { data: lancamentos = [], isLoading: loading, isFetching: fetching, error } = useQuery({
-    queryKey:        qk.lancamentos(uid, filtros),
-    queryFn:         ({ signal }) => fetchLancamentos(filtros, signal),
-    staleTime:       30_000,
+  // Cache CANÔNICO por mês (compartilhado com o Dashboard). Filtros são
+  // aplicados no cliente sobre o mês completo — o mês trafega UMA vez,
+  // qualquer combinação de filtro é instantânea e o saldo_acumulado das
+  // linhas permanece o global real (a página recalcula quando filtra).
+  const { data: doMes = [], isLoading: loading, isFetching: fetching, error } = useQuery({
+    queryKey:        qk.transacoesMes(uid, filtros.mes),
+    queryFn:         ({ signal }) => fetchTransacoesMes(filtros.mes, signal),
+    staleTime:       TRANSACOES_MES_STALE,
     placeholderData: keepPreviousData,
     enabled:         !!uid,
   })
 
+  const lancamentos = useMemo(() => {
+    let lista = doMes
+    if (filtros.conta_ids?.length)
+      lista = lista.filter(l => filtros.conta_ids!.includes(l.conta_id))
+    if (filtros.categoria_ids?.length)
+      lista = lista.filter(l => l.categoria_id != null && filtros.categoria_ids!.includes(l.categoria_id))
+    if (filtros.status_ids?.length)
+      lista = lista.filter(l => filtros.status_ids!.includes(l.status))
+    else if (filtros.status)
+      lista = lista.filter(l => l.status === filtros.status)
+    return lista
+  }, [doMes, filtros.conta_ids, filtros.categoria_ids, filtros.status_ids, filtros.status])
+
   // Prefetch pontual — chamado no onMouseEnter dos botões de navegação
   const prefetchAdj = useCallback((delta: number) => {
     if (!uid) return
-    const filtroAdj = { ...filtros, mes: mesAdjacente(filtros.mes, delta) }
+    const mesAdj = mesAdjacente(filtros.mes, delta)
     qc.prefetchQuery({
-      queryKey: qk.lancamentos(uid, filtroAdj),
-      queryFn:  ({ signal }) => fetchLancamentos(filtroAdj, signal),
-      staleTime: 30_000,
+      queryKey: qk.transacoesMes(uid, mesAdj),
+      queryFn:  ({ signal }) => fetchTransacoesMes(mesAdj, signal),
+      staleTime: TRANSACOES_MES_STALE,
     })
-  }, [filtros, qc, uid])
+  }, [filtros.mes, qc, uid])
 
-  // Prefetch de background — cobre navegação por teclado e saltos maiores
+  // Prefetch de background — só os meses imediatamente vizinhos (o cache é
+  // compartilhado com Dashboard/AppLayout, que já aqueceram uma janela maior;
+  // navegações sucessivas vão puxando o próximo mês conforme avançam).
   useEffect(() => {
     if (!uid) return
-    for (const delta of [-3, -2, -1, 1, 2, 3]) {
-      const filtroAdj = { ...filtros, mes: mesAdjacente(filtros.mes, delta) }
+    for (const delta of [-1, 1]) {
+      const mesAdj = mesAdjacente(filtros.mes, delta)
       qc.prefetchQuery({
-        queryKey: qk.lancamentos(uid, filtroAdj),
-        queryFn:  ({ signal }) => fetchLancamentos(filtroAdj, signal),
-        staleTime: 30_000,
+        queryKey: qk.transacoesMes(uid, mesAdj),
+        queryFn:  ({ signal }) => fetchTransacoesMes(mesAdj, signal),
+        staleTime: TRANSACOES_MES_STALE,
       })
     }
   }, [filtros.mes, uid]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const carregar = async () => {
-    // Invalida o extrato (filtro atual) e também o dashboard/histórico —
-    // DrawerLancamento e outros caminhos chamam apiMutate direto, então o
-    // refetch após uma mudança precisa propagar para todas as visões que
-    // consomem transações (dashboard-fase1, transacoes-mes).
-    await Promise.all([
-      qc.invalidateQueries({ queryKey: qk.lancamentos(uid, filtros) }),
-      qc.invalidateQueries({ queryKey: ['dashboard-fase1', uid] }),
-      qc.invalidateQueries({ queryKey: ['transacoes-mes', uid] }),
-    ])
-  }
+  // Invalida o cache canônico de transações — propaga para Extrato,
+  // Dashboard (fase 1 + histórico) e qualquer outra visão de transações.
+  const invalidarTudo = () =>
+    qc.invalidateQueries({ queryKey: qk.transacoesMesPref(uid) })
 
-  // Atualização local — atualiza o cache do TanStack diretamente sem refetch
+  const carregar = async () => { await invalidarTudo() }
+
+  // Atualização otimista do mês exibido + refetch em background: a UI
+  // responde na hora e o saldo_acumulado das linhas seguintes (e os outros
+  // meses afetados) são corrigidos pelo refetch.
   const atualizarLocal = (id: string, campos: Partial<Lancamento>) => {
-    qc.setQueryData<Lancamento[]>(qk.lancamentos(uid, filtros), prev =>
+    qc.setQueryData<Lancamento[]>(qk.transacoesMes(uid, filtros.mes), prev =>
       prev?.map(l => l.id === id ? { ...l, ...campos } : l) ?? []
     )
+    invalidarTudo()
   }
 
   // Remove imediatamente da lista local — usado após exclusão via Drawer
   const removerLocal = (id: string, idPar?: string | null) => {
-    qc.setQueryData<Lancamento[]>(qk.lancamentos(uid, filtros), prev =>
+    qc.setQueryData<Lancamento[]>(qk.transacoesMes(uid, filtros.mes), prev =>
       idPar
         ? prev?.filter(l => l.id_par_transferencia !== idPar) ?? []
         : prev?.filter(l => l.id !== id) ?? []
     )
+    invalidarTudo()
   }
-
-  // Invalida TODAS as queries de transações — extrato + dashboard + histórico.
-  // Sem invalidar dashboard-fase1/transacoes-mes, o dashboard fica em cache
-  // (staleTime 60s) e cálculos como diasNegativos não enxergam a mudança.
-  const invalidarTudo = () => Promise.all([
-    qc.invalidateQueries({ queryKey: ['lancamentos', uid] }),
-    qc.invalidateQueries({ queryKey: ['dashboard-fase1', uid] }),
-    qc.invalidateQueries({ queryKey: ['transacoes-mes', uid] }),
-  ])
 
   const criar = async (payload: Partial<Lancamento>): Promise<OpResult> => {
     const res = await apiMutate('/transacoes', 'POST', payload)

@@ -401,7 +401,7 @@ function SecaoLimpeza() {
         }
       }
       if (modo === 'tudo') {
-        for (const k of [['contas'], ['categorias'], ['dashboard-fase1']]) qc.invalidateQueries({ queryKey: k })
+        for (const k of [['contas'], ['categorias'], ['transacoes-mes']]) qc.invalidateQueries({ queryKey: k })
       }
       setLoading(false)
     }
@@ -1241,7 +1241,7 @@ function ImportInvestimentos({ contas }: { contas: Conta[] }) {
       const mapaConta = carregarMapaConta(userId)
       for (const g of grupos) if (contaDoGrupo[g]) mapaConta[g] = { acao: 'mapear', mapear_para: contaDoGrupo[g] }
       salvarMapaConta(userId, mapaConta)
-      for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo'], ['contas'], ['dashboard-fase1']]) {
+      for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo'], ['contas'], ['transacoes-mes']]) {
         qc.invalidateQueries({ queryKey: k })
       }
     } catch (e) {

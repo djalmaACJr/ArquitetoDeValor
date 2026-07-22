@@ -16,8 +16,6 @@
 // Convém usar `null` como uid antes do login resolver — gates `enabled`
 // nos hooks evitam executar o fetch nesse caso.
 
-import type { FiltrosLancamento } from '../hooks/useLancamentos'
-
 type Uid = string | null
 
 export const qk = {
@@ -25,19 +23,14 @@ export const qk = {
   categorias:  (uid: Uid) => ['categorias', uid]  as const,
   filtros:     (uid: Uid) => ['filtros', uid]     as const,
 
-  // Lançamentos por filtro — chave inclui uid + filtros para cache por consulta
-  lancamentos: (uid: Uid, f: FiltrosLancamento) => ['lancamentos', uid, f] as const,
-
   // Lembretes — chave inclui uid + mês para cache por período
   lembretes: (uid: Uid, f: { mes?: string }) => ['lembretes', uid, f] as const,
 
   // Assistente — lista completa de padrões do usuário
   assistente: (uid: Uid) => ['assistente', uid] as const,
 
-  // Dashboard fase 1 (saldos + alertas) — chave por mês
-  dashboardFase1: (uid: Uid, mes: string) => ['dashboard-fase1', uid, mes] as const,
-
-  // Transações de UM mês — chave compartilhada entre Dashboard e Lançamentos
+  // Transações de UM mês — chave CANÔNICA compartilhada por Dashboard
+  // (fase 1 + histórico) e Lançamentos; filtros são aplicados no cliente
   transacoesMes: (uid: Uid, mes: string) => ['transacoes-mes', uid, mes] as const,
 
   // Perfil do usuário (nome + email da tabela arqvalor.usuarios — não do JWT,

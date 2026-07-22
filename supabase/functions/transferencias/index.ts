@@ -46,6 +46,7 @@ function montarTransferencia(debito: Transacao, credito: Transacao) {
     data:             debito.data,
     descricao:        debito.descricao?.replace(/^\[Transf\. saída\] ?/, "") || null,
     status:           debito.status,
+    observacao:       debito.observacao ?? null,
     id_recorrencia:   debito.id_recorrencia,
     total_parcelas:   debito.total_parcelas ?? null,
     parcela_atual:    debito.nr_parcela ?? null,
@@ -207,6 +208,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
 
     const comum = {
       user_id: userId, categoria_id: catId, valor, data: dataParcela,
+      observacao: body.observacao ?? null,
       status: statusParcela, id_par_transferencia: crypto.randomUUID(),
       id_recorrencia: idRecorrencia,
       nr_parcela:       isRecorrente ? i + 1 : null,
@@ -270,9 +272,10 @@ async function editar(c: ReturnType<typeof db>, idPar: string, body: Record<stri
 
   const desc = body.descricao !== undefined ? (body.descricao as string) : null;
   const camposComuns: Record<string, unknown> = {};
-  if (body.valor  !== undefined) camposComuns.valor  = Number(body.valor);
-  if (body.data   !== undefined) camposComuns.data   = body.data;
-  if (body.status !== undefined) camposComuns.status = body.status;
+  if (body.valor      !== undefined) camposComuns.valor      = Number(body.valor);
+  if (body.data       !== undefined) camposComuns.data       = body.data;
+  if (body.status     !== undefined) camposComuns.status     = body.status;
+  if (body.observacao !== undefined) camposComuns.observacao = body.observacao ?? null;
 
   // ── Escopo SOMENTE_ESTE (ou par sem recorrência) ─────────────
   if (escopo === "SOMENTE_ESTE" || !par.debito.id_recorrencia) {
@@ -308,8 +311,11 @@ async function editar(c: ReturnType<typeof db>, idPar: string, body: Record<stri
   const idsPar = debitos.map((d: { id_par_transferencia: string }) => d.id_par_transferencia).filter(Boolean);
   if (idsPar.length === 0) return erro("Nenhuma parcela encontrada para o escopo informado", 404);
 
-  const updateDebito: Record<string, unknown> = { ...camposComuns };
-  const updateCredito: Record<string, unknown> = { ...camposComuns };
+  // `data` NÃO propaga para a série: cada parcela mantém sua própria data
+  // (colapsar todas na mesma data destruiria o cronograma da recorrência).
+  const { data: _dataOmitida, ...camposSerie } = camposComuns;
+  const updateDebito: Record<string, unknown> = { ...camposSerie };
+  const updateCredito: Record<string, unknown> = { ...camposSerie };
   if (desc !== null) {
     updateDebito.descricao  = `[Transf. saída] ${desc}`.trim();
     updateCredito.descricao = `[Transf. entrada] ${desc}`.trim();
@@ -339,13 +345,14 @@ async function excluir(c: ReturnType<typeof db>, idPar: string, userId: string, 
   if (!par) return erro("Transferência não encontrada", 404);
 
   // ── Escopo SOMENTE_ESTE (ou par sem recorrência) ─────────────
+  // RPC atômica: desarma o trigger de proteção e exclui o par na MESMA
+  // transação — se qualquer passo falhar, o par volta intacto (nunca sobra
+  // transação "des-pareada").
   if (escopo === "SOMENTE_ESTE" || !par.debito.id_recorrencia) {
-    const { error: eu1 } = await c.from("transacoes")
-      .update({ id_par_transferencia: null }).in("id", [par.debito.id, par.credito.id]);
-    if (eu1) return erro("Erro ao preparar exclusão: " + eu1.message, 500);
-
-    const { error: eu2 } = await c.from("transacoes").delete().in("id", [par.debito.id, par.credito.id]);
-    if (eu2) return erro("Erro ao excluir: " + eu2.message, 500);
+    const { error: eu } = await c.rpc("fn_excluir_transferencias", {
+      p_ids: [par.debito.id, par.credito.id],
+    });
+    if (eu) return erro("Erro ao excluir: " + eu.message, 500);
 
     return json({ mensagem: "Transferência excluída com sucesso", excluidos: 1 });
   }
@@ -371,12 +378,9 @@ async function excluir(c: ReturnType<typeof db>, idPar: string, userId: string, 
 
   const idsTx = todasTx.map((t: { id: string }) => t.id);
 
-  // Limpar id_par_transferencia para destravar trigger de bloqueio
-  const { error: eUp } = await c.from("transacoes")
-    .update({ id_par_transferencia: null }).in("id", idsTx);
-  if (eUp) return erro("Erro ao preparar exclusão da série: " + eUp.message, 500);
-
-  const { error: eDel } = await c.from("transacoes").delete().in("id", idsTx);
+  // RPC atômica: limpa id_par_transferencia (destrava o trigger de bloqueio)
+  // e exclui a série na mesma transação do Postgres.
+  const { error: eDel } = await c.rpc("fn_excluir_transferencias", { p_ids: idsTx });
   if (eDel) return erro("Erro ao excluir série: " + eDel.message, 500);
 
   logSuccess("Série de transferências excluída", { escopo, excluidos: idsPar.length });

@@ -5187,7 +5187,13 @@ async function dashboard(c: Db, params: URLSearchParams) {
     c.from("vw_inv_ultimo_mercado").select("ativo_id, conta_id, valor_mercado"),
     // tipo_ativo vem do ativo (join), não da cópia desnormalizada — assim a
     // reclassificação de um ativo reflete na hora no gráfico de proventos.
-    c.from("inv_dividendos").select("valor, inv_ativos(tipo_ativo)"),
+    // Respeita o mesmo filtro de conta das posições — senão o card filtrado
+    // por conta mostraria os dividendos de TODAS as contas.
+    (() => {
+      let q = c.from("inv_dividendos").select("valor, inv_ativos(tipo_ativo)");
+      if (contaFiltro) q = q.eq("conta_id", contaFiltro);
+      return q;
+    })(),
   ]);
 
   if (posRes.error)  { logError("Dashboard posicoes", posRes.error);  return erro(posRes.error.message); }
@@ -5295,9 +5301,16 @@ async function ranking(c: Db, params: URLSearchParams) {
     })(),
     c.from("vw_inv_ultimo_mercado").select("ativo_id, conta_id, valor_mercado"),
     // Janela trailing 12m ATÉ hoje: exclui projeções futuras (PROJECAO/PENDENTE
-    // a vencer) do DY/YoC — só conta provento já realizado.
-    c.from("inv_dividendos").select("ativo_id, valor, data_pagamento, valor_por_cota, tipo_dividendo_id")
-      .gte("data_pagamento", corteISO).lte("data_pagamento", hojeRanking),
+    // a vencer) do DY/YoC — só conta provento já realizado. Filtro de conta
+    // acompanha o das posições: sem ele, dividendos_12m/dy_real somariam
+    // proventos de outras contas e a estimativa de rate (valor ÷ qtd na data)
+    // dividiria valor de todas as contas pela quantidade de uma só.
+    (() => {
+      let q = c.from("inv_dividendos").select("ativo_id, valor, data_pagamento, valor_por_cota, tipo_dividendo_id")
+        .gte("data_pagamento", corteISO).lte("data_pagamento", hojeRanking);
+      if (contaFiltro) q = q.eq("conta_id", contaFiltro);
+      return q;
+    })(),
     // Operações de TODAS as posições do usuário (inclui ENCERRADAS): a
     // quantidade histórica precisa do ciclo completo para saber quantas cotas
     // havia na data de cada provento. Ordenado por (data, created_at) p/

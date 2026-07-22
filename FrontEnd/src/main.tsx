@@ -75,7 +75,7 @@ function tentarHidratar(userIdAtual: string | null) {
     }
     // Marca como stale — React Query refresca em background quando os
     // componentes se inscreverem, sem bloquear a exibição imediata.
-    queryClient.invalidateQueries({ queryKey: ['lancamentos'] })
+    queryClient.invalidateQueries({ queryKey: ['transacoes-mes'] })
   } catch {
     localStorage.removeItem(LS_KEY)
   }
@@ -88,7 +88,7 @@ function persistirCache() {
     const data: Record<string, unknown> = {}
     queryClient.getQueryCache().getAll()
       .filter(q =>
-        (q.queryKey as unknown[])[0] === 'lancamentos' &&
+        (q.queryKey as unknown[])[0] === 'transacoes-mes' &&
         q.state.status === 'success'
       )
       .forEach(q => { data[JSON.stringify(q.queryKey)] = q.state.data })

@@ -658,6 +658,80 @@ describe("Transferências — CA-TRF01 a CA-TRF22", () => {
     }
   });
 
+  // ── CA-TRF28 — observacao persiste em criar e editar ─────
+  test("CA-TRF28 — POST/PUT /transferencias persiste observacao nas duas pernas", async () => {
+    const dataStr = new Date().toISOString().split("T")[0];
+
+    const { status: sPost, data: criada } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id: contaOrigemId,
+        conta_destino_id: contaDestinoId,
+        valor: 90,
+        data: dataStr,
+        descricao: "TRF com observacao",
+        status: "PAGO",
+        observacao: "nota original",
+      }),
+    });
+    expect(sPost).toBe(201);
+    const idPar = (criada as any).id_par as string;
+    expect((criada as any).observacao).toBe("nota original");
+
+    const { status: sPut } = await api(`/transferencias/${idPar}`, {
+      method: "PUT",
+      body: JSON.stringify({ observacao: "nota editada" }),
+    });
+    expect(sPut).toBe(200);
+
+    const { data: depois } = await api(`/transferencias/${idPar}`);
+    expect((depois as any).observacao).toBe("nota editada");
+
+    await api(`/transferencias/${idPar}`, { method: "DELETE" }).catch(() => {});
+  });
+
+  // ── CA-TRF29 — data NÃO propaga em escopo de série ───────
+  test("CA-TRF29 — PUT escopo TODOS com data não colapsa o cronograma da série", async () => {
+    const dataBase = new Date();
+    dataBase.setMonth(dataBase.getMonth() + 1);
+    const dataStr = dataBase.toISOString().split("T")[0];
+
+    const { status: sPost, data: recData } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id: contaOrigemId,
+        conta_destino_id: contaDestinoId,
+        valor: 80,
+        data: dataStr,
+        descricao: "TRF serie datas",
+        status: "PENDENTE",
+        total_parcelas: 3,
+        tipo_recorrencia: "MENSAL",
+        intervalo_recorrencia: 1,
+      }),
+    });
+    expect(sPost).toBe(201);
+    const parcelas = (recData as any).parcelas as any[];
+    const datasOriginais = parcelas.map((p: any) => p.data);
+
+    // Envia valor + data juntos: valor propaga, data fica por parcela
+    const { status: sPut } = await api(`/transferencias/${parcelas[0].id_par}?escopo=TODOS`, {
+      method: "PUT",
+      body: JSON.stringify({ valor: 85, data: dataStr }),
+    });
+    expect(sPut).toBe(200);
+
+    for (let i = 0; i < parcelas.length; i++) {
+      const { data: trf } = await api(`/transferencias/${parcelas[i].id_par}`);
+      expect((trf as any).valor).toBe(85);
+      expect((trf as any).data).toBe(datasOriginais[i]);
+    }
+
+    for (const p of parcelas) {
+      await api(`/transferencias/${p.id_par}`, { method: "DELETE" }).catch(() => {});
+    }
+  });
+
   // ── CA-TRF27 — Conta inativa rejeitada ───────────────────
   test("CA-TRF27 — POST /transferencias rejeita quando conta de origem está inativa", async () => {
     // Criar conta temporária e desativá-la
