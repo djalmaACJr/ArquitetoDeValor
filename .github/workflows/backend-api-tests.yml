@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [develop]
 
+# Os testes rodam contra UM banco/usuário de teste compartilhado — duas
+# execuções simultâneas (ex.: push na branch + merge na develop) colidem:
+# o 99_limpar de uma apaga os dados que a outra está contando. Grupo único
+# serializa: uma execução por vez, na fila; a mais antiga pendente é
+# cancelada quando chega commit mais novo.
+concurrency:
+  group: backend-api-tests-shared-db
+  cancel-in-progress: false
+
 jobs:
   test:
     name: Rodar testes automatizados

@@ -11,6 +11,12 @@ on:
     paths:
       - 'FrontEnd/**'
 
+# O E2E loga com um usuário fixo (convidado@arquitetodevalor.com) e mexe nos
+# dados dele — duas execuções simultâneas se atropelam. Uma por vez, na fila.
+concurrency:
+  group: frontend-e2e-shared-user
+  cancel-in-progress: false
+
 jobs:
   e2e:
     name: Playwright — Firefox

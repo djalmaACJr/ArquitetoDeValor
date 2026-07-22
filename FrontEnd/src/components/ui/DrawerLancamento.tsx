@@ -345,8 +345,21 @@ export default function DrawerLancamento({
         setCarregando(false)
       })()
     }
+  // `todasParcelas` FICA DE FORA do dependency array de propósito: é só um
+  // auxílio (siblings de recorrência/transferência) usado no MOMENTO em que
+  // o drawer abre. Incluí-lo aqui já causou um bug real — o array de
+  // lançamentos do pai é uma nova referência a cada refetch em background
+  // (staleTime vencendo, invalidação após outra ação, hidratação do cache no
+  // boot); com `todasParcelas` na lista, QUALQUER refetch em background
+  // re-executava este efeito enquanto `novoLancamento` continuava true,
+  // resetando silenciosamente para FORM_VAZIO um lançamento novo que o
+  // usuário ainda estava preenchendo (reproduzido no E2E: TRF06 perdia a
+  // descrição digitada porque o Extrato revalidava a lista no meio do
+  // preenchimento). Os efeitos colaterais que de fato PRECISAM da lista
+  // atualizada (parcelas de recorrência) já buscam os dados frescos via
+  // apiFetch próprio (linhas acima), não dependem de re-render por prop.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lancamentoId, lancamentoProp, novoLancamento, tipoInicial, todasParcelas])
+  }, [lancamentoId, lancamentoProp, novoLancamento, tipoInicial])
 
   // Assistente — busca sugestões compatíveis com a descrição digitada
   // (mín. 2 caracteres, debounce 400ms). O usuário escolhe via dropdown,

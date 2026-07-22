@@ -668,7 +668,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
   const toggle = () => onChange(!checked)
   return (
     <div className="flex items-center gap-2.5">
-      <button onClick={toggle}
+      <button type="button" role="switch" aria-checked={checked} onClick={toggle}
         className={`w-11 h-6 rounded-full relative transition-colors flex-shrink-0 ${checked ? 'bg-av-green' : 'bg-white/10'}`}>
         <span className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all"
           style={{ left: checked ? '22px' : '2px' }} />

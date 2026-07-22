@@ -394,7 +394,13 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     await api(`/investimentos/ativos/${aId}`, "DELETE");
   });
 
-  test("CA-INV25 — RF com vencimento futuro programa resgate e operação futura não reduz o saldo atual", async () => {
+  // O pré-agendamento do RESGATE no vencimento foi REMOVIDO do backend
+  // (poluía a lista de operações e distorcia totais sem filtro de data —
+  // ver comentário em fecharPosicoesVencidas). Hoje o fechamento é só via
+  // snapshot-auto/cron quando o vencimento passa (coberto pelo CA-INV26).
+  // Este teste valida o comportamento atual: vencimento futuro NÃO gera
+  // operação de resgate e as aplicações mantêm o saldo normalmente.
+  test("CA-INV25 — RF com vencimento futuro não pré-agenda resgate e aplicações somam o saldo", async () => {
     const venc = `${mesOffset(6)}-15`;
     const { data: dA } = await api("/investimentos/ativos", "POST", {
       ticker: "JESTINVRP", nome: "Jest RF Resgate Programado", tipo_ativo: "RENDA_FIXA",
@@ -411,30 +417,28 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
       return (data?.dados ?? []) as { tipo_operacao: string; quantidade: number; data_operacao: string }[];
     };
 
-    // Aplicação (APORTE) cria a posição e o resgate programado no vencimento.
+    // Aplicação (APORTE) cria a posição — sem resgate pré-agendado.
     await api("/investimentos/operacoes", "POST", {
       ativo_id: aId, conta_id: contaId, tipo_operacao: "APORTE",
       quantidade: 1, preco_unitario: 1000, valor_total: 1000, data_operacao: `${mesOffset(-1)}-10`,
     });
     let p = await posDoAtivo();
-    expect(Number(p.quantidade)).toBe(1);     // resgate futuro NÃO reduz o saldo atual
+    expect(Number(p.quantidade)).toBe(1);
     expect(p.status).toBe("ATIVA");
 
     let ops = await opsDoAtivo(p.id);
-    const prog = ops.find((o) => o.tipo_operacao === "RESGATE" && o.data_operacao === venc);
-    expect(prog).toBeTruthy();
-    expect(Number(prog!.quantidade)).toBe(1);
+    expect(ops.find((o) => o.tipo_operacao === "RESGATE")).toBeUndefined();
 
-    // Nova aplicação atualiza o resgate programado para o novo saldo remanescente.
+    // Nova aplicação soma no saldo — e continua sem resgate pré-agendado.
     await api("/investimentos/operacoes", "POST", {
       ativo_id: aId, conta_id: contaId, tipo_operacao: "APORTE",
       quantidade: 2, preco_unitario: 1000, valor_total: 2000, data_operacao: `${mesOffset(-1)}-20`,
     });
     p = await posDoAtivo();
     expect(Number(p.quantidade)).toBe(3);
+    expect(p.status).toBe("ATIVA");
     ops = await opsDoAtivo(p.id);
-    const prog2 = ops.find((o) => o.tipo_operacao === "RESGATE" && o.data_operacao === venc);
-    expect(Number(prog2!.quantidade)).toBe(3);
+    expect(ops.find((o) => o.tipo_operacao === "RESGATE")).toBeUndefined();
 
     const { data: posAll } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
     for (const pp of posAll?.dados ?? []) await api(`/investimentos/posicoes/${pp.id}`, "DELETE");
@@ -472,9 +476,27 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     await api(`/investimentos/ativos/${aId}`, "DELETE");
   });
 
-  test("CA-INV18 — DELETE /investimentos/ativos/:id com posições vinculadas retorna 409", async () => {
-    const { status } = await api(`/investimentos/ativos/${ativoId}`, "DELETE");
-    expect(status).toBe(409);
+  // O DELETE de ativo passou a excluir EM CASCATA (FKs ON DELETE CASCADE
+  // de posições/operações/dividendos/histórico) — o antigo bloqueio 409 não
+  // existe mais. Usa um ativo descartável próprio: excluir o `ativoId`
+  // compartilhado aqui derrubaria os testes de dividendos seguintes.
+  test("CA-INV18 — DELETE /investimentos/ativos/:id exclui posições e operações em cascata", async () => {
+    const { data: dA } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVDEL", nome: "Jest Delete Cascata", tipo_ativo: "ACOES",
+    });
+    const aId = dA.dados.id as string;
+    await api("/investimentos/posicoes", "POST", {
+      ativo_id: aId, conta_id: contaId, quantidade: 1, preco_custo: 10, data_compra: hoje(),
+    });
+
+    const { status } = await api(`/investimentos/ativos/${aId}`, "DELETE");
+    expect(status).toBe(200);
+
+    // Cascata: posições somem junto e o ativo não existe mais.
+    const { data: posAll } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
+    expect((posAll?.dados ?? []).length).toBe(0);
+    const { status: sGet } = await api(`/investimentos/ativos/${aId}`);
+    expect(sGet).toBe(404);
   });
 
   // ── Alocação ideal ──────────────────────────────────────────

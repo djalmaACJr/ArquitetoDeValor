@@ -21,11 +21,12 @@ echo   9. Transferencias
 echo  10. Lembretes
 echo  11. Assistente de Lancamentos
 echo  12. Objetivos
-echo  13. Abrir relatorio HTML do ultimo run
-echo  14. Modo visual (--ui)
+echo  13. Investimentos
+echo  14. Abrir relatorio HTML do ultimo run
+echo  15. Modo visual (--ui)
 echo   0. Sair
 echo.
-set /p OPC="Digite a opcao (0-14): "
+set /p OPC="Digite a opcao (0-15): "
 
 if "%OPC%"=="0"  goto FIM
 if "%OPC%"=="1"  goto OPC1
@@ -42,6 +43,7 @@ if "%OPC%"=="11" goto OPC11
 if "%OPC%"=="12" goto OPC12
 if "%OPC%"=="13" goto OPC13
 if "%OPC%"=="14" goto OPC14
+if "%OPC%"=="15" goto OPC15
 echo Opcao invalida.
 goto MENU
 
@@ -106,24 +108,32 @@ call :RUNTEST
 goto PAUSA
 
 :OPC13
-echo.
-echo Abrindo relatorio HTML...
-npm run test:e2e:report
+set TESTFILE=e2e/tests/11_investimentos.spec.ts
+call :RUNTEST
 goto PAUSA
 
 :OPC14
 echo.
-echo Iniciando modo visual (--ui)...
-echo Certifique-se que o frontend esta rodando em http://localhost:5173
+echo Abrindo relatorio HTML...
+call npm run test:e2e:report
+goto PAUSA
+
+:OPC15
 echo.
+echo Iniciando modo visual (--ui)...
 echo Verificando dependencias...
 if not exist node_modules\@playwright (
     echo Instalando Playwright...
     npm install @playwright/test@^1.50.0 dotenv@^16.4.5
     npx playwright install
 )
+call :GARANTIRVITE
 echo.
-npm run test:e2e:ui
+echo A interface do Playwright abre numa JANELA PROPRIA ("Playwright Test").
+echo Se nada aparecer, procure a janela na barra de tarefas.
+echo Feche a janela do Playwright para voltar a este menu.
+echo.
+call npm run test:e2e:ui
 goto PAUSA
 
 :RUNTEST
@@ -137,8 +147,8 @@ if not exist node_modules\@playwright (
     npm install @playwright/test@^1.50.0 dotenv@^16.4.5
     npx playwright install
 )
+call :GARANTIRVITE
 echo.
-echo Certifique-se que o frontend esta rodando em http://localhost:5173
 echo Salvando resultado em: %ARQ%
 echo.
 
@@ -153,6 +163,20 @@ goto PAUSA
 for /f "tokens=1-3 delims=/" %%a in ("%date%") do set TS=%%c-%%b-%%a
 for /f "tokens=1-2 delims=:." %%a in ("%time%") do set TS=%TS%_%%a-%%b
 set TS=%TS: =0%
+goto :eof
+
+:GARANTIRVITE
+rem Sobe o Vite em modo E2E se nada estiver escutando na porta 5173.
+rem Os testes locais PRECISAM do dev:e2e (VITE_E2E=true): sem ele o supabase
+rem usa outro storage e o storageState do Playwright nao persiste a sessao.
+netstat -ano | findstr ":5173" | findstr "LISTENING" >nul 2>&1
+if not errorlevel 1 goto :eof
+echo.
+echo Frontend nao detectado em http://localhost:5173
+echo Iniciando "npm run dev:e2e" em outra janela (modo E2E)...
+start "vite-e2e" cmd /c "npm run dev:e2e"
+echo Aguardando o Vite subir...
+timeout /t 8 /nobreak >nul
 goto :eof
 
 :PAUSA
