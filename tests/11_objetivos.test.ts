@@ -54,7 +54,7 @@ describe("Objetivos — CA-OBJ01 a CA-OBJ13", () => {
     contaCalculoId = novaConta.conta_id ?? novaConta.id;
 
     await limparObjetivosJest();
-  });
+  }, 60000); // margem extra: hook depende de auth+edge function, sujeito a cold start esporádico
 
   afterAll(async () => {
     await limparObjetivosJest();
@@ -67,7 +67,7 @@ describe("Objetivos — CA-OBJ01 a CA-OBJ13", () => {
       }
       await api(`/contas/${contaCalculoId}`, "DELETE");
     }
-  });
+  }, 60000);
 
   // ── CA-OBJ01 ────────────────────────────────────────────────
   test("CA-OBJ01 — POST /objetivos cria SONHO e retorna 201 com campos corretos", async () => {
