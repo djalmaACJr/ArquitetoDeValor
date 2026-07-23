@@ -35,7 +35,7 @@ const COR_REC = { COMPRAR: '#00c896', NEUTRO: '#8b92a8', AGUARDAR: '#ffb74d' } a
 const LABEL_REC = { COMPRAR: 'Comprar', NEUTRO: 'Neutro', AGUARDAR: 'Aguardar' } as const
 
 // ── Ordenação por coluna ───────────────────────────────────────
-type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'venc' | 'indexador' | 'taxa'
+type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'venc' | 'indexador' | 'taxa' | 'instituicao'
 function precoMedio(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_custo / l.quantidade : 0 }
 function precoAtual(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_mercado / l.quantidade : 0 }
 function valorOrdenacao(l: AtivoLinha, k: SortKey): number | string {
@@ -56,6 +56,7 @@ function valorOrdenacao(l: AtivoLinha, k: SortKey): number | string {
     case 'venc':       return l.meta?.rf_vencimento ?? ''  // ISO yyyy-mm-dd ordena lexicalmente
     case 'indexador':  return rfIndexadorLabel(l) ?? ''
     case 'taxa':       return l.meta?.rf_taxa ?? ''
+    case 'instituicao': return l.contas.join(', ')
   }
 }
 
@@ -258,19 +259,18 @@ export default function QuadroTipoAtivos({
         : acoes && <span className="block text-[11px]" style={{ color: '#ffb74d' }}>Sem posição em conta</span>}
     </>
   )
-  const celContas = (l: AtivoLinha): ReactNode => (
-    l.contas.length > 0
-      ? <span className="block text-[11px]" style={{ color: MUTED }}>{l.contas.join(', ')}</span>
-      : acoes ? <span className="block text-[11px]" style={{ color: '#ffb74d' }}>Sem posição em conta</span> : null
-  )
-
   const C: Record<string, Coluna> = {
     ticker: { id: 'ticker', label: 'Ativo', align: 'left', sortKey: 'ticker', cell: (l) => linkAtivo(l, l.ticker) },
     nome:   { id: 'nome', label: 'Nome', align: 'left', sortKey: 'nome', cell: celNome },
     // RF: identificador é o nome do título (não há ticker útil), com link.
-    titulo: { id: 'titulo', label: 'Título', align: 'left', sortKey: 'nome', cell: (l) => (
-      <>{linkAtivo(l, <span className="truncate max-w-[240px]" title={l.nome ?? l.ticker}>{l.nome || l.ticker}</span>)}{celContas(l)}</>
-    ) },
+    titulo: { id: 'titulo', label: 'Título', align: 'left', sortKey: 'nome', cell: (l) =>
+      linkAtivo(l, <span className="truncate max-w-[240px]" title={l.nome ?? l.ticker}>{l.nome || l.ticker}</span>)
+    },
+    instituicao: { id: 'instituicao', label: 'Instituição', align: 'left', sortKey: 'instituicao', cell: (l) =>
+      l.contas.length > 0
+        ? <span className="text-white/70 truncate block max-w-[160px]" title={l.contas.join(', ')}>{l.contas.join(', ')}</span>
+        : acoes ? <span className="text-[11px]" style={{ color: '#ffb74d' }}>Sem posição em conta</span> : traco
+    },
     setor:  { id: 'setor', label: 'Segmento', align: 'left', sortKey: 'setor', cell: (l) => <span className="text-white/70">{setorLabel(l.setor) ?? '—'}</span> },
     categoria: { id: 'categoria', label: 'Categoria', align: 'left', sortKey: 'categoria', cell: (l) => <span className="text-white/70">{l.categoria ?? '—'}</span> },
     indexador: { id: 'indexador', label: 'Indexador', align: 'left', sortKey: 'indexador', cell: (l) => {
@@ -310,22 +310,22 @@ export default function QuadroTipoAtivos({
   }
 
   const base: Coluna[] = ehRF
-    ? [C.titulo, C.indexador, C.taxa, C.venc, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart]
+    ? [C.titulo, C.instituicao, C.indexador, C.taxa, C.venc, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart]
     : ehFII
       ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart]
       : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart]
   // Quando o quadro NÃO está agrupado por categoria, ela deixa de aparecer como
-  // cabeçalho de grupo — então a exibimos como coluna (após Título, na RF, ou
-  // após Nome, nos demais). Sem dados de categoria, a coluna é omitida.
+  // cabeçalho de grupo — então a exibimos como coluna (após Título+Instituição,
+  // na RF, ou após Nome, nos demais). Sem dados de categoria, a coluna é omitida.
   const visiveis: Coluna[] = (() => {
     if (dimEf === 'categoria' || !temCategoria) return base
     const arr = [...base]
-    arr.splice(ehRF ? 1 : 2, 0, C.categoria)
+    arr.splice(2, 0, C.categoria)
     return arr
   })()
   // colunas visíveis + "Comprar?" + (Ações, se houver)
   const nCols = visiveis.length + 1 + (acoes ? 1 : 0)
-  const minWidth = ehFII ? 980 : ehRF ? 920 : 860
+  const minWidth = ehFII ? 980 : ehRF ? 1040 : 860
 
   function LinhaAtivo({ l, realce, alvo, primeira, ultima }: {
     l: AtivoLinha; realce: boolean; alvo: boolean; primeira: boolean; ultima: boolean
