@@ -17,6 +17,8 @@ import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo, SelectD
 import DrawerAtivo from '../components/ui/DrawerAtivo'
 import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
 import LoadingMascote from '../components/ui/LoadingMascote'
+import TutorialTour from '../components/ui/TutorialTour'
+import { TUTORIAL_INVESTIMENTOS_DETALHE } from '../lib/tutoriaisPaginas'
 import { formatBRL, formatData, formatUSD as fmtUSD } from '../lib/utils'
 import {
   TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPO_OPERACAO_LABEL,
@@ -427,7 +429,7 @@ export default function DetalheInvestimentoPage() {
             <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>{ativo.nome}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap" data-tutorial="detalhe-header">
           {recomendacao && (
             <span title={recomendacao.motivo}
               className="inline-flex items-center text-[12px] px-2.5 py-1 rounded-full font-medium"
@@ -491,7 +493,7 @@ export default function DetalheInvestimentoPage() {
         const usd = resumoConvertido?.usd
         const sub = (v?: number) => (v != null ? fmtUSD(v) : undefined)
         return (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5" data-tutorial="detalhe-cards">
             <CardMini icone={<Wallet size={14} />} titulo="Valor de mercado" valor={formatBRL(r.mercado)} sub={sub(usd?.mercado)} />
             <CardMini icone={<Coins size={14} />} titulo="Custo" valor={formatBRL(r.custo)} sub={sub(usd?.custo)} />
             <CardMini icone={r.ganho >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
@@ -513,7 +515,7 @@ export default function DetalheInvestimentoPage() {
         </SelectDark>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" data-tutorial="detalhe-graficos">
         {/* Evolução do valor de mercado */}
         <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
           <h2 className="text-[14px] font-semibold text-white/80 mb-3">Evolução mensal</h2>
@@ -678,7 +680,7 @@ export default function DetalheInvestimentoPage() {
         )}
 
         {/* Operações recentes */}
-        <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4" data-tutorial="detalhe-operacoes">
           <h2 className="text-[14px] font-semibold text-white/80 mb-3">Operações recentes</h2>
 
           {/* Totais por tipo de operação no período selecionado */}
@@ -784,6 +786,8 @@ export default function DetalheInvestimentoPage() {
           mensagem="Isso remove o ativo e todas as suas posições, operações e dividendos."
           onConfirmar={confirmarExclusao} onCancelar={() => setExcluindo(false)} salvando={salvandoExclusao} />
       )}
+
+      <TutorialTour pageKey="investimentos-detalhe-v1" passos={TUTORIAL_INVESTIMENTOS_DETALHE} />
     </div>
   )
 }

@@ -641,15 +641,9 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
 
 // -- Grafico donut de categoria ---------------------------
 
-// Propriedades geométricas de uma fatia do donut (Chart.js ArcElement.getProps)
-interface DonutArcProps {
-  x: number; y: number; startAngle: number; endAngle: number
-  innerRadius: number; outerRadius: number
-}
-
 const rotuloCurto = (s: string, max = 13) => s.length > max ? `${s.slice(0, max - 1)}…` : s
 
-const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dados, topN = 5 }: {
+const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dados, corCentro, topN = 5 }: {
   titulo: string; subtitulo: string; total: number
   dados: DespesaCategoria[]; corCentro: string
   topN?: number
@@ -698,101 +692,67 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
   const labelsKey = labelsChart.join('|')
   const valuesKey = valuesChart.join('|')
 
+  // Mesmo padrão visual do donut "Ativos na Carteira" (InvestimentosPage):
+  // nome + % dentro de cada fatia grande o suficiente (fatias pequenas só no
+  // tooltip) e o total no buraco central — sem legenda em grade abaixo.
   const donutLabelsPlugin = useMemo(() => ({
     id: `donut-labels-${titulo.replace(/\W+/g, '-').toLowerCase()}`,
     afterDatasetsDraw(chart: ChartJS) {
       const meta = chart.getDatasetMeta(0)
-      const dataset = chart.data.datasets[0] as { data: number[]; backgroundColor: string[] } | undefined
+      const dataset = chart.data.datasets[0] as { data: number[] } | undefined
       if (!meta?.data?.length || !dataset?.data?.length) return
 
       const ctx = chart.ctx
-      const area = chart.chartArea
-      const chartW = area.right - area.left
-      const compact = chartW < 380
       const totalDataset = dataset.data.reduce((s, v) => s + Number(v || 0), 0)
-      if (totalDataset <= 0) return
-
       ctx.save()
+      ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
 
-      meta.data.forEach((arcEl, i) => {
-        const value = Number(dataset.data[i] || 0)
-        if (value <= 0) return
+      if (totalDataset > 0) {
+        meta.data.forEach((arcEl, i) => {
+          const value = Number(dataset.data[i] || 0)
+          const pct = (value / totalDataset) * 100
+          if (pct < 5) return // fatia muito pequena: identifica só no tooltip
 
-        const pct = totalDataset > 0 ? (value / totalDataset) * 100 : 0
-        const props = (arcEl as unknown as {
-          getProps(p: (keyof DonutArcProps)[], final: boolean): DonutArcProps
-        }).getProps(['x', 'y', 'startAngle', 'endAngle', 'innerRadius', 'outerRadius'], true)
-        const angle = (props.startAngle + props.endAngle) / 2
-        const cos = Math.cos(angle)
-        const sin = Math.sin(angle)
-        const color = dataset.backgroundColor[i]
-        const label = String(chart.data.labels?.[i] ?? '')
-        const valueLabel = formatBRL(value)
-        const pctLabel = `${pct.toFixed(1)}%`
-        const inside = !compact && pct >= 16 && label.length <= 14
+          const pos = (arcEl as unknown as { tooltipPosition: () => { x: number; y: number } }).tooltipPosition()
+          const label = rotuloCurto(String(chart.data.labels?.[i] ?? ''), 14)
 
-        if (inside) {
-          const r = props.innerRadius + (props.outerRadius - props.innerRadius) * 0.55
-          const x = props.x + cos * r
-          const y = props.y + sin * r
-          ctx.textAlign = 'center'
-          ctx.fillStyle = 'rgba(8, 12, 20, 0.86)'
-          ctx.font = '700 11px Space Grotesk, system-ui, sans-serif'
-          ctx.fillText(rotuloCurto(label, 14), x, y - 9)
-          ctx.font = '700 10px Space Grotesk, system-ui, sans-serif'
-          ctx.fillText(`${valueLabel} · ${pctLabel}`, x, y + 8)
-          return
-        }
+          ctx.fillStyle = '#0e1525'
+          ctx.font = '600 10px Space Grotesk, system-ui, sans-serif'
+          ctx.fillText(label, pos.x, pos.y - 8)
+          ctx.font = '700 12px Space Grotesk, system-ui, sans-serif'
+          ctx.fillText(`${pct.toFixed(1).replace('.', ',')}%`, pos.x, pos.y + 8)
+        })
+      }
 
-        if (pct < 4) return
-
-        const startX = props.x + cos * (props.outerRadius - 2)
-        const startY = props.y + sin * (props.outerRadius - 2)
-        const elbowX = props.x + cos * (props.outerRadius + 14)
-        const elbowY = props.y + sin * (props.outerRadius + 14)
-        const side = cos >= 0 ? 1 : -1
-        const endX = elbowX + side * (compact ? 26 : 42)
-        const endY = elbowY
-        const textX = endX + side * 6
-        const align: CanvasTextAlign = side > 0 ? 'left' : 'right'
-
-        ctx.strokeStyle = color
-        ctx.lineWidth = 1.4
-        ctx.beginPath()
-        ctx.moveTo(startX, startY)
-        ctx.lineTo(elbowX, elbowY)
-        ctx.lineTo(endX, endY)
-        ctx.stroke()
-
-        ctx.fillStyle = color
-        ctx.beginPath()
-        ctx.arc(startX, startY, 2.6, 0, Math.PI * 2)
-        ctx.fill()
-
-        ctx.textAlign = align
-        ctx.fillStyle = 'rgba(232, 234, 240, 0.92)'
-        ctx.font = '700 11px Space Grotesk, system-ui, sans-serif'
-        ctx.fillText(rotuloCurto(label, compact ? 10 : 15), textX, endY - 8)
-        ctx.fillStyle = 'rgba(197, 202, 216, 0.86)'
-        ctx.font = '600 10px Space Grotesk, system-ui, sans-serif'
-        ctx.fillText(`${valueLabel} · ${pctLabel}`, textX, endY + 8)
-      })
+      // Total no buraco central
+      const arc0 = meta.data[0] as unknown as { x: number; y: number } | undefined
+      if (arc0) {
+        ctx.fillStyle = '#8b92a8'
+        ctx.font = '500 11px Space Grotesk, system-ui, sans-serif'
+        ctx.fillText('Total', arc0.x, arc0.y - 11)
+        ctx.fillStyle = corCentro
+        ctx.font = '700 16px Space Grotesk, system-ui, sans-serif'
+        ctx.fillText(formatBRL(total), arc0.x, arc0.y + 9)
+      }
 
       ctx.restore()
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [titulo, labelsKey, valuesKey])
+  }), [titulo, corCentro, total, labelsKey, valuesKey])
 
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-      {/* Cabeçalho — deixa claro que mostra Top N de M */}
-      <div className="flex items-center justify-between mb-0.5">
-        <p className="text-[17px] font-semibold text-gray-700 dark:text-gray-200">{titulo}</p>
+    <div className="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-white/[0.02] p-4 flex flex-col">
+      {/* Cabeçalho — mesmo padrão do card "Ativos na Carteira" (Investimentos) */}
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="text-[15px] font-semibold text-gray-700 dark:text-white">{titulo}</p>
+          <p className="text-[13px] text-gray-400" style={{ color: '#8b92a8' }}>{subtitulo}</p>
+        </div>
         {dados.length > topN && (
           <button
             onClick={() => setExpandido(true)}
-            className="text-[14px] font-semibold px-2 py-0.5 rounded-full transition-colors hover:bg-blue-500/20"
+            className="text-[13px] font-semibold px-2 py-0.5 rounded-full transition-colors hover:bg-blue-500/20 flex-shrink-0"
             style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
             title="Ver todas as categorias"
           >
@@ -800,14 +760,12 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
           </button>
         )}
       </div>
-      <p className="text-[15px] text-gray-400 mb-3">
-        {subtitulo} · total {formatBRL(total)}
-        {dados.length > topN && <> · exibindo top {topN} de {dados.length}</>}
-      </p>
 
-      {/* Donut clicável — também abre a expansão */}
+      {/* Rosca em destaque: rótulos (nome + %) dentro das fatias e total no
+          centro — clicável, também abre a expansão. */}
       <div
-        style={{ position: 'relative', width: '100%', height: '292px', marginBottom: '1rem', cursor: dados.length > topN ? 'pointer' : 'default' }}
+        className="flex-1 min-h-[292px] flex items-center justify-center"
+        style={{ cursor: dados.length > topN ? 'pointer' : 'default' }}
         onClick={() => { if (dados.length > topN) setExpandido(true) }}
       >
         <Doughnut
@@ -816,8 +774,7 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
             datasets: [{
               data: valuesChart,
               backgroundColor: coresChart,
-              borderColor: 'rgba(10,15,26,0.96)',
-              borderWidth: 4,
+              borderWidth: 0,
               borderRadius: 12,
               spacing: 3,
               hoverOffset: 8,
@@ -826,8 +783,7 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
           options={{
             responsive: true,
             maintainAspectRatio: false,
-            layout: { padding: { top: 18, right: 48, bottom: 18, left: 48 } },
-            cutout: '64%',
+            cutout: '62%',
             plugins: {
               legend: { display: false },
               tooltip: {
@@ -849,9 +805,9 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
       </div>
 
       {/* Legenda compacta — apenas top N, com valor e percentual. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0 mt-4">
         {tops.map((d, i) => (
-          <div key={d.categoria_id} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 min-w-0">
+          <div key={d.categoria_id} className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.03] px-3 py-2 min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: coresChart[i] }} />
               <span className="flex-1 min-w-0 text-[14px] font-semibold text-gray-700 dark:text-gray-200 truncate">{d.categoria_nome}</span>
@@ -861,7 +817,7 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
           </div>
         ))}
         {temOutros && (
-          <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 min-w-0">
+          <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.03] px-3 py-2 min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: '#a3a9b8' }} />
               <span className="flex-1 min-w-0 text-[14px] font-semibold text-gray-500 italic truncate">Outros ({sobras.length})</span>

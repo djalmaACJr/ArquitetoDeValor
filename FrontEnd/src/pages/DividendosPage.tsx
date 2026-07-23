@@ -17,6 +17,8 @@ import {
 } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
+import TutorialTour from '../components/ui/TutorialTour'
+import { TUTORIAL_INVESTIMENTOS_PROVENTOS } from '../lib/tutoriaisPaginas'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import { formatBRL, formatData, hojeLocal, mesAtual, mesLabel, MESES_ABREV } from '../lib/utils'
@@ -192,7 +194,7 @@ export default function DividendosPage() {
           <h1 className="text-[22px] font-bold text-white">Proventos</h1>
           <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>Proventos recebidos, integrados ao extrato</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-tutorial="proventos-header">
           <button onClick={buscarProventos} disabled={buscando}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
             title="Busca proventos na B3 (ações, ETFs e FIIs em BRL) e na Polygon (ativos internacionais em USD): provisiona os futuros e lança os pagos nos últimos 30 dias">
@@ -221,7 +223,7 @@ export default function DividendosPage() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
             <Link2 size={15} /> Associar do extrato
           </button>
-          <button onClick={() => setDrawerNovo(true)}
+          <button onClick={() => setDrawerNovo(true)} data-tutorial="proventos-novo"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white" style={{ background: '#3b82f6' }}>
             <Plus size={15} /> Novo dividendo
           </button>
@@ -232,22 +234,26 @@ export default function DividendosPage() {
 
       <AvisoMapeamento />
 
-      <ProventosPorCategoria dividendos={dividendos} />
-      <AtivosPorCategoria dividendos={dividendos} />
-      <ObjetivosAtivos />
+      <div data-tutorial="proventos-resumo">
+        <ProventosPorCategoria dividendos={dividendos} />
+        <AtivosPorCategoria dividendos={dividendos} />
+        <ObjetivosAtivos />
+      </div>
 
       {/* Lista */}
-      {dividendos.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
-          <Coins size={32} className="mx-auto mb-3" style={{ color: MUTED }} />
-          <p className="text-white font-medium">Nenhum dividendo lançado</p>
-          <p className="text-[13px] mt-1" style={{ color: MUTED }}>
-            Cada dividendo gera uma receita no extrato, na categoria do seu tipo.
-          </p>
-        </div>
-      ) : (
-        <ListaDividendos dividendos={dividendos} onExcluir={setExcluindo} onConfirmar={setConfirmando} />
-      )}
+      <div data-tutorial="proventos-lista">
+        {dividendos.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
+            <Coins size={32} className="mx-auto mb-3" style={{ color: MUTED }} />
+            <p className="text-white font-medium">Nenhum dividendo lançado</p>
+            <p className="text-[13px] mt-1" style={{ color: MUTED }}>
+              Cada dividendo gera uma receita no extrato, na categoria do seu tipo.
+            </p>
+          </div>
+        ) : (
+          <ListaDividendos dividendos={dividendos} onExcluir={setExcluindo} onConfirmar={setConfirmando} />
+        )}
+      </div>
 
       {drawerNovo   && <DrawerNovoDividendo onClose={() => setDrawerNovo(false)} onToast={showToast} />}
       {drawerAssoc  && <DrawerAssociar      onClose={() => setDrawerAssoc(false)} onToast={showToast} />}
@@ -259,6 +265,8 @@ export default function DividendosPage() {
           mensagem="A transação vinculada no extrato também será removida."
           onConfirmar={confirmarExclusao} onCancelar={() => setExcluindo(null)} salvando={salvando} />
       )}
+
+      <TutorialTour pageKey="investimentos-proventos-v1" passos={TUTORIAL_INVESTIMENTOS_PROVENTOS} />
     </div>
   )
 }

@@ -21,6 +21,8 @@ import LoadingMascote from '../components/ui/LoadingMascote'
 import { SelectDark, Toast } from '../components/ui/shared'
 import QuadroTipoAtivos from '../components/ui/QuadroTipoAtivos'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
+import TutorialTour from '../components/ui/TutorialTour'
+import { TUTORIAL_INVESTIMENTOS } from '../lib/tutoriaisPaginas'
 import { linhaDeRanking, type AtivoLinha } from '../lib/ativosLinha'
 import { formatBRL } from '../lib/utils'
 import {
@@ -538,7 +540,7 @@ function DividendosPorMes({ dividendos }: { dividendos: { data_pagamento: string
 
   if (divPorMes.length === 0) return null
   return (
-    <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mt-6">
+    <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mt-6" data-tutorial="investimentos-dividendos">
       <h2 className="text-[15px] font-semibold text-white mb-3">Dividendos por mês</h2>
       <Bar
         data={{
@@ -771,7 +773,7 @@ export default function InvestimentosPage() {
             Visão consolidada da carteira por tipo de ativo
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-tutorial="investimentos-header">
           <SelectDark
             value={contaId}
             onChange={(e) => setContaId(e.target.value)}
@@ -877,25 +879,27 @@ export default function InvestimentosPage() {
       ) : (
         <>
           {/* Cards superiores */}
-          <CardsResumo
-            d={{
-              total_custo:      dashboard?.total_custo ?? 0,
-              total_mercado:    dashboard?.total_mercado ?? 0,
-              ganho_perda:      dashboard?.ganho_perda ?? 0,
-              total_dividendos: dashboard?.total_dividendos ?? 0,
-            }}
-            proventos12m={proventos12m}
-          />
+          <div data-tutorial="investimentos-cards">
+            <CardsResumo
+              d={{
+                total_custo:      dashboard?.total_custo ?? 0,
+                total_mercado:    dashboard?.total_mercado ?? 0,
+                ganho_perda:      dashboard?.ganho_perda ?? 0,
+                total_dividendos: dashboard?.total_dividendos ?? 0,
+              }}
+              proventos12m={proventos12m}
+            />
+          </div>
 
           {/* Evolução + composição */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-5">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-5" data-tutorial="investimentos-evolucao">
             <EvolucaoPatrimonio contaId={contaId || null} dividendos={dividendos} />
             <AtivosNaCarteira tipos={tipos}
               onSelecionarTipo={(tipo) => setFoco((f) => ({ tipo, n: (f?.n ?? 0) + 1 }))} />
           </div>
 
           {/* Lista expansível por tipo */}
-          <div className="space-y-2">
+          <div className="space-y-2" data-tutorial="investimentos-lista">
             {tipos.map((t) => (
               <QuadroTipoAtivos key={t.tipo_ativo} tipo={t.tipo_ativo} dados={t}
                 linhas={linhasPorTipo.get(t.tipo_ativo) ?? []}
@@ -903,13 +907,17 @@ export default function InvestimentosPage() {
             ))}
           </div>
 
-          <SecaoRanking ativos={ativosRanking} />
+          <div data-tutorial="investimentos-destaques">
+            <SecaoRanking ativos={ativosRanking} />
+          </div>
 
           <DividendosPorMes dividendos={dividendos} />
         </>
       )}
 
       <Toast msg={toast} />
+
+      <TutorialTour pageKey="investimentos-v1" passos={TUTORIAL_INVESTIMENTOS} />
     </div>
   )
 }

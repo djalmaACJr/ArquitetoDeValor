@@ -648,3 +648,254 @@ export const TUTORIAL_PROJECAO: PassoTutorial[] = [
     flutuante: true,
   },
 ]
+
+export const TUTORIAL_INVESTIMENTOS: PassoTutorial[] = [
+  {
+    titulo: 'Bem-vindo aos Investimentos',
+    texto: 'Aqui você acompanha sua carteira de ponta a ponta: ativos, posições, dividendos e performance — num dashboard estilo corretora que se atualiza sozinho a partir das suas operações.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Navegação do módulo',
+    texto: 'Painel (visão geral), Meus ativos (cadastro e movimentações), Proventos (dividendos) e Configurações (metas de alocação, questionários, migração de conta). Este menu acompanha você em todas as páginas de Investimentos.',
+    seletor: '[data-tutorial="investimentos-nav"]',
+  },
+  {
+    titulo: 'Filtrar por conta e atualizar dados',
+    texto: 'Filtre tudo por uma conta de investimento específica ou veja o consolidado. "Atualizar cotação" busca o preço atual dos ativos; "Preencher histórico" aparece quando há lacunas no valor de mercado de algum mês.',
+    seletor: '[data-tutorial="investimentos-header"]',
+  },
+  {
+    titulo: 'Resumo da carteira',
+    texto: 'Valor de custo, valor de mercado, ganho/prejuízo e dividendos recebidos nos últimos 12 meses — sempre respeitando o filtro de conta ativo.',
+    seletor: '[data-tutorial="investimentos-cards"]',
+  },
+  {
+    titulo: 'Evolução e composição',
+    texto: 'À esquerda, a evolução mensal do patrimônio (aplicado, ganho e proventos), com filtro de período e tipo de ativo. À direita, a composição atual da carteira — clique numa fatia do donut para focar aquele tipo na lista abaixo.',
+    seletor: '[data-tutorial="investimentos-evolucao"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Ativos por tipo',
+    texto: 'Cada bloco agrupa os ativos de um tipo (Ações, FIIs, Renda Fixa...), com preço médio, valor de mercado e rentabilidade. Clique no ticker para abrir a página de detalhe do ativo, com gráficos e histórico completo.',
+    seletor: '[data-tutorial="investimentos-lista"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Destaques da carteira',
+    texto: 'Ranking rápido dos ativos em alta, em prejuízo, com maior dividend yield e maior participação na carteira — só aparece quando há dados suficientes.',
+    seletor: '[data-tutorial="investimentos-destaques"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Dividendos por mês',
+    texto: 'Total de proventos recebidos mês a mês, nos últimos 12 meses.',
+    seletor: '[data-tutorial="investimentos-dividendos"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Comece cadastrando seus ativos em "Meus ativos" — o dashboard ganha vida assim que houver posições. Reabra este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
+    seletor: '',
+    flutuante: true,
+  },
+]
+
+export const TUTORIAL_INVESTIMENTOS_ATIVOS: PassoTutorial[] = [
+  {
+    titulo: 'Meus ativos',
+    texto: 'Aqui você cadastra os ativos da sua carteira e gerencia as posições — compra, venda, aporte ou resgate. Cada tipo (Ações, FIIs, Renda Fixa...) vira um bloco expansível na lista abaixo.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Buscar e filtrar',
+    texto: 'Busque por ticker ou nome, filtre por tipo de ativo, ou ligue "Somente com valor" para ver só o que tem posição ativa na carteira. "Atualizar tickets" e "Padronizar Tesouro" corrigem cadastros antigos.',
+    seletor: '[data-tutorial="ativos-header"]',
+  },
+  {
+    titulo: 'Novo ativo',
+    texto: 'Cadastre um ativo buscando o ticker (preenche nome e preço automaticamente) ou manualmente, se preferir. Já dá pra registrar a primeira compra no mesmo formulário.',
+    seletor: '[data-tutorial="ativos-novo"]',
+  },
+  {
+    titulo: 'Gráficos complementares',
+    texto: 'Evolução do valor por tipo de ativo, resumo por instituição (corretora) e, quando aplicável, a composição de Ações por segmento e FIIs por categoria.',
+    seletor: '[data-tutorial="ativos-evolucao"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Ativos por tipo',
+    texto: 'Cada linha é um ativo, com preço médio, valor de mercado e rentabilidade. Os ícones à direita abrem Movimentações (registrar compra/venda), Valor de mercado (histórico mensal) e Editar. Clique no ticker para ver a página de detalhe completa.',
+    seletor: '[data-tutorial="ativos-lista"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Reabra este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
+    seletor: '',
+    flutuante: true,
+  },
+]
+
+export const TUTORIAL_INVESTIMENTOS_DETALHE: PassoTutorial[] = [
+  {
+    titulo: 'Detalhe do ativo',
+    texto: 'Página completa de um único ativo: resumo, gráficos de evolução e rentabilidade, dividendos e o histórico de operações.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Ações do ativo',
+    texto: 'Dê uma nota pessoal ao ativo (usada nas avaliações), registre uma nova movimentação, edite os dados cadastrais ou exclua o ativo — a exclusão remove também posições, operações e dividendos vinculados.',
+    seletor: '[data-tutorial="detalhe-header"]',
+  },
+  {
+    titulo: 'Resumo do ativo',
+    texto: 'Valor de mercado, custo, ganho/prejuízo e total de dividendos recebidos. Para ativos em moeda estrangeira, o valor original em dólar aparece como referência.',
+    seletor: '[data-tutorial="detalhe-cards"]',
+  },
+  {
+    titulo: 'Gráficos e histórico',
+    texto: 'Escolha o período no seletor acima. Evolução mensal, rentabilidade (mês e acumulada), dividendos e dividend yield por mês — os gráficos de proventos não aparecem para Renda Fixa, Tesouro Direto e Criptomoedas.',
+    seletor: '[data-tutorial="detalhe-graficos"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Operações recentes',
+    texto: 'Totais por tipo de operação no período selecionado, seguidos da lista das últimas movimentações registradas.',
+    seletor: '[data-tutorial="detalhe-operacoes"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Reabra este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
+    seletor: '',
+    flutuante: true,
+  },
+]
+
+export const TUTORIAL_INVESTIMENTOS_PROVENTOS: PassoTutorial[] = [
+  {
+    titulo: 'Proventos',
+    texto: 'Cada dividendo recebido gera automaticamente uma receita no extrato, na categoria mapeada para o seu tipo (Dividendos, JSCP, Aluguel de FII...).',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Buscar e diagnosticar',
+    texto: '"Buscar proventos" consulta B3 e Polygon e lança os pagamentos automaticamente. Se voltar vazio, "Diagnóstico" testa cada elo (posição, fonte, tipo mapeado) sem gravar nada — ótimo pra descobrir o que está bloqueando. "Associar do extrato" vincula lançamentos manuais antigos aos investimentos.',
+    seletor: '[data-tutorial="proventos-header"]',
+  },
+  {
+    titulo: 'Novo dividendo',
+    texto: 'Lance um provento manualmente: ativo, tipo, conta de recebimento, valor e data. Data futura entra como projeção — vira PAGO quando você confirmar o recebimento.',
+    seletor: '[data-tutorial="proventos-novo"]',
+  },
+  {
+    titulo: 'Resumo de proventos',
+    texto: 'Proventos por categoria, composição por tipo de ativo (com drill-down por clique) e os objetivos de renda recorrente vinculados a dividendos.',
+    seletor: '[data-tutorial="proventos-resumo"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Extrato de proventos',
+    texto: 'Lista mês a mês, com filtros por tipo de ativo. Proventos projetados têm um botão de confirmação; qualquer um pode ser excluído (a transação vinculada no extrato some junto).',
+    seletor: '[data-tutorial="proventos-lista"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Sem tipos mapeados a uma categoria, use "Configurar tipos" antes de lançar o 1º provento. Reabra este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
+    seletor: '',
+    flutuante: true,
+  },
+]
+
+export const TUTORIAL_INVESTIMENTOS_AVALIACOES: PassoTutorial[] = [
+  {
+    titulo: 'Avaliações',
+    texto: 'Seus mentores de IA avaliam cada ativo da carteira por questionário — a nota final pondera os critérios (Fundamentos, Crescimento, Renda, Valuation). Requer ao menos um mentor de IA configurado em Perfil e ativos com saldo em carteira.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Avaliar a carteira',
+    texto: 'Escolha quais tipos de ativo avaliar e clique em "Avaliar carteira com os mentores". O processo roda nesta aba — não feche nem recarregue enquanto durar. Se parar no meio, "Continuar avaliação" retoma de onde ficou.',
+    seletor: '[data-tutorial="avaliacoes-avaliar"]',
+  },
+  {
+    titulo: 'Agenda de reavaliação',
+    texto: 'Defina uma frequência para ser lembrado de reavaliar a carteira periodicamente.',
+    seletor: '[data-tutorial="avaliacoes-agenda"]',
+  },
+  {
+    titulo: 'Mentores',
+    texto: 'Cada mentor configurado opina de forma independente; a nota final consolida o consenso entre eles (média ou mediana, conforme a questão).',
+    seletor: '[data-tutorial="avaliacoes-mentores"]',
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Depois da 1ª avaliação, aparecem aqui o ranking geral, a concentração de risco da carteira e a lista de ativos avaliados por tipo. Reabra este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
+    seletor: '',
+    flutuante: true,
+  },
+]
+
+export const TUTORIAL_INVESTIMENTOS_CONFIG: PassoTutorial[] = [
+  {
+    titulo: 'Configurações de Investimentos',
+    texto: 'Aqui ficam as preferências que alimentam o resto do módulo: seu perfil de investidor, metas de alocação, critérios de avaliação e mapeamento de proventos.',
+    seletor: '',
+    flutuante: true,
+  },
+  {
+    titulo: 'Perfil do investidor',
+    texto: 'Responda o questionário de suitability e informe quando pretende se aposentar. O perfil (Conservador a Arrojado) é derivado das respostas e do seu horizonte de tempo.',
+    seletor: '[data-tutorial="config-perfil"]',
+  },
+  {
+    titulo: 'Meta de aposentadoria',
+    texto: 'Estimativa pela regra dos 4%: quanto de patrimônio você precisa para viver da renda passiva. Edite "Renda a substituir" para simular diferentes cenários.',
+    seletor: '[data-tutorial="config-aposentadoria"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Metas de alocação',
+    texto: 'Defina o % ideal de cada tipo de ativo na carteira (a soma precisa fechar 100%). Alimenta a barra de meta e a recomendação de compra em cada ativo.',
+    seletor: '[data-tutorial="config-metas"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Pesos por critério',
+    texto: 'Quanto cada critério (Fundamentos, Crescimento, Renda, Valuation) pesa na nota final — vale para todos os tipos de ativo. "Sugerir pelo perfil" preenche automaticamente conforme seu perfil de investidor.',
+    seletor: '[data-tutorial="config-pesos"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Questionários de avaliação',
+    texto: 'Cada tipo de ativo com meta de alocação definida tem seu próprio questionário, separado por critério. Edite as perguntas à mão ou peça a um Mentor de IA para gerar um conjunto novo.',
+    seletor: '[data-tutorial="config-questionarios"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Tipos de dividendo',
+    texto: 'Mapeie cada tipo de provento (Dividendos, JSCP, Aluguel de FII...) a uma categoria do extrato. Sem mapeamento, a busca automática de proventos não consegue lançar o pagamento.',
+    seletor: '[data-tutorial="config-tipos-dividendo"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Migrar conta de investimentos',
+    texto: 'Mova posições, operações, proventos e histórico de uma conta para outra — útil para redistribuir ativos importados numa conta provisória entre suas contas reais.',
+    seletor: '[data-tutorial="config-migrar"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Tudo pronto!',
+    texto: 'Reabra este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
+    seletor: '',
+    flutuante: true,
+  },
+]

@@ -18,6 +18,8 @@ import {
 } from '../components/ui/shared'
 import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelect'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
+import TutorialTour from '../components/ui/TutorialTour'
+import { TUTORIAL_INVESTIMENTOS_CONFIG } from '../lib/tutoriaisPaginas'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { useContas } from '../hooks/useContas'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
@@ -67,15 +69,17 @@ export default function ConfiguracoesInvestimentosPage() {
         <h1 className="text-[19px] font-semibold text-white">Configurações de Investimentos</h1>
       </div>
 
-      <SecaoPerfil onToast={showToast} />
-      <SecaoMetaAposentadoria onToast={showToast} />
-      <SecaoMetas onToast={showToast} />
-      <SecaoPesos onToast={showToast} />
-      <SecaoQuestionarios onToast={showToast} />
-      <SecaoTiposDividendo onToast={showToast} />
-      <SecaoMigrarConta onToast={showToast} />
+      <div data-tutorial="config-perfil"><SecaoPerfil onToast={showToast} /></div>
+      <div data-tutorial="config-aposentadoria"><SecaoMetaAposentadoria onToast={showToast} /></div>
+      <div data-tutorial="config-metas"><SecaoMetas onToast={showToast} /></div>
+      <div data-tutorial="config-pesos"><SecaoPesos onToast={showToast} /></div>
+      <div data-tutorial="config-questionarios"><SecaoQuestionarios onToast={showToast} /></div>
+      <div data-tutorial="config-tipos-dividendo"><SecaoTiposDividendo onToast={showToast} /></div>
+      <div data-tutorial="config-migrar"><SecaoMigrarConta onToast={showToast} /></div>
 
       <Toast msg={toast} />
+
+      <TutorialTour pageKey="investimentos-config-v1" passos={TUTORIAL_INVESTIMENTOS_CONFIG} />
     </div>
   )
 }

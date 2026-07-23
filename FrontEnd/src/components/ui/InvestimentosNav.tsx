@@ -26,7 +26,7 @@ export default function InvestimentosNav() {
 
   return (
     <div className="sticky top-0 z-20 pt-1 pb-3 mb-4 border-b border-white/10"
-      style={{ background: 'var(--bg-page, #0d1220)' }}>
+      style={{ background: 'var(--bg-page, #0d1220)' }} data-tutorial="investimentos-nav">
       <nav className="flex flex-wrap items-center gap-1.5 mb-3">
         {ITENS.map((item) => {
           const Icone = item.icone

@@ -24,6 +24,8 @@ import { SelectDark } from '../components/ui/shared'
 import Mascote, { type MascoteNome } from '../components/ui/Mascote'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
+import TutorialTour from '../components/ui/TutorialTour'
+import { TUTORIAL_INVESTIMENTOS_AVALIACOES } from '../lib/tutoriaisPaginas'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPOS_ATIVO_INV, CRITERIOS_QUESTAO, CRITERIO_LABEL } from '../lib/constants'
 import type { InvAvaliacao, InvAvaliacaoMentor, InvestimentoAtivo, CriterioQuestao, TipoAtivoInvestimento, NivelConsenso, FrequenciaAgenda, PerguntaAvaliacao, PesosCriterio } from '../types'
@@ -1290,6 +1292,7 @@ export default function AvaliacoesInvestimentosPage() {
         <>
           {/* Seleção de quais TIPOS de ativo as IAs devem pesquisar. Só os
               tipos com saldo > 0 aparecem; clicar liga/desliga o tipo. */}
+          <div data-tutorial="avaliacoes-avaliar">
           {tiposPresentes.length > 1 && (
             <div className="mb-3">
               <p className="text-[12.5px] mb-1.5" style={{ color: MUTED }}>Tipos de ativo a avaliar:</p>
@@ -1344,6 +1347,7 @@ export default function AvaliacoesInvestimentosPage() {
               </span>
             )}
           </div>
+          </div>
 
           {/* Aviso enquanto roda: não trocar/fechar aba, não abrir o sistema
               em outra aba — o processo vive nesta aba e seria interrompido. */}
@@ -1387,7 +1391,7 @@ export default function AvaliacoesInvestimentosPage() {
           )}
 
           {/* Agenda de reavaliação — frequência definida pelo usuário */}
-          <section className={`rounded-xl border px-4 py-3 mb-4 flex items-center justify-between gap-3 flex-wrap ${
+          <section data-tutorial="avaliacoes-agenda" className={`rounded-xl border px-4 py-3 mb-4 flex items-center justify-between gap-3 flex-wrap ${
             agendaVencida ? 'border-amber-500/30 bg-amber-500/10' : 'border-white/10 bg-white/[0.02]'}`}>
             <div className="flex items-center gap-2 min-w-0">
               <CalendarClock size={18} style={{ color: agendaVencida ? '#ffb74d' : '#8b5cf6' }} />
@@ -1414,7 +1418,7 @@ export default function AvaliacoesInvestimentosPage() {
 
           {/* Mentores que vão opinar — o ativo (mascote preferido) orquestra
               os demais mentores configurados. */}
-          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-5 mb-4">
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-5 mb-4" data-tutorial="avaliacoes-mentores">
             <h2 className="text-[13px] font-semibold text-white mb-4">
               Mentores ({configs.length})
             </h2>
@@ -1610,6 +1614,8 @@ export default function AvaliacoesInvestimentosPage() {
             onClose={() => setLogAberto(null)} />
         )
       })()}
+
+      <TutorialTour pageKey="investimentos-avaliacoes-v1" passos={TUTORIAL_INVESTIMENTOS_AVALIACOES} />
     </div>
   )
 }

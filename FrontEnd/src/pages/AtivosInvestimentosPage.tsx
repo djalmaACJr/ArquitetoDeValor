@@ -15,6 +15,8 @@ import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
 import QuadroTipoAtivos, { type Dimensao } from '../components/ui/QuadroTipoAtivos'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
 import ResumoPorInstituicao from '../components/ui/ResumoPorInstituicao'
+import TutorialTour from '../components/ui/TutorialTour'
+import { TUTORIAL_INVESTIMENTOS_ATIVOS } from '../lib/tutoriaisPaginas'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { linhaDeMeta, type AtivoLinha } from '../lib/ativosLinha'
 import LoadingMascote from '../components/ui/LoadingMascote'
@@ -343,7 +345,7 @@ export default function AtivosInvestimentosPage() {
           <h1 className="text-[22px] font-bold text-white">Meus ativos</h1>
           <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>Cartela de ativos e posições</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap" data-tutorial="ativos-header">
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: MUTED }} />
             <input value={pesquisa} onChange={(e) => setPesquisa(e.target.value)}
@@ -386,7 +388,7 @@ export default function AtivosInvestimentosPage() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30">
             <Sparkles size={15} style={{ color: '#8b5cf6' }} /> Avaliações
           </Link>
-          <button onClick={abrirNovo}
+          <button onClick={abrirNovo} data-tutorial="ativos-novo"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white"
             style={{ background: '#3b82f6' }}>
             <Plus size={15} /> Novo ativo
@@ -405,21 +407,23 @@ export default function AtivosInvestimentosPage() {
         </div>
       ) : (
         <>
-          {!pesquisa && <EvolucaoPorTipo />}
           {!pesquisa && (
-            <div className="mb-5">
-              <ResumoPorInstituicao />
-            </div>
-          )}
-          {!pesquisa && (segmentosAcoes.length > 0 || categoriasFII.length > 0) && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
-              {segmentosAcoes.length > 0 && (
-                <RoscaCategoria titulo="Ações por segmento" fatias={segmentosAcoes}
-                  centro="Ações" onFoco={(chave) => focar('ACOES', 'segmento', chave)} />
-              )}
-              {categoriasFII.length > 0 && (
-                <RoscaCategoria titulo="FIIs por categoria" fatias={categoriasFII}
-                  centro="FIIs" onFoco={(chave) => focar('FII', 'categoria', chave)} />
+            <div data-tutorial="ativos-evolucao">
+              <EvolucaoPorTipo />
+              <div className="mb-5">
+                <ResumoPorInstituicao />
+              </div>
+              {(segmentosAcoes.length > 0 || categoriasFII.length > 0) && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
+                  {segmentosAcoes.length > 0 && (
+                    <RoscaCategoria titulo="Ações por segmento" fatias={segmentosAcoes}
+                      centro="Ações" onFoco={(chave) => focar('ACOES', 'segmento', chave)} />
+                  )}
+                  {categoriasFII.length > 0 && (
+                    <RoscaCategoria titulo="FIIs por categoria" fatias={categoriasFII}
+                      centro="FIIs" onFoco={(chave) => focar('FII', 'categoria', chave)} />
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -432,7 +436,7 @@ export default function AtivosInvestimentosPage() {
                   : 'Nenhum ativo encontrado.'}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3" data-tutorial="ativos-lista">
               {grupos.map((g) => (
                 <QuadroTipoAtivos key={g.tipo} tipo={g.tipo} dados={dadosPorTipo.get(g.tipo) ?? null}
                   linhas={g.linhas} defaultAberto
@@ -460,6 +464,7 @@ export default function AtivosInvestimentosPage() {
         <DrawerHistorico ativo={historicoDe} onClose={() => setHistoricoDe(null)} onToast={showToast} />
       )}
 
+      <TutorialTour pageKey="investimentos-ativos-v1" passos={TUTORIAL_INVESTIMENTOS_ATIVOS} />
     </div>
   )
 }

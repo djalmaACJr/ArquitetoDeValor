@@ -69,7 +69,9 @@ setup('criar dados basicos', async ({ page, request }) => {
   const pageKeys = [
     'dashboard-v1', 'extrato-v1', 'contas-v1', 'categorias-v1',
     'relatorios-v1', 'comparativo-v1', 'assinaturas-v1', 'projecao-v1',
-    'objetivos-v1',
+    'objetivos-v1', 'investimentos-v1', 'investimentos-ativos-v1',
+    'investimentos-detalhe-v1', 'investimentos-proventos-v1',
+    'investimentos-avaliacoes-v1', 'investimentos-config-v1',
   ]
   for (const k of pageKeys) tutoriaisVistos[`tour-${k}`] = true
 

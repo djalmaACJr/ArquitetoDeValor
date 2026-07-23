@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "5.0.0"
+export const APP_VERSION = "6.0.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -16,7 +16,7 @@ export const getVersionInfo = () => ({
   },
   current: {
     level: "major",
-    description: "Objetivos Financeiros (Sonho, Objetivo, Crescimento) com gráficos de evolução, % por categoria e barras divergentes; tutorial guiado da página de Objetivos; nova página Sobre; diversos ajustes de UI e consistência"
+    description: "Módulo completo de Investimentos (ativos, posições, dividendos, avaliação por Mentores de IA, dashboard e ranking de performance); transferências mais robustas; recuperação de senha e retomada de sessão após inatividade; convite de amigos; melhorias de performance no Extrato e Dashboard"
   }
 })
 
