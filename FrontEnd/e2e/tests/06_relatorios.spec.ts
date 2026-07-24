@@ -25,8 +25,20 @@ test.describe('Relatórios', () => {
 
   test('E2E-REL03 — seção Créditos pode ser recolhida', async ({ page }) => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
-    // Nível 2 (Categorias) garante que o cabeçalho com chevron expandido seja renderizado
-    await page.getByRole('button', { name: /^categorias$/i }).click()
+
+    // O card de filtros é "sticky top-0 z-20" e cobre parte da tabela ao rolar.
+    // Recolhê-lo evita que ele intercepte o clique nas linhas Créditos/Débitos
+    // (a página já tem um observer que faz isso sozinho ao rolar de verdade,
+    // mas depender de scroll+IntersectionObserver no teste é a fonte da flakiness
+    // original — recolher explicitamente é determinístico).
+    await page.getByRole('button', { name: /recolher filtros/i }).click()
+
+    // Nível 2 (Categorias) garante que o cabeçalho com chevron expandido seja renderizado.
+    // Escopado ao bloco "Detalhamento" — o filtro de categorias (FiltrosLancamentos) também
+    // tem um botão chamado "Categorias" (placeholder do MultiSelect), e getByRole sem escopo
+    // pode resolver para o elemento errado se o bloco de Detalhamento ainda não renderizou.
+    await page.locator('[data-tutorial="relatorios-detalhamento"]')
+      .getByRole('button', { name: /^categorias$/i }).click()
 
     // O cabeçalho da seção Créditos é a 1ª ocorrência do texto (a 2ª é o totalizador).
     const headerCred = page.getByText('Créditos', { exact: true }).first()
@@ -44,7 +56,11 @@ test.describe('Relatórios', () => {
 
   test('E2E-REL04 — seção Débitos pode ser recolhida', async ({ page }) => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
-    await page.getByRole('button', { name: /^categorias$/i }).click()
+    // Ver comentário em E2E-REL03 sobre por que recolhe os filtros antes.
+    await page.getByRole('button', { name: /recolher filtros/i }).click()
+    // Ver comentário em E2E-REL03 sobre por que o botão precisa ser escopado.
+    await page.locator('[data-tutorial="relatorios-detalhamento"]')
+      .getByRole('button', { name: /^categorias$/i }).click()
 
     const headerDeb = page.getByText('Débitos', { exact: true }).first()
     await expect(headerDeb).toBeVisible({ timeout: 15_000 })
