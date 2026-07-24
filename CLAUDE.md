@@ -7,8 +7,8 @@
 ## 📥 Carregamento de contexto
 
 - **`CLAUDE.md`** é o contexto base padrão e é suficiente para a maioria das tarefas (UI, hooks, refactors localizados, bugs pontuais, testes, CI).
-- **`BUSINESS_RULES.md`** deve ser lido **sob demanda** quando a tarefa envolver: recorrência de transações, antecipação de parcelas, par débito+crédito de transferências, escopo de edição (`SOMENTE_ESTE` / `ESTE_E_SEGUINTES` / `TODOS`), categorias protegidas ou cálculo de saldo.
-- **`ARCHITECTURE.md`** deve ser lido **sob demanda** quando a tarefa envolver: criar novo módulo/endpoint, mexer em RLS/migrations, alterar contrato da API ou integrações entre camadas.
+- **`BUSINESS_RULES.md`** deve ser lido **sob demanda** quando a tarefa envolver: recorrência de transações, antecipação de parcelas, par débito+crédito de transferências, escopo de edição (`SOMENTE_ESTE` / `ESTE_E_SEGUINTES` / `TODOS`), categorias protegidas, cálculo de saldo, **Investimentos** (posições/operações, dividendos/DY/YoC, renda fixa/tesouro, cripto, avaliações por IA), **Objetivos** (Sonho/Meta/Projeto/Crescimento) ou **Importação de fatura**.
+- **`ARCHITECTURE.md`** deve ser lido **sob demanda** quando a tarefa envolver: criar novo módulo/endpoint, mexer em RLS/migrations, alterar contrato da API, integrações entre camadas, **cron jobs** (`pg_cron`/`pg_net`) ou o schema das tabelas de Investimentos/Objetivos/Faturas.
 - Quando precisar ler um desses arquivos extras, avise antes de agir.
 
 ---
@@ -28,6 +28,11 @@ Permite:
 - Lembretes/alertas vinculáveis a lançamentos futuros
 - Filtros salvos por página (Dashboard, Extrato, Relatórios)
 - Assistente de lançamentos (sugestão automática por descrição)
+- **Objetivos** (Sonho/Meta de Renda/Projeto/Crescimento Anual) — metas financeiras com progresso calculado por trigger
+- **Investimentos** — carteira (ações, FIIs, renda fixa, tesouro direto, cripto, stocks/ETFs), dividendos/proventos com DY/YoC, avaliação de ativos por mentores de IA, snapshot mensal de patrimônio
+- **Importação de fatura de cartão** (PDF Nubank/C6/Inter/MercadoPago/genérico) com matching automático e revisão assistida
+- Cartões virtuais (sub-identificadores de um cartão físico, só organizacionais)
+- Análises client-side sobre o extrato: Assinaturas (detecção de recorrência), Comparativo Mensal, Projeção de Economia
 
 ---
 
@@ -64,13 +69,13 @@ Permite:
 
 | Pasta | Conteúdo |
 |---|---|
-| `pages/` | `DashboardPage`, `LancamentosPage`, `ContasPage`, `CategoriasPage`, `RelatoriosPage`, `ImportExportPage`, `PerfilPage`, `LoginPage`, `ApresentacaoMascotes` (onboarding 1º acesso) |
+| `pages/` | **Financeiro básico**: `DashboardPage`, `LancamentosPage`, `ContasPage`, `CategoriasPage`, `RelatoriosPage`, `ImportExportPage`, `PerfilPage`, `LoginPage`, `CadastroPage`, `RedefinirSenhaPage`, `ApresentacaoMascotes` (onboarding 1º acesso), `SobrePage`. **Análises client-side**: `AssinaturasPage` (detecção de recorrência), `ComparativoMensalPage`, `ProjecaoEconomiaPage`. **Objetivos**: `ObjetivosPage`, `ObjetivoDetalhe`. **Investimentos**: `InvestimentosPage` (painel), `AtivosInvestimentosPage`, `AvaliacoesInvestimentosPage` (mentores IA), `ConfiguracoesInvestimentosPage`, `DetalheInvestimentoPage`, `DividendosPage`. **Fatura**: `ImportarFaturaPage`. `Placeholders.tsx` é código morto (stubs não mais roteados). |
 | `components/layout/` | `AppLayout`, `Sidebar` |
-| `components/ui/` | `DrawerLancamento`, `Calculadora`, `BotaoNovoLancamento`, `BotaoOcultar`, `FiltrosLancamentos`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion` (botão da versão = abre tutorial da página), `ModalLembrete`, `CalendarioDashboard`, `Mascote`, `MascoteDica`, `MascoteTutorial`, `ChatMascote` (chat com IA via mascote escolhido), `TutorialTour` (overlay guiado com mascote apontando), `LoadingMascote`, `shared` |
-| `hooks/` | `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useOcultarValores`, `useTheme`, `useMascotePreferido` (apelido, tema, primeiro acesso), `useIAPreferencia`, `useChatMascote` |
+| `components/ui/` | **Financeiro básico**: `DrawerLancamento`, `Calculadora`, `BotaoNovoLancamento`, `BotaoOcultar`, `FiltrosLancamentos`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion` (botão da versão = abre tutorial da página), `ModalLembrete`, `CalendarioDashboard`, `CampoSenha` (input de senha com olho, usado em Login/Cadastro/Redefinir), `ContagemLogout` (pílula de contagem regressiva de auto-logout na Sidebar), `ModalNovaCategoriaRapida` + `FormCamposCategoria`/`formCategoriaShared` (form de categoria reutilizável). **Mascotes/IA**: `Mascote`, `MascoteDica`, `MascoteTutorial`, `ChatMascote`, `TutorialTour`, `LoadingMascote`. **Objetivos**: `CardObjetivo`, `DrawerObjetivo`, `FiltrosObjetivos`. **Investimentos**: `DrawerAtivo` (form de ativo + 1ª posição), `DrawerMovimentacoes` (operações de compra/venda/aporte/resgate de um ativo), `InvestimentosNav` (nav sticky entre as páginas do módulo), `NovidadesProventos` (card de novidades do cron de dividendos), `QuadroCorrelacao`, `QuadroSobreposicao`, `QuadroTipoAtivos`, `ResumoPorInstituicao`. `shared` |
+| `hooks/` | **Financeiro básico**: `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useOcultarValores`, `useTheme`, `useMascotePreferido` (apelido, tema, primeiro acesso), `useIAPreferencia`, `useChatMascote`, `useUsuarioPerfil` (nome/email/data_nascimento de `usuarios`, não do JWT), `useTutoriaisVistos`, `useSaldoBaseMes` (saldo por conta até fim do mês anterior, RPC `fn_saldos_contas_ate_data`), `useOperacaoLonga` (suspende auto-logout durante backup/restore/import longos). **Objetivos**: `useObjetivos`. **Investimentos**: `useInvestimentosAtivos`, `useInvestimentosDashboard` (+ `useInvestimentosRanking`, `useInvestimentosAlocacao`), `useInvestimentosHistorico`, `useInvestimentosOperacoes`, `useInvestimentosPosicoes`, `useInvAvaliacaoAgenda`, `useInvAvaliacoes`, `useInvPerfil`, `useInvPesos`, `useInvQuestionarios`, `useDividendos`, `useCotacoesTesouro`, `useIndicesEconomicos`, `usePtax`, `useAvisosDividendos`, `useNovidadesProventos`, `useResumoAposentadoria`, `useTiposDividendo`. **Fatura**: `useFaturasImport`. |
 | `context/` | `AuthContext`, `PageStateContext` (persiste filtros entre páginas), `ContextoIAContext` (split SetterCtx + ValueCtx — páginas registram o que estão exibindo para o ChatMascote enviar à IA) |
-| `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums), `queryKeys.ts` (chaves do React Query), `logger.ts` (log condicional dev-only) |
-| `types/index.ts` | Tipos compartilhados (`Conta`, `Transacao`, `Transferencia`, `Categoria`, …) — re-exporta enums de `lib/constants.ts` |
+| `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums), `queryKeys.ts` (chaves do React Query), `logger.ts` (log condicional dev-only), `operacaoLonga.ts` (store de operação longa), `questionarioAtivos.ts` (questionário padrão por tipo de ativo + cálculo de nota), `perfilInvestidor.ts` (suitability → perfil investidor) |
+| `types/index.ts` | Tipos compartilhados (`Conta`, `Transacao`, `Transferencia`, `Categoria`, `Objetivo`, `CartaoVirtual`, …) — re-exporta enums de `lib/constants.ts` |
 
 ### Backend — `supabase/`
 
@@ -84,6 +89,9 @@ Permite:
 | `functions/assistente/` | GET busca sugestões via ILIKE; POST upsert por descrição; DELETE remove padrão |
 | `functions/lembretes/` | CRUD de lembretes com filtro por mês e cascade por `lancamento_id` |
 | `functions/filtros/` | CRUD de filtros nomeados por página (Dashboard, Extrato, Relatórios) |
+| `functions/objetivos/` | CRUD de `objetivos` (tipos SONHO/OBJETIVO/PROJETO/CRESCIMENTO) + `POST /sincronizar-progresso` (RPC de recálculo em massa) |
+| `functions/investimentos/` | Módulo maior do sistema (~6.500 linhas): CRUD de ativos/posições/operações/dividendos/questionários/avaliações, dashboard/ranking (DY/YoC), cotações compartilhadas (PTAX/índices/tesouro/ativos), import/restore, e rotas de cron (`snapshot-cron`, `dividendos-cron`, `dividendos-cron-br`, `rendimento-cripto-cron`) autenticadas por `x-cron-secret` em vez de JWT |
+| `functions/faturas/` | Importação de fatura de cartão (upload PDF → parse por emissor em `parsers/` → sessão de revisão com matching automático → confirmação em massa por item ou por categoria/grupo) |
 | `functions/excluir_conta/` | Exclui todos os dados do usuário (chama `fn_excluir_dados_usuario`) |
 | `functions/version/` | Endpoint de versão (introspecção) |
 | `functions/limpar/` | Limpeza usada nos testes (reativa contas inativas para destravar UPDATE) |
@@ -96,8 +104,8 @@ Permite:
 
 | Pasta | Conteúdo |
 |---|---|
-| `tests/` | Jest API: `01_contas`, `02_categorias`, `03_transacoes`, `04_transferencias`, `05_lembretes`, `06_assistente`, `99_limpar` |
-| `FrontEnd/e2e/tests/` | Playwright: contas, categorias, navegação, extrato, dashboard, relatórios, transferências, lembretes, assistente |
+| `tests/` | Jest API: `01_contas`, `02_categorias`, `03_transacoes`, `04_transferencias`, `05_lembretes`, `06_assistente`, `07_seguranca_rls`, `08_seguranca_triggers`, `09_seguranca_rpc`, `10_seguranca_auth_cors`, `11_objetivos`, `12_investimentos`, `99_limpar` |
+| `FrontEnd/e2e/tests/` | Playwright: `00_cadastro`, `01_contas`, `02_categorias`, `03_navegacao`, `04_extrato`, `05_dashboard`, `06_relatorios`, `07_transferencias`, `08_lembretes`, `09_assistente`, `10_objetivos`, `11_investimentos`, `zz_teardown` (+ `auth.setup.ts`, `data.setup.ts`, `helpers.ts`) |
 
 ---
 
@@ -122,6 +130,23 @@ Permite:
   - `RECEITA` na conta destino
 - Categoria fixa **"Transferências"** (categoria pai com `protegida = true`)
 - Suporta recorrência (parcelas em par)
+- Criação e exclusão são **atômicas via RPC** (`fn_criar_transferencia` / `fn_excluir_transferencias`, não via 2 chamadas PostgREST separadas) — ver `ARCHITECTURE.md`
+
+### Objetivos
+
+- Uma única tabela/API para 4 tipos: **SONHO** (saldo acumulado de contas), **OBJETIVO** (receita média por categoria/período), **PROJETO** (orçamento de despesas — ainda oculto na UI), **CRESCIMENTO** (% de evolução anual líquida por categoria)
+- Progresso (`valor_atingido`/`percentual`/`status`) é **sempre calculado por trigger**, nunca setado manualmente pela API
+- Detalhe completo (inclusive uma divergência conhecida no cálculo de CRESCIMENTO) em `BUSINESS_RULES.md`
+
+### Investimentos
+
+- Maior módulo do sistema: carteira (ações/FIIs/renda fixa/tesouro/cripto/stocks), modelo "posição = soma das operações", dividendos com DY/YoC "padrão investidor10", avaliação de ativos por mentores de IA, snapshot mensal via cron
+- Detalhe completo (cálculos, cron jobs, ressalvas conhecidas) em `BUSINESS_RULES.md`
+
+### Importação de fatura
+
+- Upload de PDF → parser por emissor → sessão de revisão (`fatura_import_sessao`/`fatura_import_item`) com matching automático contra lançamentos existentes e contra padrões do Assistente → confirmação em massa (por item ou por categoria/grupo)
+- ⚠️ A migration fundacional (`20260527000001_fatura_import.sql`) está **corrompida no histórico do git** (5 bytes) — o DDL original das duas tabelas não existe em nenhum arquivo versionado. Ver ressalva em `ARCHITECTURE.md` antes de mexer no schema dessas tabelas.
 
 ### Categorias
 
@@ -220,11 +245,17 @@ Antes da migration `20260505000001`, qualquer UPDATE em `transacoes` revalidava 
 | `04_transferencias.test.ts` | CA-TRF01..22 |
 | `05_lembretes.test.ts` | CA-LEM01..11 |
 | `06_assistente.test.ts` | CA-ASS01..09 |
+| `07_seguranca_rls.test.ts` | Isolamento entre usuários (RLS) |
+| `08_seguranca_triggers.test.ts` | Triggers do banco (proteção de categoria, isolamento, exclusão bloqueada, etc.) |
+| `09_seguranca_rpc.test.ts` | RPCs `SECURITY INVOKER` (rejeitam `user_id`/`conta_id` de outro usuário) |
+| `10_seguranca_auth_cors.test.ts` | Auth e CORS |
+| `11_objetivos.test.ts` | CA-OBJ01..17 |
+| `12_investimentos.test.ts` | CA-INV01..26 |
 | `99_limpar.test.ts` | CA-LIM01..11 (limpeza pós-suite) |
 
 ### E2E (Playwright) — `FrontEnd/e2e/tests/`
 
-`00_cadastro`, `01_contas`, `02_categorias`, `03_navegacao`, `04_extrato`, `05_dashboard`, `06_relatorios`, `07_transferencias`, `08_lembretes`, `09_assistente` (+ `auth.setup.ts`, `data.setup.ts`).
+`00_cadastro`, `01_contas`, `02_categorias`, `03_navegacao`, `04_extrato`, `05_dashboard`, `06_relatorios`, `07_transferencias`, `08_lembretes`, `09_assistente`, `10_objetivos`, `11_investimentos`, `zz_teardown` (+ `auth.setup.ts`, `data.setup.ts`, `helpers.ts`).
 Roda no Firefox; relatório HTML em `FrontEnd/e2e/report/`.
 
 ---

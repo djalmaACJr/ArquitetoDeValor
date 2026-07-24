@@ -44,7 +44,15 @@
 - Tipo `CARTAO` é uma conta como as outras, com três campos extras opcionais: `dia_fechamento`, `dia_pagamento` (`1..31`) e `limite_credito` (`>= 0`).
 - `saldo_inicial` é forçado a `0` para cartão — o saldo é apenas a fatura aberta calculada pelos lançamentos.
 - O formulário de novo cartão **não** mostra "Saldo inicial"; mostra "Limite de crédito" no lugar.
-- Frontend usa esses campos apenas para exibição/calendário (eventos de fechamento e pagamento); cálculo de saldo segue a regra padrão (soma todas as transações até a data, qualquer status).
+- ⚠️ **Exceção à regra geral de saldo**: desde `20260526000001`, contas `CARTAO` **ignoram** transações com `status='PROJECAO'` no cálculo de saldo (`vw_saldo_contas`, `fn_saldos_contas_ate_data`, `fn_saldo_conta_ate_data`) — só somam `PAGO`+`PENDENTE`. Demais tipos de conta continuam somando os 3 status igualmente (regra geral inalterada).
+- Frontend usa `dia_fechamento`/`dia_pagamento` apenas para exibição/calendário (eventos de fechamento e pagamento).
+
+### Cartões virtuais
+
+- Coluna `contas.cartoes_virtuais JSONB` (array de `{id, sufixo, apelido}`) — **não é tabela própria**, não tem FK em `transacoes`, não tem limite/saldo próprio.
+- Só relevante para `tipo = CARTAO`; demais tipos sempre recebem `[]`.
+- Validação (backend e frontend, duplicada): `sufixo` — 2 a 8 dígitos numéricos; `apelido` — até 40 caracteres.
+- Puramente organizacional: identifica com qual "plástico" (cartão físico ou adicional/virtual) uma compra foi feita. O parser de fatura Nubank detecta o sufixo (`•••• XXXX`) e grava `"Cartão final <sufixo>"` na `observacao` do item — mas **não há resolução automática sufixo → apelido** implementada; a intenção existe em comentário no código, não a funcionalidade.
 
 ---
 
@@ -201,6 +209,14 @@ Toda transferência é representada por **2 transações** ligadas pelo mesmo `i
 
 Quando `total_parcelas > 1` é informado, gera-se uma série inteira de pares (cada par compartilha `id_recorrencia`). Frequência aceita: `DIARIA`, `SEMANAL`, `MENSAL`, `ANUAL`.
 
+### Atomicidade (RPC)
+
+Criação e exclusão do par (ou série, se recorrente) são atômicas via RPC `SECURITY INVOKER`, não via 2 chamadas PostgREST separadas:
+
+- **Criar**: a Edge Function monta em memória **todas** as linhas do par (2× por parcela, com datas/status/`id_recorrencia`/`id_par_transferencia` já calculados) e delega o INSERT inteiro para `arqvalor.fn_criar_transferencia(p_rows jsonb)` — se qualquer linha falhar (constraint/trigger/RLS), o Postgres faz ROLLBACK de tudo, sem par órfão possível.
+- **Excluir**: `arqvalor.fn_excluir_transferencias(p_ids)` desarma a proteção (`id_par_transferencia = NULL`) e apaga as transações do par/série numa única transação.
+- Isso substitui o esquema antigo (2 INSERTs sequenciais + DELETE compensatório manual em caso de falha), que podia deixar "meio par" órfão.
+
 ---
 
 ## 📊 Relatórios e dashboard
@@ -320,6 +336,165 @@ Usuário pode salvar conjuntos nomeados de filtros por página (Dashboard, Extra
 
 ---
 
+## 🎯 Objetivos
+
+### Conceito
+
+Uma única tabela/API (`objetivos`) serve 4 tipos de meta financeira, cada um com sua fonte de dados e fórmula de progresso próprias:
+
+| Tipo | Label na UI | O que monitora | `valor_meta` significa | Vínculo |
+|---|---|---|---|---|
+| `SONHO` | 💰 Patrimônio | Saldo acumulado de 1+ contas | Valor-alvo em R$ do saldo final | `contas_sonho[]` (+ `conta_id` legado) |
+| `OBJETIVO` | 🎯 Renda Recorrente | Receita média por período em 1+ categorias | Valor-alvo em R$ **por período** (ex. R$/mês) | `categorias_objetivo[]` (+ `categoria_id` legado) + `frequencia` |
+| `PROJETO` | 📦 (oculto na UI atual — em desenvolvimento) | Despesas em 1+ contas (orçamento) | Teto de gasto em R$ | `contas_projeto[]` (+ `categoria_id` como filtro opcional) |
+| `CRESCIMENTO` | 📈 Evolução Anual | % de crescimento líquido (receita − despesa) ano a ano em 1+ categorias | Meta de crescimento anual em % | `categorias_objetivo[]` |
+
+Campos comuns: `nome`, `descricao`, `icone`, `cor`, `data_inicio`/`data_fim` (`data_fim >= data_inicio`), `ativo` (soft delete), `valor_atingido`/`percentual`/`status` (**sempre calculados por trigger**, nunca setados pela API), `revisoes` (histórico JSON `{data, valor_meta_anterior, motivo}` a cada mudança de `valor_meta`).
+
+`status` é sempre derivado automaticamente:
+- `CANCELADO` se `ativo = false` (via soft-delete no `DELETE`).
+- `ATINGIDO` se `percentual >= 100`.
+- `EM_PROGRESSO` caso contrário.
+
+### Multi-categorias / multi-contas
+
+Os vínculos singulares originais (`conta_id` para SONHO, `categoria_id` para OBJETIVO) foram generalizados para **arrays** (`contas_sonho`, `categorias_objetivo`), permitindo agregar múltiplas contas/categorias num único objetivo (ex.: "Renda Recorrente" somando "Dividendos" + "Juros" + "Aluguéis"). Os campos singulares foram mantidos por retrocompatibilidade — o cálculo sempre prefere o array quando não vazio, com fallback para o singular.
+
+### Saldo base (SONHO)
+
+`saldo_base` = saldo agregado das contas monitoradas **no dia anterior à `data_inicio`** do objetivo. A partir dele:
+- `valor_atingido = saldo_atual − saldo_base` (crescimento desde o início do objetivo, não saldo absoluto).
+- Denominador do `percentual` = `valor_meta − saldo_base` (quanto falta crescer no total).
+- A view expõe `crescimento_mensal_necessario` = `(valor_meta − saldo_base − valor_atingido) / meses_restantes` — exibido em destaque na tela de detalhe.
+
+### Cálculo de OBJETIVO (renda recorrente)
+
+`valor_atingido` = **média por período** das receitas das categorias monitoradas (não o total acumulado) — dividido pelo número de períodos decorridos conforme `frequencia` (`MENSAL`, `ANUAL`, `SEMANAL` contam o período corrente mesmo que parcial; sem frequência ou `DIARIA` usa o total direto). Isso torna `valor_atingido` diretamente comparável a `valor_meta` (ex.: meta de R$3.000/mês).
+
+### Cálculo de CRESCIMENTO — evolução do método (YoY/YTD/NET)
+
+Não são 4 métricas diferentes, mas melhorias sucessivas na mesma fórmula, aplicadas em migrations sequenciais:
+1. **Ano-base fixo** (v1): compara ano corrente vs. o primeiro ano do objetivo — fica desatualizado com o tempo.
+2. **YoY** (Year-over-Year): compara ano corrente vs. o ano **imediatamente anterior**.
+3. **YTD** (Year-to-Date): quando o ano corrente está incompleto, compara contra o **mesmo trecho de calendário** do ano anterior (offset de dias desde 1º de janeiro, robusto a ano bissexto).
+4. **NET** (líquido): soma receita − despesa da(s) categoria(s), não só receita — necessário para categorias de investimento com entradas e saídas.
+5. **COMP_YTD**: corrige assimetria remanescente — corta o ano de comparação em `CURRENT_DATE` também, tornando os dois períodos comparados estritamente proporcionais.
+
+⚠️ **Divergência conhecida**: a migration mais recente (`20260605000001_sonho_saldo_base.sql`), ao reescrever as funções de cálculo para adicionar `saldo_base` ao SONHO, reintroduziu — aparentemente sem intenção — a versão **v1** (ano-base fixo, só receita, sem YTD) do bloco CRESCIMENTO, descartando as melhorias 2–5. Hoje: `objetivos.valor_atingido`/`percentual`/`status` (usados no card da listagem e no RPC de sincronização) refletem a versão v1 simples; a tela `ObjetivoDetalhe.tsx` recalcula, no client, a partir das transações brutas, a versão completa (YoY+YTD+NET) — **os dois números podem divergir** para o mesmo objetivo tipo CRESCIMENTO. Antes de tratar isso como bug a corrigir, confirme com quem mantém o código se foi intencional.
+
+### Endpoints e sincronização
+
+- `GET /objetivos` (filtros `tipo`/`status`/`ativo`), `GET /objetivos/:id` (inclui `progresso` = snapshots de `objetivos_progresso`), `POST /objetivos`, `PUT /objetivos/:id`, `DELETE /objetivos/:id` (soft — só `ativo=false`).
+- `POST /objetivos/sincronizar-progresso` — RPC `fn_sincronizar_progresso_objetivo`, recalcula todos os objetivos ativos do usuário em massa e grava snapshot do dia.
+- Snapshots diários (`objetivos_progresso`) alimentam o gráfico de histórico na tela de detalhe (`HistoricoProgresso`, hoje só exibido para SONHO/PROJETO — OBJETIVO/CRESCIMENTO têm visões próprias mais ricas).
+
+---
+
+## 💹 Investimentos
+
+### Conceito e tipos de ativo
+
+Carteira de investimentos com tipos: `ACOES`, `ETF`, `FII`, `STOCKS` (ações internacionais), `ETF_INTERNACIONAL`, `RENDA_FIXA`, `CRIPTOMOEDAS`, `TESOURO_DIRETO` (ENUM `tipo_ativo_inv`). ⚠️ Código (Edge Function e frontend) também referencia `REIT`, que **não existe** neste ENUM — tratar como não suportado até confirmação.
+
+### Modelo posição = soma das operações
+
+Desde a migration de baseline (`20260623000001`), **a posição nunca é editada diretamente em regime normal** — ela é sempre recomputada a partir de todas as suas `inv_operacoes` (função `recomputarPosicao`, na Edge Function, não trigger de banco):
+
+- `COMPRA`/`APORTE`: soma quantidade e custo (afeta preço médio).
+- `VENDA`/`RESGATE`: abate quantidade ao preço médio corrente.
+- `RENDIMENTO` (só cripto): soma quantidade **sem** alterar custo — dilui o preço médio, e o ganho aparece como valorização.
+- `DIVIDENDO`: não altera a posição.
+- Operações com `data_operacao` futura são ignoradas no recálculo (não afetam o saldo atual).
+- Ao final: grava `quantidade`, `preco_custo` (média), `data_compra` (1ª compra/aporte) e `status` (`ATIVA` se `qtd>0`, senão `ENCERRADA`).
+- Posições de `RENDA_FIXA`/`TESOURO_DIRETO` com `rf_vencimento` já passado são **fechadas automaticamente** (gera um `RESGATE` na data de vencimento) a cada snapshot, sem ação do usuário.
+
+### Dividendos ↔ Extrato
+
+Cada `inv_dividendos` pode gerar uma transação `RECEITA`: `status='PROJECAO'` se `data_pagamento > hoje`, senão `PAGO`. A categoria vem de `inv_tipos_dividendo.categoria_id` — **obrigatória**, sem categoria mapeada o lançamento é bloqueado (409). Ativos em moeda estrangeira: valor convertido via PTAX antes de gravar. `POST /dividendos/:id/confirmar` reconcilia `PROJECAO → PAGO` preservando `valor_projetado`.
+
+### DY (Dividend Yield) e YoC (Yield on Cost) — "padrão investidor10"
+
+Cálculo da rota `/investimentos/ranking`:
+- Janela: **trailing 12 meses-calendário até hoje** (exclui projeções futuras), mantendo só os 12 mais recentes.
+- Para cada mês, usa o `valor_por_cota` (rate) gravado em `inv_dividendos`; quando ausente, estima dividindo o valor recebido pela quantidade que o usuário tinha na data (reconstruída via replay de todas as operações).
+- **Fusão de duas fontes por data de pagamento**: `inv_dividendos` (o que o usuário efetivamente recebeu) + `inv_proventos_fundo` (cache do histórico do fundo inteiro, cobre meses **sem posse** — essencial para ativos comprados há menos de 12 meses). Na mesma data, usa o maior rate.
+- `rate12m = Σ rate` dos 12 meses.
+- **DY** = `rate12m × quantidade_atual ÷ valor_de_mercado × 100`.
+- **YoC** = `rate12m × quantidade_atual ÷ valor_de_custo × 100`.
+- Também expõe `dy_real`/`yoc_real` (dividendos efetivamente recebidos ÷ mercado/custo) e `posse_12m` (indica ao frontend quando "projetado" ≠ "real" por posse menor que 12 meses).
+
+### Renda Fixa / Tesouro Direto — valor de mercado
+
+Não usa cotação externa — é **derivado do indexador**: `PREFIXADO` usa juros compostos pela taxa fixa; `POS_FIXADO` usa a série mensal do índice (CDI/SELIC/IPCA via SGS do BCB) × `rf_percentual_indice`; `HIBRIDO` compõe a série do índice com o spread (`rf_taxa_fixa`) mês a mês. Para `TESOURO_DIRETO` prefixado/IPCA+, prioriza **marcação a mercado** via `cotacoes_tesouro` (PU); sem PU disponível, cai para a acumulação por índice. Após o vencimento, o valor fica congelado na data de vencimento.
+
+### Rendimento de cripto
+
+`inv_ativos.cripto_rendimento_aa` (%a.a.) modela yield (ex.: USDC) como **crédito de tokens a custo zero**: cada execução de `provisionarRendimentoCripto` (manual via `POST /rendimento-cripto` ou cron `rendimento-cripto-cron`) **apaga e reconstrói do zero** as operações `RENDIMENTO` da posição, materializando **sempre em blocos semanais** (mesmo que `cripto_rendimento_periodicidade` seja DIARIA/MENSAL — essa configuração só afeta a base de composição da taxa dentro do bloco, não a frequência de lançamento), com juros compostos: `tokens = qtd_no_início_do_bloco × ((1 + taxa×dias_periodicidade/365)^(dias_bloco/dias_periodicidade) − 1)`. Início = maior entre a 1ª compra/aporte e `cripto_rendimento_inicio` (se configurado e posterior). Não gera provento/dividendo — o ganho aparece só como valorização (mais tokens × preço).
+
+### Avaliação de ativos por mentores de IA
+
+- Cada ativo tem um **questionário por tipo** (`inv_questionarios`, custom por usuário, ou um padrão estático embutido no frontend), com perguntas por critério (`FUNDAMENTOS`, `CRESCIMENTO`, `DIVIDENDOS`, `VALUATION`).
+- **Pesos por critério** são globais (`usuarios.inv_pesos_criterio`, soma 100), sugeridos pelo **perfil de investidor** (`usuarios.inv_perfil`, derivado de um mini-questionário de suitability): `CONSERVADOR {35,10,35,20}`, `MODERADO {30,25,25,20}`, `ARROJADO {25,40,10,25}` (ordem: Fundamentos/Crescimento/Dividendos/Valuation).
+- **Avaliação manual**: usuário responde o questionário (`questionario_respostas`), `nota_usuario` = média ponderada por critério.
+- **Avaliação por mentores** (uma ou mais IAs configuradas em `usuarios.ia_configs`): cada mentor responde o mesmo questionário para o mesmo ativo (`POST /avaliacoes/mentor`, chamado em paralelo pelo frontend, uma vez por mentor × ativo, sem persistir). `POST /avaliacoes/salvar` consolida: por pergunta, usa a **média** se `|média − mediana| / média < 10%`, senão a **mediana** (reduz impacto de outliers); calcula nota por critério, nota final ponderada pelos pesos, e nível de consenso (`ALTO/MEDIO/BAIXO`) pelo desvio-padrão das notas dos mentores. **O consenso vira a nota oficial do ativo**, sobrescrevendo `inv_ativos.nota_usuario`/`questionario_respostas`.
+- `inv_avaliacoes.historico` guarda até 24 avaliações passadas para indicar tendência (subiu/desceu/manteve).
+- `usuarios.inv_avaliacao_agenda.frequencia` é só uma preferência de UI — **não há cron server-side de reavaliação**; a reavaliação roda no navegador orquestrando os mentores, e o app calcula a próxima data esperada.
+
+### Snapshot mensal/diário
+
+Cron `snapshot-diario` (ver `ARCHITECTURE.md`) fecha posições de RF/Tesouro vencidas e grava, para o mês corrente, `inv_historico_mensal` por (ativo, conta): valor de mercado (cotação de `cotacoes_ativos`/PTAX/tesouro conforme o tipo), variação % e rentabilidade do mês (descontando fluxos de aporte/resgate). Cotações são cacheadas compartilhadamente (1 busca por ticker, não por usuário).
+
+### Ressalvas conhecidas
+
+- `inv_etf_holdings` (composição de ETF) tem schema criado mas **nenhum consumidor** — não decompor ETFs em holdings ao documentar ou construir features novas sobre essa tabela sem antes verificar se ela foi conectada.
+- Tipo `REIT` usado no código não existe no ENUM do banco.
+
+---
+
+## 🧾 Importação de fatura de cartão
+
+### Fluxo
+
+1. **Upload** (`POST /faturas`, multipart): PDF do emissor (Nubank/C6/Inter/MercadoPago, ou parser genérico) + `conta_id` (deve ser `tipo=CARTAO`). PDF com senha é tratado explicitamente (erros `SENHA_OBRIGATORIA`/`SENHA_INCORRETA`); a senha nunca é persistida.
+2. O parser do emissor extrai lançamentos → cria `fatura_import_sessao` (`status=EM_ANALISE`) + um `fatura_import_item` por linha.
+3. **Classificação** (fase 1, UI): usuário escolhe categoria por item ou marca "Ignorar" (`decisao=IGNORAR`, excluído do resto do fluxo). `POST /faturas/:id/sugerir` roda um motor de matching (ver abaixo) que preenche `categoria_sugerida_id`/`transacao_existente_id` automaticamente; usuário pode aceitar ou vincular manualmente.
+4. **Modo de importação** (fase 2, decisão persistida em `fatura_import_sessao.modo_importacao`):
+   - **REGISTRO**: 1 lançamento por item da fatura.
+   - **CATEGORIA**: 1 lançamento por categoria (ou por grupo separado manualmente), somando os itens — com decisão adicional `separar_por_cartao` (separa por sufixo de cartão virtual detectado).
+5. **Preview e confirmação** (fase 3): a soma dos itens não-ignorados **precisa bater com `valor_total`** da fatura (tolerância de 1 centavo) antes de liberar o botão Confirmar. `POST /faturas/:id/confirmar` cria/atualiza as transações reais.
+
+### Motor de matching (`/sugerir`)
+
+Por item: normaliza a descrição (remove sufixo de parcela), busca o melhor padrão aprendido em `assistente_lancamentos` (score de similaridade textual, threshold ≥0.3) para sugerir categoria; se o padrão tem `id_recorrencia_vinculo`, tenta casar direto com a próxima parcela em aberto da mesma série. Senão, busca a melhor transação candidata (`PENDENTE`/`PROJECAO`, mesma conta, janela de datas em torno do vencimento) por similaridade de texto + proximidade de valor + número de parcela — score pondera texto (0.65), valor (0.15), categoria (+0.10) e parcela (+0.20).
+
+### Anti-duplicação ao reimportar/reconfirmar
+
+- Todo item, ao gerar/atualizar uma transação, grava `transacao_criada_id`. Ao **reabrir uma sessão confirmada** e reconfirmar, o backend usa `transacao_existente_id ?? transacao_criada_id` como alvo de UPDATE — evita duplicar a transação já gerada antes. A própria UI avisa que reconfirmar **pode** duplicar (risco residual reconhecido, não garantia absoluta).
+- No modo CATEGORIA, uma **guarda anti-overwrite** garante que uma mesma transação-alvo só seja usada por um grupo por confirmação — evita que dois grupos façam UPDATE sequencial na mesma transação e um sobrescreva o valor do outro.
+- `hash_match` (chave `conta|data|valor|descrição normalizada`) é calculado por item mas **não usado em nenhuma query de deduplicação hoje** — reenviar o mesmo PDF cria uma nova sessão/novos itens sem bloqueio automático; a prevenção de duplicidade real das transações só acontece nos pontos acima, no momento de confirmar.
+- Papel do "grupo" (modo CATEGORIA): por padrão 1 grupo por categoria; o usuário pode separar manualmente um subconjunto em um grupo novo (`grupo_chave`), com descrição própria (`descricao_override`) — persistido, sobrevive a reload/pausa da revisão. Cada grupo vira **uma única transação** na confirmação, somando os itens (sinal RECEITA/DESPESA conforme o líquido).
+
+### Regras de dados
+
+- `tipo` do item (`RECEITA`|`DESPESA`) distingue créditos (estornos/descontos) de débitos — o valor numérico é sempre positivo, o sinal é dado por `tipo`.
+- Transição `PROJECAO → PENDENTE` também preserva `valor_projetado` (estendido em `20260530000004` especificamente para o fluxo de confirmação de fatura atualizar uma projeção existente).
+
+⚠️ Ver em `ARCHITECTURE.md` o achado de que a migration fundacional dessas tabelas está corrompida no git — o schema documentado aqui foi reconstruído por evidência indireta, não a partir do DDL fonte.
+
+---
+
+## 📈 Análises client-side (sem tabela própria)
+
+Três páginas processam dados de `transacoes` inteiramente no navegador — não têm edge function, migration nem tabela dedicada:
+
+- **Assinaturas** (`AssinaturasPage`): detecta gastos recorrentes agrupando por categoria + descrição normalizada, calculando intervalo médio entre ocorrências para classificar frequência. Ignora **intencionalmente** o `id_recorrencia` real do banco — é heurística sobre texto/valor/data, não a série de recorrência.
+- **Comparativo Mensal** (`ComparativoMensalPage`): compara dois períodos livres lado a lado, somando receita/despesa por categoria (ignora transferências) e gerando insights de variação.
+- **Projeção de Economia** (`ProjecaoEconomiaPage`): simula patrimônio futuro por juros compostos a partir da média de receita/despesa dos últimos 6 meses, com sliders de rendimento/redução de despesas/horizonte.
+
+Nenhuma dessas páginas deve ganhar tabela/migration própria sem necessidade real — são views derivadas, por design.
+
+---
+
 ## 📥 Importação de transações (XLSX/CSV)
 
 ### Detecção automática de transferências
@@ -360,8 +535,21 @@ Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `
 |---|---|
 | `cor` | `^#[0-9A-Fa-f]{6}$` |
 | `descricao` (conta) | 1..100 |
-| `descricao` (categoria) | 1..20 |
+| `descricao` (categoria) | 1..50 |
 | `descricao` (transação/transferência) | 2..200 |
+| `sufixo` (cartão virtual) | `^\d{2,8}$` |
+| `apelido` (cartão virtual) | ≤ 40 |
+| `nome` (objetivo) | 1..100 |
+| `valor_meta` (objetivo) | > 0 (percentual para tipo CRESCIMENTO) |
+| `tipo` (objetivo) | `SONHO` \| `OBJETIVO` \| `PROJETO` \| `CRESCIMENTO` |
+| `status` (objetivo) | `EM_PROGRESSO` \| `ATINGIDO` \| `CANCELADO` |
+| `frequencia` (objetivo) | `DIARIA` \| `SEMANAL` \| `MENSAL` \| `ANUAL` |
+| `nota_usuario`/`nota_final` (investimento) | 0..10 |
+| `percentual_ideal` (alocação) | 0..100 |
+| `status` (fatura) | `EM_ANALISE` \| `CONFIRMADA` \| `CANCELADA` |
+| `decisao` (item de fatura) | `PENDENTE` \| `CRIAR` \| `ATUALIZAR` \| `IGNORAR` |
+| `tipo` (item de fatura) | `RECEITA` \| `DESPESA` |
+| `modo_importacao` (fatura) | `NULL` \| `REGISTRO` \| `CATEGORIA` |
 | `valor` | > 0 |
 | `valor_projetado` | > 0 quando presente |
 | `nr_parcela` | ≥ 1 e ≤ `total_parcelas` |
@@ -414,7 +602,7 @@ Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `
 ## 🚫 Restrições críticas (resumo)
 
 - ❌ Misturar dados entre usuários (bloqueado por RLS + trigger `fn_validar_isolamento_usuario`).
-- ❌ Quebrar pares de transferência — sempre atômico via endpoint `/transferencias`.
+- ❌ Quebrar pares de transferência — sempre atômico via RPC `fn_criar_transferencia`/`fn_excluir_transferencias` (endpoint `/transferencias`).
 - ❌ Excluir avulso uma transação que tem `id_par_transferencia` com categoria protegida (trigger `trg_bloquear_exclusao_transf_avulsa`).
 - ❌ Inconsistência em recorrência — `id_recorrencia/nr_parcela/total_parcelas/tipo_recorrencia` são "tudo ou nada" (`chk_parcela_consistente`).
 - ❌ Excluir conta com transações (`fn_bloquear_exclusao_conta`).
@@ -424,3 +612,7 @@ Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `
 - ❌ Transferência com mesma conta de origem e destino.
 - ❌ Criar lançamento em conta inativa, ou em categoria inativa (validações no endpoint).
 - ✅ Atualizar campos não-relacionais (status, descricao, valor) de uma transação cuja conta esteja inativa **é permitido** desde a migration `20260505000001`.
+- ❌ Setar manualmente `objetivos.valor_atingido`/`percentual`/`status` pela API — são sempre calculados por trigger.
+- ❌ Excluir objetivo fisicamente via API — `DELETE` é soft (`ativo=false` → trigger cancela).
+- ❌ Confirmar fatura de cartão fora do fluxo REGISTRO/CATEGORIA sem antes conciliar o total esperado do mês (a UI bloqueia o botão Confirmar quando não bate).
+- ⚠️ Cartão ignora transações `PROJECAO` no cálculo de saldo (única exceção à regra geral "soma todos os status") — não reintroduzir esse filtro em outros tipos de conta.
