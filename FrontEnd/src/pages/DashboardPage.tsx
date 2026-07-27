@@ -687,16 +687,19 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
 
   const formatPct = (v: number) => total > 0 ? ((v / total) * 100).toFixed(1) : '0.0'
 
-  // Chave estável do conteúdo do gráfico — evita expressão complexa no
-  // array de dependências do useMemo (exigência do lint react-hooks).
-  const labelsKey = labelsChart.join('|')
-  const valuesKey = valuesChart.join('|')
-
   // Mesmo padrão visual do donut "Ativos na Carteira" (InvestimentosPage):
   // nome + % dentro de cada fatia grande o suficiente (fatias pequenas só no
   // tooltip) e o total no buraco central — sem legenda em grade abaixo.
+  //
+  // IMPORTANTE: react-chartjs-2 só aplica a prop `plugins` na criação inicial
+  // do Chart.js (veja node_modules/react-chartjs-2/dist/index.js) — updates
+  // subsequentes só repassam `data`/`options`, nunca `plugins`. Por isso este
+  // plugin NÃO pode capturar `total`/`corCentro` via closure (ficaria travado
+  // no valor do primeiro render, tipicamente 0 porque os dados ainda não
+  // carregaram) — ele lê `chart.options.plugins.donutCenterText` a cada
+  // desenho, que É atualizado a cada render via a prop `options`.
   const donutLabelsPlugin = useMemo(() => ({
-    id: `donut-labels-${titulo.replace(/\W+/g, '-').toLowerCase()}`,
+    id: 'donut-labels',
     afterDatasetsDraw(chart: ChartJS) {
       const meta = chart.getDatasetMeta(0)
       const dataset = chart.data.datasets[0] as { data: number[] } | undefined
@@ -725,21 +728,22 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
         })
       }
 
-      // Total no buraco central
+      // Total no buraco central — lido de chart.options (não de closure) para
+      // sempre refletir o valor do render mais recente, ver nota acima.
+      const centro = (chart.options.plugins as { donutCenterText?: { total: number; cor: string } } | undefined)?.donutCenterText
       const arc0 = meta.data[0] as unknown as { x: number; y: number } | undefined
-      if (arc0) {
+      if (arc0 && centro) {
         ctx.fillStyle = '#8b92a8'
         ctx.font = '500 11px Space Grotesk, system-ui, sans-serif'
         ctx.fillText('Total', arc0.x, arc0.y - 11)
-        ctx.fillStyle = corCentro
+        ctx.fillStyle = centro.cor
         ctx.font = '700 16px Space Grotesk, system-ui, sans-serif'
-        ctx.fillText(formatBRL(total), arc0.x, arc0.y + 9)
+        ctx.fillText(formatBRL(centro.total), arc0.x, arc0.y + 9)
       }
 
       ctx.restore()
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [titulo, corCentro, total, labelsKey, valuesKey])
+  }), [])
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-white/[0.02] p-4 flex flex-col">
@@ -762,46 +766,57 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
       </div>
 
       {/* Rosca em destaque: rótulos (nome + %) dentro das fatias e total no
-          centro — clicável, também abre a expansão. */}
+          centro — clicável, também abre a expansão.
+          O wrapper externo (`relative`) participa do layout flex normalmente,
+          mas o canvas mora num filho `absolute inset-0`: assim o tamanho do
+          canvas nunca realimenta o tamanho do próprio wrapper (loop clássico
+          do Chart.js responsive dentro de containers com altura automática,
+          que só cresce e nunca encolhe ao trocar de mês). */}
       <div
-        className="flex-1 min-h-[292px] flex items-center justify-center"
+        className="flex-1 min-h-[292px] relative"
         style={{ cursor: dados.length > topN ? 'pointer' : 'default' }}
         onClick={() => { if (dados.length > topN) setExpandido(true) }}
       >
-        <Doughnut
-          data={{
-            labels: labelsChart,
-            datasets: [{
-              data: valuesChart,
-              backgroundColor: coresChart,
-              borderWidth: 0,
-              borderRadius: 12,
-              spacing: 3,
-              hoverOffset: 8,
-            }],
-          }}
-          options={{
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '62%',
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                backgroundColor: 'rgba(10,15,26,0.94)',
-                borderColor: 'rgba(255,255,255,0.12)',
-                borderWidth: 1,
-                padding: 10,
-                titleColor: '#e8eaf0',
-                bodyColor: '#c5cad8',
-                displayColors: true,
-                callbacks: {
-                  label: ctx => ` ${formatBRL(ctx.parsed)} (${formatPct(ctx.parsed)}%)`,
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Doughnut
+            data={{
+              labels: labelsChart,
+              datasets: [{
+                data: valuesChart,
+                backgroundColor: coresChart,
+                borderWidth: 0,
+                borderRadius: 12,
+                spacing: 3,
+                hoverOffset: 8,
+              }],
+            }}
+            options={{
+              responsive: true,
+              maintainAspectRatio: false,
+              cutout: '62%',
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  backgroundColor: 'rgba(10,15,26,0.94)',
+                  borderColor: 'rgba(255,255,255,0.12)',
+                  borderWidth: 1,
+                  padding: 10,
+                  titleColor: '#e8eaf0',
+                  bodyColor: '#c5cad8',
+                  displayColors: true,
+                  callbacks: {
+                    label: (ctx: TooltipItem<'doughnut'>) => ` ${formatBRL(ctx.parsed)} (${formatPct(ctx.parsed)}%)`,
+                  },
                 },
-              },
-            },
-          }}
-          plugins={[donutLabelsPlugin]}
-        />
+                // Lido pelo donutLabelsPlugin a cada desenho — ver nota acima
+                // sobre por que o total não pode vir de closure.
+                donutCenterText: { total, cor: corCentro },
+                /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+              } as any,
+            }}
+            plugins={[donutLabelsPlugin]}
+          />
+        </div>
       </div>
 
       {/* Legenda compacta — apenas top N, com valor e percentual. */}
