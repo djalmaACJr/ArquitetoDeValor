@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Zips gerados pelo script de publicação OTA (scripts/publish-android-ota.mjs)
+*.zip
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,10 +1,20 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
 import { consumirRotaPosExpiracao } from '../lib/retornoPosExpiracao'
 import { CampoSenha } from '../components/ui/CampoSenha'
+
+// Dentro do WebView do app Android (Capacitor), window.location.origin é
+// "https://localhost" — não um domínio real alcançável pelo link do e-mail
+// de redefinição de senha. Nesse caso força a origem de produção; no browser
+// normal continua usando window.location.origin (funciona em qualquer ambiente
+// de deploy: produção, preview, localhost de dev).
+const origemRedefinicaoSenha = Capacitor.isNativePlatform()
+  ? 'https://arquitetodevalor.com.br'
+  : window.location.origin
 
 const LogoSVG = () => (
   <svg width="48" height="48" viewBox="210 30 260 260">
@@ -79,7 +89,7 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/redefinir-senha`,
+      redirectTo: `${origemRedefinicaoSenha}/redefinir-senha`,
     })
     setLoading(false)
     if (err) { setError('Não foi possível enviar o e-mail. Verifique o endereço.'); return }

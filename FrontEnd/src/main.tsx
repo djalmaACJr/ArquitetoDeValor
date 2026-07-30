@@ -1,10 +1,20 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Capacitor } from '@capacitor/core'
+import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import App from './App'
 import { supabase } from './lib/supabase'
 import { limparEstadoCliente } from './lib/clientCache'
 import './styles/globals.css'
+
+// Confirma pro plugin de OTA (@capgo/capacitor-updater) que o bundle atual
+// carregou com sucesso — sem isso, ele reverte pro bundle anterior por
+// segurança (proteção contra publicar um update quebrado). Só existe efeito
+// dentro do app nativo; no navegador normal isNativePlatform() é false.
+if (Capacitor.isNativePlatform()) {
+  CapacitorUpdater.notifyAppReady()
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
