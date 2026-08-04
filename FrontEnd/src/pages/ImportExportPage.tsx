@@ -55,6 +55,14 @@ interface TransacaoRaw {
   [key: string]: unknown
 }
 
+// Transferência do backup já resolvida para contas do usuário atual (via
+// mapaContas) — usada só internamente no restore, entre o filtro de
+// duplicadas e a criação em lote.
+interface TransferenciaParaCriar extends TransacaoRaw {
+  _origem: string
+  _destino: string
+}
+
 interface ContaBackup {
   conta_id: string
   nome: string
@@ -3380,15 +3388,13 @@ function SecaoRestore() {
         })
 
       let dupTrf = 0, semContaTrf = 0
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const trfParaCriar: any[] = []
+      const trfParaCriar: TransferenciaParaCriar[] = []
       if (fazExtrato && trfBackup && trfBackup.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const parsUnicos = new Map<string, any>()
+        const parsUnicos = new Map<string, TransacaoRaw>()
         for (const t of trfBackup) { const parId = (t.id_par ?? t.id_recorrencia) as string | undefined; if (parId && !parsUnicos.has(parId)) parsUnicos.set(parId, t) }
         for (const t of parsUnicos.values()) {
-          const origem  = mapaContas[t.conta_origem_id ?? t.conta_id]
-          const destino = mapaContas[t.conta_destino_id]
+          const origem  = mapaContas[(t.conta_origem_id as string | undefined) ?? t.conta_id ?? '']
+          const destino = mapaContas[(t.conta_destino_id as string | undefined) ?? '']
           if (!origem || !destino) { semContaTrf++; continue }
           const k = trfKey(t.data, t.valor, origem, destino)
           if (existentesTrf.has(k)) { dupTrf++; continue }
@@ -3432,8 +3438,7 @@ function SecaoRestore() {
         setProgressoLabel(`Restaurando ${trfParaCriar.length} transferência(s)...`)
         let okTrf = 0, errTrf = 0
         const tchunks = dividirEmChunks(trfParaCriar, 8)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ptrf = async (chunk: any[]) => {
+        const ptrf = async (chunk: TransferenciaParaCriar[]) => {
           for (const t of chunk) {
             if (canceladoRef.current) break
             const r = await apiComRetry('/transferencias', 'POST', {

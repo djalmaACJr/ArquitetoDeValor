@@ -303,15 +303,12 @@ export default function RelatoriosPage() {
   const expandidosPareto = expPareto.expandidos
   const drillRef    = useRef<HTMLDivElement>(null)
 
-  // ── Auto-colapsar a barra de filtros (DEBUG instrumentado) ──
+  // ── Auto-colapsar a barra de filtros ──
   const [filtrosColapsados, setFiltrosColapsados] = useState(false)
   const overrideManualRef = useRef(false)
   const sentinelRef = useRef<HTMLDivElement>(null)
   const stickyBarRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const renderCountRef = useRef(0)
-  renderCountRef.current++
-  console.log('[REL][render]', { n: renderCountRef.current, col: filtrosColapsados })
 
   useEffect(() => {
     const sentinel = sentinelRef.current
@@ -322,36 +319,11 @@ export default function RelatoriosPage() {
       if (o === 'auto' || o === 'scroll') break
       scrollRoot = scrollRoot.parentElement
     }
-    const root = scrollRoot as HTMLElement
-    console.log('[REL][init]', {
-      scrollRoot: root?.tagName,
-      scrollHeight: root?.scrollHeight,
-      clientHeight: root?.clientHeight,
-      scrollTop: root?.scrollTop,
-    })
-    let iter = 0
     const obs = new IntersectionObserver(([entry]) => {
-      iter++
-      const stickyH = stickyBarRef.current?.offsetHeight ?? 0
-      const containerPad = containerRef.current?.style.paddingBottom ?? ''
-      console.log('[REL][IO]', {
-        iter,
-        intersecting: entry.isIntersecting,
-        scrollTop: root?.scrollTop,
-        scrollHeight: root?.scrollHeight,
-        clientHeight: root?.clientHeight,
-        maxScroll: root ? root.scrollHeight - root.clientHeight : 0,
-        sentinelTop: entry.boundingClientRect.top.toFixed(0),
-        rootBoundsTop: entry.rootBounds?.top.toFixed(0) ?? 'null',
-        stickyH,
-        containerPad,
-        override: overrideManualRef.current,
-      })
       if (entry.isIntersecting) {
         overrideManualRef.current = false
         setFiltrosColapsados(prev => {
           if (!prev) return prev
-          console.log('[REL][→false] removendo padding')
           if (containerRef.current) containerRef.current.style.paddingBottom = ''
           return false
         })
@@ -363,7 +335,6 @@ export default function RelatoriosPage() {
           if (sticky && container) {
             const reducao = Math.max(0, sticky.offsetHeight - 50)
             container.style.paddingBottom = `${reducao}px`
-            console.log('[REL][→true] aplicando padding', { reducao })
           }
           return true
         })

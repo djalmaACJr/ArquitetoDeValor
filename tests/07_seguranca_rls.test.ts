@@ -16,31 +16,45 @@ const TS = Date.now();
 // Sufixo único pra cada teste evitar colisão entre runs.
 const SUF = `RLS-${TS}`;
 
-describe("Segurança — RLS (isolamento entre usuários)", () => {
+// Toda a suíte depende de uma 2ª conta de teste (TEST_EMAIL_B/TEST_PASSWORD_B).
+// Antes, a ausência era tratada com um `return` silencioso em cada teste —
+// Jest reportava a suíte inteira como PASSOU sem executar nenhuma verificação
+// de isolamento entre usuários (achado de auditoria: ponto único de falha
+// silenciosa na suíte de segurança mais crítica do sistema). Agora:
+//   • env ausente     → describe.skip: aparece como SKIPPED no relatório,
+//     nunca como passou.
+//   • env presente mas login falha → beforeAll lança: os testes aparecem
+//     como FALHOU (alguém configurou e está quebrado — isso deve ser visível).
+const TEM_ENV_USER_B = !!(process.env.TEST_EMAIL_B && process.env.TEST_PASSWORD_B);
+if (!TEM_ENV_USER_B) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[07_seguranca_rls] TEST_EMAIL_B/TEST_PASSWORD_B ausentes — suíte inteira SKIPPED " +
+    "(não passou: pulada). Configure no .env para rodar de verdade.",
+  );
+}
+const describeComUserB = TEM_ENV_USER_B ? describe : describe.skip;
+
+describeComUserB("Segurança — RLS (isolamento entre usuários)", () => {
   let userA_id: string;
   let userB_id: string;
-  // Toda a suíte depende do User B. Se ausente, marca skip global.
-  let temUserB = false;
 
   beforeAll(async () => {
     userA_id = await getUserId();
-    temUserB = !!(await tryGetTokenB());
-    if (!temUserB) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        "[07_seguranca_rls] User B não disponível — TODOS os testes desta suíte serão pulados. " +
-        "Configure TEST_EMAIL_B/TEST_PASSWORD_B no .env pra rodar.",
+    const token = await tryGetTokenB();
+    if (!token) {
+      throw new Error(
+        "TEST_EMAIL_B/TEST_PASSWORD_B configurados, mas o login falhou — corrija as credenciais " +
+        "(provavelmente o projeto exige confirmação por e-mail para essa conta, ou a senha mudou). " +
+        "Esta suíte cobre isolamento entre usuários e não deve rodar sem User B funcional de verdade.",
       );
-      return;
     }
     userB_id = await getUserIdB();
     expect(userA_id).not.toBe(userB_id);
   });
-  const guardarUserB = () => { if (!temUserB) { console.log("⊘ pulado: sem User B"); return true; } return false; };
 
   // ── SEG-RLS01: contas ──────────────────────────────────────
   test("SEG-RLS01 — contas: User B não vê conta criada por A", async () => {
-    if (guardarUserB()) return;
     const { status, data } = await api("/contas", "POST", {
       nome: `Conta-${SUF}`,
       tipo: "CORRENTE",
@@ -72,7 +86,6 @@ describe("Segurança — RLS (isolamento entre usuários)", () => {
 
   // ── SEG-RLS02: categorias ──────────────────────────────────
   test("SEG-RLS02 — categorias: User B não vê/edita categoria criada por A", async () => {
-    if (guardarUserB()) return;
     const { status, data } = await api("/categorias", "POST", {
       descricao: `Cat-${SUF}`,
       icone: "🧪",
@@ -95,7 +108,6 @@ describe("Segurança — RLS (isolamento entre usuários)", () => {
 
   // ── SEG-RLS03: transações ──────────────────────────────────
   test("SEG-RLS03 — transações: User B não vê transação criada por A", async () => {
-    if (guardarUserB()) return;
     // Cria pré-requisitos
     const { data: contaResp } = await api("/contas", "POST", {
       nome: `ContaTx-${SUF}`, tipo: "CORRENTE", saldo_inicial: 0,
@@ -135,7 +147,6 @@ describe("Segurança — RLS (isolamento entre usuários)", () => {
 
   // ── SEG-RLS04: lembretes ───────────────────────────────────
   test("SEG-RLS04 — lembretes: User B não vê lembrete criado por A", async () => {
-    if (guardarUserB()) return;
     const { status, data } = await api("/lembretes", "POST", {
       data: "2026-12-31",
       descricao: `lemb-${SUF}`,
@@ -157,7 +168,6 @@ describe("Segurança — RLS (isolamento entre usuários)", () => {
 
   // ── SEG-RLS05: filtros salvos ──────────────────────────────
   test("SEG-RLS05 — filtros salvos: User B não vê filtro criado por A", async () => {
-    if (guardarUserB()) return;
     const { status, data } = await api("/filtros", "POST", {
       pagina: "extrato",
       nome:   `filtro-${SUF}`,
@@ -179,7 +189,6 @@ describe("Segurança — RLS (isolamento entre usuários)", () => {
 
   // ── SEG-RLS06: assistente_lancamentos ──────────────────────
   test("SEG-RLS06 — assistente: padrão de A não sugere para B", async () => {
-    if (guardarUserB()) return;
     const desc = `lancamento-${SUF}-unico`;
     // User A cria padrão via POST direto.
     const { data: contaResp } = await api("/contas", "POST", {
@@ -217,7 +226,6 @@ describe("Segurança — RLS (isolamento entre usuários)", () => {
   // com itens forjados deve receber 404. (Cobertura completa de fatura
   // entra no 07_faturas.test.ts quando ele existir.)
   test("SEG-RLS07 — faturas: lista de B não contém faturas de A", async () => {
-    if (guardarUserB()) return;
     const { data: listaA } = await api("/faturas");
     const { data: listaB } = await apiB("/faturas");
     const idsA = (listaA?.dados ?? []).map((s: any) => s.id);
@@ -226,7 +234,6 @@ describe("Segurança — RLS (isolamento entre usuários)", () => {
   });
 
   test("SEG-RLS08 — itens-bulk: User B com item_id inexistente → 404", async () => {
-    if (guardarUserB()) return;
     // Endpoint requer um sessaoId válido. Como B não tem sessões,
     // mandamos um UUID aleatório e esperamos 404 (sessão não encontrada).
     const sessaoFake = "00000000-0000-0000-0000-000000000000";

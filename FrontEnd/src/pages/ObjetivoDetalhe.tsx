@@ -16,6 +16,7 @@ import { ModalExcluir, Toast } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { apiFetch } from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
+import { qk } from '../lib/queryKeys'
 import { formatBRL, formatData } from '../lib/utils'
 import type { Objetivo, Transacao } from '../types'
 import type { EditarObjetivoInput } from '../hooks/useObjetivos'
@@ -1786,7 +1787,7 @@ export default function ObjetivoDetalhe() {
 
   // Transações — para OBJETIVO e CRESCIMENTO com categoria
   const { data: transacoes = [] } = useQuery({
-    queryKey: ['objetivo-txs', uid, id],
+    queryKey: qk.objetivoTxs(uid, id!),
     queryFn:  () => fetchTxsObjetivo(objetivo!),
     enabled:  !!uid && !!objetivo &&
               (objetivo.tipo === 'OBJETIVO' || objetivo.tipo === 'CRESCIMENTO') &&
@@ -1796,7 +1797,7 @@ export default function ObjetivoDetalhe() {
 
   // Transações das contas monitoradas — para o gráfico de saldo do SONHO
   const { data: txsSonho = [] } = useQuery({
-    queryKey: ['objetivo-saldo-txs', uid, id],
+    queryKey: qk.objetivoSaldoTxs(uid, id!),
     queryFn:  () => fetchTxsContasSonho(objetivo!),
     enabled:  !!uid && !!objetivo && objetivo.tipo === 'SONHO' &&
               (!!objetivo.contas_sonho?.length || !!objetivo.conta_id),
@@ -1821,7 +1822,7 @@ export default function ObjetivoDetalhe() {
     const res = await editar(id, payload)
     if (res.ok) {
       showToast('Objetivo atualizado!')
-      qc.invalidateQueries({ queryKey: ['objetivo-txs', uid, id] })
+      qc.invalidateQueries({ queryKey: qk.objetivoTxs(uid, id!) })
     }
     return { ok: res.ok, erro: res.erro }
   }
@@ -1839,7 +1840,7 @@ export default function ObjetivoDetalhe() {
     const res = await sincronizar()
     setSincronizando(false)
     if (res.ok) {
-      qc.invalidateQueries({ queryKey: ['objetivo-txs', uid, id] })
+      qc.invalidateQueries({ queryKey: qk.objetivoTxs(uid, id!) })
       showToast('Progresso atualizado!')
     } else {
       showToast(res.erro ?? 'Erro ao sincronizar')

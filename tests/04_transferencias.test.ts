@@ -780,4 +780,81 @@ describe("Transferências — CA-TRF01 a CA-TRF22", () => {
     expect(status).toBe(404);
   });
 
+  // ── CA-TRF30 — Regressão: PUT /transacoes/:id numa perna de
+  // transferência propaga status/valor/data/observacao para o par ──
+  // Bug reportado pelo usuário (2026-08-04): mudar o status de uma perna
+  // isolada (ex.: filtrando o extrato por uma única conta e marcando como
+  // PAGO) deixava a outra perna com o status antigo. Corrigido via
+  // fn_atualizar_par_transferencia — este teste cobre exatamente o caminho
+  // que o frontend usa (alterarStatus/handleStatus/pagarSelecionados em
+  // LancamentosPage.tsx): PUT /transacoes/:id?escopo=SOMENTE_ESTE.
+  test("CA-TRF30 — PUT /transacoes/:id?escopo=SOMENTE_ESTE numa perna de transferência sincroniza o par", async () => {
+    const dataStr = new Date().toISOString().split("T")[0];
+    const { status: sPost, data: trf } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id: contaOrigemId,
+        conta_destino_id: contaDestinoId,
+        valor: 60,
+        data: dataStr,
+        descricao: "TRF sync via /transacoes",
+        status: "PENDENTE",
+      }),
+    });
+    expect(sPost).toBe(201);
+    const { id_debito: idDebito, id_credito: idCredito } = trf as Transferencia;
+
+    try {
+      // Edita só o débito, pelo endpoint de transações (não o de transferências)
+      const { status: sPut } = await api(`/transacoes/${idDebito}?escopo=SOMENTE_ESTE`, {
+        method: "PUT",
+        body: JSON.stringify({ status: "PAGO" }),
+      });
+      expect(sPut).toBe(200);
+
+      // O crédito (perna não tocada diretamente) precisa refletir o mesmo status
+      const { data: debitoAtualizado } = await api(`/transacoes/${idDebito}`);
+      const { data: creditoAtualizado } = await api(`/transacoes/${idCredito}`);
+      expect(debitoAtualizado.status).toBe("PAGO");
+      expect(creditoAtualizado.status).toBe("PAGO");
+    } finally {
+      await api(`/transferencias/${(trf as Transferencia).id_par}`, { method: "DELETE" }).catch(() => {});
+    }
+  });
+
+  // ── CA-TRF31 — Regressão: campos exclusivos de /transferencias
+  // não podem ser alterados isoladamente via /transacoes/:id ──
+  test("CA-TRF31 — PUT /transacoes/:id numa perna de transferência rejeita conta_id/descricao (422)", async () => {
+    const dataStr = new Date().toISOString().split("T")[0];
+    const { status: sPost, data: trf } = await api("/transferencias", {
+      method: "POST",
+      body: JSON.stringify({
+        conta_origem_id: contaOrigemId,
+        conta_destino_id: contaDestinoId,
+        valor: 40,
+        data: dataStr,
+        descricao: "TRF bloqueio campo",
+        status: "PENDENTE",
+      }),
+    });
+    expect(sPost).toBe(201);
+    const { id_debito: idDebito, id_par: idPar } = trf as Transferencia;
+
+    try {
+      const { status: sConta } = await api(`/transacoes/${idDebito}?escopo=SOMENTE_ESTE`, {
+        method: "PUT",
+        body: JSON.stringify({ conta_id: contaTerceiraId }),
+      });
+      expect(sConta).toBe(422);
+
+      const { status: sDesc } = await api(`/transacoes/${idDebito}?escopo=SOMENTE_ESTE`, {
+        method: "PUT",
+        body: JSON.stringify({ descricao: "Descrição direta proibida" }),
+      });
+      expect(sDesc).toBe(422);
+    } finally {
+      await api(`/transferencias/${idPar}`, { method: "DELETE" }).catch(() => {});
+    }
+  });
+
 });

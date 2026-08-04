@@ -916,6 +916,11 @@ export async function buscarDividendosPolygon(
 //       RENDIMENTO + FII → "Aluguel de FII"
 //       RENDIMENTO + ação→ "Rend. Trib."
 //     Sem categoria mapeada no tipo → pula (não lança sem extrato).
+//   • Vários eventos do MESMO tipo na MESMA data (ex.: 2 tranches de JCP)
+//     são somados e lançados 1x — evita que a 2ª tranche seja tratada como
+//     "atualização" da 1ª e sobrescreva o valor (a reconciliação abaixo não
+//     distingue por valor, só por ativo+conta+tipo+data). Tipos diferentes
+//     no mesmo dia (Dividendo + JSCP) continuam lançamentos separados.
 //   • Reconciliação: reusa upsertDividendoProvisionado (mesma chave
 //     user+ativo+conta+tipo dentro do mês do pay_date).
 // ============================================================
@@ -1011,11 +1016,34 @@ export async function provisionarProventosBrl(
       await upsertProventosFundo(admin, ativo.user_id, ativo.id, proventos);
 
       const tipos = await tiposDoUsuario(ativo.user_id);
+
+      // Agrupa por (payDate, tipo): a B3 pode anunciar 2+ tranches do MESMO
+      // tipo na MESMA data (ex.: dois JCPs) — upsertDividendoProvisionado
+      // reconcilia pela chave ativo+conta+tipo+data (sem o valor), então
+      // processar cada tranche com uma chamada separada faria a 2ª ser
+      // tratada como "atualização" da 1ª e SOBRESCREVER o valor em vez de
+      // somar — a 1ª tranche sumia silenciosamente do extrato (achado real,
+      // ver auditoria 2026-08-04). Somar por (data, tipo) antes de reconciliar
+      // espelha o que o path USD já faz por data (ver buscarDividendosPolygon
+      // acima) — tipos DIFERENTES no mesmo dia (Dividendo + JSCP) continuam
+      // registros separados, pois a chave de agrupamento inclui o tipo.
+      // Dedup de repetição exata da fonte (mesma defesa do path USD).
+      const vistos = new Set<string>();
+      const porDataTipo = new Map<string, { payDate: string; nomeTipo: string; rate: number }>();
       for (const pv of proventos) {
         // Futuros (PROJECAO) + retroativos recentes (lançados como PAGO);
         // cobre dias em que o job não rodou.
         if (pv.payDate < dataCorte) continue;
         const nomeTipo = tipoNomePorLabelB3(pv.label, ativo.tipo_ativo);
+        const chaveVista = `${pv.payDate}|${nomeTipo}|${pv.rate}`;
+        if (vistos.has(chaveVista)) continue;
+        vistos.add(chaveVista);
+        const chave = `${pv.payDate}|${nomeTipo}`;
+        const atual = porDataTipo.get(chave);
+        porDataTipo.set(chave, { payDate: pv.payDate, nomeTipo, rate: (atual?.rate ?? 0) + pv.rate });
+      }
+
+      for (const { payDate, nomeTipo, rate } of porDataTipo.values()) {
         const tipo = tipos.get(nomeTipo);
         if (!tipo?.categoria_id) {
           // Sem categoria → não lança; registra pendência para avisar.
@@ -1026,19 +1054,19 @@ export async function provisionarProventosBrl(
         }
 
         for (const pos of posicoes as { conta_id: string; quantidade: number }[]) {
-          const valorBRL = Number((pv.rate * Number(pos.quantidade)).toFixed(2));
+          const valorBRL = Number((rate * Number(pos.quantidade)).toFixed(2));
           if (valorBRL <= 0) continue;
           const r = await upsertDividendoProvisionado(admin, {
             userId: ativo.user_id, ativoId: ativo.id, contaId: pos.conta_id,
             tipoAtivo: ativo.tipo_ativo, tipoDivId: tipo.id,
             categoriaId: String(tipo.categoria_id), ticker: ativo.ticker,
-            valor: valorBRL, payDate: pv.payDate, nome: ativo.nome,
-            valorPorCota: pv.rate,
+            valor: valorBRL, payDate, nome: ativo.nome,
+            valorPorCota: rate,
           });
           if (r === "criado" || r === "atualizado") {
             if (r === "criado") criados++; else atualizados++;
             registrarNovidade(nov, ativo.user_id, {
-              ticker: ativo.ticker, tipo: nomeTipo, data_pagamento: pv.payDate,
+              ticker: ativo.ticker, tipo: nomeTipo, data_pagamento: payDate,
               valor: valorBRL, acao: r,
             });
           } else if (typeof r === "object") {

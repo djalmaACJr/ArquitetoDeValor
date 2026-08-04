@@ -1018,8 +1018,8 @@ function SecaoIA() {
                   <div className="px-3 pb-3 pt-1 space-y-2" style={{ borderTop: '1px solid var(--border-faint)' }}>
                     <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>{provedorAtual.custo}</p>
                     <ol className="space-y-1 list-decimal list-inside">
-                      {provedorAtual.passos.map((p, i) => (
-                        <li key={i} className="text-[13px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{p}</li>
+                      {provedorAtual.passos.map((p) => (
+                        <li key={p} className="text-[13px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{p}</li>
                       ))}
                     </ol>
                     <a

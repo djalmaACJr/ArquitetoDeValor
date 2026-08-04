@@ -45,6 +45,8 @@ export const qk = {
   // Objetivos financeiros
   objetivos:       (uid: Uid, f?: unknown)   => ['objetivos', uid, f ?? null] as const,
   objetivoDetalhe: (uid: Uid, id: string)    => ['objetivos', uid, id]        as const,
+  objetivoTxs:      (uid: Uid, id: string)   => ['objetivo-txs', uid, id]       as const,
+  objetivoSaldoTxs: (uid: Uid, id: string)   => ['objetivo-saldo-txs', uid, id] as const,
 
   // Investimentos
   invAtivos:     (uid: Uid, f?: unknown) => ['inv-ativos', uid, f ?? null]     as const,

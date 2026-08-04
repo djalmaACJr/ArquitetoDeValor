@@ -1592,7 +1592,7 @@ export default function ComparativoMensalPage() {
                   return (
                     <button
                       type="button"
-                      key={i}
+                      key={`${ins.tipo}-${ins.texto}`}
                       disabled={!clicavel}
                       onClick={() => {
                         if (!clicavel) return
