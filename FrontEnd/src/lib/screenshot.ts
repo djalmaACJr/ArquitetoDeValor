@@ -12,8 +12,6 @@
 //   - Em mobile, a captura pode ser grande — escalamos para no máximo
 //     1200px de largura pra economizar tokens.
 
-import html2canvas from 'html2canvas'
-
 const LARGURA_MAX = 1200
 const QUALIDADE_JPEG = 0.85   // 85% de qualidade — bom balanço tamanho/qualidade
 
@@ -26,6 +24,11 @@ export async function capturarTela(alvo?: HTMLElement): Promise<string | null> {
   if (!elemento) return null
 
   try {
+    // Import dinâmico: html2canvas só é necessário quando o usuário de fato
+    // aciona a captura (botão do chat) — carregá-lo estaticamente inflava o
+    // chunk do ChatMascote (221KB/54KB gzip) em toda página que o mascote
+    // aparece, incluindo o Dashboard (mesmo padrão já usado para exceljs).
+    const html2canvas = (await import('html2canvas')).default
     const canvas = await html2canvas(elemento, {
       useCORS:    true,
       logging:    false,

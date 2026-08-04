@@ -366,10 +366,10 @@ Cache compartilhado (sem `user_id`) de composição de ETF: PK `(etf_ticker, hol
 
 ### 🧾 Tabelas — Importação de fatura
 
-⚠️ **Achado de integridade do repositório**: a migration fundacional `supabase/migrations/Aplicados/20260527000001_fatura_import.sql` está **corrompida no histórico do git** — seu conteúdo é a string literal `"f1 o"` (5 bytes) em todos os commits, incluindo o que a introduziu. O DDL original de `fatura_import_sessao`/`fatura_import_item` **não existe em nenhum arquivo versionado do repo**; o schema abaixo foi reconstruído por evidência indireta (migrations `ALTER` posteriores, código de `functions/faturas/index.ts`, tipos do frontend). Recomenda-se gerar uma migration de reconciliação (`CREATE TABLE IF NOT EXISTS` idempotente) para corrigir o drift entre o banco real e o repo.
+✅ **Corrigido em 2026-08-04**: a migration fundacional `supabase/migrations/Aplicados/20260527000001_fatura_import.sql` estava **corrompida** (depois deletada por completo) em todo o histórico do git. Foi reconstruída por evidência indireta (migrations `ALTER` posteriores, código de `functions/faturas/index.ts`, tipos do frontend) e recolocada no mesmo slot cronológico, incluindo a trigger `trg_validar_conta_cartao_fatura` que antes só existia em comentário.
 
 #### `fatura_import_sessao` (schema reconstruído — ver aviso acima)
-`id`, `user_id`, `conta_id → contas` (deve ser `tipo=CARTAO`, validado por trigger `trg_validar_conta_cartao_fatura` citado no código mas sem migration localizada), `arquivo_nome`, `vencimento_fatura DATE`, `valor_total NUMERIC`, `status` (`EM_ANALISE\|CONFIRMADA\|CANCELADA`), `observacao`, `modo_importacao VARCHAR(10)` (`NULL\|REGISTRO\|CATEGORIA`, `20260530000003`), `separar_por_cartao BOOLEAN` (`20260530000003`), timestamps. RLS `pol_fatura_sessao_user`.
+`id`, `user_id`, `conta_id → contas` (deve ser `tipo=CARTAO`, validado por trigger `trg_validar_conta_cartao_fatura`), `arquivo_nome`, `vencimento_fatura DATE`, `valor_total NUMERIC`, `status` (`EM_ANALISE\|CONFIRMADA\|CANCELADA`), `observacao`, `modo_importacao VARCHAR(10)` (`NULL\|REGISTRO\|CATEGORIA`, `20260530000003`), `separar_por_cartao BOOLEAN` (`20260530000003`), timestamps. RLS `pol_fatura_sessao_user`.
 
 #### `fatura_import_item` (schema reconstruído — ver aviso acima)
 `id`, `sessao_id → fatura_import_sessao`, `user_id`, `data_compra`, `descricao`, `estabelecimento`, `valor NUMERIC` (sempre positivo), `tipo VARCHAR(10) DEFAULT 'DESPESA' CHECK IN ('RECEITA','DESPESA')` (`20260527000002`), `parcela_atual`/`parcela_total`, `decisao` (`PENDENTE\|CRIAR\|ATUALIZAR\|IGNORAR`), `categoria_sugerida_id`/`categoria_escolhida_id → categorias`, `transacao_existente_id`/`transacao_criada_id → transacoes`, `hash_match` (calculado, sem uso de dedup no código atual), `observacao` (usada também para guardar `"Cartão final <sufixo>"` do cartão virtual detectado no PDF), `grupo_chave TEXT` (`20260530000002` — separação manual de grupo no modo CATEGORIA, sobrevive a reload), `descricao_override TEXT` (`20260530000002`), timestamps. RLS `pol_fatura_item_user`. Índices de FK adicionados em `20260709000001`.
@@ -451,7 +451,7 @@ Todos autenticam via header `x-cron-secret` (não JWT de usuário), lendo URL/se
 | `dividendos-diario` | `0 9 * * *` (06h BRT) | `POST /investimentos/dividendos-cron` | Provisiona proventos futuros de ativos em USD (Polygon.io) |
 | `dividendos-br-diario` | `30 9 * * *` (06h30 BRT) | `POST /investimentos/dividendos-cron-br` | Provisiona proventos futuros de ativos em BRL (B3, sem API key) |
 
-A rota `/investimentos/rendimento-cripto-cron` existe na Edge Function mas **não foi encontrada migration de agendamento `pg_cron` para ela** — hoje só é acionada manualmente via `POST /investimentos/rendimento-cripto` (autenticado).
+A rota `/investimentos/rendimento-cripto-cron` é agendada por `20260625000005_cron_rendimento_cripto.sql` (job `rendimento-cripto-diario`, `0 10 * * *` = 07h BRT, diário) — confirmado que o job existe e nenhuma migration posterior o desagenda (`cron.unschedule`).
 
 ### Row Level Security
 
@@ -466,7 +466,7 @@ WITH CHECK (user_id = auth.uid());
 
 Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já aplicadas/arquivadas (~98 arquivos); migrations na raiz de `supabase/migrations/` são as mais recentes, presumivelmente já rodadas em produção mas ainda não "arquivadas" — **confirme com o time antes de assumir que ainda estão pendentes**. **Todas idempotentes** (`IF NOT EXISTS`, `CREATE OR REPLACE`, blocos `DO/EXCEPTION`, `DROP POLICY/TRIGGER IF EXISTS`).
 
-⚠️ **Achado de integridade**: `Aplicados/20260527000001_fatura_import.sql` está corrompida (5 bytes, `"f1 o"`) em todo o histórico do git — ver seção "Tabelas — Importação de fatura".
+✅ **Corrigido em 2026-08-04**: `Aplicados/20260527000001_fatura_import.sql` estava corrompida (5 bytes, `"f1 o"`) e depois foi deletada por completo do histórico do git — o arquivo foi reconstruído por evidência indireta (código de `faturas/index.ts`, migrations `ALTER` posteriores, tipos do frontend) e agora recria `fatura_import_sessao`/`fatura_import_item` de forma idempotente, incluindo a trigger `trg_validar_conta_cartao_fatura` (antes só citada em comentário, nunca implementada). Ver seção "Tabelas — Importação de fatura".
 
 #### Fundação e proteções (`Aplicados/`)
 
@@ -503,7 +503,7 @@ Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já 
 - `20260525000002_cartoes_virtuais.sql` — coluna `cartoes_virtuais JSONB` em `contas` + recria `vw_saldo_contas`
 - `20260525000003_sincronizar_nome_update.sql` — trigger `trg_sincronizar_usuario_update` (AFTER UPDATE em `auth.users`) propaga nome/email para `arqvalor.usuarios`
 - `20260526000001_saldo_cartao_ignora_projecao.sql` — contas `CARTAO` ignoram transações `PROJECAO` no saldo; recria `vw_saldo_contas` e as funções `fn_saldos_contas_ate_data`/`fn_saldo_conta_ate_data`
-- `20260527000001_fatura_import.sql` — ⚠️ **corrompida** (ver aviso acima); deveria criar `fatura_import_sessao`/`fatura_import_item`
+- `20260527000001_fatura_import.sql` — ✅ reconstruída em 2026-08-04 (ver aviso acima); cria `fatura_import_sessao`/`fatura_import_item` + `trg_validar_conta_cartao_fatura`
 - `20260527000002_fatura_import_tipo.sql` — coluna `tipo` (`RECEITA|DESPESA`) em `fatura_import_item`
 - `20260527000003_categoria_descricao_50.sql` — amplia `categorias.descricao` de 20 para 50 caracteres
 - `20260530000001_assistente_id_recorrencia_vinculo.sql` — coluna `id_recorrencia_vinculo` em `assistente_lancamentos`
@@ -615,8 +615,8 @@ Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já 
 - **Soft delete vs hard delete** — contas/categorias têm `ativa` (soft); transações são removidas (hard) com escopo; **objetivos** também usam soft delete (`ativo=false` → trigger seta `status=CANCELADO`, sem DELETE físico via API).
 - **`atualizado_em`** é gerenciado por trigger — não setar manualmente.
 - **Generated columns** `ano_tx`/`mes_tx` aceleram filtros mensais — usar nas queries quando possível.
-- **Migration corrompida**: `Aplicados/20260527000001_fatura_import.sql` não reflete o schema real de `fatura_import_sessao`/`fatura_import_item` — qualquer alteração nessas tabelas deve primeiro reconciliar o repo com uma migration `CREATE TABLE IF NOT EXISTS` baseada no schema real do banco.
-- **`tipo_ativo_inv` incompleto**: código (Edge Function `investimentos` e frontend) referencia o tipo `REIT`, que **não existe** no ENUM do banco — tratar como feature incompleta/planejada ao mexer em tipos de ativo, não como suportado.
+- ~~Migration corrompida de fatura_import~~ — corrigido em 2026-08-04, ver `Aplicados/20260527000001_fatura_import.sql`.
+- **`tipo_ativo_inv` inclui `REIT`**: adicionado por `20260613000003_tipo_reit.sql` (`ALTER TYPE ... ADD VALUE`) — é um valor válido e suportado tanto no backend quanto na UI (`DrawerAtivo.tsx`), ao contrário do que versões anteriores desta nota afirmavam.
 - **`inv_etf_holdings` é uma tabela órfã**: schema criado (`20260620000001`) mas nenhuma rota de Edge Function nem componente do frontend lê/escreve nela hoje — não assumir que decomposição de ETF está implementada.
 - **Regressão conhecida em Objetivos tipo CRESCIMENTO**: a migration `20260605000001_sonho_saldo_base.sql`, ao reescrever as funções de cálculo, reintroduziu a versão **antiga** do bloco CRESCIMENTO (ano-base fixo, só receita bruta, sem cutoff YTD), descartando as melhorias de `20260603000003..006` (YoY/YTD/líquido). O valor gravado no banco (`objetivos.valor_atingido`/`percentual`/`status`) usa essa versão simples, enquanto a tela `ObjetivoDetalhe.tsx` recalcula no client a versão completa (YoY+YTD+líquido) — os dois números podem divergir para o mesmo objetivo. Antes de "corrigir", confirmar com quem mantém o código se isso foi intencional.
 - **Cartões virtuais sem resolução sufixo→apelido**: o parser Nubank grava `"Cartão final <sufixo>"` na `observacao` do item de fatura com a intenção declarada em comentário de casar com `contas.cartoes_virtuais` para mostrar o apelido — isso não está implementado; a UI hoje mostra a string crua do sufixo.

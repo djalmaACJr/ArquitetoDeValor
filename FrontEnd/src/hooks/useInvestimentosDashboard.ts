@@ -15,6 +15,18 @@ export async function fetchDashboard(contaId?: string | null): Promise<Investime
   return res.dados ?? { total_custo: 0, total_mercado: 0, ganho_perda: 0, total_dividendos: 0, tipos: [] }
 }
 
+export interface TotalPorConta { conta_id: string; valor_custo: number; total_mercado: number }
+
+// Total de mercado de TODAS as contas de investimento numa única requisição
+// (agrupar=conta no backend) — usado pelo resumo "por instituição" no
+// dashboard, que antes chamava fetchDashboard() uma vez POR conta só para
+// ler total_mercado (N requisições HTTP + 4N queries no Postgres).
+export async function fetchTotaisPorConta(): Promise<TotalPorConta[]> {
+  const res = await apiFetch<{ totais_por_conta: TotalPorConta[] }>('/investimentos/dashboard?agrupar=conta')
+  if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar totais por conta')
+  return res.dados?.totais_por_conta ?? []
+}
+
 export function useInvestimentosDashboard(contaId?: string | null) {
   const { session } = useAuth()
   const uid = session?.user?.id ?? null

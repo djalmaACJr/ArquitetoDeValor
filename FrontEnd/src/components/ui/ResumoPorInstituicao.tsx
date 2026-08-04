@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
-import { useQueries } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Doughnut } from 'react-chartjs-2'
 import { ChevronRight, ExternalLink } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useContas } from '../../hooks/useContas'
-import { fetchDashboard, useInvestimentosRanking } from '../../hooks/useInvestimentosDashboard'
+import { fetchDashboard, fetchTotaisPorConta, useInvestimentosRanking } from '../../hooks/useInvestimentosDashboard'
 import { qk } from '../../lib/queryKeys'
 import { formatBRL } from '../../lib/utils'
 import { TIPO_ATIVO_LABEL } from '../../lib/constants'
@@ -36,30 +36,37 @@ export default function ResumoPorInstituicao() {
     [contas],
   )
 
-  const dashboards = useQueries({
-    queries: instituicoes.map((c) => ({
-      queryKey: qk.invDashboard(uid, c.conta_id),
-      queryFn: () => fetchDashboard(c.conta_id),
-      staleTime: 30_000,
-      refetchOnWindowFocus: false,
-      enabled: !!uid,
-    })),
+  // Nível 0: total de mercado de TODAS as contas numa única requisição
+  // (antes: 1 requisição de dashboard completo POR conta, só para ler
+  // total_mercado — N requisições HTTP + 4N queries no Postgres).
+  const { data: totaisPorConta, isLoading: carregandoInstituicoes } = useQuery({
+    queryKey: qk.invTotaisPorConta(uid),
+    queryFn: fetchTotaisPorConta,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    enabled: !!uid && instituicoes.length > 0,
   })
-  const carregandoInstituicoes = instituicoes.length > 0 && dashboards.some((q) => q.isLoading)
+
+  // Nível 1+: dashboard COMPLETO (com breakdown por tipo) só da instituição
+  // selecionada — busca sob demanda, não mais para todas de uma vez.
+  const { data: dashboardDaInstituicao } = useQuery({
+    queryKey: qk.invDashboard(uid, nivel.n !== 0 ? nivel.contaId : null),
+    queryFn: () => fetchDashboard(nivel.n !== 0 ? nivel.contaId : null),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    enabled: !!uid && nivel.n !== 0,
+  })
 
   // Ativos de um tipo dentro da instituição — só busca ao chegar no nível 2.
   const { ranking, loading: carregandoRanking } = useInvestimentosRanking(nivel.n === 2 ? nivel.contaId : null)
 
-  const fatiasInstituicoes = useMemo(() => (
-    instituicoes
-      .map((c, i) => ({ label: c.nome, valor: dashboards[i]?.data?.total_mercado ?? 0, contaId: c.conta_id }))
+  const fatiasInstituicoes = useMemo(() => {
+    const porConta = new Map((totaisPorConta ?? []).map((t) => [t.conta_id, t.total_mercado]))
+    return instituicoes
+      .map((c) => ({ label: c.nome, valor: porConta.get(c.conta_id) ?? 0, contaId: c.conta_id }))
       .filter((f) => f.valor > 0)
       .sort((a, b) => b.valor - a.valor)
-  ), [instituicoes, dashboards])
-
-  const dashboardDaInstituicao = nivel.n !== 0
-    ? dashboards[instituicoes.findIndex((c) => c.conta_id === nivel.contaId)]?.data ?? null
-    : null
+  }, [instituicoes, totaisPorConta])
 
   const fatiasTipos = useMemo(() => {
     if (!dashboardDaInstituicao) return []

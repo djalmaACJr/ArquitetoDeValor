@@ -64,6 +64,10 @@ export const qk = {
   invHistorico:  (uid: Uid, f?: unknown) => ['inv-historico', uid, f ?? null]  as const,
   invDashboard:  (uid: Uid, contaId?: string | null) => ['inv-dashboard', uid, contaId ?? null] as const,
   invRanking:    (uid: Uid, contaId?: string | null) => ['inv-ranking', uid, contaId ?? null]   as const,
+  // Prefixo 'inv-dashboard' de propósito: cai automaticamente em toda
+  // invalidação existente de invDashboardPref(uid) espalhada pelos hooks de
+  // investimentos, sem precisar tocar em cada um deles.
+  invTotaisPorConta: (uid: Uid) => ['inv-dashboard', uid, 'por-conta'] as const,
 
   // Prefixos para INVALIDAÇÃO — chave de 2 elementos que casa (por prefixo)
   // todas as variações de parâmetro da mesma família, sem repetir strings

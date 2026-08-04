@@ -106,6 +106,37 @@ function verificador() {
   return _verificador;
 }
 
+// ── Comparação de strings em tempo constante (evita timing attack) ──
+// Usada para comparar secrets (ex.: x-cron-secret) — nunca usar `!==`/`===`
+// direto nesses casos: o early-exit char-a-char do JS vaza, por timing,
+// quantos caracteres iniciais bateram com o valor esperado.
+function compararSeguro(a: string, b: string): boolean {
+  const bufA = new TextEncoder().encode(a);
+  const bufB = new TextEncoder().encode(b);
+  // Web Crypto (SubtleCrypto) não expõe comparação em tempo constante —
+  // isso só existe em node:crypto (timingSafeEqual), que exigiria import
+  // extra. XOR byte-a-byte sobre um buffer de tamanho fixo (o maior dos
+  // dois) tem custo indistinguível do conteúdo e não usa early-exit —
+  // evita vazar por timing tanto o conteúdo quanto o tamanho do secret.
+  const tam = Math.max(bufA.length, bufB.length, 1);
+  const x = new Uint8Array(tam), y = new Uint8Array(tam);
+  x.set(bufA); y.set(bufB);
+  let diff = bufA.length ^ bufB.length;
+  for (let i = 0; i < tam; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+// ── Valida um job de cron pelo header x-cron-secret (sem JWT) ────────
+// `nomeSecretEnv` é o nome da env var (ex.: "CRON_SECRET") — cada Edge
+// Function pode usar a mesma ou secrets próprios. Devolve Response 401 se
+// o secret não estiver configurado ou não bater (comparação timing-safe).
+export function autenticarCron(req: Request, nomeSecretEnv = "CRON_SECRET"): Response | null {
+  const esperado = Deno.env.get(nomeSecretEnv) ?? "";
+  const recebido = req.headers.get("x-cron-secret") ?? "";
+  if (!esperado || !compararSeguro(recebido, esperado)) return erro("Não autorizado", 401);
+  return null;
+}
+
 // ── Valida autenticação — retorna userId ou Response 401 ──────
 // Verifica ASSINATURA e EXPIRAÇÃO do JWT (não só decodifica): o payload de
 // um token forjado/expirado não pode virar userId — rotas que usam dbAdmin()

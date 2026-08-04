@@ -278,22 +278,33 @@ async function editar(c: ReturnType<typeof db>, idPar: string, body: Record<stri
   if (body.observacao !== undefined) camposComuns.observacao = body.observacao ?? null;
 
   // ── Escopo SOMENTE_ESTE (ou par sem recorrência) ─────────────
+  // Débito e crédito são gravados na MESMA transação do Postgres (RPC) —
+  // se qualquer lado falhar, o par volta intacto (nunca fica um lado só
+  // atualizado). Ver fn_atualizar_transacoes_transferencia.
   if (escopo === "SOMENTE_ESTE" || !par.debito.id_recorrencia) {
-    const { error: eu1 } = await c.from("transacoes").update({
-      ...camposComuns, conta_id: novaOrigem,
-      ...(desc !== null ? { descricao: `[Transf. saída] ${desc}`.trim() } : {}),
-    }).eq("id", par.debito.id);
-    if (eu1) return erro("Erro ao atualizar débito: " + eu1.message, 500);
+    const updates = [
+      {
+        id: par.debito.id,
+        campos: {
+          ...camposComuns, conta_id: novaOrigem,
+          ...(desc !== null ? { descricao: `[Transf. saída] ${desc}`.trim() } : {}),
+        },
+      },
+      {
+        id: par.credito.id,
+        campos: {
+          ...camposComuns, conta_id: novaDestino,
+          ...(desc !== null ? { descricao: `[Transf. entrada] ${desc}`.trim() } : {}),
+        },
+      },
+    ];
+    const { data: linhas, error: eUp } = await c.rpc("fn_atualizar_transacoes_transferencia", { p_updates: updates });
+    if (eUp || !linhas) return erro("Erro ao atualizar transferência: " + (eUp?.message ?? ""), 500);
 
-    const { error: eu2 } = await c.from("transacoes").update({
-      ...camposComuns, conta_id: novaDestino,
-      ...(desc !== null ? { descricao: `[Transf. entrada] ${desc}`.trim() } : {}),
-    }).eq("id", par.credito.id);
-    if (eu2) return erro("Erro ao atualizar crédito: " + eu2.message, 500);
-
-    const parAtualizado = await buscarPar(c, idPar, userId);
-    if (!parAtualizado) return erro("Erro ao recuperar transferência atualizada", 500);
-    return json(montarTransferencia(parAtualizado.debito, parAtualizado.credito));
+    const debito  = (linhas as Transacao[]).find((t) => t.tipo === "DESPESA");
+    const credito = (linhas as Transacao[]).find((t) => t.tipo === "RECEITA");
+    if (!debito || !credito) return erro("Erro ao recuperar transferência atualizada", 500);
+    return json(montarTransferencia(debito, credito));
   }
 
   // ── Escopo TODOS ou ESTE_E_SEGUINTES ─────────────────────────
@@ -314,24 +325,32 @@ async function editar(c: ReturnType<typeof db>, idPar: string, body: Record<stri
   // `data` NÃO propaga para a série: cada parcela mantém sua própria data
   // (colapsar todas na mesma data destruiria o cronograma da recorrência).
   const { data: _dataOmitida, ...camposSerie } = camposComuns;
-  const updateDebito: Record<string, unknown> = { ...camposSerie };
-  const updateCredito: Record<string, unknown> = { ...camposSerie };
-  if (desc !== null) {
-    updateDebito.descricao  = `[Transf. saída] ${desc}`.trim();
-    updateCredito.descricao = `[Transf. entrada] ${desc}`.trim();
-  }
 
-  const { error: eUpDeb } = await c.from("transacoes")
-    .update(updateDebito)
-    .in("id_par_transferencia", idsPar)
-    .eq("tipo", "DESPESA");
-  if (eUpDeb) return erro("Erro ao atualizar débitos da série: " + eUpDeb.message, 500);
+  // Buscar id+tipo de TODAS as transações (débito e crédito) da série, para
+  // montar o update de cada uma com o prefixo de descrição correto.
+  const { data: todasTx, error: eTodas } = await c.from("transacoes")
+    .select("id, tipo")
+    .in("id_par_transferencia", idsPar);
+  if (eTodas || !todasTx) return erro("Erro ao buscar transações da série: " + (eTodas?.message ?? ""), 500);
 
-  const { error: eUpCred } = await c.from("transacoes")
-    .update(updateCredito)
-    .in("id_par_transferencia", idsPar)
-    .eq("tipo", "RECEITA");
-  if (eUpCred) return erro("Erro ao atualizar créditos da série: " + eUpCred.message, 500);
+  const updates = (todasTx as { id: string; tipo: string }[]).map((t) => ({
+    id: t.id,
+    campos: {
+      ...camposSerie,
+      ...(desc !== null
+        ? { descricao: t.tipo === "DESPESA" ? `[Transf. saída] ${desc}`.trim() : `[Transf. entrada] ${desc}`.trim() }
+        : {}),
+    },
+  }));
+
+  // Débitos e créditos de toda a série são gravados na MESMA transação do
+  // Postgres (RPC) — se qualquer linha falhar, a série inteira volta ao
+  // estado anterior (nunca fica parte da série atualizada e parte não).
+  const { data: linhasAtualizadas, error: eUpSerie } = await c.rpc(
+    "fn_atualizar_transacoes_transferencia",
+    { p_updates: updates },
+  );
+  if (eUpSerie || !linhasAtualizadas) return erro("Erro ao atualizar série de transferências: " + (eUpSerie?.message ?? ""), 500);
 
   logSuccess("Série de transferências atualizada", { escopo, atualizados: idsPar.length });
   return json({ atualizados: idsPar.length, escopo });

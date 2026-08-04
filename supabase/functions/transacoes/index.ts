@@ -679,13 +679,42 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
     }
     
     // Atualizar total_parcelas em todas as parcelas da recorrência
-    await c.from("transacoes")
+    const { error: eTotalParcelas } = await c.from("transacoes")
       .update({ total_parcelas: novoTotalParcelas })
       .eq("id_recorrencia", atual.id_recorrencia);
+    if (eTotalParcelas) {
+      logError("Atualizar total_parcelas da série", eTotalParcelas);
+      return erro("Erro ao atualizar total_parcelas da série: " + eTotalParcelas.message);
+    }
   }
 
   // Somente recorrências podem ter escopo estendido
   if (!atual.id_recorrencia || escopo === "SOMENTE_ESTE") {
+    // Perna de transferência: nunca editar isoladamente — o par (débito+
+    // crédito) precisa permanecer sincronizado (CLAUDE.md › Consistência de
+    // transferências). Campos que diferem por natureza entre as pernas
+    // (conta_id/categoria_id/tipo/descricao) só podem mudar via
+    // PUT /transferencias/:id_par, que sabe montar cada lado corretamente.
+    if (atual.id_par_transferencia) {
+      const CAMPOS_PROPAGAVEIS = ["status", "valor", "data", "observacao"];
+      const camposNaoPropagaveis = Object.keys(dadosUpdate).filter(k => !CAMPOS_PROPAGAVEIS.includes(k));
+      if (camposNaoPropagaveis.length > 0) {
+        return erro(
+          `Este lançamento é parte de uma transferência — ${camposNaoPropagaveis.join(", ")} só pode ser alterado pela tela de Transferências.`,
+          422,
+        );
+      }
+      const { data: parAtualizado, error: eParUp } = await c.rpc("fn_atualizar_par_transferencia", {
+        p_id_par_transferencia: atual.id_par_transferencia,
+        p_campos: dadosUpdate,
+      });
+      if (eParUp) { logError("Editar transferência (par)", eParUp); return erro(eParUp.message); }
+      const idsPar = (parAtualizado ?? []).map((t: { id: string }) => t.id);
+      await sincronizarProventoTransacoes(c, idsPar.length > 0 ? idsPar : [id]);
+      logSuccess("Transferência (par) atualizada via /transacoes", { id, id_par_transferencia: atual.id_par_transferencia });
+      return json({ atualizados: parAtualizado?.length ?? 0, dados: parAtualizado });
+    }
+
     const { data, error } = await c.from("transacoes").update(dadosUpdate).eq("id", id).select();
     if (error) { logError("Editar transação", error); return erro(error.message); }
     // Replica/espelha o provento em investimentos (cria vínculo se faltar,
@@ -764,8 +793,13 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
       atualizados = parcelas.length;
     }
   } else {
-    // Data/frequência mudaram: cada parcela recebe data (e status) próprios
-    for (const parcela of parcelas) {
+    // Data/frequência mudaram: cada parcela recebe data (e status) próprios.
+    // Os updates são calculados em memória e gravados com UMA chamada RPC
+    // atômica (fn_atualizar_transacoes_lote) em vez de um UPDATE por parcela
+    // dentro de um loop — antes, uma falha isolada era só logada e o loop
+    // CONTINUAVA, retornando HTTP 200 com a série parcialmente atualizada e
+    // sem informar ao chamador quais parcelas falharam.
+    const updates = parcelas.map((parcela) => {
       const update: Record<string, unknown> = { ...dadosUpdate };
 
       // Recalcular data proporcional ao offset desta parcela na série
@@ -773,16 +807,7 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
         const offset = (parcela.nr_parcela - nrAtual);
         const novaData = calcularDataParcela(novaDataBase, frequencia, offset * intervalo);
         update.data = novaData;
-
-        // Recalcular status baseado na nova data
-        if (novaData <= hoje) {
-          update.status = "PAGO";
-        } else if (atual.status === "PROJECAO") {
-          update.status = "PROJECAO";
-        } else {
-          update.status = "PENDENTE";
-        }
-
+        update.status = novaData <= hoje ? "PAGO" : (atual.status === "PROJECAO" ? "PROJECAO" : "PENDENTE");
         logDebug(`Parcela ${parcela.nr_parcela}: novaData=${novaData}, status=${update.status}`);
       } else if (dataFoiAlterada) {
         // Sem frequência detectada — manter offset de dias original
@@ -792,24 +817,20 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
         const diffMs = dataNovaBase.getTime() - dataOriginalBase.getTime();
         const novaData = new Date(dataOriginalParcela.getTime() + diffMs);
         update.data = novaData.toISOString().split("T")[0];
-
-        // Recalcular status baseado na nova data
         const dataUpdate = String(update.data);
-        if (dataUpdate <= hoje) {
-          update.status = "PAGO";
-        } else if (atual.status === "PROJECAO") {
-          update.status = "PROJECAO";
-        } else {
-          update.status = "PENDENTE";
-        }
-
+        update.status = dataUpdate <= hoje ? "PAGO" : (atual.status === "PROJECAO" ? "PROJECAO" : "PENDENTE");
         logDebug(`Parcela ${parcela.nr_parcela}: novaData=${update.data}, status=${update.status}`);
       }
 
-      const { error: eUp } = await c.from("transacoes").update(update).eq("id", parcela.id);
-      if (eUp) { logError(`Editar parcela ${parcela.id}`, eUp); }
-      else atualizados++;
+      return { id: parcela.id, campos: update };
+    });
+
+    const { data: linhasAtualizadas, error: eUpLote } = await c.rpc("fn_atualizar_transacoes_lote", { p_updates: updates });
+    if (eUpLote || !linhasAtualizadas) {
+      logError("Editar série (recálculo de datas)", eUpLote);
+      return erro("Erro ao atualizar série: " + (eUpLote?.message ?? ""));
     }
+    atualizados = linhasAtualizadas.length;
   }
 
   // Replica/espelha o provento em investimentos para TODAS as parcelas do escopo.

@@ -94,7 +94,7 @@ Permite:
 | `functions/faturas/` | Importação de fatura de cartão (upload PDF → parse por emissor em `parsers/` → sessão de revisão com matching automático → confirmação em massa por item ou por categoria/grupo) |
 | `functions/excluir_conta/` | Exclui todos os dados do usuário (chama `fn_excluir_dados_usuario`) |
 | `functions/version/` | Endpoint de versão (introspecção) |
-| `functions/limpar/` | Limpeza usada nos testes (reativa contas inativas para destravar UPDATE) |
+| `functions/limpar/` | Zera dados do usuário por entidade (`transacoes`\|`categorias`\|`contas`\|`investimentos`\|tudo) — reativa contas inativas para destravar UPDATE. Usada tanto pelos testes (`99_limpar.test.ts`) quanto pela feature real "Limpar dados" em `ImportExportPage.tsx` (com modal de confirmação no frontend). Protegida só por JWT+RLS (como qualquer DELETE do sistema) — nunca por secret de ambiente, já que é uma função de produção legítima, não infraestrutura de teste isolada. |
 | `functions/ia_configs/` | CRUD das configs de IA por provedor (apelido, modelo, api_key). API key é criptografada em AES-256-GCM antes de ser persistida; frontend só vê máscara (`sk-...f4a2`). Inclui ping para testar credencial. |
 | `functions/chat_mascote/` | Recebe mensagem + contexto opcional (texto + screenshot base64) da página, descriptografa a api_key da config escolhida e proxia a chamada para o provedor (Claude / GPT / Gemini / DeepSeek / OpenRouter / Mistral / Cohere). |
 | `functions/convite/` | Envia convite de cadastro por e-mail via Brevo (sem rastreamento — não há tabela de convites). Chamada pela seção "Convidar amigos" do Perfil; o compartilhamento via WhatsApp é só um link `wa.me` gerado no frontend, sem endpoint próprio. |

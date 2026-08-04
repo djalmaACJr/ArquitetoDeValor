@@ -1,0 +1,32 @@
+-- ============================================================
+-- inv_dividendos — trava de unicidade contra duplicação por reconciliação
+--
+-- Achado real (2026-08-04, investigação de bug reportado pelo usuário):
+-- PETR4, tipo JSCP, mesma conta, pay_date 2026-08-20, valor 19.28 — dois
+-- registros criados pelo cron diário de dividendos BRL (rotaDividendosCronBr
+-- → provisionarProventosBrl → upsertDividendoProvisionado) em execuções de
+-- dias DIFERENTES (2026-07-04 e 2026-07-06, mesmo horário ~09:30 UTC do
+-- cron). A query de dedup (upsertDividendoProvisionado, chave user+ativo+
+-- conta+tipo_dividendo+mês) deveria ter encontrado o registro de 04/07 e
+-- só atualizado — mas por algum motivo (ainda não totalmente esclarecido;
+-- suspeita de disparo duplicado do agendador pg_net/pg_cron ou corrida
+-- entre o cron e uma ação manual) criou um segundo registro idêntico.
+--
+-- IMPORTANTE: uma constraint única em (ativo,conta,tipo,data) SEM o valor
+-- quebraria casos LEGÍTIMOS já existentes no banco — uma varredura em toda
+-- a tabela achou ~19 grupos com a mesma chave (ativo+conta+tipo+data) mas
+-- VALORES diferentes (ex.: duas parcelas de JCP anunciadas na mesma data,
+-- a maioria vinda de importação em lote de extrato B3). Incluir `valor` na
+-- chave de unicidade resolve isso: nenhum desses ~19 grupos tem valor igual
+-- dentro do grupo (só o caso real do bug tinha), então a constraint abaixo
+-- não bloqueia nenhum dado histórico válido.
+--
+-- O duplicado already identificado (id a3e5cc1e-3798-4309-8bd7-25c8091b0a2c
+-- e sua transação 677bf67c-383e-4996-b425-7b027c053d86) já foi removido
+-- manualmente antes desta migration — não há violação pendente a limpar.
+--
+-- Idempotente: CREATE UNIQUE INDEX IF NOT EXISTS.
+-- ============================================================
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_inv_dividendos_dedup
+  ON arqvalor.inv_dividendos (user_id, ativo_id, conta_id, tipo_dividendo_id, data_pagamento, valor);
