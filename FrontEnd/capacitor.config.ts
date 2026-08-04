@@ -4,23 +4,17 @@ const config: CapacitorConfig = {
   appId: 'br.com.arquitetodevalor.app',
   appName: 'Arquiteto de Valor',
   webDir: 'dist',
-  // 'https' evita problemas de cookie/mixed-content do WebView no Android
-  // (padrão recomendado pelo Capacitor em vez do 'capacitor://' default).
   server: {
-    androidScheme: 'https',
+    androidScheme: 'https'
   },
   plugins: {
     CapacitorUpdater: {
-      // Edge function self-hosted (supabase/functions/app_updates) — não a
-      // nuvem da Capgo, que é o default (https://plugin.capgo.app/updates).
       updateUrl: 'https://ftpelncgrakpphytfrfo.supabase.co/functions/v1/app_updates',
-      // Sem telemetria pra Capgo: self-hosted é só o que já temos no Supabase.
       statsUrl: '',
-      // Baixa em segundo plano a cada retomada do app e aplica na próxima vez
-      // que o app for pro background — não interrompe a sessão em uso.
       autoUpdate: 'atBackground',
-    },
-  },
+      publicKey: '-----BEGIN RSA PUBLIC KEY-----\nMIIBCgKCAQEA04yksziEcyD3mBSyXnvxLUY8pauD3ZvPil3PxcDQEQ01uT+qXmjg\n1kyebhDWZcT6+JuQmAzH7ComfaXoFZ2Fx78RwxQW3NMVk76bZVASbTqIEjNzPrOq\nFNK4uG9IcvT3ObLZjZZq4sklkarrzGKZamnfhIQFI72aWNPK0bZ1QiayheXfmFNv\nWUGNMTBeQ8cRlKfvnYHexMmNY7i6D2OWZ/LLzawZ8Lgz1Z8dukzniaGDDDpN/sb7\n2rXkW6AB/cAjRriA75xxIZ2rAucYju5xA6R4JnEbtyXHFt0WNI4PPA+PJ4rFPbyx\nBaFEBREJqRZlSRjvIFWX+jiZIFAWJYiBBwIDAQAB\n-----END RSA PUBLIC KEY-----\n'
+    }
+  }
 };
 
 export default config;

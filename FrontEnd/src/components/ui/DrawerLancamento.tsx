@@ -488,59 +488,26 @@ export default function DrawerLancamento({
     : []
 
   // ── Salvar ─────────────────────────────────────────────────
+  // A mensagem de erro sempre renderiza no fim do formulário (depois de
+  // "Salvar como padrão"), como último item do corpo rolável do Drawer —
+  // sem rolar até ela, some fora da área visível e parece que "não apareceu".
+  function mostrarErro(mensagem: string) {
+    setErro(mensagem)
+    setTimeout(() => {
+      const errorElement = document.querySelector('[data-error-message]')
+      if (errorElement) {
+        errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }
+    }, 150)
+  }
+
   const salvar = async (criarNovo = false) => {
-    if (!form.descricao.trim()) { 
-      setErro('Descrição é obrigatória.'); 
-      // Rolar para mostrar o erro de validação
-      setTimeout(() => {
-        const errorElement = document.querySelector('[data-error-message]')
-        if (errorElement) {
-          errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        } else {
-          window.scrollTo({ top: 0, behavior: 'smooth' })
-        }
-      }, 100)
-      return 
-    }
-    if (!form.valor || Number(form.valor) <= 0) { 
-      setErro('Valor deve ser maior que zero.'); 
-      // Rolar para mostrar o erro de validação
-      setTimeout(() => {
-        const errorElement = document.querySelector('[data-error-message]')
-        if (errorElement) {
-          errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        } else {
-          window.scrollTo({ top: 0, behavior: 'smooth' })
-        }
-      }, 100)
-      return 
-    }
-    if (!form.data) { 
-      setErro('Data é obrigatória.'); 
-      // Rolar para mostrar o erro de validação
-      setTimeout(() => {
-        const errorElement = document.querySelector('[data-error-message]')
-        if (errorElement) {
-          errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        } else {
-          window.scrollTo({ top: 0, behavior: 'smooth' })
-        }
-      }, 100)
-      return 
-    }
-    if (!form.conta_id) { 
-      setErro('Conta é obrigatória.'); 
-      // Rolar para mostrar o erro de validação
-      setTimeout(() => {
-        const errorElement = document.querySelector('[data-error-message]')
-        if (errorElement) {
-          errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        } else {
-          window.scrollTo({ top: 0, behavior: 'smooth' })
-        }
-      }, 100)
-      return 
-    }
+    if (!form.descricao.trim()) { mostrarErro('Descrição é obrigatória.'); return }
+    if (!form.valor || Number(form.valor) <= 0) { mostrarErro('Valor deve ser maior que zero.'); return }
+    if (!form.data) { mostrarErro('Data é obrigatória.'); return }
+    if (!form.conta_id) { mostrarErro('Conta é obrigatória.'); return }
 
     // Verificar alteração de total_parcelas em recorrências
     if (editando?.id_recorrencia && escopo === 'ESTE_E_SEGUINTES') {
@@ -563,8 +530,8 @@ export default function DrawerLancamento({
     const valorNumerico = parsearValorBR(form.valor)
 
     if (form.tipo === 'TRANSFERENCIA') {
-      if (!form.conta_destino_id) { setSalvando(false); setErro('Selecione a conta de destino.'); return }
-      if (form.conta_id === form.conta_destino_id) { setSalvando(false); setErro('Contas devem ser diferentes.'); return }
+      if (!form.conta_destino_id) { setSalvando(false); mostrarErro('Selecione a conta de destino.'); return }
+      if (form.conta_id === form.conta_destino_id) { setSalvando(false); mostrarErro('Contas devem ser diferentes.'); return }
       const payload = {
         conta_origem_id: form.conta_id, conta_destino_id: form.conta_destino_id,
         valor: valorNumerico, data: form.data, descricao: form.descricao.trim(),
@@ -592,7 +559,7 @@ export default function DrawerLancamento({
           setForm({ ...FORM_VAZIO, tipo: form.tipo, data: form.data, conta_id: form.conta_id, status: form.status })
           setTimeout(() => descricaoRef.current?.focus(), 50)
         } else { onFechar() }
-      } else setErro(res.erro ?? 'Erro ao salvar.')
+      } else mostrarErro(res.erro ?? 'Erro ao salvar.')
       return
     }
 
@@ -620,7 +587,7 @@ export default function DrawerLancamento({
       })
       if (!res.ok) {
         setSalvando(false)
-        setErro(res.erro ?? 'Erro ao converter lançamento.')
+        mostrarErro(res.erro ?? 'Erro ao converter lançamento.')
         return
       }
       const delRes = await apiMutate(`/transacoes/${editando!.id}?escopo=SOMENTE_ESTE`, 'DELETE', {})
@@ -629,7 +596,7 @@ export default function DrawerLancamento({
         const primeiraId = criadas?.parcelas?.[0]?.id
         if (primeiraId) await apiMutate(`/transacoes/${primeiraId}?escopo=TODOS`, 'DELETE', {})
         setSalvando(false)
-        setErro(delRes.erro ?? 'Erro ao converter lançamento — nada foi alterado.')
+        mostrarErro(delRes.erro ?? 'Erro ao converter lançamento — nada foi alterado.')
         return
       }
       setSalvando(false)
@@ -644,7 +611,7 @@ export default function DrawerLancamento({
           setEscopo('SOMENTE_ESTE'); setExpandindo(false)
           setTimeout(() => descricaoRef.current?.focus(), 50)
         } else { onFechar() }
-      } else { setErro(res.erro ?? 'Erro ao salvar.') }
+      } else { mostrarErro(res.erro ?? 'Erro ao salvar.') }
       return
     }
 
@@ -707,16 +674,7 @@ export default function DrawerLancamento({
         setTimeout(() => descricaoRef.current?.focus(), 50)
       } else { onFechar() }
     } else {
-      setErro(res.erro ?? 'Erro ao salvar.')
-      // Rolar para mostrar a mensagem de erro dentro do Drawer
-      setTimeout(() => {
-        const errorElement = document.querySelector('[data-error-message]')
-        if (errorElement) {
-          errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        } else {
-          window.scrollTo({ top: 0, behavior: 'smooth' })
-        }
-      }, 500)
+      mostrarErro(res.erro ?? 'Erro ao salvar.')
     }
   }
 
@@ -731,7 +689,7 @@ export default function DrawerLancamento({
     const res = await apiMutate(url, 'DELETE', {})
     setExcluindo(false)
     setConfirmandoExclusao(false)
-    if (res.ok) { onExcluido?.(); onFechar() } else setErro(res.erro ?? 'Erro ao excluir.')
+    if (res.ok) { onExcluido?.(); onFechar() } else mostrarErro(res.erro ?? 'Erro ao excluir.')
   }
 
   // ── Antecipar parcelas ─────────────────────────────────────
@@ -753,7 +711,7 @@ export default function DrawerLancamento({
 
       const res = await apiMutate(`/transacoes/${editando.id}/antecipar`, 'POST')
       if (!res.ok) {
-        setErro(res.erro ?? 'Erro ao antecipar.')
+        mostrarErro(res.erro ?? 'Erro ao antecipar.')
         return
       }
       if (nFuturas > 0) {

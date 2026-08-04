@@ -94,11 +94,20 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
   const [expr,        setExpr]        = useState(inicialStr)
   const [resultado,   setResultado]   = useState<number | null>(null)
   const [acabouIgual, setAcabouIgual] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef      = useRef<HTMLInputElement>(null)
+  const containerRef  = useRef<HTMLDivElement>(null)
 
   // Foca o input oculto ao montar para capturar teclado e colagem imediatamente
   useEffect(() => {
     inputRef.current?.focus()
+  }, [])
+
+  // A calculadora renderiza inline dentro do corpo rolável do Drawer, depois
+  // de vários campos (Tipo, Data, Descrição, Categoria) — sem isso ela abre
+  // fora da área visível (usuário vê só o topo, teclado/OK ficam cortados
+  // embaixo do rodapé fixo do drawer, parecendo "não caber na tela").
+  useEffect(() => {
+    containerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [])
 
   // ── Ações ──────────────────────────────────────────────────
@@ -237,6 +246,7 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
 
   return (
     <div
+      ref={containerRef}
       onClick={() => inputRef.current?.focus()}
       className="rounded-2xl border border-white/10 overflow-hidden mt-2 outline-none relative"
       style={{ background: '#141b2e' }}

@@ -1,4 +1,6 @@
-apply plugin: 'com.android.application'
+plugins {
+    id 'com.android.application'
+}
 
 android {
     namespace = "br.com.arquitetodevalor.app"
@@ -18,8 +20,14 @@ android {
     }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            minifyEnabled true
+            // Referencia explicitamente as regras do @capgo/capacitor-updater
+            // (não declara consumerProguardFiles no próprio build.gradle, então
+            // não seria puxado automaticamente) além do padrão do projeto —
+            // sem isso o R8 pode remover/renomear classes do plugin acessadas
+            // via reflection pela bridge nativa do Capacitor.
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro',
+                '../../node_modules/@capgo/capacitor-updater/android/proguard-rules.pro'
         }
     }
 }
@@ -49,6 +57,6 @@ try {
     if (servicesJSON.text) {
         apply plugin: 'com.google.gms.google-services'
     }
-} catch(Exception e) {
+} catch(Exception ignored) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }

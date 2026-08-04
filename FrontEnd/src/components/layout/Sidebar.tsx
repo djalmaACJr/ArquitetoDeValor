@@ -328,18 +328,28 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         />
       )}
 
+      {/* Wrapper — só existe pra dar contexto de posicionamento (`relative`)
+          ao botão de colapsar sem herdar o `overflow-y-auto`/`overflow-x`
+          implícito da nav (que cortava o botão, posicionado propositalmente
+          "a cavalo" da borda direita com `-right-3`). No mobile a nav é
+          `fixed` (ignora ancestrais não-transformados), então o wrapper
+          vazio não afeta nada. */}
+      <div
+        className={isDesktop
+          ? `relative sticky top-0 h-[100svh] flex-shrink-0 transition-all duration-300 ${colapsado ? 'w-[60px]' : 'w-[216px]'}`
+          : ''}
+      >
       <nav
         className={
           isDesktop
-            // Desktop: parte do layout, largura controlada por `colapsado`.
-            // `overflow-y-auto` evita que o conteúdo da nav (quando submenu
-            // expandido empurra o rodapé além de h-screen) vaze para fora
-            // da viewport e gere um retângulo `bg-av-dark` visível em
-            // cima da página principal — bug "quadro preto" reportado ao
-            // navegar com Relatórios expandido + clicar em Perfil.
-            ? `flex flex-col px-3 py-5 bg-av-dark sticky top-0 h-[100svh] overflow-y-auto rounded-r-2xl flex-shrink-0 transition-all duration-300 ${
-                colapsado ? 'w-[60px]' : 'w-[216px]'
-              }`
+            // Desktop: h-full/w-full pra preencher o wrapper (que já carrega
+            // sticky/h-[100svh]/largura). `overflow-y-auto` evita que o
+            // conteúdo da nav (quando submenu expandido empurra o rodapé
+            // além de h-screen) vaze para fora da viewport e gere um
+            // retângulo `bg-av-dark` visível em cima da página principal —
+            // bug "quadro preto" reportado ao navegar com Relatórios
+            // expandido + clicar em Perfil.
+            ? 'flex flex-col px-3 py-5 bg-av-dark h-full w-full overflow-y-auto rounded-r-2xl'
             // Mobile: overlay deslizante.
             : `flex flex-col px-3 py-4 bg-av-dark fixed top-0 left-0 h-[100svh] overflow-y-auto z-50 w-[min(82vw,300px)] transition-transform duration-300 ${
                 mobileOpen ? 'translate-x-0' : '-translate-x-full'
@@ -354,17 +364,6 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
             className="absolute top-3 right-3 z-10 w-8 h-8 rounded-lg border border-blue-400/30 flex items-center justify-center text-white/70 hover:text-white hover:border-white/40 transition-colors"
           >
             <X size={14}/>
-          </button>
-        )}
-
-        {/* Colapsar — só no desktop */}
-        {isDesktop && (
-          <button
-            onClick={() => setCollapsed(v => !v)}
-            title={collapsed ? 'Expandir menu' : 'Recolher menu'}
-            className="absolute -right-3 top-6 z-10 w-6 h-6 rounded-full bg-av-dark border border-blue-400/30 flex items-center justify-center text-white/60 hover:text-av-green hover:border-av-green/50 transition-colors shadow-md"
-          >
-            {collapsed ? <ChevronRight size={12}/> : <ChevronLeft size={12}/>}
           </button>
         )}
 
@@ -432,6 +431,19 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         )}
       </div>
     </nav>
+
+      {/* Colapsar — só no desktop; fora da nav pra não ser cortado pelo
+          overflow-y-auto dela (ver comentário no wrapper acima). */}
+      {isDesktop && (
+        <button
+          onClick={() => setCollapsed(v => !v)}
+          title={collapsed ? 'Expandir menu' : 'Recolher menu'}
+          className="absolute -right-3 top-6 z-10 w-6 h-6 rounded-full bg-av-dark border border-blue-400/30 flex items-center justify-center text-white/60 hover:text-av-green hover:border-av-green/50 transition-colors shadow-md"
+        >
+          {collapsed ? <ChevronRight size={12}/> : <ChevronLeft size={12}/>}
+        </button>
+      )}
+      </div>
     </>
   )
 }

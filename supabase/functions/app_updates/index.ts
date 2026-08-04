@@ -5,7 +5,11 @@
 // a cada abertura do app Android — devolve o bundle OTA mais recente
 // publicado em arqvalor.app_releases, se houver um mais novo que o instalado.
 // Contrato do plugin (self-hosted updateUrl): recebe um "AppInfos" e devolve
-// { version, url, checksum } se houver update, ou { message } se não houver.
+// { version, url, checksum, session_key } se houver update, ou { message }
+// se não houver. Bundles são assinados (@capgo/cli bundle encrypt) — checksum
+// aqui é o checksum CIFRADO e session_key é o ivSessionKey exigido pra
+// decifrar no dispositivo (ver FrontEnd/capacitor.config.ts → publicKey e
+// FrontEnd/scripts/publish-android-ota.mjs).
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, corsPreFlight, registrarOrigem, dbAdmin } from "../_shared/utils.ts";
@@ -55,7 +59,7 @@ Deno.serve(async (req: Request) => {
 
   const { data, error } = await dbAdmin()
     .from("app_releases")
-    .select("versao, bundle_url, checksum")
+    .select("versao, bundle_url, checksum, session_key")
     .eq("plataforma", plataforma)
     .eq("canal", "production")
     .eq("ativo", true)
@@ -72,5 +76,6 @@ Deno.serve(async (req: Request) => {
     version: data.versao,
     url: data.bundle_url,
     checksum: data.checksum,
+    session_key: data.session_key,
   });
 });

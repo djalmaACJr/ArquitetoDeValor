@@ -15,6 +15,10 @@ dist-ssr
 # Zips gerados pelo script de publicação OTA (scripts/publish-android-ota.mjs)
 *.zip
 
+# Chave privada de assinatura OTA (@capgo/cli key create) — NUNCA versionar.
+# A chave de verdade vive só no .env da raiz (CAPGO_UPDATER_PRIVATE_KEY).
+.capgo_key_v2
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
