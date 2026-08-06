@@ -1,10 +1,14 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import type { FormEvent } from 'react'
 import {
   User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown,
   Pencil, Sparkles, ArrowRight, Wand2, RefreshCw, Search, ChevronLeft, ChevronRight,
-  Palette, Users, MessageCircle, Info, UserPlus, Mail, Share2,
+  Palette, Users, MessageCircle, Info, UserPlus, Mail, Share2, Fingerprint,
 } from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
+import {
+  biometriaAtiva, biometriaDisponivelNoAparelho, ativarBiometria, desativarBiometria,
+} from '../lib/biometria'
 import ChatMascote from '../components/ui/ChatMascote'
 import { useTheme } from '../hooks/useTheme'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
@@ -1203,6 +1207,55 @@ export default function PerfilPage() {
     }
   }
 
+  // ── Login por digital (só app Android — ver src/lib/biometria.ts) ──
+  const [digitalAtiva,      setDigitalAtiva]      = useState(false)
+  const [digitalDisponivel, setDigitalDisponivel] = useState(false)
+  const [pedindoSenhaDigital, setPedindoSenhaDigital] = useState(false)
+  const [senhaDigital,      setSenhaDigital]      = useState('')
+  const [fbDigital,         setFbDigital]         = useState<Feedback | null>(null)
+  const [loadDigital,       setLoadDigital]       = useState(false)
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    Promise.all([biometriaAtiva(), biometriaDisponivelNoAparelho()]).then(([ativa, disp]) => {
+      setDigitalAtiva(ativa)
+      setDigitalDisponivel(disp.disponivel)
+    })
+  }, [])
+
+  async function desligarDigital() {
+    setLoadDigital(true)
+    await desativarBiometria()
+    setLoadDigital(false)
+    setDigitalAtiva(false)
+    setFbDigital({ tipo: 'ok', msg: 'Login por digital desativado.' })
+  }
+
+  // Exige confirmar a senha atual antes de guardá-la protegida por biometria
+  // (mesmo padrão de "Alterar senha" acima) — evita salvar uma senha errada
+  // (typo) que só seria descoberta na próxima tentativa de entrar com digital.
+  async function ativarDigital(e: FormEvent) {
+    e.preventDefault()
+    setFbDigital(null)
+    setLoadDigital(true)
+    const { error: errLogin } = await supabase.auth.signInWithPassword({ email: emailAtual, password: senhaDigital })
+    if (errLogin) {
+      setLoadDigital(false)
+      setFbDigital({ tipo: 'erro', msg: 'Senha incorreta.' })
+      return
+    }
+    const r = await ativarBiometria(emailAtual, senhaDigital)
+    setLoadDigital(false)
+    setSenhaDigital('')
+    if (!r.ok) {
+      setFbDigital({ tipo: 'erro', msg: r.erro ?? 'Não foi possível ativar — confirme a digital no aparelho.' })
+      return
+    }
+    setPedindoSenhaDigital(false)
+    setDigitalAtiva(true)
+    setFbDigital({ tipo: 'ok', msg: 'Login por digital ativado!' })
+  }
+
   // ── Filtros salvos ──────────────────────────────────────────
   const { filtros, carregando: carregandoFiltros, renomear: renomearFiltro, atualizarDados: atualizarDadosFiltro, excluir: excluirFiltro, excluirTodos } =
     useFiltrosSalvos()
@@ -1506,6 +1559,51 @@ export default function PerfilPage() {
           </Secao>
 
         </div>{/* fim Linha 1 */}
+
+        {/* ── Login por digital — só app Android com biometria disponível ── */}
+        {Capacitor.isNativePlatform() && digitalDisponivel && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Secao titulo="Login por digital" icone={<Fingerprint size={15}/>}>
+              {!pedindoSenhaDigital ? (
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[16px] text-white/50">
+                    {digitalAtiva
+                      ? 'Ativado — você pode entrar só com a digital.'
+                      : 'Entre no app sem digitar sua senha toda vez.'}
+                  </p>
+                  <button type="button"
+                    onClick={() => digitalAtiva ? desligarDigital() : setPedindoSenhaDigital(true)}
+                    disabled={loadDigital}
+                    className={`${btn} shrink-0 ${digitalAtiva
+                      ? 'bg-white/5 text-white/50 hover:bg-white/10'
+                      : 'bg-av-green text-av-dark hover:bg-av-green/90'}`}>
+                    {loadDigital ? '...' : digitalAtiva ? 'Desativar' : 'Ativar'}
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={ativarDigital} className="space-y-3">
+                  <div>
+                    <label className={label}>Confirme sua senha atual</label>
+                    <input type="password" required value={senhaDigital} onChange={e => setSenhaDigital(e.target.value)}
+                      className={input} placeholder="••••••••" autoFocus/>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button type="button"
+                      onClick={() => { setPedindoSenhaDigital(false); setSenhaDigital(''); setFbDigital(null) }}
+                      className={`${btn} bg-white/5 text-white/50 hover:bg-white/10`}>
+                      Cancelar
+                    </button>
+                    <button type="submit" disabled={loadDigital}
+                      className={`${btn} bg-av-green text-av-dark hover:bg-av-green/90`}>
+                      {loadDigital ? 'Confirmando...' : 'Confirmar'}
+                    </button>
+                  </div>
+                </form>
+              )}
+              <Alerta fb={fbDigital}/>
+            </Secao>
+          </div>
+        )}
 
         {/* ── Linha 2: Filtros salvos | Assistente de Lançamentos ─ */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

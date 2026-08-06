@@ -33,4 +33,10 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Login por biometria (@capgo/capacitor-native-biometric). USE_BIOMETRIC
+         cobre API 28+ (BiometricPrompt); USE_FINGERPRINT é o equivalente legado
+         exigido em API 24-27 (minSdk deste app é 24) — sem ele, digital não
+         funciona nos aparelhos mais antigos suportados. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 </manifest>

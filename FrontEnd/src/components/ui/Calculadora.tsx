@@ -1,11 +1,27 @@
 // src/components/ui/Calculadora.tsx
 import { useState, useEffect, useRef } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { Delete } from 'lucide-react'
+import { usePtax } from '../../hooks/usePtax'
+
+// Detalhes de uma conversão US$ → R$ feita pelo usuário, repassados ao
+// Drawer para registrar a cotação usada na observação e, quando não havia
+// PTAX publicada para a data do lançamento, forçar o status para Projeção.
+export interface InfoConversaoDolar {
+  valorOriginal: number
+  cotacao: number
+  dataCotacao: string
+  semCotacao: boolean
+}
 
 interface Props {
   valorInicial: number
   onConfirmar: (valor: number) => void
   onFechar: () => void
+  // Data (YYYY-MM-DD) do lançamento — usada para buscar a cotação PTAX do
+  // dia. Opcional só por robustez; na prática o Drawer sempre tem uma data.
+  dataLancamento?: string
+  onConversaoDolar?: (info: InfoConversaoDolar) => void
 }
 
 // Avalia uma expressão aritmética simples de forma segura
@@ -77,6 +93,7 @@ function Btn({ label, onClick, className = BTN_NUM, style }: BotaoProps) {
   return (
     <button
       type="button"
+      tabIndex={-1}
       onMouseDown={e => { e.preventDefault(); onClick() }}
       className={className}
       style={{ height: '46px', ...style }}
@@ -86,7 +103,7 @@ function Btn({ label, onClick, className = BTN_NUM, style }: BotaoProps) {
   )
 }
 
-export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Props) {
+export default function Calculadora({ valorInicial, onConfirmar, onFechar, dataLancamento, onConversaoDolar }: Props) {
   const inicialStr = valorInicial > 0
     ? formatCents(Math.round(valorInicial * 100))
     : ''
@@ -96,6 +113,17 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
   const [acabouIgual, setAcabouIgual] = useState(false)
   const inputRef      = useRef<HTMLInputElement>(null)
   const containerRef  = useRef<HTMLDivElement>(null)
+
+  // Cotação PTAX (USD → BRL) para o botão de conversão de dólar: pede a
+  // cotação da DATA DO LANÇAMENTO (não a de hoje) — o backend devolve o dia
+  // exato ou, se cair em fim de semana/feriado, a cotação do dia útil
+  // anterior mais próximo (mesma convenção usada em Investimentos).
+  const { taxaEm, atualData } = usePtax(dataLancamento ? [dataLancamento] : [])
+  const taxaDolar = dataLancamento ? taxaEm(dataLancamento) : null
+  // Não existe PTAX publicada ainda para a data do lançamento quando ela é
+  // posterior ao último dia com cotação sincronizada (ex.: lançamento
+  // futuro) — nesse caso a taxa usada é só uma estimativa (a mais recente).
+  const semCotacaoParaData = !!dataLancamento && !!atualData && dataLancamento > atualData
 
   // Foca o input oculto ao montar para capturar teclado e colagem imediatamente
   useEffect(() => {
@@ -161,6 +189,24 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
     setExpr('')
     setResultado(null)
     setAcabouIgual(false)
+  }
+
+  // Converte o valor atual (assumido em US$) para R$ usando a cotação PTAX
+  // da data do lançamento (ou a mais próxima/recente disponível).
+  function pressConverterDolar() {
+    if (taxaDolar == null || !dataLancamento) return
+    const atual = acabouIgual ? resultado : avaliarExpr(expr)
+    if (atual === null) return
+    const convertido = atual * taxaDolar
+    setExpr(convertido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+    setResultado(convertido)
+    setAcabouIgual(true)
+    onConversaoDolar?.({
+      valorOriginal: atual,
+      cotacao: taxaDolar,
+      dataCotacao: semCotacaoParaData && atualData ? atualData : dataLancamento,
+      semCotacao: semCotacaoParaData,
+    })
   }
 
   function confirmar() {
@@ -255,7 +301,7 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
       <input
         ref={inputRef}
         autoFocus
-        inputMode="numeric"
+        inputMode={Capacitor.isNativePlatform() ? 'none' : 'numeric'}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
         className="absolute opacity-0 pointer-events-none"
@@ -306,6 +352,7 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
         {/* = — ocupa linhas 4 e 5 */}
         <button
           type="button"
+          tabIndex={-1}
           onMouseDown={e => { e.preventDefault(); if (acabouIgual) { confirmar() } else { pressIgual() } }}
           className={`${BTN} bg-av-green hover:bg-av-green/90 row-span-2`}
           style={{ gridRow: 'span 2', height: 'auto', minHeight: '46px', color: '#0a0f1a' }}
@@ -318,10 +365,32 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
         <Btn label="00" onClick={pressDuplo} />
       </div>
 
+      {/* Conversão US$ → R$ (cotação PTAX da data do lançamento) */}
+      <div className="px-3 pb-3">
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={taxaDolar == null}
+          onMouseDown={e => { e.preventDefault(); pressConverterDolar() }}
+          className="w-full rounded-xl text-[15px] font-medium py-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#28354d]"
+          style={{ background: '#1e2940', color: '#60a5fa', border: '1px solid rgba(255,255,255,0.08)' }}
+          title={
+            taxaDolar == null
+              ? 'Cotação indisponível'
+              : semCotacaoParaData
+                ? `Sem PTAX publicada para a data do lançamento — usando a cotação mais recente: US$ 1 = R$ ${taxaDolar.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+                : `Converter usando a cotação PTAX do dia: US$ 1 = R$ ${taxaDolar.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+          }
+        >
+          US$ → R$ {taxaDolar != null ? `(1 = ${taxaDolar.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${semCotacaoParaData ? '*' : ''})` : ''}
+        </button>
+      </div>
+
       {/* Confirmar / Cancelar */}
       <div className="grid grid-cols-2 gap-1.5 px-3 pb-3">
         <button
           type="button"
+          tabIndex={-1}
           onMouseDown={e => { e.preventDefault(); onFechar() }}
           className="rounded-xl text-[17px] font-medium py-2.5 transition-colors hover:bg-white/5"
           style={{ color: '#8b92a8', border: '1px solid rgba(255,255,255,0.08)' }}
@@ -330,6 +399,7 @@ export default function Calculadora({ valorInicial, onConfirmar, onFechar }: Pro
         </button>
         <button
           type="button"
+          tabIndex={-1}
           onMouseDown={e => { e.preventDefault(); confirmar() }}
           className="rounded-xl text-[17px] font-semibold py-2.5 bg-av-green hover:bg-av-green/90 transition-colors"
           style={{ color: '#0a0f1a' }}

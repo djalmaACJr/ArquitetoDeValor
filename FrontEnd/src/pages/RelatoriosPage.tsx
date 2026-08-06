@@ -310,6 +310,23 @@ export default function RelatoriosPage() {
   const stickyBarRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Altura real da barra de filtros (sticky, top:0) — o cabeçalho da tabela
+  // (também sticky) usa esse valor como seu próprio `top`, pra ficar
+  // encostado logo abaixo dela em vez de sobrepor os comboboxes de filtro.
+  // ResizeObserver (em vez de só olhar `filtrosColapsados`) cobre tanto o
+  // colapso quanto qualquer mudança de altura no estado expandido (ex.:
+  // chips de filtro quebrando linha).
+  const [alturaBarraFiltros, setAlturaBarraFiltros] = useState(0)
+  useEffect(() => {
+    const el = stickyBarRef.current
+    if (!el) return
+    const atualizar = () => setAlturaBarraFiltros(el.offsetHeight)
+    atualizar()
+    const obs = new ResizeObserver(atualizar)
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+
   useEffect(() => {
     const sentinel = sentinelRef.current
     if (!sentinel) return
@@ -960,7 +977,12 @@ export default function RelatoriosPage() {
       {/* Sticky: topbar + filtros — encolhe automaticamente ao rolar.
           Quando colapsado, mostra só uma barra fina com botão pra reexibir
           os filtros + título + botão Gerar/atualizar. */}
-      <div ref={stickyBarRef} className="sticky top-0 z-20 -mx-5 px-5 pt-4 pb-2"
+      {/* z-50: precisa ficar ACIMA do <thead> (z-30) e do canto sticky dele
+          (z-40) — senão o dropdown dos comboboxes de filtro (Contas,
+          Categorias, Status), embora tenha z-index alto internamente, fica
+          preso na stacking context desta div (z-20 antes) e é coberto pelo
+          cabeçalho sticky da tabela ao rolar. */}
+      <div ref={stickyBarRef} className="sticky top-0 z-50 -mx-5 px-5 pt-4 pb-2"
         style={{ background: 'var(--bg-page, #0d1220)', borderBottom: filtrosColapsados ? '1px solid rgba(255,255,255,0.08)' : 'none' }}>
         {filtrosColapsados ? (
           // ── Versão compacta (auto ao rolar) ──
@@ -1265,9 +1287,9 @@ export default function RelatoriosPage() {
               inteira (<main>) rola horizontalmente — não a tabela. */}
           {!vistaPareto && <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl" data-tutorial="relatorios-tabela">
               <table className="w-full border-collapse" style={{ minWidth: 600 }}>
-                {/* Cabecalho — sticky abaixo da topbar (altura da topbar
-                    colapsada ~50px). */}
-                <thead className="sticky z-30" style={{ top: filtrosColapsados ? 50 : 0 }}>
+                {/* Cabecalho — sticky logo abaixo da barra de filtros
+                    (altura medida via ResizeObserver, ver alturaBarraFiltros). */}
+                <thead className="sticky z-30" style={{ top: alturaBarraFiltros }}>
                   <tr style={{ background: '#1a1f2e' }}>
                     <th className="px-4 py-3 text-left sticky left-0 z-40 border-b border-white/10"
                       style={{ background: '#1a1f2e', minWidth: 220 }}>

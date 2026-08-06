@@ -61,3 +61,34 @@ export async function preencherValor(page: Page, drawer: Locator, valor: string)
   await drawer.getByRole('button', { name: /^OK$/ }).click()
   await page.waitForTimeout(200)
 }
+
+/**
+ * Localiza a linha de um lançamento pelo texto e clica no botão Editar,
+ * devolvendo o Locator do drawer já visível.
+ *
+ * Endurecido contra um flake observado em E2E-EX10: o clique no botão Editar
+ * às vezes acontecia bem no meio de um re-render/replaceState de rota ainda
+ * em andamento na página (o beforeEach já espera `networkidle`, mas um
+ * re-render de React pode continuar depois disso) — o `.click()` do
+ * Playwright não lançava erro, mas o handler `abrirEditar` se perdia e o
+ * drawer nunca abria. Em vez de falhar direto, tenta clicar de novo uma
+ * vez antes de exigir o drawer visível.
+ */
+export async function abrirEdicaoLancamento(page: Page, textoLinha: string): Promise<Locator> {
+  const linha = page.getByText(textoLinha).first()
+  await linha.waitFor({ state: 'visible', timeout: 10_000 })
+  // Deixa a lista assentar antes de interagir (evita clicar em cima de um
+  // re-render ainda em andamento logo após a linha aparecer).
+  await page.waitForTimeout(300)
+
+  const row = linha.locator('../..').first()
+  const botaoEditar = row.locator('button[title*="ditar"], button:has([data-lucide="pencil"])').first()
+  await botaoEditar.click()
+
+  const drawer = page.getByRole('dialog').first()
+  if (!(await drawer.isVisible({ timeout: 3000 }).catch(() => false))) {
+    await botaoEditar.click({ force: true })
+  }
+  await drawer.waitFor({ state: 'visible', timeout: 5000 })
+  return drawer
+}

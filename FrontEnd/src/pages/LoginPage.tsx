@@ -2,10 +2,20 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
+import { Fingerprint } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
 import { consumirRotaPosExpiracao } from '../lib/retornoPosExpiracao'
 import { CampoSenha } from '../components/ui/CampoSenha'
+import {
+  biometriaAtiva, biometriaDisponivelNoAparelho, ativarBiometria,
+  desativarBiometria, entrarComBiometria,
+} from '../lib/biometria'
+
+// Marca "não perguntar de novo" após o usuário recusar ativar a digital
+// (por dispositivo — limpo no logout junto com o resto do estado do
+// usuário, ver lib/clientCache.ts). Sem isso, todo login voltaria a oferecer.
+const LS_BIOMETRIA_RECUSADA = 'arqvalor:biometria-recusada'
 
 // Dentro do WebView do app Android (Capacitor), window.location.origin é
 // "https://localhost" — não um domínio real alcançável pelo link do e-mail
@@ -70,18 +80,113 @@ export default function LoginPage() {
   const [loading, setLoading]   = useState(false)
   const [linkEnviado, setLinkEnviado] = useState(false)
 
+  // Login por digital (só Android nativo) — ver src/lib/biometria.ts.
+  const [digitalAtiva, setDigitalAtiva] = useState(false)
+  const [ofertaDigital, setOfertaDigital] = useState<{ email: string; senha: string; rota: string | null } | null>(null)
+  const [erroAtivarDigital, setErroAtivarDigital] = useState('')
+  const [ativandoDigital, setAtivandoDigital] = useState(false)
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    biometriaAtiva().then(setDigitalAtiva)
+  }, [])
+
+  const irParaApos = (rota: string | null) => navigate(rota ?? '/')
+
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
-    const { error: err } = await signIn(email, password)
-    setLoading(false)
-    if (err) { setError('Email ou senha inválidos.'); return }
-    // Logout por inatividade guarda a rota em que o usuário estava —
-    // se o snapshot for deste mesmo usuário, retoma de onde parou.
-    const { data } = await supabase.auth.getSession()
-    const rotaSalva = consumirRotaPosExpiracao(data.session?.user?.id ?? null)
-    navigate(rotaSalva ?? '/')
+    // try/catch/finally: signIn (via supabase-js) normalmente resolve com
+    // {error} mesmo pra senha errada, mas PODE rejeitar de verdade em falha
+    // de rede/servidor (ex.: sem internet no aparelho). Sem isso, uma
+    // exceção aqui escapava sem tratamento — `loading` ficava travado em
+    // true (botão preso em "Entrando...") e NENHUMA mensagem aparecia,
+    // porque o catch nunca existiu pra setar `error`.
+    try {
+      const { error: err } = await signIn(email, password)
+      if (err) {
+        console.error('[login] signInWithPassword falhou', err)
+        setError('Email ou senha inválidos.')
+        return
+      }
+      // Logout por inatividade guarda a rota em que o usuário estava —
+      // se o snapshot for deste mesmo usuário, retoma de onde parou.
+      const { data } = await supabase.auth.getSession()
+      const rotaSalva = consumirRotaPosExpiracao(data.session?.user?.id ?? null)
+
+      // Oferece ativar a digital: só no app Android, com hardware/cadastro
+      // de biometria disponível, ainda não ativada neste app, e sem recusa
+      // prévia.
+      if (Capacitor.isNativePlatform() && !digitalAtiva
+          && localStorage.getItem(LS_BIOMETRIA_RECUSADA) !== '1') {
+        const { disponivel } = await biometriaDisponivelNoAparelho()
+        if (disponivel) {
+          setOfertaDigital({ email, senha: password, rota: rotaSalva })
+          return
+        }
+      }
+      irParaApos(rotaSalva)
+    } catch (e) {
+      console.error('[login] erro inesperado', e)
+      setError('Não foi possível entrar. Verifique sua conexão e tente novamente.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleLoginDigital = async () => {
+    setError('')
+    setLoading(true)
+    try {
+      const { email: emailSalvo, senha } = await entrarComBiometria()
+      const { error: err } = await signIn(emailSalvo, senha)
+      if (err) {
+        // Credenciais salvas não batem mais (ex.: senha trocada em outro
+        // dispositivo) — limpa e pede pra entrar manual e reativar.
+        await desativarBiometria()
+        setDigitalAtiva(false)
+        setError('Sua senha mudou. Entre com e-mail e senha e ative a digital de novo.')
+        return
+      }
+      const { data } = await supabase.auth.getSession()
+      const rotaSalva = consumirRotaPosExpiracao(data.session?.user?.id ?? null)
+      irParaApos(rotaSalva)
+    } catch {
+      // Usuário cancelou o prompt do SO ou a biometria falhou — sem drama,
+      // só volta pro formulário normal.
+      setError('Não foi possível confirmar a digital. Tente novamente ou entre com sua senha.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const confirmarAtivarDigital = async () => {
+    if (!ofertaDigital) return
+    setErroAtivarDigital('')
+    setAtivandoDigital(true)
+    const r = await ativarBiometria(ofertaDigital.email, ofertaDigital.senha)
+    setAtivandoDigital(false)
+    if (!r.ok) {
+      // Mantém o modal aberto — antes essa falha era ignorada em silêncio:
+      // o usuário achava que tinha ativado (nada de errado aparecia), mas a
+      // credencial nunca foi salva, e a tela de Perfil/o botão "Entrar com
+      // digital" continuavam mostrando como desativado.
+      setErroAtivarDigital(r.erro ?? 'Não foi possível ativar a digital neste aparelho.')
+      return
+    }
+    setDigitalAtiva(true)
+    const rota = ofertaDigital.rota
+    setOfertaDigital(null)
+    irParaApos(rota)
+  }
+
+  const recusarAtivarDigital = () => {
+    localStorage.setItem(LS_BIOMETRIA_RECUSADA, '1')
+    const rota = ofertaDigital?.rota ?? null
+    setOfertaDigital(null)
+    setErroAtivarDigital('')
+    irParaApos(rota)
   }
 
   const handleEsqueci = async (e: FormEvent) => {
@@ -155,6 +260,20 @@ export default function LoginPage() {
                   }}>
                   Sua sessão foi encerrada por inatividade. Entre novamente para continuar.
                 </div>
+              )}
+              {digitalAtiva && (
+                <>
+                  <button type="button" onClick={handleLoginDigital} disabled={loading}
+                    className="w-full flex items-center justify-center gap-2 border border-av-green/40 text-av-green font-semibold rounded-lg py-2.5 text-[17px] hover:bg-av-green/10 disabled:opacity-50 transition-colors mb-4">
+                    <Fingerprint size={18} />
+                    Entrar com digital
+                  </button>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="flex-1 h-px bg-white/10" />
+                    <span className="text-[14px] text-white/30">ou</span>
+                    <div className="flex-1 h-px bg-white/10" />
+                  </div>
+                </>
               )}
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
@@ -255,6 +374,35 @@ export default function LoginPage() {
         </p>
       </div>
       </div>
+
+      {/* Oferta de ativar login por digital — só aparece uma vez após um
+          login manual bem-sucedido no app Android (ver handleLogin). */}
+      {ofertaDigital && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/70">
+          <div className="w-full max-w-sm bg-[#0d1220] border border-white/10 rounded-2xl p-6 shadow-2xl">
+            <div className="w-12 h-12 rounded-full bg-av-green/10 border border-av-green/30 flex items-center justify-center mb-4 mx-auto">
+              <Fingerprint size={22} className="text-av-green" />
+            </div>
+            <h2 className="text-base font-semibold text-white text-center mb-2">Ativar login por digital?</h2>
+            <p className="text-[15px] text-white/50 text-center leading-relaxed mb-5">
+              Da próxima vez, entre só com sua digital — sem digitar e-mail e senha.
+            </p>
+            {erroAtivarDigital && (
+              <p className="text-[15px] text-red-400 bg-red-400/10 rounded-lg px-3 py-2 mb-4">{erroAtivarDigital}</p>
+            )}
+            <div className="flex gap-2">
+              <button type="button" onClick={recusarAtivarDigital} disabled={ativandoDigital}
+                className="flex-1 py-2.5 rounded-lg border border-white/10 text-[16px] font-semibold text-white/60 hover:border-white/20 disabled:opacity-50 transition-colors">
+                Agora não
+              </button>
+              <button type="button" onClick={confirmarAtivarDigital} disabled={ativandoDigital}
+                className="flex-1 py-2.5 rounded-lg bg-av-green text-av-dark text-[16px] font-semibold hover:bg-av-green/90 disabled:opacity-50 transition-colors">
+                {ativandoDigital ? 'Ativando...' : erroAtivarDigital ? 'Tentar de novo' : 'Ativar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

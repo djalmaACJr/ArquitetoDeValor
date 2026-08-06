@@ -7,4 +7,19 @@ import react from '@vitejs/plugin-react'
 // `import.meta.env.DEV` que é tree-shaken pelo bundler.
 export default defineConfig({
   plugins: [react()],
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('exceljs')) return 'exceljs';
+            if (id.includes('@supabase')) return 'supabase';
+            if (id.includes('chart.js')) return 'charts';
+            return 'vendor';
+          }
+        },
+      },
+    },
+  },
 })

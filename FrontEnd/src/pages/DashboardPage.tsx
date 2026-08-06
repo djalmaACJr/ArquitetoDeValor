@@ -1,6 +1,7 @@
 // src/pages/DashboardPage.tsx
 import { useState, useEffect, useCallback, memo, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
 import MascoteDica from '../components/ui/MascoteDica'
 import { falaResultadoMes } from '../lib/conteudoMascotes'
 import LoadingMascote from '../components/ui/LoadingMascote'
@@ -371,7 +372,26 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
   loading?: boolean;
   onMesClick?: (mes: string) => void;
 }) {
-  const labels = historico.map(h => mesLabel(h.mes))
+  const isAndroid = Capacitor.isNativePlatform()
+  const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth)
+
+  useEffect(() => {
+    const handler = () => setIsPortrait(window.innerHeight > window.innerWidth)
+    window.addEventListener('resize', handler)
+    window.addEventListener('orientationchange', handler)
+    return () => {
+      window.removeEventListener('resize', handler)
+      window.removeEventListener('orientationchange', handler)
+    }
+  }, [])
+
+  const nMeses = isAndroid ? (isPortrait ? 3 : 6) : historico.length
+  const hSlice = nMeses >= historico.length ? historico : historico.slice(-nMeses)
+  const pSlice = nMeses >= pagos.length ? pagos : pagos.slice(-nMeses)
+  const penSlice = nMeses >= pendentes.length ? pendentes : pendentes.slice(-nMeses)
+  const projSlice = nMeses >= projecoes.length ? projecoes : projecoes.slice(-nMeses)
+
+  const labels = hSlice.map(h => mesLabel(h.mes))
 
   const data = {
     labels,
@@ -380,7 +400,7 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
       {
         type: 'bar' as const,
         label: 'Receitas Pagas',
-        data: pagos.map(p => p.receitas),
+        data: pSlice.map(p => p.receitas),
         backgroundColor: '#10b981',
         borderRadius: 4,
         stack: 'receitas',
@@ -390,7 +410,7 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
       {
         type: 'bar' as const,
         label: 'Receitas Pendentes',
-        data: pendentes.map(p => p.receitas),
+        data: penSlice.map(p => p.receitas),
         backgroundColor: '#84cc16',
         borderRadius: 4,
         stack: 'receitas',
@@ -400,7 +420,7 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
       {
         type: 'bar' as const,
         label: 'Receitas Projeções',
-        data: projecoes.map(p => p.receitas),
+        data: projSlice.map(p => p.receitas),
         backgroundColor: '#06b6d4',
         borderRadius: 4,
         stack: 'receitas',
@@ -411,7 +431,7 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
       {
         type: 'bar' as const,
         label: 'Despesas Pagas',
-        data: pagos.map(p => p.despesas),
+        data: pSlice.map(p => p.despesas),
         backgroundColor: '#dc2626',
         borderRadius: 4,
         stack: 'despesas',
@@ -421,7 +441,7 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
       {
         type: 'bar' as const,
         label: 'Despesas Pendentes',
-        data: pendentes.map(p => p.despesas),
+        data: penSlice.map(p => p.despesas),
         backgroundColor: '#f59e0b',
         borderRadius: 4,
         stack: 'despesas',
@@ -431,7 +451,7 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
       {
         type: 'bar' as const,
         label: 'Despesas Projeções',
-        data: projecoes.map(p => p.despesas),
+        data: projSlice.map(p => p.despesas),
         backgroundColor: '#8b5cf6',
         borderRadius: 4,
         stack: 'despesas',
@@ -441,7 +461,7 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
       {
         type: 'line' as const,
         label: 'Resultado',
-        data: historico.map(h => h.total_entradas - h.total_saidas),
+        data: hSlice.map(h => h.total_entradas - h.total_saidas),
         borderColor: '#f97316',
         backgroundColor: 'rgba(249,115,22,0.1)',
         borderWidth: 2,
@@ -452,16 +472,13 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
         pointBorderWidth: 1.5,
         tension: 0.35,
         fill: false,
-        // Eixo dedicado — o Resultado mensal (poucos R$ mil) ficaria
-        // visualmente achatado se compartilhasse escala com o Saldo
-        // acumulado (centenas de milhares).
         yAxisID: 'yResultado',
         order: 2,
       },
       {
         type: 'line' as const,
         label: 'Saldo',
-        data: oculto ? historico.map(() => null) : historico.map(h => h.saldo_mes ?? null),
+        data: oculto ? hSlice.map(() => null) : hSlice.map(h => h.saldo_mes ?? null),
         borderColor: '#a78bfa',
         backgroundColor: 'rgba(167,139,250,0.15)',
         borderWidth: 2,
@@ -589,7 +606,7 @@ const GraficoBarras = memo(function GraficoBarras({ historico, oculto, pagos, pe
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
       <p className="text-[17px] font-semibold text-gray-700 dark:text-gray-200 mb-0.5">Evolução mensal</p>
-      <p className="text-[15px] text-gray-400 mb-3">Receitas, despesas e saldo - últimos 6 meses</p>
+      <p className="text-[15px] text-gray-400 mb-3">Receitas, despesas e saldo - últimos {nMeses} meses</p>
       <div className="flex flex-wrap gap-x-6 gap-y-1 mb-3 text-[14px]">
         <div className="flex items-center gap-2">
           <span className="text-gray-600 font-semibold">Status:</span>
@@ -648,7 +665,9 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
   dados: DespesaCategoria[]; corCentro: string
   topN?: number
 }) {
+  const isAndroid = Capacitor.getPlatform() === 'android'
   const [expandido, setExpandido] = useState(false)
+  const [legendaAberta, setLegendaAberta] = useState(!isAndroid)
   const [busca, setBusca] = useState('')
 
   // Normaliza para busca: lowercase + sem acento. Mesmo padrão de outras telas.
@@ -748,15 +767,25 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
   return (
     <div className="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-white/[0.02] p-4 flex flex-col">
       {/* Cabeçalho — mesmo padrão do card "Ativos na Carteira" (Investimentos) */}
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <p className="text-[15px] font-semibold text-gray-700 dark:text-white">{titulo}</p>
-          <p className="text-[13px] text-gray-400" style={{ color: '#8b92a8' }}>{subtitulo}</p>
+      <div
+        className={`flex items-center justify-between mb-3 ${isAndroid ? 'cursor-pointer select-none' : ''}`}
+        onClick={() => isAndroid && setLegendaAberta(!legendaAberta)}
+      >
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-[15px] font-semibold text-gray-700 dark:text-white truncate">{titulo}</p>
+            {isAndroid && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/5 text-gray-400 uppercase tracking-wider">
+                {legendaAberta ? 'Ocultar' : 'Ver'}
+              </span>
+            )}
+          </div>
+          <p className="text-[13px] text-gray-400 truncate" style={{ color: '#8b92a8' }}>{subtitulo}</p>
         </div>
         {dados.length > topN && (
           <button
-            onClick={() => setExpandido(true)}
-            className="text-[13px] font-semibold px-2 py-0.5 rounded-full transition-colors hover:bg-blue-500/20 flex-shrink-0"
+            onClick={(e) => { e.stopPropagation(); setExpandido(true) }}
+            className="text-[13px] font-semibold px-2 py-0.5 rounded-full transition-colors hover:bg-blue-500/20 flex-shrink-0 ml-2"
             style={{ background: 'rgba(77,166,255,0.12)', color: '#4da6ff' }}
             title="Ver todas as categorias"
           >
@@ -820,28 +849,30 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
       </div>
 
       {/* Legenda compacta — apenas top N, com valor e percentual. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0 mt-4">
-        {tops.map((d, i) => (
-          <div key={d.categoria_id} className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.03] px-3 py-2 min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: coresChart[i] }} />
-              <span className="flex-1 min-w-0 text-[14px] font-semibold text-gray-700 dark:text-gray-200 truncate">{d.categoria_nome}</span>
-              <span className="text-[13px] font-bold text-gray-400 whitespace-nowrap">{formatPct(d.total)}%</span>
+      {legendaAberta && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0 mt-4">
+          {tops.map((d, i) => (
+            <div key={d.categoria_id} className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.03] px-3 py-2 min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: coresChart[i] }} />
+                <span className="flex-1 min-w-0 text-[14px] font-semibold text-gray-700 dark:text-gray-200 truncate">{d.categoria_nome}</span>
+                <span className="text-[13px] font-bold text-gray-400 whitespace-nowrap">{formatPct(d.total)}%</span>
+              </div>
+              <p className="mt-1 text-[14px] font-bold text-gray-700 dark:text-gray-100">{formatBRL(d.total)}</p>
             </div>
-            <p className="mt-1 text-[14px] font-bold text-gray-700 dark:text-gray-100">{formatBRL(d.total)}</p>
-          </div>
-        ))}
-        {temOutros && (
-          <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.03] px-3 py-2 min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: '#a3a9b8' }} />
-              <span className="flex-1 min-w-0 text-[14px] font-semibold text-gray-500 italic truncate">Outros ({sobras.length})</span>
-              <span className="text-[13px] font-bold text-gray-400 whitespace-nowrap">{formatPct(outros)}%</span>
+          ))}
+          {temOutros && (
+            <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.03] px-3 py-2 min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: '#a3a9b8' }} />
+                <span className="flex-1 min-w-0 text-[14px] font-semibold text-gray-500 italic truncate">Outros ({sobras.length})</span>
+                <span className="text-[13px] font-bold text-gray-400 whitespace-nowrap">{formatPct(outros)}%</span>
+              </div>
+              <p className="mt-1 text-[14px] font-bold text-gray-500">{formatBRL(outros)}</p>
             </div>
-            <p className="mt-1 text-[14px] font-bold text-gray-500">{formatBRL(outros)}</p>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Modal expandido — lista completa com valor e % */}
       {expandido && (
@@ -1104,6 +1135,8 @@ const CardContas = memo(function CardContas({ contas, oculto, mes, modo, setModo
   const navigate = useNavigate()
   const mesAtualStr = mesAtual()
   const isMesAtual = mes === mesAtualStr
+  const isAndroid = Capacitor.isNativePlatform()
+  const [aberto, setAberto] = useState(!isAndroid)
 
   // Saldo na data-alvo calculado client-side: parte do saldo PAGO no fim do
   // mês anterior (RPC) e aplica as transações do mês até a data-alvo.
@@ -1164,11 +1197,19 @@ const CardContas = memo(function CardContas({ contas, oculto, mes, modo, setModo
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-[17px] font-semibold text-gray-700 dark:text-gray-200">Minhas contas</p>
-        {isMesAtual && (
+      <div
+        className={`flex items-center justify-between ${isAndroid ? 'cursor-pointer select-none' : ''} ${aberto ? 'mb-3' : ''}`}
+        onClick={() => isAndroid && setAberto(!aberto)}
+      >
+        <div className="flex items-center gap-2">
+          <p className="text-[17px] font-semibold text-gray-700 dark:text-gray-200">Minhas contas</p>
+          {isAndroid && (
+            aberto ? <ChevronDown size={18} className="text-gray-400" /> : <ChevronRight size={18} className="text-gray-400" />
+          )}
+        </div>
+        {isMesAtual && aberto && (
           <select
-            value={modo} onChange={e => setModo(e.target.value as 'hoje' | 'fim')}
+            value={modo} onChange={e => { e.stopPropagation(); setModo(e.target.value as 'hoje' | 'fim') }}
             className="text-[15px] bg-blue-400/10 border border-blue-400/30 rounded-md text-av-blue px-2 py-1 cursor-pointer"
             style={{ colorScheme: 'auto' }}
           >
@@ -1177,77 +1218,82 @@ const CardContas = memo(function CardContas({ contas, oculto, mes, modo, setModo
           </select>
         )}
       </div>
-      {(() => {
-        // Total geral — soma de todos os saldos das contas ativas exibidas.
-        const todasAtivas = contas.filter(c => c.ativa)
-        const totalGeral = todasAtivas.reduce((s, c) => s + getSaldoConta(c), 0)
-        const algumaContaAtiva = todasAtivas.length > 0
-        return algumaContaAtiva && (
-          <div className="flex items-center justify-between mb-4 pb-3 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-            <span className="text-[15px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Total geral</span>
-            <span
-              className="text-[20px] font-bold whitespace-nowrap"
-              style={{ color: totalGeral >= 0 ? '#00c896' : '#ff6b4a' }}
-            >
-              {oculto ? OCULTO : formatBRL(totalGeral)}
-            </span>
-          </div>
-        )
-      })()}
-      {gruposDash.map(grupo => {
-        const contasGrupo = contas
-          .filter(c => grupo.tipos.includes(c.tipo) && c.ativa)
-          .sort((a, b) => getSaldoConta(b) - getSaldoConta(a) || a.nome.localeCompare(b.nome, 'pt-BR'))
-        if (contasGrupo.length === 0) return null
-        const totalGrupo = contasGrupo.reduce((s, c) => s + getSaldoConta(c), 0)
-        // Bancárias e Investimentos ganham linha extra: saldo === 0 mostra a
-        // data do último lançamento; saldo ≠ 0 mostra % do total do grupo.
-        const temInfoExtra = grupo.label === 'Contas bancárias' || grupo.label === 'Investimentos'
-        return (
-          <div key={grupo.label} className="mb-4 last:mb-0">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[14px] font-semibold text-gray-400 uppercase tracking-wide">{grupo.label}</span>
-              <span className="text-[15px] font-bold" style={{ color: grupo.cor }}>{oculto ? OCULTO : formatBRL(totalGrupo)}</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
-              {contasGrupo.map(conta => {
-                const saldoConta = getSaldoConta(conta)
-                let infoExtra: string | null = null
-                if (temInfoExtra) {
-                  if (saldoConta === 0) {
-                    const ult = ultimaTxPorConta[conta.conta_id]
-                    infoExtra = ult
-                      ? `Último mov.: ${new Date(ult + 'T12:00:00').toLocaleDateString('pt-BR')}`
-                      : 'Sem movimento recente'
-                  } else if (totalGrupo !== 0) {
-                    const pct = (saldoConta / totalGrupo) * 100
-                    infoExtra = `${pct.toFixed(1).replace('.', ',')}% do total`
-                  }
-                }
-                return (
-                  <div
-                    key={conta.conta_id}
-                    className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3 flex items-center gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
-                    onClick={() => navigate('/lancamentos', { state: { contaId: conta.conta_id, mes } })}
-                  >
-                    <IconeConta icone={conta.icone} cor={conta.cor} size="md" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[16px] font-semibold text-gray-700 dark:text-gray-200 truncate">{conta.nome}</p>
-                      <p className="text-[14px] text-gray-400 truncate">
-                        {infoExtra ?? conta.tipo}
-                      </p>
-                    </div>
-                    <p className="text-[16px] font-bold whitespace-nowrap"
-                      style={{ color: saldoConta >= 0 ? '#00c896' : '#ff6b4a' }}>
-                      {oculto ? OCULTO : formatBRL(saldoConta)}
-                    </p>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })}
+
+      {aberto && (
+        <>
+          {(() => {
+            // Total geral — soma de todos os saldos das contas ativas exibidas.
+            const todasAtivas = contas.filter(c => c.ativa)
+            const totalGeral = todasAtivas.reduce((s, c) => s + getSaldoConta(c), 0)
+            const algumaContaAtiva = todasAtivas.length > 0
+            return algumaContaAtiva && (
+              <div className="flex items-center justify-between mb-4 pb-3 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
+                <span className="text-[15px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>Total geral</span>
+                <span
+                  className="text-[20px] font-bold whitespace-nowrap"
+                  style={{ color: totalGeral >= 0 ? '#00c896' : '#ff6b4a' }}
+                >
+                  {oculto ? OCULTO : formatBRL(totalGeral)}
+                </span>
+              </div>
+            )
+          })()}
+          {gruposDash.map(grupo => {
+            const contasGrupo = contas
+              .filter(c => grupo.tipos.includes(c.tipo) && c.ativa)
+              .sort((a, b) => getSaldoConta(b) - getSaldoConta(a) || a.nome.localeCompare(b.nome, 'pt-BR'))
+            if (contasGrupo.length === 0) return null
+            const totalGrupo = contasGrupo.reduce((s, c) => s + getSaldoConta(c), 0)
+            // Bancárias e Investimentos ganham linha extra: saldo === 0 mostra a
+            // data do último lançamento; saldo ≠ 0 mostra % do total do grupo.
+            const temInfoExtra = grupo.label === 'Contas bancárias' || grupo.label === 'Investimentos'
+            return (
+              <div key={grupo.label} className="mb-4 last:mb-0">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[14px] font-semibold text-gray-400 uppercase tracking-wide">{grupo.label}</span>
+                  <span className="text-[15px] font-bold" style={{ color: grupo.cor }}>{oculto ? OCULTO : formatBRL(totalGrupo)}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+                  {contasGrupo.map(conta => {
+                    const saldoConta = getSaldoConta(conta)
+                    let infoExtra: string | null = null
+                    if (temInfoExtra) {
+                      if (saldoConta === 0) {
+                        const ult = ultimaTxPorConta[conta.conta_id]
+                        infoExtra = ult
+                          ? `Último mov.: ${new Date(ult + 'T12:00:00').toLocaleDateString('pt-BR')}`
+                          : 'Sem movimento recente'
+                      } else if (totalGrupo !== 0) {
+                        const pct = (saldoConta / totalGrupo) * 100
+                        infoExtra = `${pct.toFixed(1).replace('.', ',')}% do total`
+                      }
+                    }
+                    return (
+                      <div
+                        key={conta.conta_id}
+                        className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3 flex items-center gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                        onClick={() => navigate('/lancamentos', { state: { contaId: conta.conta_id, mes } })}
+                      >
+                        <IconeConta icone={conta.icone} cor={conta.cor} size="md" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[16px] font-semibold text-gray-700 dark:text-gray-200 truncate">{conta.nome}</p>
+                          <p className="text-[14px] text-gray-400 truncate">
+                            {infoExtra ?? conta.tipo}
+                          </p>
+                        </div>
+                        <p className="text-[16px] font-bold whitespace-nowrap"
+                          style={{ color: saldoConta >= 0 ? '#00c896' : '#ff6b4a' }}>
+                          {oculto ? OCULTO : formatBRL(saldoConta)}
+                        </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </>
+      )}
     </div>
   )
 })
@@ -1503,8 +1549,39 @@ export default function DashboardPage() {
         setMes(proximoMes(mes, 1))
       }
     }
+
+    // Navegação por Swipe no Android
+    let touchStartX = 0
+    let touchStartY = 0
+    function onTouchStart(e: TouchEvent) {
+      touchStartX = e.touches[0].clientX
+      touchStartY = e.touches[0].clientY
+    }
+    function onTouchEnd(e: TouchEvent) {
+      const dx = e.changedTouches[0].clientX - touchStartX
+      const dy = e.changedTouches[0].clientY - touchStartY
+      // Movimento horizontal predominante e distância mínima (75px)
+      if (Math.abs(dx) > Math.abs(dy) * 2 && Math.abs(dx) > 75) {
+        if (dx > 0) {
+          prefetchMesAnterior()
+          setMes(proximoMes(mes, -1))
+        } else {
+          prefetchMesSeguinte()
+          setMes(proximoMes(mes, 1))
+        }
+      }
+    }
+
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    if (Capacitor.isNativePlatform()) {
+      document.addEventListener('touchstart', onTouchStart, { passive: true })
+      document.addEventListener('touchend', onTouchEnd, { passive: true })
+    }
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('touchstart', onTouchStart)
+      document.removeEventListener('touchend', onTouchEnd)
+    }
   }, [mes, setMes, prefetchMesAnterior, prefetchMesSeguinte])
 
   // Recarrega ao montar para pegar transações criadas em outra página (ex: LancamentosPage)
@@ -1718,7 +1795,7 @@ export default function DashboardPage() {
 
           {/* Linha 1: calendário + resultados + saldo */}
           <div className="flex flex-col xl:flex-row gap-3 items-stretch">
-            <div data-tutorial="dashboard-calendario" className="w-full xl:w-auto min-w-0">
+            <div data-tutorial="dashboard-calendario" className="w-full xl:w-auto min-w-0 flex justify-center">
               <CalendarioDashboard
                 mes={mes}
                 lembretes={lembretes}

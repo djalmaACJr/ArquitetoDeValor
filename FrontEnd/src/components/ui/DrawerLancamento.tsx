@@ -3,13 +3,14 @@
 // Usado em: LancamentosPage, DashboardPage, RelatoriosPage
 
 import { useState, useEffect, useRef } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { Repeat2, Trash2, Zap, Sparkles } from 'lucide-react'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
 import { useTiposDividendo } from '../../hooks/useTiposDividendo'
 import { useInvestimentosAtivos } from '../../hooks/useInvestimentosAtivos'
 import { apiFetch, apiMutate } from '../../lib/api'
-import { formatBRL, parsearValorBR, hojeLocal, dataParaYMD } from '../../lib/utils'
+import { formatBRL, formatData, parsearValorBR, hojeLocal, dataParaYMD } from '../../lib/utils'
 import { buscarSugestoes, buscarTodasSugestoes, salvarSugestao, type SugestaoLancamento } from '../../hooks/useAssistente'
 // Logger desativado — reativar removendo o comentário desta linha e dos log() abaixo
 // import { log } from '../../lib/logger'
@@ -17,7 +18,7 @@ import {
   Drawer, Field, Input, SearchableSelect, Toggle,
   BtnSalvar, BtnCancelar, Segmented, ModalExcluir,
 } from './shared'
-import Calculadora from './Calculadora'
+import Calculadora, { type InfoConversaoDolar } from './Calculadora'
 import type { Lancamento } from '../../hooks/useLancamentos'
 
 // Função para inferir parâmetros de recorrência a partir das parcelas
@@ -265,6 +266,21 @@ export default function DrawerLancamento({
     setTimeout(() => { ignorarFoco.current = false }, 150)
   }
 
+  // Registra a cotação PTAX usada na conversão US$ → R$ (calculadora do
+  // campo Valor) na observação do lançamento. Quando a data do lançamento
+  // ainda não tem PTAX publicada (ex.: data futura), não há como saber a
+  // cotação real do dia — força o status para Projeção para deixar isso
+  // explícito, em vez de gravar um valor definitivo como se fosse certo.
+  function handleConversaoDolar(info: InfoConversaoDolar) {
+    const valorConvertido = info.valorOriginal * info.cotacao
+    const nota = `Convertido US$ ${info.valorOriginal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} → R$ ${valorConvertido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (cotação PTAX de ${formatData(info.dataCotacao)}: R$ ${info.cotacao.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })})`
+      + (info.semCotacao ? ' — sem PTAX publicada para a data do lançamento, cotação estimada pela mais recente' : '')
+    set({
+      observacao: form.observacao ? `${form.observacao}\n${nota}` : nota,
+      ...(info.semCotacao ? { status: 'PROJECAO' as StatusTx } : {}),
+    })
+  }
+
   useEffect(() => {
     if (novoLancamento) {
       const preserved = criarNovoPreserved.current
@@ -435,9 +451,14 @@ export default function DrawerLancamento({
   }, [escopo, editando?.id_recorrencia])
 
   // Opções para SearchableSelect ───────────────────────────
+  // `contas` (useContas) vem ordenada por saldo dentro de cada tipo — faz
+  // sentido nas telas que agrupam por tipo (Dashboard/ContasPage), mas aqui
+  // a lista é plana, então reordena por nome (alfabética) para ficar
+  // previsível ao buscar/escolher a conta do lançamento.
   const opcoesContas = contas
     .filter(c => c.ativa)
     .map(c => ({ id: c.conta_id, label: c.nome, icone: '' }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'))
 
   const catsPai = categorias.filter(c => !c.id_pai && !c.protegida)
   const catsSub = categorias.filter(c => !!c.id_pai)
@@ -970,19 +991,6 @@ export default function DrawerLancamento({
           )}
         </Field>
 
-        {/* Categoria — depois da Descrição: o assistente preenche a categoria a
-            partir da descrição digitada */}
-        {form.tipo !== 'TRANSFERENCIA' && (
-          <Field label="Categoria" data-tutorial="drawer-categoria">
-            <SearchableSelect
-              opcoes={opcoesCategorias}
-              value={form.categoria_id}
-              onChange={id => set({ categoria_id: id })}
-              placeholder="Sem categoria"
-            />
-          </Field>
-        )}
-
         {/* Valor */}
         <Field label="Valor *" data-tutorial="drawer-valor">
           <button
@@ -990,7 +998,7 @@ export default function DrawerLancamento({
             type="button"
             aria-label="Valor"
             onClick={abrirCalc}
-            onFocus={() => { if (!ignorarFoco.current) abrirCalc() }}
+            onFocus={() => { if (!ignorarFoco.current && Capacitor.isNativePlatform()) abrirCalc() }}
             className="w-full text-left px-3 py-2 rounded-lg border transition-colors text-[17px]"
             style={{
               background: '#252d42',
@@ -1005,9 +1013,24 @@ export default function DrawerLancamento({
               valorInicial={parsearValorBR(form.valor)}
               onConfirmar={confirmarCalc}
               onFechar={fecharCalc}
+              dataLancamento={form.data}
+              onConversaoDolar={handleConversaoDolar}
             />
           )}
         </Field>
+
+        {/* Categoria — depois da Descrição: o assistente preenche a categoria a
+            partir da descrição digitada */}
+        {form.tipo !== 'TRANSFERENCIA' && (
+          <Field label="Categoria" data-tutorial="drawer-categoria">
+            <SearchableSelect
+              opcoes={opcoesCategorias}
+              value={form.categoria_id}
+              onChange={id => set({ categoria_id: id })}
+              placeholder="Sem categoria"
+            />
+          </Field>
+        )}
 
         {/* Conta origem */}
         <Field label={form.tipo === 'TRANSFERENCIA' ? 'Conta origem *' : 'Conta *'} data-tutorial="drawer-conta">

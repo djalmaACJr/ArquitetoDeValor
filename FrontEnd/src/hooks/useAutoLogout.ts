@@ -19,9 +19,23 @@
 //     tick publica a contagem regressiva no store `autoLogoutAviso` (Sidebar).
 //   - Eventos no document, com `{ passive: true }` para não bloquear
 //     scroll. `capture: false` (default) pois não precisamos interceptar.
+//   - A última atividade também é persistida em localStorage (não só em
+//     memória) — necessário no app Android/Capacitor, onde o SO pode matar
+//     o processo inteiro ao minimizar, sem rodar nenhum código de cleanup
+//     (ver LS_ULTIMA_ATIVIDADE abaixo).
+//   - No app nativo (Android/iOS), usa @capacitor/app (pause/resume) para
+//     detectar segundo-plano — MAIS CONFIÁVEL que visibilitychange/focus
+//     dentro de uma WebView Capacitor: o caso comum (Activity pausada mas
+//     NÃO morta pelo SO — usuário só minimizou e voltou) não passa pelo
+//     "processo reiniciado" que a persistência acima cobre, e a WebView nem
+//     sempre repassa visibilitychange/blur corretamente a partir do ciclo de
+//     vida nativo real da Activity. pause/resume do Capacitor mapeiam direto
+//     pra onPause()/onResume() nativos, sem essa reinterpretação.
 
 import { useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
+import { App as CapacitorApp } from '@capacitor/app'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import { usePageState } from '../context/PageStateContext'
@@ -49,6 +63,18 @@ const EVENTOS_INTERACAO = [
 const INTERVALO_CHECK_MS = 1_000
 // Janela final em que a Sidebar exibe a contagem regressiva chamando atenção.
 const AVISO_MS = 60_000
+
+// Persistência da última atividade — ESSENCIAL no app Android (Capacitor).
+// No browser desktop, a aba costuma ficar viva em memória mesmo oculta, então
+// o useRef + visibilitychange (abaixo) já bastava. No Android, o SO pode
+// pausar/matar o processo do app inteiro ao ser minimizado (Home, troca de
+// app, tela bloqueada) — sem aviso ao JS (não roda beforeunload/pagehide em
+// kill de processo). Ao reabrir, o React remonta do zero e o useRef voltava
+// para Date.now(), zerando a contagem — o app parecia nunca deslogar por
+// inatividade por mais tempo que o usuário ficasse fora. localStorage
+// sobrevive ao processo ser morto; ao montar, comparamos com o relógio real
+// e deslogamos na hora se o limite já passou enquanto o app estava fechado.
+const LS_ULTIMA_ATIVIDADE = 'arqvalor:ultima-atividade'
 
 export function useAutoLogout(timeoutMinutos: number = 15): void {
   const navigate = useNavigate()
@@ -99,15 +125,24 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
     if (timeoutMinutos <= 0) return // 0 desliga o auto-logout
 
     const limiteMs = timeoutMinutos * 60_000
-    lastActivityRef.current = Date.now()
+
+    // Retoma a última atividade persistida (sobrevive ao app Android ser
+    // pausado/morto pelo SO — ver comentário de LS_ULTIMA_ATIVIDADE acima).
+    // Sem valor salvo (1º carregamento após login) começa do zero normalmente.
+    const persistida = Number(localStorage.getItem(LS_ULTIMA_ATIVIDADE) ?? 0)
+    lastActivityRef.current = persistida > 0 ? persistida : Date.now()
+
+    function persistirAtividade() {
+      try { localStorage.setItem(LS_ULTIMA_ATIVIDADE, String(lastActivityRef.current)) }
+      catch { /* quota cheia ou storage indisponível — auto-logout ainda funciona em memória */ }
+    }
+    persistirAtividade()
 
     function marcarAtividade(e: Event) {
-      // Defesa adicional: só conta atividade com a janela em foco. O reset
-      // real foi resolvido removendo `mousemove` de EVENTOS_INTERACAO (cursor
-      // cruzando a janela em multi-monitor ATIVA a janela, então hasFocus()
-      // vira true e o guard sozinho não bastava). Aqui fica como reforço para
-      // eventos que cheguem com a janela em segundo plano.
-      if (!document.hasFocus()) return
+      // Defesa adicional: só conta atividade com a janela em foco (Desktop).
+      // No Android/iOS Capacitor, document.hasFocus() nem sempre é confiável
+      // e o app é a única coisa na tela, então ignoramos essa trava no nativo.
+      if (!Capacitor.isNativePlatform() && !document.hasFocus()) return
       // Alt+Tab / Cmd+Tab / Super (troca de janela): o usuário está SAINDO para
       // outro app, não usando este. O keydown dispara enquanto a janela ainda
       // tem foco — sem este guard, "trocar de app" resetava o relógio e a
@@ -132,11 +167,12 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       // Operação longa em andamento (backup/restore/import/sincronização):
       // suspende o logout e empurra o relógio de atividade, para a contagem
       // de inatividade recomeçar só quando a operação terminar.
-      if (temOperacaoLongaAtiva()) { lastActivityRef.current = Date.now(); return }
+      if (temOperacaoLongaAtiva()) { lastActivityRef.current = Date.now(); persistirAtividade(); return }
       if (!forcar && Date.now() - lastActivityRef.current < limiteMs) return
 
       expiradoRef.current = true
       setAviso(false, 0) // some com a contagem ao deslogar
+      localStorage.removeItem(LS_ULTIMA_ATIVIDADE) // não herdar pro próximo login
       // Guarda rota + filtros para retomar após o próximo login do
       // mesmo usuário nesta aba (LoginPage e PageStateProvider consomem).
       const snap = snapshotRef.current
@@ -151,6 +187,14 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       navigateRef.current('/login?expirado=1', { replace: true })
     }
 
+    // Se o valor persistido (de antes do app ser pausado/morto pelo SO) já
+    // ultrapassou o limite, desloga IMEDIATAMENTE ao montar — sem isso, o
+    // app Android reaberto depois do tempo de inatividade continuava logado
+    // até o próximo tick "perceber" (e um tick só roda com o app já aberto).
+    if (persistida > 0 && Date.now() - persistida >= limiteMs) {
+      checarExpiracao(true)
+    }
+
     // Tick de 1s: atualiza a contagem regressiva (último minuto) e dispara a
     // expiração quando o tempo zera. Durante operação longa, empurra o relógio
     // (mesma regra do checarExpiracao) e esconde a contagem.
@@ -158,6 +202,7 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       if (expiradoRef.current) return
       if (temOperacaoLongaAtiva()) {
         lastActivityRef.current = Date.now()
+        persistirAtividade()
         setAviso(false, 0)
         return
       }
@@ -167,6 +212,10 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
         checarExpiracao()
         return
       }
+      // Persiste a cada tick (1s) — barato, e garante que o valor salvo
+      // fique atualizado a qualquer momento em que o SO decida pausar/matar
+      // o app (ver LS_ULTIMA_ATIVIDADE).
+      persistirAtividade()
       // Só publica/limpa o aviso no último minuto (o store ignora no-ops).
       if (restanteMs <= AVISO_MS) setAviso(true, Math.ceil(restanteMs / 1000))
       else setAviso(false, 0)
@@ -176,6 +225,7 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
     // Clique na contagem (Sidebar) zera o relógio e esconde o aviso.
     function resetarInatividade() {
       lastActivityRef.current = Date.now()
+      persistirAtividade()
       setAviso(false, 0)
     }
     registrarResetInatividade(resetarInatividade)
@@ -184,8 +234,18 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
     // limite, desloga IMEDIATAMENTE — antes que um mousemove resete o timer.
     // Cobre o caso de timers estrangulados/congelados em segundo plano.
     function onVisibilidade() {
+      // No Capacitor, priorizamos os listeners de pause/resume nativos
+      // (addListener) que são disparados exatamente no ciclo nativo,
+      // enquanto o visibilitychange do navegador pode ser inconsistente.
+      if (Capacitor.isNativePlatform()) return
+
       if (document.visibilityState === 'hidden') {
         hiddenAtRef.current = Date.now()
+        // Momento mais importante para persistir: no Android é exatamente
+        // aqui (app indo pra segundo plano) que o processo pode ser
+        // pausado/morto pelo SO a qualquer momento, sem chance de rodar
+        // mais nenhum código JS depois disso.
+        persistirAtividade()
       } else {
         const escondidaMs = hiddenAtRef.current ? Date.now() - hiddenAtRef.current : 0
         hiddenAtRef.current = 0
@@ -196,7 +256,47 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
     document.addEventListener('visibilitychange', onVisibilidade)
     window.addEventListener('focus', onFoco)
 
+    // Sinal nativo (Android/iOS) — ver nota no topo do arquivo. `then` em vez
+    // de `await` porque addListener é assíncrono e o efeito precisa ficar
+    // síncrono para poder devolver a função de cleanup abaixo. `cancelado`
+    // cobre o caso raro do cleanup rodar ANTES da Promise resolver — sem
+    // isso, o listener chegaria a existir depois do unmount (vazamento).
+    let handlePause: { remove: () => void } | null = null
+    let handleResume: { remove: () => void } | null = null
+    let cancelado = false
+    if (Capacitor.isNativePlatform()) {
+      CapacitorApp.addListener('pause', () => {
+        // Registra o momento da saída para permitir uma tolerância (1min)
+        // ao trocar de app rapidamente.
+        hiddenAtRef.current = Date.now()
+        persistirAtividade()
+      }).then(h => { if (cancelado) h.remove(); else handlePause = h })
+
+      CapacitorApp.addListener('resume', () => {
+        const agora = Date.now()
+        const escondidaMs = hiddenAtRef.current ? agora - hiddenAtRef.current : 0
+        hiddenAtRef.current = 0
+
+        // Janela de tolerância para troca rápida de app (ex: ver SMS/Token).
+        const limiteTrocaAppMs = 60_000
+
+        // Desloga se:
+        // 1. Ficou em segundo plano por mais de 1 minuto;
+        // 2. OU a inatividade TOTAL (antes + durante pausa) passou do limite (5min).
+        if (escondidaMs >= limiteTrocaAppMs || (agora - lastActivityRef.current >= limiteMs)) {
+          checarExpiracao(true)
+        } else {
+          // Voltou rápido: apenas garante que o timer de 1s continue
+          // a partir do ponto correto.
+          persistirAtividade()
+        }
+      }).then(h => { if (cancelado) h.remove(); else handleResume = h })
+    }
+
     return () => {
+      cancelado = true
+      handlePause?.remove()
+      handleResume?.remove()
       for (const ev of EVENTOS_INTERACAO) {
         document.removeEventListener(ev, marcarAtividade)
       }

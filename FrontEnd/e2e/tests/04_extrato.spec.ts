@@ -1,11 +1,17 @@
 // e2e/tests/02_extrato.spec.ts
 import { test, expect } from '@playwright/test'
-import { abrirNovoLancamento, preencherValor } from './helpers'
+import { abrirNovoLancamento, preencherValor, abrirEdicaoLancamento } from './helpers'
 
 test.describe('Extrato (Lançamentos)', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/lancamentos')
+    // Aguarda a página assentar (fetch inicial de lançamentos + qualquer
+    // re-render/replaceState de rota) antes de qualquer teste interagir.
+    // Sem isso, E2E-EX10 flakava: o clique no botão Editar acontecia bem no
+    // meio de uma navegação/re-render ainda em andamento — o clique em si
+    // não falhava, mas o drawer não chegava a abrir (a ação se perdia).
+    await page.waitForLoadState('networkidle')
   })
 
   test('E2E-EX01 — página carrega com filtros na barra superior', async ({ page }) => {
@@ -178,14 +184,7 @@ test.describe('Extrato (Lançamentos)', () => {
 
   // ── E2E-EX10 ─────────────────────────────────────────────────
   test('E2E-EX10 — editar lançamento recorrente exibe opções de escopo', async ({ page }) => {
-    const linha = page.getByText('E2E Recorrente Mensal').first()
-    await expect(linha).toBeVisible({ timeout: 10_000 })
-
-    const row = linha.locator('../..').first()
-    await row.locator('button[title*="ditar"], button:has([data-lucide="pencil"])').first().click()
-
-    const drawer = page.getByRole('dialog').first()
-    await expect(drawer).toBeVisible({ timeout: 5000 })
+    const drawer = await abrirEdicaoLancamento(page, 'E2E Recorrente Mensal')
     await page.waitForTimeout(400)
 
     // O drawer deve mostrar "Parcela X de Y" para recorrente
@@ -200,14 +199,7 @@ test.describe('Extrato (Lançamentos)', () => {
 
   // ── E2E-EX11 ─────────────────────────────────────────────────
   test('E2E-EX11 — editar escopo SOMENTE_ESTE altera apenas o lançamento atual', async ({ page }) => {
-    const linha = page.getByText('E2E Recorrente Mensal').first()
-    await expect(linha).toBeVisible({ timeout: 10_000 })
-
-    const row = linha.locator('../..').first()
-    await row.locator('button[title*="ditar"], button:has([data-lucide="pencil"])').first().click()
-
-    const drawer = page.getByRole('dialog').first()
-    await expect(drawer).toBeVisible({ timeout: 5000 })
+    const drawer = await abrirEdicaoLancamento(page, 'E2E Recorrente Mensal')
     await page.waitForTimeout(400)
 
     // Escopo padrão é SOMENTE_ESTE — alterar a descrição e salvar
@@ -224,14 +216,7 @@ test.describe('Extrato (Lançamentos)', () => {
 
   // ── E2E-EX12 ─────────────────────────────────────────────────
   test('E2E-EX12 — excluir lançamento recorrente com escopo SOMENTE_ESTE', async ({ page }) => {
-    const linha = page.getByText('E2E Recorrente Editado').first()
-    await expect(linha).toBeVisible({ timeout: 10_000 })
-
-    const row = linha.locator('../..').first()
-    await row.locator('button[title*="ditar"], button:has([data-lucide="pencil"])').first().click()
-
-    const drawer = page.getByRole('dialog').first()
-    await expect(drawer).toBeVisible({ timeout: 5000 })
+    const drawer = await abrirEdicaoLancamento(page, 'E2E Recorrente Editado')
 
     // Garantir que escopo SOMENTE_ESTE está selecionado (padrão)
     const radioSomente = drawer.getByText(/somente este lançamento/i)

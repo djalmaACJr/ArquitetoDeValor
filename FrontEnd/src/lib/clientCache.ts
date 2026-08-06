@@ -43,6 +43,8 @@ const LS_KEYS_USER_SCOPED = [
   'av-mascote',                    // mascote preferido (sync de arqvalor.usuarios)
   'av-theme',                      // tema (sync de arqvalor.usuarios.layout)
   'arqvalor:ocultar_valores',      // flag ocultar (sync de arqvalor.usuarios.ocultar_valores)
+  'arqvalor:ultima-atividade',     // timestamp de auto-logout (useAutoLogout) — nunca herdar entre usuários
+  'arqvalor:biometria-recusada',   // "não perguntar de novo" sobre login por digital (LoginPage)
 ] as const
 
 // Chaves legadas que ainda podem existir no LS de versões anteriores.

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, Navigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Menu } from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
 import Sidebar from './Sidebar'
 import NovidadesProventos from '../ui/NovidadesProventos'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
@@ -26,10 +27,9 @@ export default function AppLayout() {
   // sempre gravar na entrada certa (evita corromper a posição da página anterior).
   const chaveAtual = useRef(location.key)
 
-  // Auto-logout após 15min de inatividade — defesa em PC compartilhado.
-  // Combinado com sessionStorage (fechar aba = sair) cobre os 2 cenários
-  // de "sessão esquecida" mais comuns.
-  useAutoLogout(15)
+  // Auto-logout: 5min no app nativo (segurança) / 15min no desktop (conveniência).
+  const timeoutAutoLogout = Capacitor.isNativePlatform() ? 5 : 15
+  useAutoLogout(timeoutAutoLogout)
 
   // Fecha o menu mobile ao navegar (UX)
   // eslint-disable-next-line react-hooks/set-state-in-effect

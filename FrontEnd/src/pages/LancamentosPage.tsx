@@ -1,6 +1,7 @@
 // src/pages/LancamentosPage.tsx
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { Capacitor } from '@capacitor/core'
 
 import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
@@ -195,10 +196,12 @@ export default function LancamentosPage() {
   const setFiltStatus  = (v: string[]) => setPgState({ filtStatus: v })
   const setComSaldo    = (v: boolean | ((prev: boolean) => boolean)) =>
     setPgState({ comSaldo: typeof v === 'function' ? v(pgState.comSaldo) : v })
-  // Saldo-base por conta = saldo PAGO no fim do mês anterior. Só é necessário
-  // recalcular quando há exatamente UMA conta filtrada (para mostrar saldo
-  // acumulado no extrato dessa conta).
-  const saldoBaseConta = useSaldoBaseMes(mes, filtContas.length === 1)
+  // Saldo-base por conta = saldo no fim do mês anterior. Necessário quando
+  // há exatamente UMA conta filtrada (saldo acumulado do extrato dessa
+  // conta) e também sempre que "saldo anterior" está ativo sem filtro de
+  // categoria — nesse segundo caso serve de fallback para mostrar o saldo
+  // até o mês quando ele não tem nenhum lançamento (ver `saldoMesVazio`).
+  const saldoBaseConta = useSaldoBaseMes(mes, filtContas.length === 1 || (comSaldo && filtCats.length === 0))
 
   const { lancamentos, loading, fetching, error, carregar, removerLocal, prefetchAdj, editar, excluir, antecipar, alterarStatus } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus, com_saldo: comSaldo })
@@ -228,8 +231,35 @@ export default function LancamentosPage() {
       if (e.key === 'ArrowLeft')  { e.preventDefault(); prefetchAdj(-1); navMes(-1) }
       else if (e.key === 'ArrowRight') { e.preventDefault(); prefetchAdj(1);  navMes(1)  }
     }
+
+    // Navegação por Swipe no Android
+    let touchStartX = 0
+    let touchStartY = 0
+    function onTouchStart(e: TouchEvent) {
+      touchStartX = e.touches[0].clientX
+      touchStartY = e.touches[0].clientY
+    }
+    function onTouchEnd(e: TouchEvent) {
+      if (drawerAberto) return
+      const dx = e.changedTouches[0].clientX - touchStartX
+      const dy = e.changedTouches[0].clientY - touchStartY
+      // Movimento horizontal predominante e distância mínima (75px)
+      if (Math.abs(dx) > Math.abs(dy) * 2 && Math.abs(dx) > 75) {
+        if (dx > 0) { prefetchAdj(-1); navMes(-1) }
+        else { prefetchAdj(1);  navMes(1) }
+      }
+    }
+
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    if (Capacitor.isNativePlatform()) {
+      document.addEventListener('touchstart', onTouchStart, { passive: true })
+      document.addEventListener('touchend', onTouchEnd, { passive: true })
+    }
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('touchstart', onTouchStart)
+      document.removeEventListener('touchend', onTouchEnd)
+    }
   }, [navMes, drawerAberto, prefetchAdj])
 
   // Status dropdown aberto — guarda também a posição (rect) do badge para
@@ -720,6 +750,27 @@ export default function LancamentosPage() {
     return grupos.length > 0 ? grupos[0][0] : null
   }, [lancamentosComSaldoCorrigido])
 
+  // Saldo até este mês quando ele não tem NENHUM lançamento — sem linhas
+  // não há saldo_acumulado vindo do backend (que é a fonte de saldoAnterior
+  // acima), então cai no saldo-base por conta (fim do mês anterior), que
+  // sem movimento no mês é igual ao saldo até o mês atual. Soma só as
+  // contas filtradas (ou todas as ativas, sem filtro de conta).
+  // Mesmas ressalvas de `saldoAnterior`: sem sentido com filtro de
+  // categoria (saldo parcial); e, diferente do caso com movimento, a RPC
+  // de saldo-base não filtra por status — por isso também exige que não
+  // haja filtro de status ativo, pra não exibir um total que mistura
+  // status fora do que o usuário filtrou.
+  const saldoMesVazio = useMemo(() => {
+    if (!comSaldo || filtCats.length > 0 || filtStatus.length > 0) return null
+    if (lancamentos.length > 0) return null
+    if (Object.keys(saldoBaseConta).length === 0) return null
+    const contasRelevantes = filtContas.length > 0
+      ? filtContas
+      : contas.filter(c => c.ativa).map(c => c.conta_id)
+    if (contasRelevantes.length === 0) return null
+    return contasRelevantes.reduce((acc, id) => acc + (saldoBaseConta[id] ?? 0), 0)
+  }, [comSaldo, filtCats, filtStatus, lancamentos, filtContas, contas, saldoBaseConta])
+
   // Dias do mês com pelo menos um lançamento (para destacar no calendário)
   // Usa lancamentosParaExibir para refletir também a pesquisa por texto
   const diasComMovimento = useMemo(
@@ -1056,6 +1107,14 @@ export default function LancamentosPage() {
               ) : (
                 <>
                   <p className="text-[17px] mb-3" style={{ color: '#8b92a8' }}>Nenhum lançamento em {mesLabel(mes)}.</p>
+                  {saldoMesVazio !== null && (
+                    <p className="text-[15px] mb-3">
+                      <span style={{ color: '#8b92a8' }}>Saldo até {mesLabel(mes)}: </span>
+                      <span className="font-semibold" style={{ color: saldoMesVazio >= 0 ? '#00c896' : '#f87171' }}>
+                        {formatBRL(saldoMesVazio)}
+                      </span>
+                    </p>
+                  )}
                   <button onClick={() => abrirNovo()} className="text-[16px] underline underline-offset-2" style={{ color: '#00c896' }}>
                     Criar primeiro lançamento
                   </button>

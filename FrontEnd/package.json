@@ -16,7 +16,9 @@
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
+    "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.4.2",
+    "@capgo/capacitor-native-biometric": "^8.6.3",
     "@capgo/capacitor-updater": "^8.51.2",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
