@@ -6,7 +6,7 @@ import MascoteDica from '../components/ui/MascoteDica'
 import { falaResultadoMes } from '../lib/conteudoMascotes'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
-import { ChevronDown, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus, Search } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus, Search, Filter } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { log } from '../lib/logger'
 import { mesLabel, formatBRL, formatData, proximoMes, hojeLocal, mesAtual, dataParaYMD, MESES_ABREV, CORES_CATEGORIA } from '../lib/utils'
@@ -1508,6 +1508,11 @@ export default function DashboardPage() {
   const setModo         = (v: 'hoje' | 'fim') => setPgState({ modo: v })
   const { oculto, toggle: toggleOculto } = useOcultarValores()
 
+  // Barra de filtros (Conta/Categoria/Status) — recolhida por padrão no
+  // Android, deixando só o mês visível de cara (mesmo padrão do Extrato).
+  const [filtrosExpandidos, setFiltrosExpandidos] = useState(() => !Capacitor.isNativePlatform())
+  const temFiltroAtivo = contasFiltro.length > 0 || filtCats.length > 0 || filtStatus.length > 0
+
 
   const [lancamentoEditando, setLancamentoEditando] = useState<Transacao | null>(null)
   const [editandoId,         setEditandoId]         = useState<string | null>(null)
@@ -1732,14 +1737,34 @@ export default function DashboardPage() {
         <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
         <div className="w-full lg:w-auto grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2">
           <div className="contents sm:flex sm:items-center sm:gap-2" data-tutorial="dashboard-filtros">
-            <FiltrosLancamentos
-              pagina="dashboard"
-              filtContas={contasFiltro} filtCats={filtCats} filtStatus={filtStatus}
-              setFiltContas={setContasFiltro} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
-              classNameContas="w-full sm:w-40"
-              classNameCats="w-full sm:w-44"
-              classNameStatus="w-full sm:w-36"
-            />
+            {/* Recolhida por padrão no Android — o mês continua sempre visível */}
+            <button
+              onClick={() => setFiltrosExpandidos(v => !v)}
+              aria-expanded={filtrosExpandidos}
+              className={
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[16px] font-medium transition-colors ' +
+                (temFiltroAtivo
+                  ? 'border-blue-400/60 text-blue-600 bg-blue-50 dark:border-blue-400/40 dark:text-blue-400 dark:bg-blue-400/10'
+                  : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800')
+              }
+            >
+              <Filter size={14} />
+              Filtros
+              {temFiltroAtivo && !filtrosExpandidos && (
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-blue-500" />
+              )}
+              {filtrosExpandidos ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            {filtrosExpandidos && (
+              <FiltrosLancamentos
+                pagina="dashboard"
+                filtContas={contasFiltro} filtCats={filtCats} filtStatus={filtStatus}
+                setFiltContas={setContasFiltro} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
+                classNameContas="w-full sm:w-40"
+                classNameCats="w-full sm:w-44"
+                classNameStatus="w-full sm:w-36"
+              />
+            )}
           </div>
 
           {/* Botao atualizar */}

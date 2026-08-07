@@ -68,7 +68,7 @@ export function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin":  _origemAtual,
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type",
+    "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type, Idempotency-Key",
     "Vary":                         "Origin",
   };
 }

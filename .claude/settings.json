@@ -66,7 +66,11 @@
       "Bash(where python *)",
       "Bash(/c/Users/djjun/AppData/Local/Programs/Python/Python39/python.exe -c ' *)",
       "Bash(PYTHONIOENCODING=utf-8 /c/Users/djjun/AppData/Local/Programs/Python/Python39/python.exe -c ' *)",
-      "Bash(PYTHONIOENCODING=utf-8 \"/c/Users/djjun/AppData/Local/Programs/Python/Python39/python.exe\" \"Documentação/_update_spec_v2_0.py\")"
+      "Bash(PYTHONIOENCODING=utf-8 \"/c/Users/djjun/AppData/Local/Programs/Python/Python39/python.exe\" \"Documentação/_update_spec_v2_0.py\")",
+      "Bash(grep -v \"^$\")",
+      "Bash(grep -n \"Access-Control-Allow-Headers\\\\|Idempotency\\\\|allow-headers\\\\|allowHeaders\" -i FrontEnd/../supabase/functions/_shared/utils.ts)",
+      "Read(//c/Pessoal/ArquitetoDeValor/supabase/functions/_shared/**)",
+      "Bash(command -v supabase)"
     ]
   }
 }

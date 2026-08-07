@@ -794,33 +794,34 @@ export default function DrawerLancamento({
         titulo={editando ? 'Editar lançamento' : 'Novo lançamento'}
         subtitulo={editando?.descricao ?? 'Preencha os dados abaixo'}
         rodape={
-          <>
+          // Grid de 2 colunas — com recorrência (Excluir + Antecipar + Cancelar
+          // + Atualizar = 4 botões) uma única linha flex não cabia na largura
+          // do drawer e "Atualizar" saía da tela. 2 por linha sempre cabe.
+          <div className="grid grid-cols-2 gap-2 w-full">
             {editando && (
-              <div className="flex gap-2 mr-auto">
-                <button
-                  onClick={() => setConfirmandoExclusao(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[16px] font-semibold transition-colors"
-                  style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
-                >
-                  <Trash2 size={13} /> Excluir
-                </button>
-                {podeAntecipar && (
-                  <button
-                    onClick={() => setConfirmandoAntecip(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[16px] font-semibold transition-colors"
-                    style={{ background: 'rgba(240,180,41,0.1)', color: '#f0b429', border: '1px solid rgba(240,180,41,0.3)' }}
-                  >
-                    <Zap size={13} /> Antecipar
-                  </button>
-                )}
-              </div>
+              <button
+                onClick={() => setConfirmandoExclusao(true)}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[16px] font-semibold transition-colors"
+                style={{ background: 'rgba(255,107,74,0.1)', color: '#ff6b4a', border: '1px solid rgba(255,107,74,0.3)' }}
+              >
+                <Trash2 size={13} /> Excluir
+              </button>
+            )}
+            {editando && podeAntecipar && (
+              <button
+                onClick={() => setConfirmandoAntecip(true)}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[16px] font-semibold transition-colors"
+                style={{ background: 'rgba(240,180,41,0.1)', color: '#f0b429', border: '1px solid rgba(240,180,41,0.3)' }}
+              >
+                <Zap size={13} /> Antecipar
+              </button>
             )}
             <BtnCancelar onClick={onFechar} />
             {!editando && (
               <button
                 onClick={() => salvar(true)}
                 disabled={salvando}
-                className="px-3 py-2.5 rounded-lg border text-[16px] font-semibold transition-all hover:bg-av-green/5"
+                className="flex items-center justify-center px-3 py-2.5 rounded-lg border text-[16px] font-semibold transition-all hover:bg-av-green/5"
                 style={{ borderColor: 'rgba(0,200,150,0.3)', color: '#00c896' }}
               >
                 {salvando ? 'Salvando…' : '+ Criar novo'}
@@ -828,7 +829,7 @@ export default function DrawerLancamento({
             )}
             <BtnSalvar editando={!!editando} salvando={salvando} onClick={() => salvar()}
               labelSalvar="Salvar" labelEditar="Atualizar" />
-          </>
+          </div>
         }
       >
         {/* Tipo */}

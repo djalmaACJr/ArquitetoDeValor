@@ -393,26 +393,14 @@ export default function LancamentosPage() {
     return () => clearTimeout(timer)
   }, [diaFocado])
 
-  // ── Auto-colapsar header ao rolar; mostrar botão "voltar ao topo" ──
-  // `overrideManual`: ativado quando o usuário clica em expandir/recolher
-  // enquanto está scrollado. Desativa o auto-collapse até voltar ao topo.
-  //
-  // Raiz do problema com poucos registros:
-  //   O header sticky faz parte do fluxo normal → sua altura conta no
-  //   scrollHeight. Ao colapsar, scrollHeight diminui. Se a diferença for
-  //   maior que (scrollTop - 20), o browser clipa scrollTop para perto de
-  //   zero → event y<20 → expande → header cresce → scrollTop sobe →
-  //   colapsa de novo → loop / pisca.
-  //
-  // Solução definitiva (sem timers):
-  //   Só colapsa se `scrollable > headerH`.
-  //   Como a economia máxima possível é toda a altura do header atual,
-  //   essa guarda garante que mesmo no pior caso o scrollTop não cai para
-  //   zero. Matematicamente: novo scrollable = (scrollable - economia) ≥
-  //   (scrollable - headerH) > 0 → scrollTop nunca clipa para < 20.
-  const [headerColapsado,   setHeaderColapsado]   = useState(false)
+  // ── Mostrar botão "voltar ao topo" ao rolar ──
+  // (O header sticky em si não colapsa mais sozinho ao rolar — isso causava
+  // um pisca-pisca: o header encolhia, o scrollTop era clipado pra perto de
+  // zero pelo browser, o que reabria o header, que crescia de novo, e assim
+  // por diante. Mês/pesquisa/calendário agora ficam sempre visíveis; só a
+  // barra Conta/Categoria/Status/Saldo é recolhível, e só por ação manual —
+  // ver `filtrosExpandidos`.)
   const [mostrarVoltarTopo, setMostrarVoltarTopo] = useState(false)
-  const overrideManualRef  = useRef(false)
   useEffect(() => {
     const main = document.querySelector('main') as HTMLElement | null
     if (!main) return
@@ -421,33 +409,12 @@ export default function LancamentosPage() {
       if (ticking) return
       ticking = true
       requestAnimationFrame(() => {
-        const y = main!.scrollTop
-        if (y < 20) {
-          overrideManualRef.current = false
-          setHeaderColapsado(false)
-        } else if (y > 120 && !overrideManualRef.current) {
-          // Só colapsa quando há conteúdo scrollável suficiente para que o
-          // scrollTop não caia para perto do topo após o header encolher
-          const scrollavel = main!.scrollHeight - main!.clientHeight
-          const headerH    = stickyRef.current?.offsetHeight ?? 0
-          if (scrollavel > headerH) {
-            setHeaderColapsado(true)
-          }
-        }
-        setMostrarVoltarTopo(y > 240)
+        setMostrarVoltarTopo(main!.scrollTop > 240)
         ticking = false
       })
     }
     main.addEventListener('scroll', onScroll, { passive: true })
     return () => main.removeEventListener('scroll', onScroll)
-  }, [])
-  const expandirHeader = useCallback(() => {
-    overrideManualRef.current = true
-    setHeaderColapsado(false)
-  }, [])
-  const colapsarHeader = useCallback(() => {
-    overrideManualRef.current = true
-    setHeaderColapsado(true)
   }, [])
   const voltarAoTopo = useCallback(() => {
     const main = document.querySelector('main') as HTMLElement | null
@@ -472,10 +439,10 @@ export default function LancamentosPage() {
 
   const hoje = useMemo(() => hojeLocal(), [])
 
-  // Barra de filtros (Mês/Conta/Categoria/Status/Saldo anterior) — no Android
-  // a tela é estreita e essa barra some com o teclado/dedo; começa recolhida
-  // deixando só o campo de pesquisa visível, com botão pra expandir.
-  const [filtrosExpandidos, setFiltrosExpandidos] = useState(() => !Capacitor.isNativePlatform())
+  // Barra de filtros (Mês/Conta/Categoria/Status/Saldo anterior) — começa
+  // recolhida em qualquer plataforma (Android ou navegador), deixando só o
+  // campo de pesquisa visível, com botão pra expandir.
+  const [filtrosExpandidos, setFiltrosExpandidos] = useState(false)
 
   // ── Pesquisa ──────────────────────────────────────────────────
   const [refreshing,        setRefreshing]        = useState(false)
@@ -784,58 +751,14 @@ export default function LancamentosPage() {
   )
 
 
-  const filtrosAtivosBadge = temFiltroAtivo || pesquisa.length > 0
-
   return (
     <div className="p-5">
-      {/* ── Sticky: topbar + filtros + calendário ── */}
+      {/* ── Sticky: topbar + mês + filtros + pesquisa + calendário ── */}
       <div ref={stickyRef} className="sticky top-0 z-20 -mx-5 px-5 pt-4 pb-2" style={{ background: '#0d1220', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-        {headerColapsado ? (
-          // ── Versão compacta (auto ao rolar): só o calendário + botão expandir ──
-          <div className="flex items-center gap-2">
-            <button
-              onClick={expandirHeader}
-              title="Mostrar filtros"
-              aria-label="Mostrar filtros"
-              className="relative flex items-center justify-center rounded-lg border transition-all flex-shrink-0"
-              style={{
-                width: 34, height: 34,
-                borderColor: filtrosAtivosBadge ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.12)',
-                color: filtrosAtivosBadge ? '#4da6ff' : '#8b92a8',
-                background: filtrosAtivosBadge ? 'rgba(77,166,255,0.08)' : 'rgba(255,255,255,0.03)',
-              }}
-            >
-              <Filter size={14} />
-              {filtrosAtivosBadge && (
-                <span
-                  className="absolute -top-1 -right-1 w-2 h-2 rounded-full"
-                  style={{ background: '#4da6ff' }}
-                />
-              )}
-            </button>
-            <div className="flex-1 min-w-0">
-              {!buscaMultiMes && (
-                <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} onSelectDia={handleSelectDia} />
-              )}
-            </div>
-            <BotaoNovoLancamento className="hidden sm:block" onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
-          </div>
-        ) : (
-          <>
         {/* Topbar */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-          <h1 className="text-[21px] font-bold flex items-center gap-2" style={{ color: '#e8eaf0' }}>
+          <h1 className="text-[21px] font-bold" style={{ color: '#e8eaf0' }}>
             Lançamentos
-            {/* Botão de recolher filtros — sempre visível */}
-            <button
-              onClick={colapsarHeader}
-              title="Recolher filtros"
-              aria-label="Recolher filtros"
-              className="p-1 rounded-md border transition-colors"
-              style={{ borderColor: 'rgba(255,255,255,0.12)', color: '#8b92a8' }}
-            >
-              <ChevronUp size={14} />
-            </button>
           </h1>
           <div className="w-full sm:w-auto flex items-center gap-2">
             <button
@@ -869,42 +792,45 @@ export default function LancamentosPage() {
             </div>
           </div>
         </div>
-        {/* Alternar barra de filtros — recolhida por padrão no Android, deixando só a pesquisa visível */}
-        <button
-          onClick={() => setFiltrosExpandidos(v => !v)}
-          aria-expanded={filtrosExpandidos}
-          className="flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-lg border text-[15px] font-medium transition-all self-start"
-          style={{
-            borderColor: temFiltroAtivo || !comSaldo ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.12)',
-            color: temFiltroAtivo || !comSaldo ? '#4da6ff' : '#8b92a8',
-            background: temFiltroAtivo || !comSaldo ? 'rgba(77,166,255,0.08)' : 'rgba(255,255,255,0.03)',
-          }}
-        >
-          <Filter size={13} />
-          Filtros
-          {(temFiltroAtivo || !comSaldo) && !filtrosExpandidos && (
-            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#4da6ff' }} />
-          )}
-          {filtrosExpandidos ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-        </button>
 
-        {/* Filtros — tudo em uma linha */}
-        {filtrosExpandidos && (
-        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 mb-2 items-center">
-        {/* Mês */}
-        <div className="col-span-2 sm:col-span-1 flex items-center gap-1.5 min-w-0" data-tutorial="extrato-mes">
-          <MonthPicker value={mes} onChange={setMes}
-            onHoverPrev={() => prefetchAdj(-1)}
-            onHoverNext={() => prefetchAdj(1)}
-          />
-          {fetching && !loading && (
-            <span
-              className="inline-block w-3.5 h-3.5 rounded-full border-2 border-transparent animate-spin"
-              style={{ borderTopColor: '#4da6ff', borderRightColor: 'rgba(77,166,255,0.3)' }}
+        {/* Mês + alternar barra de filtros — sempre visíveis, independem de scroll */}
+        <div className="flex items-center flex-wrap gap-2 mb-2">
+          <div className="flex items-center gap-1.5 min-w-0" data-tutorial="extrato-mes">
+            <MonthPicker value={mes} onChange={setMes}
+              onHoverPrev={() => prefetchAdj(-1)}
+              onHoverNext={() => prefetchAdj(1)}
             />
-          )}
+            {fetching && !loading && (
+              <span
+                className="inline-block w-3.5 h-3.5 rounded-full border-2 border-transparent animate-spin"
+                style={{ borderTopColor: '#4da6ff', borderRightColor: 'rgba(77,166,255,0.3)' }}
+              />
+            )}
+          </div>
+
+          {/* Recolhida por padrão no Android — só a pesquisa fica visível de cara */}
+          <button
+            onClick={() => setFiltrosExpandidos(v => !v)}
+            aria-expanded={filtrosExpandidos}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[15px] font-medium transition-all"
+            style={{
+              borderColor: temFiltroAtivo || !comSaldo ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.12)',
+              color: temFiltroAtivo || !comSaldo ? '#4da6ff' : '#8b92a8',
+              background: temFiltroAtivo || !comSaldo ? 'rgba(77,166,255,0.08)' : 'rgba(255,255,255,0.03)',
+            }}
+          >
+            <Filter size={13} />
+            Filtros
+            {(temFiltroAtivo || !comSaldo) && !filtrosExpandidos && (
+              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#4da6ff' }} />
+            )}
+            {filtrosExpandidos ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
         </div>
 
+        {/* Filtros — Conta/Categoria/Status/Saldo anterior, recolhível */}
+        {filtrosExpandidos && (
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 mb-2 items-center">
         <div className="contents sm:flex sm:items-center sm:gap-2" data-tutorial="extrato-filtros">
           <FiltrosLancamentos
             pagina="extrato"
@@ -1021,8 +947,6 @@ export default function LancamentosPage() {
           <div data-tutorial="extrato-calendario">
             <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} onSelectDia={handleSelectDia} />
           </div>
-        )}
-          </>
         )}
       </div>
 
