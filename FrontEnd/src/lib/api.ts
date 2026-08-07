@@ -27,11 +27,12 @@ async function getSession() {
   return session
 }
 
-function makeHeaders(token: string): Record<string, string> {
+function makeHeaders(token: string, extra?: Record<string, string>): Record<string, string> {
   return {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
     'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+    ...extra,
   }
 }
 
@@ -63,13 +64,14 @@ export async function apiFetch<T = unknown>(
 export async function apiMutate<T = unknown>(
   path: string,
   method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
-  body?: unknown
+  body?: unknown,
+  extraHeaders?: Record<string, string>
 ): Promise<ApiResult<T>> {
   try {
     const session = await getSession()
     const res = await fetch(`${BASE}${path}`, {
       method,
-      headers: makeHeaders(session.access_token),
+      headers: makeHeaders(session.access_token, extraHeaders),
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
     const data = await res.json().catch(() => ({}))

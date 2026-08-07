@@ -1,7 +1,7 @@
 // supabase/functions/investimentos/snapshot.ts
 // Snapshot mensal de patrimônio (histórico), auto/cron/backfill, e a rota
 // de histórico-mensal — extraído de index.ts.
-import { json, erro, db, dbAdmin, extrairId, buscarTodasLinhas, autenticarCron } from "../_shared/utils.ts";
+import { json, erro, db, dbAdmin, extrairId, buscarTodasLinhas, autenticarCron, mesCorrenteBR } from "../_shared/utils.ts";
 import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
 import {
   Db, RE_MES_ANO, CDI_FALLBACK, IPCA_FALLBACK, hojeISO, deslocarDias, mesesEntre,
@@ -213,7 +213,7 @@ export interface GrupoPosicao {
 export async function executarSnapshotMes(
   client: Db, userId: string, mesAno: string, contaId?: string | null,
 ): Promise<{ atualizados: number; ignorados: { ticker: string; motivo: string }[] }> {
-  const mesCorrente = new Date().toISOString().slice(0, 7);
+  const mesCorrente = mesCorrenteBR();
   const [ano, mes] = mesAno.split("-").map(Number);
   const dataRef = mesAno === mesCorrente ? new Date() : new Date(Date.UTC(ano, mes, 0, 12));
 
@@ -324,7 +324,7 @@ export async function executarSnapshotMes(
 export async function rotaSnapshotAuto(c: Db, req: Request, m: string, userId: string) {
   if (m !== "POST") return erro("Método não permitido", 405);
   const body = await req.json().catch(() => ({})) as { mes_ano?: string; conta_id?: string };
-  const mesCorrente = new Date().toISOString().slice(0, 7);
+  const mesCorrente = mesCorrenteBR();
   const mesAno = body.mes_ano && RE_MES_ANO.test(body.mes_ano) ? body.mes_ano : mesCorrente;
   logRequest("POST", "/investimentos/snapshot-auto", { mesAno, conta_id: body.conta_id ?? null });
   try {
@@ -352,7 +352,7 @@ export async function rotaSnapshotCron(req: Request, m: string) {
   if (naoAutorizado) return naoAutorizado;
 
   const admin = dbAdmin();
-  const mesAno = new Date().toISOString().slice(0, 7);
+  const mesAno = mesCorrenteBR();
   logRequest("POST", "/investimentos/snapshot-cron", { mesAno });
 
   const { data: users, error } = await admin.from("inv_posicoes").select("user_id").eq("status", "ATIVA");
@@ -395,7 +395,7 @@ export async function rotaSnapshotCron(req: Request, m: string) {
 export async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userId: string) {
   if (m !== "POST") return erro("Método não permitido", 405);
   const body = await req.json().catch(() => ({})) as { conta_id?: string; ate?: string; ativo_id?: string };
-  const mesCorrente = new Date().toISOString().slice(0, 7);
+  const mesCorrente = mesCorrenteBR();
   // Backfill cobre só meses PASSADOS — para no mês anterior. O mês corrente é
   // tarefa do "Atualizar cotação"/job diário (cotação ao vivo), e o fechamento
   // mensal da fonte (Yahoo) só sai quando o mês termina.

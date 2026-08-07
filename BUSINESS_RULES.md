@@ -211,11 +211,13 @@ Quando `total_parcelas > 1` é informado, gera-se uma série inteira de pares (c
 
 ### Atomicidade (RPC)
 
-Criação e exclusão do par (ou série, se recorrente) são atômicas via RPC `SECURITY INVOKER`, não via 2 chamadas PostgREST separadas:
+Criação, edição e exclusão do par (ou série, se recorrente) são atômicas via RPC `SECURITY INVOKER`, não via 2+ chamadas PostgREST separadas:
 
 - **Criar**: a Edge Function monta em memória **todas** as linhas do par (2× por parcela, com datas/status/`id_recorrencia`/`id_par_transferencia` já calculados) e delega o INSERT inteiro para `arqvalor.fn_criar_transferencia(p_rows jsonb)` — se qualquer linha falhar (constraint/trigger/RLS), o Postgres faz ROLLBACK de tudo, sem par órfão possível.
+- **Editar via `/transacoes` (1 perna)**: `PUT /transacoes/:id` — quando a transação tem `id_par_transferencia` — chama `arqvalor.fn_atualizar_par_transferencia(p_id_par_transferencia, p_campos)`, que espelha `valor`/`data`/`status`/`observacao` nas DUAS pernas num único `UPDATE`, em vez de atualizar só a linha editada. Corrigido em `20260804000001` (bug: marcar 1 perna como PAGO, ex. ao filtrar o Extrato por 1 conta do par, deixava a outra com status antigo).
+- **Editar via `/transferencias` (par/série completo)**: `arqvalor.fn_atualizar_transacoes_transferencia(p_updates)` recebe um array `{id, campos}` (2, ou 2×N para série) e aplica tudo num único `UPDATE ... FROM` — substitui os 2 (ou 2×N) `UPDATE`s sequenciais que podiam deixar o par inconsistente se o 2º falhasse depois do 1º ter sucesso (`20260804000002`).
 - **Excluir**: `arqvalor.fn_excluir_transferencias(p_ids)` desarma a proteção (`id_par_transferencia = NULL`) e apaga as transações do par/série numa única transação.
-- Isso substitui o esquema antigo (2 INSERTs sequenciais + DELETE compensatório manual em caso de falha), que podia deixar "meio par" órfão.
+- Isso substitui o esquema antigo (INSERTs/UPDATEs sequenciais + compensação manual em caso de falha), que podia deixar "meio par" órfão ou divergente.
 
 ---
 
@@ -380,7 +382,7 @@ Não são 4 métricas diferentes, mas melhorias sucessivas na mesma fórmula, ap
 4. **NET** (líquido): soma receita − despesa da(s) categoria(s), não só receita — necessário para categorias de investimento com entradas e saídas.
 5. **COMP_YTD**: corrige assimetria remanescente — corta o ano de comparação em `CURRENT_DATE` também, tornando os dois períodos comparados estritamente proporcionais.
 
-⚠️ **Divergência conhecida**: a migration mais recente (`20260605000001_sonho_saldo_base.sql`), ao reescrever as funções de cálculo para adicionar `saldo_base` ao SONHO, reintroduziu — aparentemente sem intenção — a versão **v1** (ano-base fixo, só receita, sem YTD) do bloco CRESCIMENTO, descartando as melhorias 2–5. Hoje: `objetivos.valor_atingido`/`percentual`/`status` (usados no card da listagem e no RPC de sincronização) refletem a versão v1 simples; a tela `ObjetivoDetalhe.tsx` recalcula, no client, a partir das transações brutas, a versão completa (YoY+YTD+NET) — **os dois números podem divergir** para o mesmo objetivo tipo CRESCIMENTO. Antes de tratar isso como bug a corrigir, confirme com quem mantém o código se foi intencional.
+✓ **Corrigido em 07/08/2026** (`20260806000006_crescimento_comp_ytd_reconciliado.sql`, AUD-03): a migration `20260605000001_sonho_saldo_base.sql`, ao reescrever as funções de cálculo para adicionar `saldo_base` ao SONHO, tinha reintroduzido — sem intenção — a versão **v1** (ano-base fixo, só receita, sem YTD) do bloco CRESCIMENTO, descartando as melhorias 2–5. Isso fazia `objetivos.valor_atingido`/`percentual`/`status` (card da listagem + RPC de sincronização) divergirem do que `ObjetivoDetalhe.tsx` recalculava no client a partir das transações brutas (versão completa YoY+YTD+NET). A migration de reconciliação recria as duas funções (`fn_atualizar_progresso_objetivo` / `fn_calcular_progresso_objetivo`) unindo `saldo_base` (SONHO) com COMP_YTD (CRESCIMENTO) — banco e tela agora calculam a mesma fórmula.
 
 ### Endpoints e sincronização
 
@@ -602,7 +604,7 @@ Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `
 ## 🚫 Restrições críticas (resumo)
 
 - ❌ Misturar dados entre usuários (bloqueado por RLS + trigger `fn_validar_isolamento_usuario`).
-- ❌ Quebrar pares de transferência — sempre atômico via RPC `fn_criar_transferencia`/`fn_excluir_transferencias` (endpoint `/transferencias`).
+- ❌ Quebrar pares de transferência — sempre atômico via RPC `fn_criar_transferencia`/`fn_atualizar_par_transferencia`/`fn_atualizar_transacoes_transferencia`/`fn_excluir_transferencias` (endpoints `/transacoes` e `/transferencias`).
 - ❌ Excluir avulso uma transação que tem `id_par_transferencia` com categoria protegida (trigger `trg_bloquear_exclusao_transf_avulsa`).
 - ❌ Inconsistência em recorrência — `id_recorrencia/nr_parcela/total_parcelas/tipo_recorrencia` são "tudo ou nada" (`chk_parcela_consistente`).
 - ❌ Excluir conta com transações (`fn_bloquear_exclusao_conta`).

@@ -29,8 +29,14 @@ Execute o arquivo `rodar_testes_e2e.bat` na raiz do projeto:
 ### Via NPM Scripts
 
 ```bash
-# Rodar todos os testes
+# Rodar todos os testes (projeto "firefox")
 npm run test:e2e
+
+# Reexecutar a MESMA suíte em viewport/toque de Android (Chromium, Pixel 7)
+# — não roda por padrão, pensado pra rodar antes de builds do app Android.
+# Não cobre trechos gateados por Capacitor.isNativePlatform() (biometria,
+# swipe de mês, teclado nativo) — isso continua exigindo teste manual.
+npm run test:e2e:mobile
 
 # Rodar em modo visual
 npm run test:e2e:ui
@@ -43,15 +49,24 @@ npm run test:e2e:report
 
 ```
 e2e/
-├── playwright.config.ts    # Configuração do Playwright
+├── playwright.config.ts    # Configuração do Playwright (projetos: auth, data, firefox, mobile)
 ├── tests/
-│   ├── 01_dashboard.spec.ts
-│   ├── 02_extrato.spec.ts
-│   ├── 03_contas.spec.ts
-│   ├── 04_categorias.spec.ts
-│   ├── 05_relatorios.spec.ts
-│   ├── 06_navegacao.spec.ts
-│   └── auth.setup.ts        # Setup de autenticação
+│   ├── 00_cadastro.spec.ts
+│   ├── 01_contas.spec.ts
+│   ├── 02_categorias.spec.ts
+│   ├── 03_navegacao.spec.ts
+│   ├── 04_extrato.spec.ts
+│   ├── 05_dashboard.spec.ts
+│   ├── 06_relatorios.spec.ts
+│   ├── 07_transferencias.spec.ts
+│   ├── 08_lembretes.spec.ts
+│   ├── 09_assistente.spec.ts
+│   ├── 10_objetivos.spec.ts
+│   ├── 11_investimentos.spec.ts
+│   ├── zz_teardown.spec.ts
+│   ├── auth.setup.ts        # Setup de autenticação (login, salva fixtures/auth.json)
+│   ├── data.setup.ts        # Setup de dados básicos (contas, categorias)
+│   └── helpers.ts
 ├── fixtures/
 └── report/                  # Relatórios HTML
 ```
@@ -59,7 +74,7 @@ e2e/
 ## 🔧 Configuração
 
 - **Base URL**: `http://localhost:5173` (configurável via `E2E_BASE_URL`)
-- **Browser**: Firefox (Desktop)
+- **Browser**: Firefox Desktop (`npm run test:e2e`) ou Chromium/Pixel 7 (`npm run test:e2e:mobile`)
 - **Timeout**: 30 segundos
 - **Retries**: 0 (local), 1 (CI)
 

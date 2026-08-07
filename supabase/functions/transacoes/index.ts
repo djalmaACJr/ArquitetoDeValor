@@ -3,7 +3,8 @@
 
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId, extrairAcao,
-         verificarExistencia, validarStatus, calcularDataParcela, corsPreFlight } from "../_shared/utils.ts";
+         verificarExistencia, validarStatus, calcularDataParcela, corsPreFlight, hojeBR,
+         comIdempotencia } from "../_shared/utils.ts";
 import { registrarOrigem } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess } from "../_shared/logger.ts";
 
@@ -28,7 +29,14 @@ Deno.serve(async (req: Request) => {
   try {
         if (m === "GET"    && !id)                       return await listar(c, params, userId);
     if (m === "GET"    &&  id)                       return await buscarPorId(c, id);
-    if (m === "POST"   && !id)                       return await criar(c, await req.json(), userId);
+    if (m === "POST"   && !id) {
+      // Idempotency-Key opcional (AUD-06) — sem o header, comportamento
+      // idêntico a antes. Chave lida ANTES do req.json() pra não depender
+      // de qual promise resolve primeiro.
+      const chaveIdemp = req.headers.get("Idempotency-Key");
+      const body = await req.json();
+      return await comIdempotencia(c, userId, "POST /transacoes", chaveIdemp, () => criar(c, body, userId));
+    }
     if (m === "POST"   &&  id && acao==="antecipar") return await antecipar(c, id, userId);
     if (m === "PUT"    &&  id)                       return await editar(c, id, await req.json(), escopo);
     if (m === "DELETE" &&  id)                       return await excluir(c, id, escopo);
@@ -254,7 +262,11 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
   // ── Validações básicas ──────────────────────────────────────
   if (!body.descricao || String(body.descricao).length < 2 || String(body.descricao).length > 200)
     return erro("RV-001: descricao deve ter entre 2 e 200 caracteres");
-  if (!body.valor || Number(body.valor) <= 0)
+  // Number.isFinite (não só <= 0): "100abc" vira NaN, que passa por
+  // `NaN <= 0` (sempre false em JS) — a validação anterior deixava esse
+  // tipo de entrada seguir pro banco, dependendo só da CHECK (valor > 0)
+  // do Postgres como rede de segurança (achado de auditoria, AUD-07).
+  if (!body.valor || !Number.isFinite(Number(body.valor)) || Number(body.valor) <= 0)
     return erro("RV-002: valor deve ser maior que zero");
   if (!body.data)
     return erro("RV-003: data é obrigatória");
@@ -295,7 +307,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
 
   const statusOriginal = String(body.status);
   const dataBase       = String(body.data);
-  const hoje           = new Date().toISOString().split("T")[0];
+  const hoje           = hojeBR();
 
   // ── Validação: PROJECAO só para datas futuras ───────────────
   if (statusOriginal === "PROJECAO" && dataBase <= hoje)
@@ -558,11 +570,15 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
     const erroStatus = validarStatus(body.status);
     if (erroStatus) return erro(erroStatus);
   }
+  // Mesma guarda de RV-002 (POST), agora também no PUT — antes dependia só
+  // da CHECK do banco pra rejeitar valor não-numérico/NaN/Infinity (AUD-07).
+  if (body.valor !== undefined && (!Number.isFinite(Number(body.valor)) || Number(body.valor) <= 0))
+    return erro("RV-002: valor deve ser maior que zero");
   if (body.tipo !== undefined && !TIPOS_TX.includes(String(body.tipo)))
     return erro("tipo deve ser RECEITA ou DESPESA");
 
   // Validação PROJECAO só para datas futuras
-  const hoje = new Date().toISOString().split("T")[0];
+  const hoje = hojeBR();
   const dataEfetiva = String(body.data ?? atual.data);
   if (body.status === "PROJECAO" && dataEfetiva <= hoje)
     return erro("RV-008: status PROJECAO só é permitido para datas futuras", 422);
@@ -633,7 +649,7 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
           const novaData = calcularDataParcela(ultimaParcela.data, frequenciaFinal, offset * intervaloFinal);
           
           // Status da nova parcela baseado na data
-          const hoje = new Date().toISOString().split("T")[0];
+          const hoje = hojeBR();
           let statusParcela: string;
           if (novaData <= hoje) {
             statusParcela = "PAGO";

@@ -4,6 +4,34 @@
 // Alteração: CORS com origem configurável via ALLOWED_ORIGIN
 // ============================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { logError } from "./logger.ts";
+
+// ── Data de "hoje" no fuso de Brasília — NUNCA use `new Date().toISOString()`
+// pra isso ────────────────────────────────────────────────────────────────
+// Achado de auditoria (AUD-01, 2026-08-06): `new Date().toISOString().split("T")[0]`
+// devolve a data em UTC. Brasil é UTC-3 o ano todo (sem horário de verão
+// desde 2019) — então, das 21h00 às 23h59 (horário de Brasília), o relógio
+// UTC já virou o dia seguinte. Nessa janela, toda comparação "data <= hoje"
+// feita com o padrão antigo comparava contra o dia ERRADO: uma parcela de
+// amanhã (Brasil) virava PAGO hoje à noite; um resgate de renda fixa
+// agendado pra amanhã era aplicado à posição uma noite adiantado; um
+// lançamento PROJEÇÃO genuinamente futuro era rejeitado como inválido.
+// Reproduzível garantidamente, todo santo dia, não é edge case raro.
+//
+// `hojeBR()`/`mesCorrenteBR()` são os únicos pontos que devem calcular
+// "hoje"/"mês corrente" pra regra de negócio (status, corte de vencimento,
+// etc.) — todo o resto do módulo delega pra cá.
+const FORMATADOR_DATA_BR = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Sao_Paulo",
+  year: "numeric", month: "2-digit", day: "2-digit",
+});
+export function hojeBR(): string {
+  // Locale en-CA formata nativamente como YYYY-MM-DD — evita parsing manual.
+  return FORMATADOR_DATA_BR.format(new Date());
+}
+export function mesCorrenteBR(): string {
+  return hojeBR().slice(0, 7);
+}
 
 // ── CORS — allowlist de origens ───────────────────────────────────────────────
 // ALLOWED_ORIGIN aceita uma LISTA separada por vírgula (produção):
@@ -63,6 +91,56 @@ export function erro(mensagem: string, status = 400): Response {
   return json({ erro: mensagem }, status);
 }
 
+// ── Idempotency-Key — protege endpoints de criação contra duplicação ──
+// Achado de auditoria AUD-06: POST /transacoes e /transferencias não
+// tinham nenhuma defesa contra retry de rede (a chamada chega e cria o
+// registro, a resposta se perde, o cliente reenvia — duplica). Opcional e
+// opt-in: sem o header `Idempotency-Key`, o comportamento é IDÊNTICO ao de
+// antes (chama `executar()` direto, sem passar pela tabela).
+//
+// Como funciona: reivindica a chave (INSERT) ANTES de rodar `executar()`.
+// A UNIQUE (user_id, rota, chave) da tabela serializa tentativas
+// concorrentes com a MESMA chave — a 2ª tentativa esbarra na constraint
+// antes de conseguir criar duplicata nenhuma, não é uma checagem "olha e
+// depois grava" (que teria a mesma race condition que estamos evitando).
+// Se a 1ª tentativa já terminou, devolve a resposta cacheada; se ainda
+// está em andamento, devolve 409 em vez de arriscar duplicar.
+export async function comIdempotencia(
+  c: Db, userId: string, rota: string, chave: string | null,
+  executar: () => Promise<Response>,
+): Promise<Response> {
+  if (!chave) return await executar();
+
+  const { error: erroClaim } = await c.from("idempotency_keys")
+    .insert({ user_id: userId, rota, chave });
+
+  if (erroClaim) {
+    if (erroClaim.code === "23505") { // unique_violation — chave já reivindicada
+      const { data: existente } = await c.from("idempotency_keys")
+        .select("status_code, resposta")
+        .eq("user_id", userId).eq("rota", rota).eq("chave", chave)
+        .maybeSingle();
+      if (existente?.status_code != null) {
+        return json(existente.resposta, existente.status_code);
+      }
+      return erro("Operação já em andamento com esta chave de idempotência — aguarde, não reenvie.", 409);
+    }
+    // Erro inesperado gravando a chave (ex.: migration ainda não aplicada):
+    // segue sem idempotência em vez de bloquear a operação real por isso.
+    logError("comIdempotencia (reivindicar chave)", erroClaim);
+    return await executar();
+  }
+
+  const resp = await executar();
+  let corpo: unknown = null;
+  try { corpo = await resp.clone().json(); } catch { /* corpo não-JSON */ }
+  const { error: erroUpdate } = await c.from("idempotency_keys")
+    .update({ status_code: resp.status, resposta: corpo })
+    .eq("user_id", userId).eq("rota", rota).eq("chave", chave);
+  if (erroUpdate) logError("comIdempotencia (gravar resposta)", erroUpdate);
+  return resp;
+}
+
 // ── Cliente Supabase com schema arqvalor (anon key + JWT do usuário) ──
 // Sem anotação de retorno explícita: createClient() com { schema: "arqvalor" }
 // devolve SupabaseClient<..., "arqvalor", ...>, incompatível com o genérico
@@ -90,6 +168,57 @@ export function dbAdmin() {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     { db: { schema: "arqvalor" } }
   );
+}
+
+// ── Registro de execução de cron job (tabela cron_execucoes) ──
+// Grava sucesso/erro de UMA execução de cron — consultada pela tela admin
+// /admin/crons no frontend (RLS só libera SELECT pra usuarios.admin=true).
+// Nasceu da auditoria 2026-08-06: dividendos-diario falhou 19 dias direto
+// sem NENHUM sinal em lugar nenhum que desse pra checar sem entrar no SQL
+// Editor/Logs Explorer do Supabase.
+//
+// NUNCA lança — uma falha ao gravar o log não pode derrubar a resposta
+// real do cron (o dado em si já foi processado ou já falhou; perder só o
+// registro do log é um problema bem menor que isso virar um 500 espúrio).
+export async function registrarExecucaoCron(
+  jobNome: string,
+  status: "sucesso" | "erro",
+  resumo: unknown,
+  erroMsg: string | null,
+  duracaoMs: number,
+): Promise<void> {
+  try {
+    const { error } = await dbAdmin().from("cron_execucoes").insert({
+      job_nome: jobNome, status, resumo: resumo ?? null, erro: erroMsg, duracao_ms: duracaoMs,
+    });
+    if (error) logError("registrarExecucaoCron (insert)", error);
+  } catch (e) {
+    logError("registrarExecucaoCron (inesperado)", e);
+  }
+}
+
+// Envolve a chamada de uma rota de cron: mede duração, grava o resultado
+// (sucesso/erro) em cron_execucoes e repassa a Response original sem
+// alterar o comportamento de quem chama (o handler externo em index.ts
+// continua responsável por tratar exceções e responder 500).
+export async function executarComLogDeCron(
+  jobNome: string,
+  fn: () => Promise<Response>,
+): Promise<Response> {
+  const inicio = Date.now();
+  try {
+    const resp = await fn();
+    const duracaoMs = Date.now() - inicio;
+    let resumo: unknown = null;
+    try { const corpo = await resp.clone().json(); resumo = corpo?.dados ?? corpo; } catch { /* corpo não-JSON */ }
+    const sucesso = resp.status >= 200 && resp.status < 300;
+    await registrarExecucaoCron(jobNome, sucesso ? "sucesso" : "erro", resumo, sucesso ? null : JSON.stringify(resumo), duracaoMs);
+    return resp;
+  } catch (e) {
+    const duracaoMs = Date.now() - inicio;
+    await registrarExecucaoCron(jobNome, "erro", null, (e as Error)?.message ?? String(e), duracaoMs);
+    throw e; // handler externo (index.ts) continua tratando e respondendo 500
+  }
 }
 
 // ── Verificador de JWT (singleton do módulo) ──────────────────

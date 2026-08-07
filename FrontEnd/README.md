@@ -1,8 +1,10 @@
 # Arquiteto de Valor — Frontend
 
-Aplicação web de gestão financeira pessoal. Controle de contas, lançamentos com recorrência, transferências, relatórios, lembretes e assistente inteligente de lançamentos.
+Aplicação de gestão financeira pessoal (web + app Android via Capacitor). Controle de contas, lançamentos com recorrência, transferências, relatórios, lembretes, assistente inteligente de lançamentos, Objetivos, Investimentos e importação de fatura de cartão.
 
-**Versão atual:** 1.97.2
+**Versão atual:** ver `APP_VERSION` em [`version.ts`](../version.ts) (raiz do repo).
+
+> Este README cobre a instalação e visão geral do frontend. Para o contexto completo do sistema (regras de negócio, arquitetura do backend, todos os módulos) veja [`CLAUDE.md`](../CLAUDE.md) na raiz do repo — é o documento mantido em sincronia com o código.
 
 ---
 
@@ -41,8 +43,10 @@ npm run dev
 | `npm run preview` | Preview do build local |
 | `npm run lint` | ESLint + TypeScript check |
 | `npm run test:e2e` | Playwright headless (Firefox) |
+| `npm run test:e2e:mobile` | Playwright headless (Chromium, viewport/toque Android — não roda por padrão) |
 | `npm run test:e2e:ui` | Playwright modo visual |
 | `npm run test:e2e:report` | Abre relatório HTML do Playwright |
+| `npm run publish:ota` | Publica atualização OTA do app Android (ver seção "App Android" abaixo) |
 
 ---
 
@@ -74,21 +78,27 @@ npm run dev
 
 ## Estrutura do projeto
 
+Amostra representativa — o app cresceu bastante desde a 1ª versão (Objetivos, Investimentos, Importação de fatura, Mascotes/IA, app Android). **Inventário completo e atualizado em [`CLAUDE.md`](../CLAUDE.md) › "📁 Estrutura relevante".**
+
 ```
 src/
-├── pages/                        # Uma página por rota
-│   ├── LoginPage.tsx
+├── pages/                        # Uma página por rota — financeiro básico,
+│                                  # análises client-side, Objetivos,
+│                                  # Investimentos (7 páginas), Importar fatura
+│   ├── LoginPage.tsx              # + login por digital (Android)
 │   ├── DashboardPage.tsx
 │   ├── LancamentosPage.tsx
 │   ├── ContasPage.tsx
 │   ├── CategoriasPage.tsx
 │   ├── RelatoriosPage.tsx
 │   ├── ImportExportPage.tsx
-│   └── PerfilPage.tsx
+│   └── PerfilPage.tsx             # + seção "Login por digital" (Android)
 │
 ├── components/
 │   ├── layout/                   # AppLayout, Sidebar
-│   └── ui/                       # Componentes reutilizáveis
+│   └── ui/                       # Componentes reutilizáveis — financeiro
+│       │                        # básico, Mascotes/IA (Chat, Tutorial),
+│       │                        # Objetivos, Investimentos
 │       ├── DrawerLancamento.tsx  # Formulário criar/editar lançamento
 │       ├── Calculadora.tsx       # Calculadora embutida no drawer
 │       ├── BotaoNovoLancamento.tsx
@@ -102,7 +112,8 @@ src/
 │       ├── AppVersion.tsx
 │       └── shared/               # Primitivos compartilhados
 │
-├── hooks/                        # Lógica de negócio (React Query)
+├── hooks/                        # Lógica de negócio (React Query) — um
+│                                  # hook por domínio (~40 hoje)
 │   ├── useAuth.ts
 │   ├── useContas.ts
 │   ├── useCategorias.ts
@@ -119,7 +130,8 @@ src/
 │
 ├── lib/
 │   ├── api.ts                    # apiFetch / apiMutate (HTTP + JWT)
-│   ├── supabase.ts               # Cliente Supabase Auth
+│   ├── supabase.ts               # Cliente Supabase Auth (storage por plataforma)
+│   ├── biometria.ts              # Login por digital (só Android)
 │   ├── constants.ts              # ENUMs centralizados
 │   ├── queryKeys.ts              # Chaves React Query
 │   ├── utils.ts                  # Formatação, helpers
@@ -127,6 +139,10 @@ src/
 │
 └── types/
     └── index.ts                  # Tipos compartilhados (re-exporta enums)
+
+android/                          # Projeto nativo gerado pelo Capacitor
+capacitor.config.ts               # appId, updateUrl OTA, publicKey de assinatura
+scripts/publish-android-ota.mjs   # Publica atualização OTA (npm run publish:ota)
 ```
 
 ---
@@ -186,15 +202,39 @@ src/
 - Dados do usuário
 - Gerenciamento de filtros salvos (renomear / excluir)
 - Exclusão de conta (apaga todos os dados)
+- Login por digital (Android) — ativar/desativar
+
+### Objetivos
+- 4 tipos: Sonho (saldo acumulado), Meta de Renda, Projeto (orçamento, ainda oculto na UI), Crescimento Anual
+- Progresso calculado sempre por trigger no banco, nunca pela API
+
+### Investimentos
+- Carteira: ações, FIIs, renda fixa, tesouro direto, cripto, stocks/ETFs internacionais
+- Dividendos/proventos com DY/YoC, avaliação de ativos por mentores de IA, snapshot mensal de patrimônio via cron
+
+### Importação de fatura
+- Upload de PDF (Nubank/C6/Inter/MercadoPago/genérico) → parse → sessão de revisão com matching automático → confirmação em massa
+
+### Mascotes + IA
+- Onboarding escolhendo mascote/apelido/tema; chat com IA (múltiplos provedores) com contexto opcional da página; tutorial guiado por página
+
+> Detalhe completo de todos os módulos acima em [`CLAUDE.md`](../CLAUDE.md) e [`BUSINESS_RULES.md`](../BUSINESS_RULES.md).
+
+### App Android
+- Mesmo código React, empacotado com Capacitor 8 (WebView)
+- Login por digital (biometria), sessão mais restritiva (`sessionStorage`, auto-logout de 5min) e atualização OTA do bundle sem passar pela Play Store
+- Build/instalação: `../instalar_android.bat` (raiz do repo) ou `npm run build && npx cap sync android`
+- Detalhe completo em [`CLAUDE.md`](../CLAUDE.md) › "Sessão + biometria (Android)"
 
 ---
 
 ## Testes E2E (Playwright)
 
-Localizados em `e2e/tests/`. Rodam no Firefox.
+Localizados em `e2e/tests/`. Rodam no Firefox por padrão (projeto `firefox`); há também um projeto `mobile` (Chromium, viewport/toque Android) opcional — ver [`README_E2E.md`](./README_E2E.md).
 
 | Arquivo | Cobre |
 |---|---|
+| `00_cadastro.spec.ts` | Cadastro de usuário |
 | `01_contas.spec.ts` | CRUD de contas |
 | `02_categorias.spec.ts` | CRUD de categorias |
 | `03_navegacao.spec.ts` | Navegação entre páginas |
@@ -204,10 +244,16 @@ Localizados em `e2e/tests/`. Rodam no Firefox.
 | `07_transferencias.spec.ts` | Transferências |
 | `08_lembretes.spec.ts` | Lembretes |
 | `09_assistente.spec.ts` | Assistente de lançamentos |
+| `10_objetivos.spec.ts` | Objetivos |
+| `11_investimentos.spec.ts` | Investimentos |
+| `zz_teardown.spec.ts` | Limpeza pós-suite |
 
 ```bash
 # Executar (requer frontend rodando em localhost:5173)
 npm run test:e2e
+
+# Reexecutar em viewport/toque Android (Chromium) — opcional
+npm run test:e2e:mobile
 
 # Modo visual
 npm run test:e2e:ui

@@ -9,6 +9,9 @@ const TEST_PASSWORD     = process.env.TEST_PASSWORD     as string;
 // Se não estiver no env, o setup cria um usuário descartável via signUp.
 const TEST_EMAIL_B      = process.env.TEST_EMAIL_B      as string | undefined;
 const TEST_PASSWORD_B   = process.env.TEST_PASSWORD_B   as string | undefined;
+// Só pra limpeza do usuário descartável (auth.admin.deleteUser exige
+// service_role — a suíte principal nunca usa isso pra nada além disso).
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY as string | undefined;
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !TEST_EMAIL || !TEST_PASSWORD) {
   throw new Error("Variáveis de ambiente não configuradas. Verifique .env ou GitHub Secrets.");
@@ -21,6 +24,10 @@ let cachedToken: string | null = null;
 let cachedTokenB: string | null = null;
 let cachedUserId: string | null = null;
 let cachedUserIdB: string | null = null;
+// true só quando User B veio do signUp dinâmico deste módulo (não de
+// TEST_EMAIL_B/PASSWORD_B configurados) — usado por limparUserBSeDinamico()
+// pra nunca excluir uma conta de teste real por engano.
+let userBEhDinamico = false;
 
 export async function getToken(): Promise<string> {
   if (cachedToken) return cachedToken;
@@ -74,6 +81,15 @@ export async function getTokenB(): Promise<string> {
 
   // Sem credenciais fixas → cria usuário descartável.
   // Domínio @example.com é reservado pela RFC 2606 — Supabase costuma aceitar.
+  //
+  // ⚠️ A partir daqui, se signUp() não der erro, uma conta REAL e PERMANENTE
+  // já foi criada em auth.users — independente do que acontecer no resto
+  // desta função (login imediato falhar, teste pular, etc.). `userBEhDinamico`
+  // marca isso pra limparUserBSeDinamico() poder excluir no afterAll de quem
+  // chamou — sem isso, cada execução sem TEST_EMAIL_B configurado deixava
+  // pra trás um usuário órfão por arquivo de teste que usa User B (achado
+  // real: 08/09/11_*.test.ts acumulando "jest-rls-*@example.com" a cada run,
+  // sem nenhuma limpeza em lugar nenhum).
   const email    = `jest-rls-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
   const password = "Jest!Pass" + Math.random().toString(36).slice(2, 10);
   const { data, error } = await client.auth.signUp({ email, password });
@@ -83,10 +99,15 @@ export async function getTokenB(): Promise<string> {
       `→ Configure TEST_EMAIL_B/TEST_PASSWORD_B no .env apontando para uma 2ª conta de teste já criada.`,
     );
   }
+  userBEhDinamico = true;
+  // Guarda o id JÁ AQUI, antes de qualquer outra coisa que possa lançar —
+  // o usuário já existe em auth.users neste ponto independente do resto.
+  // Sem isso, limparUserBSeDinamico() não encontrava nada pra excluir
+  // sempre que o login imediato abaixo falhava (o caso mais comum).
+  cachedUserIdB = data.user?.id ?? null;
   // Se confirmação por email estiver desabilitada, signUp já devolve session.
   if (data.session?.access_token) {
-    cachedTokenB  = data.session.access_token;
-    cachedUserIdB = data.user?.id ?? null;
+    cachedTokenB = data.session.access_token;
     return cachedTokenB;
   }
   // Caso contrário, faz login imediato (signUp confirma na hora em dev).
@@ -94,12 +115,71 @@ export async function getTokenB(): Promise<string> {
   if (errLogin || !login.session?.access_token) {
     throw new Error(
       `signUp do User B funcionou mas o login imediato falhou (${errLogin?.message ?? "sem sessão"}).\n` +
-      `Provavelmente o projeto exige confirmação por email. Defina TEST_EMAIL_B/TEST_PASSWORD_B no .env.`,
+      `Provavelmente o projeto exige confirmação por email. Defina TEST_EMAIL_B/TEST_PASSWORD_B no .env.\n` +
+      `(A conta ${email} já foi criada e ficará órfã se ninguém chamar limparUserBSeDinamico() — ` +
+      `o afterAll do arquivo de teste deveria fazer isso mesmo quando este erro é lançado.)`,
     );
   }
   cachedTokenB  = login.session.access_token;
   cachedUserIdB = login.user?.id ?? null;
   return cachedTokenB;
+}
+
+/**
+ * Exclui o usuário B dinâmico criado por ESTE módulo (via signUp fallback
+ * de getTokenB), se houver um. NUNCA exclui uma conta vinda de
+ * TEST_EMAIL_B/TEST_PASSWORD_B — só o que este próprio arquivo criou.
+ *
+ * Chame no afterAll de qualquer arquivo que use tryGetTokenB()/getTokenB()
+ * sem TEST_EMAIL_B configurado — cada arquivo de teste tem seu próprio
+ * módulo/estado (Jest isola por arquivo), então cada um que criar um User B
+ * dinâmico precisa limpar o seu.
+ *
+ * Requer SUPABASE_SERVICE_ROLE_KEY no .env (auth.admin.deleteUser não
+ * funciona com anon key). Sem a chave, avisa no console em vez de falhar o
+ * teardown — não é razão pra derrubar a suíte, mas fica visível pra
+ * corrigir a conta órfã manualmente pelo Dashboard.
+ */
+export async function limparUserBSeDinamico(): Promise<void> {
+  if (!userBEhDinamico || !cachedUserIdB) return;
+  const idParaExcluir = cachedUserIdB;
+  // Reseta já no início — mesmo se a exclusão falhar, não faz sentido tentar
+  // de novo com o mesmo id numa próxima chamada dentro do mesmo processo.
+  userBEhDinamico = false;
+  cachedUserIdB   = null;
+  cachedTokenB    = null;
+
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[setup] User B dinâmico (${idParaExcluir}) NÃO foi excluído — SUPABASE_SERVICE_ROLE_KEY ` +
+      `ausente no .env. Exclua manualmente: Dashboard → Authentication → Users → busque "jest-rls-".`,
+    );
+    return;
+  }
+  const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { db: { schema: "arqvalor" } });
+
+  // Precisa limpar os DADOS antes de apagar o auth.users — o trigger
+  // fn_remover_usuario (BEFORE DELETE em auth.users) só faz um
+  // `DELETE FROM usuarios WHERE id = OLD.id` cru, sem cuidar de ordem de
+  // FK; se ainda houver dado do usuário (ex.: seed automático de
+  // contas/investimentos que todo signup ganha), o DELETE trava e o
+  // Admin API devolve "Database error deleting user" sem mais detalhe
+  // (achado real: 14 contas jest-rls órfãs que nenhuma delete tocava).
+  // fn_excluir_dados_usuario tem bypass explícito pra chamador service_role
+  // — mesmo caminho que a Edge Function excluir_conta usa pro usuário real.
+  const { error: errDados } = await admin.rpc("fn_excluir_dados_usuario", { p_user_id: idParaExcluir });
+  if (errDados) {
+    // eslint-disable-next-line no-console
+    console.warn(`[setup] Falha ao limpar dados do User B dinâmico (${idParaExcluir}): ${errDados.message}`);
+    return; // não tenta deleteUser se a limpeza de dados falhou — deixaria pior
+  }
+
+  const { error } = await admin.auth.admin.deleteUser(idParaExcluir);
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn(`[setup] Falha ao excluir User B dinâmico (${idParaExcluir}): ${error.message}`);
+  }
 }
 
 export async function getUserIdB(): Promise<string> {

@@ -5,7 +5,7 @@
 // Cobre critérios de aceite: CA-OBJ01 a CA-OBJ13
 // ============================================================
 
-import { api, apiSemAuth, tryGetTokenB, gerarHeaders } from "./setup";
+import { api, apiSemAuth, tryGetTokenB, limparUserBSeDinamico, gerarHeaders } from "./setup";
 
 // ── IDs gerados durante os testes ────────────────────────────
 let contaId:        string;   // conta reutilizada de /contas
@@ -67,6 +67,10 @@ describe("Objetivos — CA-OBJ01 a CA-OBJ13", () => {
       }
       await api(`/contas/${contaCalculoId}`, "DELETE");
     }
+    // CA-OBJ12 pode ter criado um User B descartável via tryGetTokenB()
+    // (sem TEST_EMAIL_B configurado) — exclui aqui, não faz nada se User B
+    // veio de credenciais reais do .env.
+    await limparUserBSeDinamico();
   }, 60000);
 
   // ── CA-OBJ01 ────────────────────────────────────────────────

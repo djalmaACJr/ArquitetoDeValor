@@ -13,7 +13,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import {
-  api, apiB, getToken, getTokenB, getUserId, getUserIdB, tryGetTokenB,
+  api, apiB, getToken, getTokenB, getUserId, getUserIdB, tryGetTokenB, limparUserBSeDinamico,
   limparConta, limparCategoria, limparTransacao,
 } from "./setup";
 
@@ -63,6 +63,10 @@ describe("Segurança — RPCs SECURITY INVOKER", () => {
 
   afterAll(async () => {
     if (contaB_id) await apiB(`/contas/${contaB_id}`, "DELETE");
+    // tryGetTokenB() no beforeAll pode ter criado um usuário descartável
+    // (sem TEST_EMAIL_B configurado) — exclui aqui, não faz nada se User B
+    // veio de credenciais reais.
+    await limparUserBSeDinamico();
   });
 
   // ── SEG-RPC01: fn_saldos_contas_ate_data com user_id de outro ─

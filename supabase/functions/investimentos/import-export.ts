@@ -421,7 +421,7 @@ export async function rotaImportar(c: Db, req: Request, m: string, userId: strin
       orfas.push({
         user_id: userId, ativo_id: ativoId, conta_id: contaId,
         quantidade: 0, preco_custo: 0,
-        data_compra: datas[0] ?? new Date().toISOString().split("T")[0],
+        data_compra: datas[0] ?? hojeISO(),
         status: "ENCERRADA", _par: par,
       });
     }
@@ -495,7 +495,7 @@ export async function rotaImportar(c: Db, req: Request, m: string, userId: strin
     const divExistSet = new Set<string>();
     for (const d of divExist ?? []) divExistSet.add(divKey(String(d.ativo_id), String(d.data_pagamento), Number(d.valor), String(d.tipo_ativo)));
 
-    const hoje = new Date().toISOString().split("T")[0];
+    const hoje = hojeISO();
     const divSemExtrato: Record<string, unknown>[] = [];
     const divComExtrato: { div: Record<string, unknown>; categoriaId: string; ticker: string; nome: string }[] = [];
     let semCategoria = 0;

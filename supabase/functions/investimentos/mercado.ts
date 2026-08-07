@@ -1,7 +1,7 @@
 // supabase/functions/investimentos/mercado.ts
 // Cotações externas (brapi/Yahoo/CoinGecko/B3), PTAX, índices (CDI/IPCA),
 // Tesouro Direto e cálculo de renda fixa — extraído de index.ts.
-import { json, erro, db, dbAdmin } from "../_shared/utils.ts";
+import { json, erro, db, dbAdmin, mesCorrenteBR } from "../_shared/utils.ts";
 import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
 import {
   Db, CDI_FALLBACK, IPCA_FALLBACK, TIPOS_ATIVO,
@@ -651,7 +651,7 @@ export async function rebuildHistoricoRF(c: Db, userId: string, ativoId: string)
     });
   }
 
-  const mesCorrente = new Date().toISOString().slice(0, 7);
+  const mesCorrente = mesCorrenteBR();
   const indexador = (ativo.rf_indexador as string | null) ?? null;
   const taxa      = (ativo.rf_taxa as string | null) ?? null;
   const venc      = (ativo.rf_vencimento as string | null) ?? null;

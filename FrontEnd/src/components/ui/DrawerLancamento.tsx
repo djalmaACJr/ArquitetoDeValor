@@ -550,6 +550,12 @@ export default function DrawerLancamento({
 
     const valorNumerico = parsearValorBR(form.valor)
 
+    // Idempotency-Key: uma chave por tentativa de salvamento, enviada só nas
+    // criações (POST) — protege contra duplo clique/duplo submit gerando
+    // lançamento ou transferência repetidos (ver AUD-06).
+    const chaveIdempotencia = crypto.randomUUID()
+    const headersIdempotencia = { 'Idempotency-Key': chaveIdempotencia }
+
     if (form.tipo === 'TRANSFERENCIA') {
       if (!form.conta_destino_id) { setSalvando(false); mostrarErro('Selecione a conta de destino.'); return }
       if (form.conta_id === form.conta_destino_id) { setSalvando(false); mostrarErro('Contas devem ser diferentes.'); return }
@@ -568,7 +574,7 @@ export default function DrawerLancamento({
       const url = editando
         ? `/transferencias/${editando.id_par_transferencia ?? editando.id}?escopo=${escopo}`
         : '/transferencias'
-      const res = await apiMutate(url, editando ? 'PUT' : 'POST', payload)
+      const res = await apiMutate(url, editando ? 'PUT' : 'POST', payload, editando ? undefined : headersIdempotencia)
       setSalvando(false)
       if (res.ok) {
         const dadosResp = res.dados as { id?: string; id_debito?: string } | null
@@ -605,7 +611,7 @@ export default function DrawerLancamento({
         total_parcelas:        parseInt(form.total_parcelas) || 2,
         tipo_recorrencia:      form.tipo_recorrencia,
         intervalo_recorrencia: parseInt(form.intervalo_recorrencia) || 1,
-      })
+      }, headersIdempotencia)
       if (!res.ok) {
         setSalvando(false)
         mostrarErro(res.erro ?? 'Erro ao converter lançamento.')
@@ -672,7 +678,7 @@ export default function DrawerLancamento({
     
     // log('=== SALVAMENTO ===', { url, method, payload, escopo })
 
-    const res = await apiMutate(url, method, payload)
+    const res = await apiMutate(url, method, payload, editando ? undefined : headersIdempotencia)
 
     // log('Resposta:', { ok: res.ok, dados: res.dados })
     setSalvando(false)

@@ -23,7 +23,7 @@
 //   dashboard.ts            — /dashboard, /ranking
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { erro, db, autenticar, corsPreFlight } from "../_shared/utils.ts";
+import { erro, db, autenticar, corsPreFlight, executarComLogDeCron } from "../_shared/utils.ts";
 import { registrarOrigem } from "../_shared/utils.ts";
 import { logError } from "../_shared/logger.ts";
 
@@ -42,6 +42,7 @@ import {
   rotaMigrarConta, rotaImportar, rotaAtualizarAtivos, rotaNormalizarTesouro, rotaRestaurar,
 } from "./import-export.ts";
 import { dashboard, ranking } from "./dashboard.ts";
+import { rotaCronExecucoes } from "./admin.ts";
 
 Deno.serve(async (req: Request) => {
   registrarOrigem(req);
@@ -55,29 +56,35 @@ Deno.serve(async (req: Request) => {
 
   // Job do servidor: autentica por secret (header x-cron-secret), sem JWT
   // de usuário. Tratado ANTES de autenticar() por isso.
+  //
+  // Todos os 4 crons abaixo passam por executarComLogDeCron(), que grava
+  // sucesso/erro + duração em arqvalor.cron_execucoes (tela /admin/crons).
+  // Nasceu da auditoria 2026-08-06: dividendos-diario ficou 19 dias
+  // falhando sem NENHUM sinal visível — ver comentário na migration
+  // 20260806000002_cron_execucoes.sql.
   if (recurso === "snapshot-cron") {
-    try { return await rotaSnapshotCron(req, m); }
+    try { return await executarComLogDeCron("snapshot-diario", () => rotaSnapshotCron(req, m)); }
     catch (e) { logError("Handler snapshot-cron", e); return erro("Erro interno", 500); }
   }
 
   // Job do servidor: provisiona proventos de ativos em USD (Polygon.io).
   // Também sem JWT — protegido pelo x-cron-secret.
   if (recurso === "dividendos-cron") {
-    try { return await rotaDividendosCron(req, m); }
+    try { return await executarComLogDeCron("dividendos-diario", () => rotaDividendosCron(req, m)); }
     catch (e) { logError("Handler dividendos-cron", e); return erro("Erro interno", 500); }
   }
 
   // Job do servidor: provisiona proventos de ativos em BRL (ACOES/ETF/FII)
   // a partir dos dados públicos da B3. Sem JWT — protegido pelo x-cron-secret.
   if (recurso === "dividendos-cron-br") {
-    try { return await rotaDividendosCronBr(req, m); }
+    try { return await executarComLogDeCron("dividendos-br-diario", () => rotaDividendosCronBr(req, m)); }
     catch (e) { logError("Handler dividendos-cron-br", e); return erro("Erro interno", 500); }
   }
 
   // Job do servidor: materializa o rendimento (yield) das criptos como
   // operações RENDIMENTO p/ todos os usuários. Sem JWT — x-cron-secret.
   if (recurso === "rendimento-cripto-cron") {
-    try { return await rotaRendimentoCriptoCron(req, m); }
+    try { return await executarComLogDeCron("rendimento-cripto-diario", () => rotaRendimentoCriptoCron(req, m)); }
     catch (e) { logError("Handler rendimento-cripto-cron", e); return erro("Erro interno", 500); }
   }
 
@@ -113,6 +120,7 @@ Deno.serve(async (req: Request) => {
       case "dashboard":       return m === "GET" ? await dashboard(c, url.searchParams) : erro("Método não permitido", 405);
       case "ranking":         return m === "GET" ? await ranking(c, url.searchParams) : erro("Método não permitido", 405);
       case "busca-externa":   return m === "GET" ? await buscaExterna(url.searchParams) : erro("Método não permitido", 405);
+      case "cron-execucoes":  return await rotaCronExecucoes(c, m, userId);
       case "ptax":
         if (m === "GET")  return await rotaPtax(c, url.searchParams);
         if (m === "POST") return await sincronizarPtaxResposta(c);

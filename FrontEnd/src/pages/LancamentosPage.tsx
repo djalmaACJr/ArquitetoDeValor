@@ -7,7 +7,7 @@ import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import ModalLembrete from '../components/ui/ModalLembrete'
-import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X, RefreshCw, FileDown, ChevronUp, ArrowUp, Filter } from 'lucide-react'
+import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X, RefreshCw, FileDown, ChevronUp, ChevronDown, ArrowUp, Filter } from 'lucide-react'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
@@ -472,6 +472,11 @@ export default function LancamentosPage() {
 
   const hoje = useMemo(() => hojeLocal(), [])
 
+  // Barra de filtros (Mês/Conta/Categoria/Status/Saldo anterior) — no Android
+  // a tela é estreita e essa barra some com o teclado/dedo; começa recolhida
+  // deixando só o campo de pesquisa visível, com botão pra expandir.
+  const [filtrosExpandidos, setFiltrosExpandidos] = useState(() => !Capacitor.isNativePlatform())
+
   // ── Pesquisa ──────────────────────────────────────────────────
   const [refreshing,        setRefreshing]        = useState(false)
   const [pesquisa,          setPesquisa]          = useState('')
@@ -864,7 +869,27 @@ export default function LancamentosPage() {
             </div>
           </div>
         </div>
+        {/* Alternar barra de filtros — recolhida por padrão no Android, deixando só a pesquisa visível */}
+        <button
+          onClick={() => setFiltrosExpandidos(v => !v)}
+          aria-expanded={filtrosExpandidos}
+          className="flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-lg border text-[15px] font-medium transition-all self-start"
+          style={{
+            borderColor: temFiltroAtivo || !comSaldo ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.12)',
+            color: temFiltroAtivo || !comSaldo ? '#4da6ff' : '#8b92a8',
+            background: temFiltroAtivo || !comSaldo ? 'rgba(77,166,255,0.08)' : 'rgba(255,255,255,0.03)',
+          }}
+        >
+          <Filter size={13} />
+          Filtros
+          {(temFiltroAtivo || !comSaldo) && !filtrosExpandidos && (
+            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#4da6ff' }} />
+          )}
+          {filtrosExpandidos ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        </button>
+
         {/* Filtros — tudo em uma linha */}
+        {filtrosExpandidos && (
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 mb-2 items-center">
         {/* Mês */}
         <div className="col-span-2 sm:col-span-1 flex items-center gap-1.5 min-w-0" data-tutorial="extrato-mes">
@@ -952,6 +977,7 @@ export default function LancamentosPage() {
         </div>
 
         </div>
+        )}
         {/* Pesquisa */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-2" data-tutorial="extrato-pesquisa">
           <div className="flex items-center gap-2 flex-1 rounded-lg px-3 py-1.5 border min-w-0"

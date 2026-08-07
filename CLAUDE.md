@@ -33,6 +33,7 @@ Permite:
 - **Importação de fatura de cartão** (PDF Nubank/C6/Inter/MercadoPago/genérico) com matching automático e revisão assistida
 - Cartões virtuais (sub-identificadores de um cartão físico, só organizacionais)
 - Análises client-side sobre o extrato: Assinaturas (detecção de recorrência), Comparativo Mensal, Projeção de Economia
+- **App Android** (Capacitor, mesmo código React) — login por digital (biometria), auto-logout mais curto e atualização OTA do bundle sem passar pela Play Store
 
 ---
 
@@ -47,6 +48,13 @@ Permite:
 - Chart.js 4 + react-chartjs-2
 - Lucide React (ícones)
 - **`@tanstack/react-query`** — cache + dedup + invalidação para `useContas`, `useCategorias`, `useLancamentos`, `useDashboard`, `useFiltrosSalvos`
+
+### App Android (`FrontEnd/android/`)
+
+- **Capacitor 8** empacota o MESMO build web numa WebView — não é código nativo separado, é `npm run build` + `npx cap sync android`
+- Plugins: `@capacitor/app` (ciclo de vida pause/resume), `@capgo/capacitor-native-biometric` (login por digital), `@capgo/capacitor-updater` (atualização OTA do bundle, self-hosted)
+- Detecção de plataforma no código React via `Capacitor.isNativePlatform()` (várias telas se comportam diferente: `AppLayout`, `Calculadora`, `DrawerLancamento`, `useAutoLogout`, `LoginPage`, `PerfilPage`, `DashboardPage`, `LancamentosPage`, `lib/supabase.ts`)
+- Detalhe completo (biometria, sessão, OTA) na seção "🔐 Sessão + biometria (Android)" mais abaixo
 
 ### Backend (Supabase)
 
@@ -69,12 +77,12 @@ Permite:
 
 | Pasta | Conteúdo |
 |---|---|
-| `pages/` | **Financeiro básico**: `DashboardPage`, `LancamentosPage`, `ContasPage`, `CategoriasPage`, `RelatoriosPage`, `ImportExportPage`, `PerfilPage`, `LoginPage`, `CadastroPage`, `RedefinirSenhaPage`, `ApresentacaoMascotes` (onboarding 1º acesso), `SobrePage`. **Análises client-side**: `AssinaturasPage` (detecção de recorrência), `ComparativoMensalPage`, `ProjecaoEconomiaPage`. **Objetivos**: `ObjetivosPage`, `ObjetivoDetalhe`. **Investimentos**: `InvestimentosPage` (painel), `AtivosInvestimentosPage`, `AvaliacoesInvestimentosPage` (mentores IA), `ConfiguracoesInvestimentosPage`, `DetalheInvestimentoPage`, `DividendosPage`. **Fatura**: `ImportarFaturaPage`. `Placeholders.tsx` é código morto (stubs não mais roteados). |
+| `pages/` | **Financeiro básico**: `DashboardPage`, `LancamentosPage`, `ContasPage`, `CategoriasPage`, `RelatoriosPage`, `ImportExportPage`, `PerfilPage` (inclui seção "Login por digital", só Android), `LoginPage` (oferece ativar biometria após login manual + botão "Entrar com digital", só Android), `CadastroPage`, `RedefinirSenhaPage`, `ApresentacaoMascotes` (onboarding 1º acesso), `SobrePage`. **Análises client-side**: `AssinaturasPage` (detecção de recorrência), `ComparativoMensalPage`, `ProjecaoEconomiaPage`. **Objetivos**: `ObjetivosPage`, `ObjetivoDetalhe`. **Investimentos**: `InvestimentosPage` (painel), `AtivosInvestimentosPage`, `AvaliacoesInvestimentosPage` (mentores IA), `ConfiguracoesInvestimentosPage`, `DetalheInvestimentoPage`, `DividendosPage`. **Fatura**: `ImportarFaturaPage`. **Admin** (só `usuarios.admin = true`, RLS): `AdminCronsPage` (`/admin/crons` — histórico de execução dos 4 cron jobs). `Placeholders.tsx` é código morto (stubs não mais roteados). |
 | `components/layout/` | `AppLayout`, `Sidebar` |
 | `components/ui/` | **Financeiro básico**: `DrawerLancamento`, `Calculadora`, `BotaoNovoLancamento`, `BotaoOcultar`, `FiltrosLancamentos`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `MultiSelect`, `AppVersion` (botão da versão = abre tutorial da página), `ModalLembrete`, `CalendarioDashboard`, `CampoSenha` (input de senha com olho, usado em Login/Cadastro/Redefinir), `ContagemLogout` (pílula de contagem regressiva de auto-logout na Sidebar), `ModalNovaCategoriaRapida` + `FormCamposCategoria`/`formCategoriaShared` (form de categoria reutilizável). **Mascotes/IA**: `Mascote`, `MascoteDica`, `MascoteTutorial`, `ChatMascote`, `TutorialTour`, `LoadingMascote`. **Objetivos**: `CardObjetivo`, `DrawerObjetivo`, `FiltrosObjetivos`. **Investimentos**: `DrawerAtivo` (form de ativo + 1ª posição), `DrawerMovimentacoes` (operações de compra/venda/aporte/resgate de um ativo), `InvestimentosNav` (nav sticky entre as páginas do módulo), `NovidadesProventos` (card de novidades do cron de dividendos), `QuadroCorrelacao`, `QuadroSobreposicao`, `QuadroTipoAtivos`, `ResumoPorInstituicao`. `shared` |
-| `hooks/` | **Financeiro básico**: `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useOcultarValores`, `useTheme`, `useMascotePreferido` (apelido, tema, primeiro acesso), `useIAPreferencia`, `useChatMascote`, `useUsuarioPerfil` (nome/email/data_nascimento de `usuarios`, não do JWT), `useTutoriaisVistos`, `useSaldoBaseMes` (saldo por conta até fim do mês anterior, RPC `fn_saldos_contas_ate_data`), `useOperacaoLonga` (suspende auto-logout durante backup/restore/import longos). **Objetivos**: `useObjetivos`. **Investimentos**: `useInvestimentosAtivos`, `useInvestimentosDashboard` (+ `useInvestimentosRanking`, `useInvestimentosAlocacao`), `useInvestimentosHistorico`, `useInvestimentosOperacoes`, `useInvestimentosPosicoes`, `useInvAvaliacaoAgenda`, `useInvAvaliacoes`, `useInvPerfil`, `useInvPesos`, `useInvQuestionarios`, `useDividendos`, `useCotacoesTesouro`, `useIndicesEconomicos`, `usePtax`, `useAvisosDividendos`, `useNovidadesProventos`, `useResumoAposentadoria`, `useTiposDividendo`. **Fatura**: `useFaturasImport`. |
+| `hooks/` | **Financeiro básico**: `useAuth`, `useCategorias`, `useContas`, `useDashboard`, `useLancamentos`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useOcultarValores`, `useTheme`, `useMascotePreferido` (apelido, tema, primeiro acesso), `useIAPreferencia`, `useChatMascote`, `useUsuarioPerfil` (nome/email/data_nascimento de `usuarios`, não do JWT), `useTutoriaisVistos`, `useSaldoBaseMes` (saldo por conta até fim do mês anterior, RPC `fn_saldos_contas_ate_data`), `useOperacaoLonga` (suspende auto-logout durante backup/restore/import longos). **Objetivos**: `useObjetivos`. **Investimentos**: `useInvestimentosAtivos`, `useInvestimentosDashboard` (+ `useInvestimentosRanking`, `useInvestimentosAlocacao`), `useInvestimentosHistorico`, `useInvestimentosOperacoes`, `useInvestimentosPosicoes`, `useInvAvaliacaoAgenda`, `useInvAvaliacoes`, `useInvPerfil`, `useInvPesos`, `useInvQuestionarios`, `useDividendos`, `useCotacoesTesouro`, `useIndicesEconomicos`, `usePtax`, `useAvisosDividendos`, `useNovidadesProventos`, `useResumoAposentadoria`, `useTiposDividendo`. **Fatura**: `useFaturasImport`. **Admin**: `useAdmin` (lê `usuarios.admin` direto — mesma exceção de acesso da tabela `usuarios`), `useCronExecucoes` (histórico dos cron jobs, via Edge Function). |
 | `context/` | `AuthContext`, `PageStateContext` (persiste filtros entre páginas), `ContextoIAContext` (split SetterCtx + ValueCtx — páginas registram o que estão exibindo para o ChatMascote enviar à IA) |
-| `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums), `queryKeys.ts` (chaves do React Query), `logger.ts` (log condicional dev-only), `operacaoLonga.ts` (store de operação longa), `questionarioAtivos.ts` (questionário padrão por tipo de ativo + cálculo de nota), `perfilInvestidor.ts` (suitability → perfil investidor) |
+| `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth — storage da sessão varia por plataforma, ver seção Sessão + biometria), `utils.ts`, `constants.ts` (enums), `queryKeys.ts` (chaves do React Query), `logger.ts` (log condicional dev-only), `operacaoLonga.ts` (store de operação longa), `questionarioAtivos.ts` (questionário padrão por tipo de ativo + cálculo de nota), `perfilInvestidor.ts` (suitability → perfil investidor), `biometria.ts` (login por digital — só Android nativo, wrapper de `@capgo/capacitor-native-biometric`) |
 | `types/index.ts` | Tipos compartilhados (`Conta`, `Transacao`, `Transferencia`, `Categoria`, `Objetivo`, `CartaoVirtual`, …) — re-exporta enums de `lib/constants.ts` |
 
 ### Backend — `supabase/`
@@ -90,7 +98,7 @@ Permite:
 | `functions/lembretes/` | CRUD de lembretes com filtro por mês e cascade por `lancamento_id` |
 | `functions/filtros/` | CRUD de filtros nomeados por página (Dashboard, Extrato, Relatórios) |
 | `functions/objetivos/` | CRUD de `objetivos` (tipos SONHO/OBJETIVO/PROJETO/CRESCIMENTO) + `POST /sincronizar-progresso` (RPC de recálculo em massa) |
-| `functions/investimentos/` | Módulo maior do sistema (~6.500 linhas): CRUD de ativos/posições/operações/dividendos/questionários/avaliações, dashboard/ranking (DY/YoC), cotações compartilhadas (PTAX/índices/tesouro/ativos), import/restore, e rotas de cron (`snapshot-cron`, `dividendos-cron`, `dividendos-cron-br`, `rendimento-cripto-cron`) autenticadas por `x-cron-secret` em vez de JWT |
+| `functions/investimentos/` | Módulo maior do sistema (~6.500 linhas): CRUD de ativos/posições/operações/dividendos/questionários/avaliações, dashboard/ranking (DY/YoC), cotações compartilhadas (PTAX/índices/tesouro/ativos), import/restore, e rotas de cron (`snapshot-cron`, `dividendos-cron`, `dividendos-cron-br`, `rendimento-cripto-cron`) autenticadas por `x-cron-secret` em vez de JWT. As 4 rotas de cron são envolvidas por `executarComLogDeCron()`, que grava sucesso/erro/duração em `cron_execucoes` — consultável por admin em `GET /investimentos/cron-execucoes` (`admin.ts`) e exibido em `/admin/crons` no frontend |
 | `functions/faturas/` | Importação de fatura de cartão (upload PDF → parse por emissor em `parsers/` → sessão de revisão com matching automático → confirmação em massa por item ou por categoria/grupo) |
 | `functions/excluir_conta/` | Exclui todos os dados do usuário (chama `fn_excluir_dados_usuario`) |
 | `functions/version/` | Endpoint de versão (introspecção) |
@@ -98,6 +106,7 @@ Permite:
 | `functions/ia_configs/` | CRUD das configs de IA por provedor (apelido, modelo, api_key). API key é criptografada em AES-256-GCM antes de ser persistida; frontend só vê máscara (`sk-...f4a2`). Inclui ping para testar credencial. |
 | `functions/chat_mascote/` | Recebe mensagem + contexto opcional (texto + screenshot base64) da página, descriptografa a api_key da config escolhida e proxia a chamada para o provedor (Claude / GPT / Gemini / DeepSeek / OpenRouter / Mistral / Cohere). |
 | `functions/convite/` | Envia convite de cadastro por e-mail via Brevo (sem rastreamento — não há tabela de convites). Chamada pela seção "Convidar amigos" do Perfil; o compartilhamento via WhatsApp é só um link `wa.me` gerado no frontend, sem endpoint próprio. |
+| `functions/app_updates/` | `POST /app_updates` — endpoint **público** (sem JWT) consultado pelo `@capgo/capacitor-updater` a cada abertura do app Android; devolve o bundle OTA mais recente de `arqvalor.app_releases` se houver versão mais nova que a instalada. Publicado por `FrontEnd/scripts/publish-android-ota.mjs` (`npm run publish:ota`), nunca pela API. |
 | `migrations/` | DDL idempotente (schema, ENUMs, triggers, views, RLS, seed de usuário) |
 
 ### Testes
@@ -130,7 +139,7 @@ Permite:
   - `RECEITA` na conta destino
 - Categoria fixa **"Transferências"** (categoria pai com `protegida = true`)
 - Suporta recorrência (parcelas em par)
-- Criação e exclusão são **atômicas via RPC** (`fn_criar_transferencia` / `fn_excluir_transferencias`, não via 2 chamadas PostgREST separadas) — ver `ARCHITECTURE.md`
+- Criação, edição e exclusão são **atômicas via RPC** (`fn_criar_transferencia` / `fn_atualizar_par_transferencia` + `fn_atualizar_transacoes_transferencia` / `fn_excluir_transferencias`, não via 2+ chamadas PostgREST separadas) — ver `ARCHITECTURE.md`
 
 ### Objetivos
 
@@ -195,6 +204,8 @@ Permite:
 - Edição/exclusão precisa atualizar **ambos** os registros
 - Quando recorrente, todos os pares da série compartilham `id_recorrencia`
 - Trigger `trg_bloquear_exclusao_transf_avulsa` impede DELETE direto em `transacoes` que tenha `id_par_transferencia` quando a categoria é protegida — força uso do endpoint `/transferencias/:id_par`.
+- `PUT /transacoes/:id` também respeita o par: se a transação editada tiver `id_par_transferencia`, a Edge Function chama `fn_atualizar_par_transferencia` (espelha valor/data/status/observação nas 2 pernas numa única transação) em vez de fazer `UPDATE` isolado. Corrigido em `20260804000001` — antes, marcar uma perna como PAGO (ex.: filtrando o Extrato por 1 conta do par) deixava a outra com status divergente.
+- Edição em lote de uma série de recorrência (escopo `TODOS`/`ESTE_E_SEGUINTES`) também é atômica via `fn_atualizar_transacoes_lote` (`20260804000003`) — antes era um loop de `UPDATE`s que podia falhar parcialmente e ainda retornar HTTP 200.
 
 ### 🔁 Validação de isolamento (trigger)
 
@@ -203,6 +214,12 @@ Permite:
 - No **UPDATE** somente quando `conta_id` ou `categoria_id` é alterado.
 
 Antes da migration `20260505000001`, qualquer UPDATE em `transacoes` revalidava — bloqueando reclassificações em conta inativa. Hoje você pode atualizar status/descricao/valor sem ativar a conta primeiro.
+
+### 🕒 Fuso horário — "hoje" é sempre America/Sao_Paulo
+
+- **Nunca** use `new Date().toISOString()` (ou qualquer variação que resolva em UTC) pra determinar "a data de hoje" no Deno — Brasil é UTC−3 o ano todo (sem horário de verão desde 2019); das 21h à meia-noite BRT, UTC já virou o dia seguinte. Use `hojeBR()` / `mesCorrenteBR()` de `_shared/utils.ts` (ambos via `Intl.DateTimeFormat('en-CA', {timeZone: 'America/Sao_Paulo'})`).
+- No Postgres, `CURRENT_DATE`/`now()` já resolvem no fuso certo — a instância tem `timezone = 'America/Sao_Paulo'` desde `20260806000003_timezone_america_sao_paulo.sql` (`ALTER DATABASE`). Não precisa (nem deve) escrever `AT TIME ZONE` manualmente em código novo por causa disso.
+- Achado de auditoria AUD-01 (corrigido em `20260806000003`+Deno): status de parcela `PAGO`/`PENDENTE`, validação RV-008, e encerramento de renda fixa/tesouro no vencimento já foram corrompidos silenciosamente por esse bug — nenhum erro visível, só o dia errado.
 
 ---
 
@@ -256,7 +273,9 @@ Antes da migration `20260505000001`, qualquer UPDATE em `transacoes` revalidava 
 ### E2E (Playwright) — `FrontEnd/e2e/tests/`
 
 `00_cadastro`, `01_contas`, `02_categorias`, `03_navegacao`, `04_extrato`, `05_dashboard`, `06_relatorios`, `07_transferencias`, `08_lembretes`, `09_assistente`, `10_objetivos`, `11_investimentos`, `zz_teardown` (+ `auth.setup.ts`, `data.setup.ts`, `helpers.ts`).
-Roda no Firefox; relatório HTML em `FrontEnd/e2e/report/`.
+Roda no Firefox (`npm run test:e2e`); relatório HTML em `FrontEnd/e2e/report/`.
+
+Projeto extra **`mobile`** (`npm run test:e2e:mobile`) roda a MESMA suíte em viewport/toque de Android (Chromium, `devices['Pixel 7']` — mais próximo da WebView do app do que o Firefox). Não roda por padrão em `npm run test:e2e`. Cobre regressões de layout responsivo/alvo de toque; **não** cobre trechos gateados por `Capacitor.isNativePlatform()` (biometria em `lib/biometria.ts`, swipe de mês, teclado nativo do valor) — esses só existem dentro do app real e continuam dependendo de teste manual no aparelho/emulador.
 
 ---
 
@@ -331,12 +350,26 @@ npm run test:e2e:report   # abre relatório HTML
 ./rodar_testes_e2e.bat
 ```
 
-> **Storage da sessão em E2E**: o app usa `localStorage` para a sessão Supabase (compartilhada entre abas — ver seção 🔐), que é exatamente o que o `storageState` do Playwright persiste entre specs. **Não precisa de comando separado nem de detectar `navigator.webdriver`**.
+> **Storage da sessão em E2E**: Playwright roda em navegador desktop (Firefox/Chromium), então `Capacitor.isNativePlatform()` é sempre `false` e o app usa `localStorage` para a sessão Supabase (compartilhada entre abas — ver seção "🔐 Sessão + biometria (Android)"), que é exatamente o que o `storageState` do Playwright persiste entre specs. **Não precisa de comando separado nem de detectar `navigator.webdriver`**.
 
 ### Deploy Edge Functions
 
 ```bash
 supabase functions deploy --project-ref SEU_PROJECT_REF
+```
+
+### Android
+
+```bash
+# Build + instalar via USB no aparelho conectado (debug), na raiz do repo
+./instalar_android.bat
+# Equivalente manual (dentro de FrontEnd/):
+npm run build && npx cap sync android && cd android && gradlew.bat installDebug
+
+# Publicar atualização OTA (sem passar pela Play Store) — ver seção
+# "🔐 Sessão + biometria (Android)"
+cd FrontEnd
+npm run publish:ota
 ```
 
 ---
@@ -384,17 +417,37 @@ BREVO_API_KEY=...
 BREVO_SENDER_EMAIL=convites@arquitetodevalor.com.br
 ```
 
-### 🔐 Configuração de sessão (Supabase Auth)
+### `.env` da raiz do repo (script `npm run publish:ota` — NUNCA em `FrontEnd/.env`)
 
-Defesa contra "sessão esquecida em PC compartilhado". Camadas trabalham juntas e atacam dois problemas distintos: **sessão persistida no LS** e **token vivo demais após inatividade ou roubo**.
+```env
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...          # Dashboard > Project Settings > API — sobe a release pro Storage/tabela, bypassa RLS
+CAPGO_UPDATER_PRIVATE_KEY=...          # assina/cifra o bundle (E2E v2). Gere com: npx @capgo/cli key create
+# A publicKey correspondente já está embutida em FrontEnd/capacitor.config.ts
+# (é pública por natureza — só a privada acima precisa ficar fora do bundle/git).
+```
 
-> ⚠️ **Decisão jun/2026**: a sessão usa `localStorage` (padrão do supabase-js), e não mais `sessionStorage`. Motivo: permitir abrir links em **nova aba** (middle-click) sem novo login — a sessão é compartilhada entre abas e sobrevive ao fechar a aba. Em troca, **abandona-se** a proteção "fechar a aba = desloga"; a defesa contra sessão esquecida fica só com o `useAutoLogout` (client) + Inactivity timeout (server).
+### 🔐 Sessão + biometria (Android)
+
+Defesa contra "sessão esquecida em PC compartilhado". Camadas trabalham juntas e atacam dois problemas distintos: **sessão persistida** e **token vivo demais após inatividade ou roubo**. A estratégia **difere por plataforma** — desktop/web prioriza conveniência (multi-aba), Android prioriza segurança (aparelho pode ser perdido/roubado).
+
+> ⚠️ **Decisão jun/2026, refinada ago/2026 (1ª versão Android)**: a sessão usa `localStorage` no **desktop/web** (padrão do supabase-js) e `sessionStorage` no **app Android nativo** ([lib/supabase.ts](FrontEnd/src/lib/supabase.ts), `Capacitor.isNativePlatform()` decide). No desktop, `localStorage` permite abrir links em **nova aba** (middle-click) sem novo login — sessão compartilhada entre abas, sobrevive ao fechar a aba; abandona-se de propósito a proteção "fechar aba = desloga" nessa plataforma. No Android não existe "várias abas" — lá queremos exatamente o oposto: fechar o app (matar o processo) precisa deslogar por segurança, o que `sessionStorage` garante.
 
 #### Camadas no client (este repo)
 
-1. **`localStorage`** ([lib/supabase.ts](FrontEnd/src/lib/supabase.ts)) — storage padrão do supabase-js: sessão **compartilhada entre abas** e persistida ao fechar a aba (abrir nova aba não pede login). ⚠️ Não protege "fechar aba = desloga" — ver aviso acima.
-2. **`useAutoLogout(15)`** ([hooks/useAutoLogout.ts](FrontEnd/src/hooks/useAutoLogout.ts) montado em `AppLayout`) — timer de inatividade no client. 15 min sem mouse/teclado/scroll/click → `signOut()` + redirect `/login?expirado=1` (banner amigável).
-3. **`limparEstadoCliente()`** ([lib/clientCache.ts](FrontEnd/src/lib/clientCache.ts)) — chamado pelo listener de `onAuthStateChange` em troca de user. Reseta `_saved` em memória das páginas e LS de preferências.
+1. **Storage por plataforma** ([lib/supabase.ts](FrontEnd/src/lib/supabase.ts)) — `localStorage` no desktop/web (compartilhado entre abas, sobrevive ao fechar aba) vs `sessionStorage` no Android (morre com o processo). Ver decisão acima.
+2. **`useAutoLogout(timeout)`** ([hooks/useAutoLogout.ts](FrontEnd/src/hooks/useAutoLogout.ts) montado em `AppLayout`) — timer de inatividade no client. **15 min no desktop / 5 min no Android** (`Capacitor.isNativePlatform() ? 5 : 15`, decidido em `AppLayout.tsx`) sem mouse/teclado/scroll/click/toque → `signOut()` + redirect `/login?expirado=1` (banner amigável). No Android, a última atividade também é **persistida em `localStorage`** (chave `arqvalor:ultima-atividade`) — o SO pode matar o processo inteiro ao minimizar sem rodar nenhum código de cleanup; ao reabrir, compara com o relógio real e desloga na hora se o limite já tiver passado enquanto o app estava fechado. No nativo, o hook também escuta os eventos `pause`/`resume` do `@capacitor/app` (mais confiável que `visibilitychange` dentro da WebView) — ficar em segundo plano por ≥ 1 min já força reautenticação, com tolerância pra troca rápida de app (ex.: copiar um código de SMS).
+3. **`limparEstadoCliente()`** ([lib/clientCache.ts](FrontEnd/src/lib/clientCache.ts)) — chamado pelo listener de `onAuthStateChange` em troca de user. Reseta `_saved` em memória das páginas e LS de preferências (inclui `arqvalor:ultima-atividade` e `arqvalor:biometria-recusada` — nunca herdar entre usuários no mesmo aparelho).
+4. **Login por digital** ([lib/biometria.ts](FrontEnd/src/lib/biometria.ts), só Android) — wrapper sobre `@capgo/capacitor-native-biometric`. O Supabase não tem provedor de auth biométrico nativo (a digital nunca sai do aparelho); o padrão usado é: `verifyIdentity()` mostra o prompt nativo do SO e só então libera e-mail+senha guardados **criptografados em repouso** (`EncryptedSharedPreferences`) via `setCredentials()`/`getCredentials()`. Login por digital sempre reautentica do zero (`signInWithPassword`) — não é "destravar uma sessão viva", então funciona mesmo depois de um `signOut()` por inatividade. `LoginPage` oferece ativar a digital uma vez após login manual bem-sucedido (recusa fica marcada em `localStorage`, "não perguntar de novo"); `PerfilPage` tem uma seção pra ativar/desativar a qualquer momento (pede a senha atual antes de salvar, pra não gravar um typo).
+
+#### Atualização OTA (Android, `@capgo/capacitor-updater`)
+
+Distribui um novo build web pro app Android **sem passar pela Play Store** — self-hosted no próprio Supabase, sem nuvem da Capgo.
+
+- `npm run publish:ota` (dentro de `FrontEnd/`, script `scripts/publish-android-ota.mjs`): builda `dist/`, zipa e **assina/cifra** o bundle com a chave privada (`@capgo/cli`, E2E v2), sobe pro bucket público `app-releases` no Storage e insere a release em `arqvalor.app_releases`.
+- O app consulta `POST /app_updates` (edge function pública, sem JWT) a cada abertura — compara a versão instalada com a mais recente `ativo=true` e devolve `{ version, url, checksum, session_key }` se houver update mais novo. `checksum`/`session_key` aqui são a saída CIFRADA do `bundle encrypt`, não o checksum simples do zip — o plugin só aceita bundles assinados com o par da `publicKey` embutida em [capacitor.config.ts](FrontEnd/capacitor.config.ts).
+- `autoUpdate: 'atBackground'` — baixa e aplica no próximo restart do app, sem interromper o uso.
+- Variáveis exigidas no `.env` da **raiz do repo** (nunca em `FrontEnd/.env`, que é o bundle público) — ver seção "Variáveis de ambiente" mais abaixo.
 
 #### Camadas no Supabase (Dashboard — configuração externa)
 

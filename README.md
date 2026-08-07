@@ -29,6 +29,7 @@ O **Arquiteto de Valor** é uma aplicação web para controle financeiro e patri
 A aplicação é composta por:
 - **Frontend** — React 19 + Vite 8 + TypeScript + Tailwind CSS
 - **Backend** — Supabase (PostgreSQL + Edge Functions em Deno/TypeScript)
+- **App Android** — o mesmo frontend empacotado com Capacitor (WebView), com login por digital, sessão mais restritiva e atualização OTA do bundle sem passar pela Play Store
 
 ---
 
@@ -38,8 +39,9 @@ A aplicação é composta por:
 |---|---|
 | Frontend | React 19, Vite 8 (Rolldown), TypeScript 6, Tailwind CSS 3 |
 | Backend | Supabase (PostgreSQL schema `arqvalor`, Edge Functions Deno/TS, Auth, RLS) |
+| App Android | Capacitor 8 (`@capacitor/app`, `@capgo/capacitor-native-biometric`, `@capgo/capacitor-updater`) |
 | Testes API | Jest + ts-jest |
-| Testes E2E | Playwright + Firefox |
+| Testes E2E | Playwright (Firefox padrão + Chromium/Android opcional) |
 | CI/CD | GitHub Actions (4 workflows) |
 
 ---
@@ -79,9 +81,12 @@ ArquitetoDeValor/
 │   │   │                            # ProjecaoEconomiaPage
 │   │   └── types/                   # Tipos TypeScript globais
 │   ├── e2e/                         # Testes E2E Playwright
-│   │   ├── playwright.config.ts
+│   │   ├── playwright.config.ts     # Projetos: auth, data, firefox (padrão), mobile (Android, opcional)
 │   │   ├── fixtures/                # auth.json (gerado automaticamente — não commitar)
 │   │   └── tests/                   # Suites de testes (00–11 + setup + teardown)
+│   ├── android/                     # Projeto nativo gerado pelo Capacitor (build/instalação do APK)
+│   ├── capacitor.config.ts          # appId, updateUrl OTA, publicKey de assinatura do bundle
+│   ├── scripts/publish-android-ota.mjs # Publica atualização OTA (npm run publish:ota)
 │   └── .env.local                   # Chaves Supabase para o Vite (não commitar)
 │
 ├── supabase/
@@ -101,6 +106,7 @@ ArquitetoDeValor/
 │   │   ├── ia_configs/
 │   │   ├── chat_mascote/
 │   │   ├── version/
+│   │   ├── app_updates/             # OTA do app Android — endpoint público, sem JWT
 │   │   └── limpar/
 │   └── migrations/                  # Migrations idempotentes (CREATE OR REPLACE/IF NOT EXISTS)
 │       └── Aplicados/               # Migrations já aplicadas/arquivadas
@@ -123,6 +129,8 @@ ArquitetoDeValor/
 │
 ├── rodar_testes.bat                 # Menu de testes de API (Windows)
 ├── rodar_testes_e2e.bat             # Menu de testes E2E (Windows)
+├── instalar_android.bat             # Build + instala o APK debug via USB
+├── version.ts                       # APP_VERSION — versão única do app (web + Android)
 ├── CLAUDE.md                        # Contexto principal para assistentes de IA
 ├── ARCHITECTURE.md                  # Detalhe técnico de arquitetura/banco (sob demanda)
 ├── BUSINESS_RULES.md                # Regras de negócio detalhadas (sob demanda)
@@ -293,13 +301,14 @@ npm run test:contas         # módulo específico
 
 ### Testes E2E (Playwright)
 
-Cobrem os fluxos do frontend no Firefox — 13 suites.
+Cobrem os fluxos do frontend — 13 suites, rodadas por padrão no Firefox (projeto `firefox`). Há também um projeto `mobile` opcional (Chromium, viewport/toque de Android — `npm run test:e2e:mobile`), que reexecuta a mesma suíte pra pegar regressões de layout responsivo antes de builds do app Android; não cobre trechos que só existem no app nativo de verdade (biometria, swipe, teclado nativo).
 
-A sessão do Supabase usa `localStorage` por padrão (compartilhada entre abas), que é exatamente o que o `storageState` do Playwright persiste entre specs — **não é necessário nenhum modo especial nem variável de ambiente** para rodar localmente:
+A sessão do Supabase usa `localStorage` no navegador (compartilhada entre abas — `Capacitor.isNativePlatform()` é sempre `false` fora do app Android, mesmo no projeto `mobile`), que é exatamente o que o `storageState` do Playwright persiste entre specs — **não é necessário nenhum modo especial nem variável de ambiente** para rodar localmente:
 
 ```bash
 cd FrontEnd
-npm run test:e2e          # headless (sobe o Vite dev server automaticamente)
+npm run test:e2e          # headless, Firefox (sobe o Vite dev server automaticamente)
+npm run test:e2e:mobile   # headless, Chromium/Android — opcional
 npm run test:e2e:ui       # modo visual (debug)
 npm run test:e2e:report   # abre relatório HTML
 ```
@@ -311,7 +320,7 @@ rodar_testes_e2e.bat
 
 > Em CI, o `webServer` do Playwright sobe o Vite automaticamente.
 
-> ⚠️ O script `npm run dev:e2e` e o arquivo `.env.e2e` (`VITE_E2E=true`) ainda existem no projeto, mas `FrontEnd/src/lib/supabase.ts` hoje usa `localStorage` incondicionalmente — não há mais branch de código lendo essa variável. Trate-os como vestigiais até uma limpeza dedicada.
+> ⚠️ O script `npm run dev:e2e` e o arquivo `.env.e2e` (`VITE_E2E=true`) ainda existem no projeto, mas `FrontEnd/src/lib/supabase.ts` hoje decide o storage por `Capacitor.isNativePlatform()` (não por essa variável) — no navegador (E2E incluso) sempre resolve pra `localStorage`. Trate-os como vestigiais até uma limpeza dedicada.
 
 | Arquivo | Módulo |
 |---|---|
@@ -380,3 +389,4 @@ Configure os seguintes **Secrets** no repositório (`Settings → Secrets and va
 - **Cartões Virtuais** — Sub-identificadores organizacionais de um cartão físico (sem limite/saldo próprio), reconhecidos automaticamente na importação de fatura.
 - **Assinaturas, Comparativo Mensal e Projeção de Economia** — Análises adicionais sobre o extrato: detecção de gastos recorrentes, comparação de dois períodos livres e simulação de patrimônio futuro por juros compostos.
 - **Mascotes e Chat com IA** — Assistente conversacional com mentor escolhido pelo usuário, múltiplos provedores de IA (Claude, GPT, Gemini, DeepSeek, OpenRouter, Mistral, Cohere) com credenciais cifradas, e tutorial guiado por página.
+- **App Android** — Mesmo código React empacotado com Capacitor. Login por digital (biometria, credenciais cifradas em repouso no aparelho), sessão mais restritiva que no desktop (`sessionStorage`, auto-logout de 5min vs 15min, detecção de pause/resume nativo), e atualização OTA do bundle direto do Supabase — sem passar pela Play Store a cada release.

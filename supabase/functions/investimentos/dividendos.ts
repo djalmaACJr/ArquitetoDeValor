@@ -202,7 +202,7 @@ export async function rotaDividendos(c: Db, req: Request, m: string, userId: str
     if (errDiv) { logError("Criar dividendo", errDiv); return erro(errDiv.message); }
 
     // 2) Cria a transação no extrato
-    const hoje    = new Date().toISOString().split("T")[0];
+    const hoje    = hojeISO();
     const futuro  = String(body.data_pagamento) > hoje;
     const status  = futuro ? "PROJECAO" : "PAGO";
     // descricao da transação: "TICKER - Nome do ativo" (mesma convenção do
@@ -685,7 +685,18 @@ export async function upsertDividendoProvisionado(admin: Db, p: {
   // busca seguinte não achava o (agora não-PROJECAO) existente e criava um
   // segundo lançamento duplicado com a mesma data/valor.
   const mesmaData = lista.find((d) => String(d.data_pagamento).slice(0, 10) === p.payDate);
-  if (!existente && mesmaData) return "ignorado";
+  // Provento que a FONTE já reporta como pago (payDate no passado) e que já
+  // tem QUALQUER registro não-projeção neste ativo+conta+tipo dentro do MÊS:
+  // nunca duplica, mesmo que a data não bata mais exatamente. A B3 costuma
+  // revisar/confirmar a data de pagamento de JSCP depois do anúncio inicial
+  // (comum em bancos), e o usuário pode ter corrigido manualmente o valor
+  // (ex.: refletindo IR retido) e/ou a data do que realmente caiu na conta.
+  // Sem esta relaxação, um lançamento já PAGO com data no passado — que o
+  // usuário espera nunca mais ver tocado — ficava vulnerável a duplicação
+  // assim que a data exata deixasse de bater (achado real: JSCP BBDC
+  // duplicado em 2026-08 após o usuário corrigir o valor líquido recebido).
+  const jaResolvidoNoMes = lista.find((d) => d.transacoes?.status && d.transacoes.status !== "PROJECAO");
+  if (!existente && (mesmaData || (pago && jaResolvidoNoMes))) return "ignorado";
 
   if (existente) {
     // Pagamento já vencido: nunca mexe num provento que já foi provisionado

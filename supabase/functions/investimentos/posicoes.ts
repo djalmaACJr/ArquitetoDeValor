@@ -297,7 +297,7 @@ export async function recomputarPosicao(c: Db, posicaoId: string): Promise<void>
   const campos = {
     quantidade:  qtd,
     preco_custo: precoMedio,
-    data_compra: dataCompra ?? (pos?.data_compra ? String(pos.data_compra) : new Date().toISOString().split("T")[0]),
+    data_compra: dataCompra ?? (pos?.data_compra ? String(pos.data_compra) : hojeISO()),
     status:      qtd > 0 ? "ATIVA" : "ENCERRADA",
   };
   const { error: errUpd } = await c.from("inv_posicoes").update(campos).eq("id", posicaoId);

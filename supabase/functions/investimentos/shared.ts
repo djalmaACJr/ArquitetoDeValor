@@ -1,7 +1,7 @@
 // supabase/functions/investimentos/shared.ts
 // Tipos, constantes e helpers pequenos e puros compartilhados entre os
 // módulos de investimentos (extraído de index.ts — ver ARCHITECTURE.md).
-import { db } from "../_shared/utils.ts";
+import { db, hojeBR } from "../_shared/utils.ts";
 
 export type Db = ReturnType<typeof db>;
 
@@ -93,7 +93,10 @@ export function dataPagamentoPlausivel(iso: string): boolean {
   return ano >= 2000 && ano <= new Date().getUTCFullYear() + 3;
 }
 
-export function hojeISO(): string { return new Date().toISOString().slice(0, 10); }
+// Delega pro helper canônico (achado de auditoria AUD-01) — mantém o nome
+// `hojeISO` porque é usado em ~10 pontos do módulo de investimentos; só a
+// implementação mudou, de UTC pra fuso de Brasília.
+export function hojeISO(): string { return hojeBR(); }
 export function deslocarDias(dataISO: string, n: number): string {
   const dt = new Date(`${dataISO}T12:00:00Z`);
   dt.setUTCDate(dt.getUTCDate() + n);

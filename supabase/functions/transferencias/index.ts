@@ -5,7 +5,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import {
   json, erro, db, autenticar, extrairId,
-  validarStatus, calcularDataParcela, corsPreFlight
+  validarStatus, calcularDataParcela, corsPreFlight, hojeBR, comIdempotencia
 } from "../_shared/utils.ts";
 import { registrarOrigem } from "../_shared/utils.ts";
 import { logError, logSuccess, logRequest, logResponse } from "../_shared/logger.ts";
@@ -77,7 +77,9 @@ function validarPayload(body: Record<string, unknown>, modoEdicao = false): stri
     return "conta_origem_id e conta_destino_id devem ser diferentes";
   if (body.valor !== undefined) {
     const v = Number(body.valor);
-    if (isNaN(v) || v <= 0) return "valor deve ser maior que zero";
+    // Number.isFinite (não só isNaN): isNaN(Infinity) é false, então um
+    // valor "Infinity" passava por essa checagem antes (AUD-07).
+    if (!Number.isFinite(v) || v <= 0) return "valor deve ser maior que zero";
   }
   const erroStatus = validarStatus(body.status);
   if (erroStatus) return erroStatus;
@@ -104,7 +106,12 @@ Deno.serve(async (req: Request) => {
   try {
     if (m === "GET"    && id)  return await buscarPorId(c, id, userId);
     if (m === "GET"    && !id) return await listar(c, userId, url.searchParams);
-    if (m === "POST"   && !id) return await criar(c, await req.json(), userId);
+    if (m === "POST"   && !id) {
+      // Idempotency-Key opcional (AUD-06) — mesmo padrão de /transacoes.
+      const chaveIdemp = req.headers.get("Idempotency-Key");
+      const body = await req.json();
+      return await comIdempotencia(c, userId, "POST /transferencias", chaveIdemp, () => criar(c, body, userId));
+    }
     if (m === "PUT"    && id)  return await editar(c, id, await req.json(), userId, escopo);
     if (m === "DELETE" && id)  return await excluir(c, id, userId, escopo);
     return erro("Rota não encontrada", 404);
@@ -176,7 +183,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
 
   const statusOriginal = String(body.status ?? "PAGO");
   const dataBase       = String(body.data);
-  const hoje           = new Date().toISOString().split("T")[0];
+  const hoje           = hojeBR();
   const valor          = Number(body.valor);
   const desc           = String(body.descricao ?? "");
 
@@ -265,7 +272,7 @@ async function editar(c: ReturnType<typeof db>, idPar: string, body: Record<stri
   if (novaOrigem === novaDestino) return erro("conta_origem_id e conta_destino_id devem ser diferentes", 422);
 
   // Validação PROJECAO só para datas futuras
-  const hoje = new Date().toISOString().split("T")[0];
+  const hoje = hojeBR();
   const dataEfetiva = String(body.data ?? par.debito.data);
   if (body.status === "PROJECAO" && dataEfetiva <= hoje)
     return erro("RV-008: status PROJECAO só é permitido para datas futuras", 422);

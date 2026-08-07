@@ -38,6 +38,11 @@ export const qk = {
   // diretamente via Studio/SQL)
   usuarioPerfil: (uid: Uid) => ['usuario-perfil', uid] as const,
 
+  // Admin — flag e telas restritas a usuarios.admin = true (RLS garante o
+  // isolamento real; ver migration 20260806000002_cron_execucoes.sql)
+  usuarioAdmin: (uid: Uid) => ['usuario-admin', uid] as const,
+  cronExecucoes: (uid: Uid) => ['cron-execucoes', uid] as const,
+
   // Importação de fatura de cartão
   faturasImport:        (uid: Uid)               => ['faturas-import', uid] as const,
   faturaImportSessao:   (uid: Uid, id: string)   => ['faturas-import', uid, id] as const,

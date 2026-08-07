@@ -93,6 +93,30 @@ A API responde `{ dados }` em sucesso e `{ erro }` em falha — `apiFetch` desem
 - **React Query**: configurado em `main.tsx` (`QueryClientProvider`) com `staleTime: 30s`, `refetchOnWindowFocus: false`, `retry: 1`. Cada hook usa `useQuery(queryKey)` e invalida via `qc.invalidateQueries(queryKey)` após mutation.
 - **Logs**: usar `log()` / `debug()` de `lib/logger.ts` em vez de `console.log` — são no-op em produção via `import.meta.env.DEV` (tree-shaken pelo bundler).
 
+### App Android
+
+Capacitor 8 empacota o MESMO build web (`FrontEnd/dist/`) numa WebView — não há árvore de código nativa separada em React. `Capacitor.isNativePlatform()` decide comportamento por plataforma em vários pontos (storage da sessão, timeout de auto-logout, biometria, calculadora/teclado, swipe de navegação). Detalhe completo (biometria, sessão dual-storage, atualização OTA) em `CLAUDE.md` › "Sessão + biometria (Android)" — não duplicado aqui de propósito, é conteúdo de produto/segurança, não de arquitetura de camadas.
+
+#### Rede: TLS e avaliação de certificate pinning (AUD-08, 06/08/2026)
+
+Estado atual — `android/app/src/main/res/xml/network_security_config.xml`:
+```xml
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">supabase.co</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
+```
+`cleartextTrafficPermitted="false"` já bloqueia HTTP puro (global e para `*.supabase.co` especificamente) — todo tráfego é HTTPS com validação da cadeia de CA do sistema. O que isso NÃO cobre é um MITM com certificado de CA confiável no device (ex.: proxy corporativo, malware que instala CA raiz, ataque com CA comprometida) — é exatamente esse gap que *certificate pinning* fecha, fixando no app quais certificados/chaves públicas são aceitos para `supabase.co`, independente do que o Android confia no OS.
+
+**Recomendação: não adotar pinning agora.** Avaliação custo-benefício:
+- **Benefício**: fecha o cenário MITM-com-CA-confiável — real, mas de severidade baixa aqui porque a aplicação já não guarda a senha do usuário em lugar algum acessível a esse ataque (login por biometria usa `EncryptedSharedPreferences` + `signInWithPassword` a cada uso, nunca reaproveita token — ver `FrontEnd/src/lib/biometria.ts`), e o JWT tem vida curta (`JWT expiry` recomendado 30min, ver CLAUDE.md › "Configuração de sessão"). O que um MITM nessas condições rouba é, na pior hipótese, um access token de curta duração, não credenciais permanentes.
+- **Custo operacional real**: Supabase pode rotacionar o certificado do endpoint `*.supabase.co` sem aviso (renovação de TLS, mudança de CA, migração de infra) — pins desatualizados **quebram o app inteiro para 100% dos usuários** até uma nova release ser publicada. A distribuição é OTA via `@capgo/capacitor-updater` (`app_releases`, ver seção "Tabela — Releases OTA"), mas mesmo assim há uma janela de app inacessível entre a rotação do certificado e a publicação do novo pin — pra uma equipe pequena sem monitoramento de expiração de certificado de terceiro, esse risco de auto-DoS supera o benefício de segurança marginal acima.
+- **Alternativa já suficiente para o perfil de risco atual**: manter `cleartextTrafficPermitted="false"` (já feito) + JWT expiry curto + Inactivity timeout no servidor (já documentados) cobre o essencial sem o risco operacional do pinning.
+
+**Reavaliar se**: o escopo de dados sensíveis client-side aumentar (ex.: passar a cachear tokens de longa duração no device), ou a equipe crescer o suficiente para ter um processo formal de rotação de pin acoplado ao calendário de renovação de certificado do Supabase.
+
 ---
 
 ## ⚙️ Backend — Edge Functions (Deno)
@@ -121,6 +145,7 @@ supabase/functions/
 ├── faturas/
 │   ├── index.ts                 # sessão de importação de fatura (upload → parse → revisão → confirmação)
 │   └── parsers/                 # nubank.ts, c6.ts, inter.ts, mercadopago.ts, generico.ts, helpers.ts, tipos.ts, index.ts (dispatcher)
+├── app_updates/index.ts        # POST /app_updates — endpoint público (sem JWT), consultado pelo @capgo/capacitor-updater a cada abertura do app Android; ver tabela app_releases
 └── limpar/index.ts             # usado em testes (reativa contas inativas antes do UPDATE/DELETE)
 ```
 
@@ -158,6 +183,10 @@ Deno.serve(async (req) => {
 | `validarCor`, `validarStatus`, `validarFrequencia` | Validações de domínio |
 | `calcularDataParcela(base, freq, offset)` | Calcula data N períodos à frente |
 | `camposParaAtualizar(body, campos)` | Filtra body para `update()` parcial |
+| `registrarExecucaoCron(jobNome, status, resumo, erro, duracaoMs)` | Grava 1 linha em `cron_execucoes` via `dbAdmin()`. Nunca lança (só loga se a própria gravação falhar) |
+| `executarComLogDeCron(jobNome, fn)` | Envolve a chamada de uma rota de cron: mede duração, extrai o corpo `dados` da `Response` como resumo, grava via `registrarExecucaoCron`, repassa a `Response` original. Usada pelas 4 rotas `*-cron` de `investimentos/index.ts` |
+| `hojeBR()` / `mesCorrenteBR()` | **AUD-01**: data/mês de "hoje" no fuso `America/Sao_Paulo` (via `Intl.DateTimeFormat('en-CA', {timeZone: ...})`), substituindo `new Date().toISOString()` (que resolve em UTC, errando o dia das 21h à meia-noite BRT). Ponto único reusado em `transacoes`, `transferencias`, `objetivos`, `faturas`; `investimentos/shared.ts` mantém seu `hojeISO()` histórico, que agora só delega pra `hojeBR()` |
+| `comIdempotencia(c, userId, rota, chave, executar)` | **AUD-06**: se `chave` (header `Idempotency-Key`) vier, reivindica-a via INSERT em `idempotency_keys` (claim-first, não check-then-write — evita a mesma race que a feature existe pra fechar); colisão (`23505`) → devolve a resposta já cacheada; sem colisão → roda `executar()` e grava o resultado. Sem `chave`, ou se o INSERT falhar por outro motivo (ex.: tabela não migrada ainda), cai em fail-open (roda `executar()` normalmente) — nunca bloqueia criação por causa da própria feature de proteção. Usada em `POST /transacoes` e `POST /transferencias` |
 
 ### CORS
 
@@ -212,7 +241,7 @@ Tudo vive em **`arqvalor`** — `search_path` é configurado nas migrations. Ext
 ### Tabelas
 
 #### `usuarios`
-`id (PK = auth.uid)`, `email UNIQUE`, `nome`, `ocultar_valores BOOLEAN NOT NULL DEFAULT false`, `mascote_preferido TEXT` (nullable, sem default — `NULL` ⇒ primeiro acesso), `layout JSONB` (nullable, apelido do mascote + tema), `ia_preferencia TEXT` (provedor padrão), `ia_configs JSONB` (array de configs `{id,provedor,apelido,modelo,api_key_cripto}` — `api_key_cripto` é AES-256-GCM via secret `IA_KEYS_ENCRYPTION_KEY`), `data_nascimento DATE`, `tutoriais_vistos JSONB NOT NULL DEFAULT '{}'` (chaves `tour-<pagina>` / `tutorial-<pagina>-<mascote>`), `inv_perfil JSONB` (`{perfil, idade, idade_aposentadoria, suitability, atualizado_em}`), `inv_pesos_criterio JSONB` (`{FUNDAMENTOS, CRESCIMENTO, DIVIDENDOS, VALUATION}` somando 100, globais para todos os tipos de ativo), `inv_avaliacao_agenda JSONB` (`{frequencia}` — preferência de UI, não dispara cron), `inv_dividendos_avisos JSONB` (avisos self-healing do cron BRL sobre tipo de provento sem categoria mapeada; auto-regenerado, fora do backup), `inv_dividendos_novidades JSONB` (resumo do que o cron BRL fez desde o último login; exibido 1x e descartado), `criado_em`.
+`id (PK = auth.uid)`, `email UNIQUE`, `nome`, `ocultar_valores BOOLEAN NOT NULL DEFAULT false`, `mascote_preferido TEXT` (nullable, sem default — `NULL` ⇒ primeiro acesso), `layout JSONB` (nullable, apelido do mascote + tema), `ia_preferencia TEXT` (provedor padrão), `ia_configs JSONB` (array de configs `{id,provedor,apelido,modelo,api_key_cripto}` — `api_key_cripto` é AES-256-GCM via secret `IA_KEYS_ENCRYPTION_KEY`), `data_nascimento DATE`, `tutoriais_vistos JSONB NOT NULL DEFAULT '{}'` (chaves `tour-<pagina>` / `tutorial-<pagina>-<mascote>`), `inv_perfil JSONB` (`{perfil, idade, idade_aposentadoria, suitability, atualizado_em}`), `inv_pesos_criterio JSONB` (`{FUNDAMENTOS, CRESCIMENTO, DIVIDENDOS, VALUATION}` somando 100, globais para todos os tipos de ativo), `inv_avaliacao_agenda JSONB` (`{frequencia}` — preferência de UI, não dispara cron), `inv_dividendos_avisos JSONB` (avisos self-healing do cron BRL sobre tipo de provento sem categoria mapeada; auto-regenerado, fora do backup), `inv_dividendos_novidades JSONB` (resumo do que o cron BRL fez desde o último login; exibido 1x e descartado), `admin BOOLEAN NOT NULL DEFAULT false` (flag de administrador — única fonte da verdade para gating de telas admin, ex. `/admin/crons`; setada manualmente via SQL, sem endpoint de auto-promoção), `criado_em`.
 Adições posteriores ao schema base (migrations `20260513..20260723`).
 
 #### `contas`
@@ -376,6 +405,57 @@ Cache compartilhado (sem `user_id`) de composição de ETF: PK `(etf_ticker, hol
 
 ---
 
+### 📱 Tabela — Releases OTA (Android)
+
+Migrations: `20260730000001_app_releases.sql` (criação), `20260731000001_app_releases_session_key.sql` (coluna `session_key`) — ambas ainda pendentes na raiz de `supabase/migrations/`, ver seção Migrations.
+
+#### `app_releases`
+**Sem `user_id`** — metadado global do app, não dado de usuário. `id`, `plataforma TEXT DEFAULT 'android'`, `canal TEXT DEFAULT 'production'`, `versao TEXT` (`X.Y.Z`, comparada em código pela Edge Function — não é semver estrito), `bundle_url TEXT` (zip no bucket Storage `app-releases`, público), `checksum TEXT` (checksum **cifrado** do `@capgo/cli bundle encrypt`, não o hash simples do zip), `session_key TEXT` (`ivSessionKey` da mesma cifragem — ambos exigidos pelo `@capgo/capacitor-updater` no dispositivo pra decifrar), `notas`, `ativo BOOLEAN DEFAULT true`, `criado_em`.
+RLS: `SELECT` público (`USING (ativo = true)`, grant para `anon, authenticated` — o app consulta sem JWT); escrita só via `service_role` (`dbAdmin()`), nunca pela API — só o script `FrontEnd/scripts/publish-android-ota.mjs` grava aqui.
+Bucket `app-releases` (Storage, público): upload só via `service_role` no mesmo script; sem policy de INSERT para `anon`/`authenticated`.
+Consumida por `GET-like POST /app_updates` — ver seção Edge Functions.
+
+---
+
+### 📋 Tabela — Histórico de execução de cron (`cron_execucoes`, novo)
+
+Migrations: `20260806000001_usuarios_admin.sql` (coluna `usuarios.admin`), `20260806000002_cron_execucoes.sql` (tabela).
+
+Motivação: auditoria de 2026-08-04 encontrou o job `dividendos-diario` falhando 100% das vezes por 19 dias direto (segredo de URL ausente no Vault, depois timeout de `pg_net` curto demais) sem NENHUM sinal visível em lugar nenhum — só foi descoberto porque um usuário notou proventos faltando e a causa foi rastreada manualmente via SQL Editor/Logs Explorer. Esta tabela é o registro que faltava.
+
+#### `cron_execucoes`
+**Sem `user_id`** — metadado operacional do sistema, não dado de usuário (mesma categoria de `app_releases`). `id`, `job_nome TEXT` (`dividendos-diario`\|`dividendos-br-diario`\|`snapshot-diario`\|`rendimento-cripto-diario`), `status TEXT CHECK IN ('sucesso','erro')`, `resumo JSONB` (corpo `dados` da resposta, formato livre por job), `erro TEXT`, `duracao_ms INTEGER`, `executado_em TIMESTAMPTZ DEFAULT now()`.
+RLS: `SELECT` só para quem tem `usuarios.admin = true` (policy com subquery `EXISTS`); sem policy de INSERT/UPDATE/DELETE para `anon`/`authenticated` — só `service_role` grava.
+Gravada automaticamente por `executarComLogDeCron()` (`_shared/utils.ts`), que envolve as 4 rotas de cron dentro de `investimentos/index.ts` — mede duração, tenta extrair o corpo `dados` da Response como resumo, e nunca lança (uma falha ao gravar o log não pode derrubar a resposta real do cron). Consumida por `GET /investimentos/cron-execucoes` (`investimentos/admin.ts`) e exibida em `AdminCronsPage.tsx` (`/admin/crons`, só visível/populada para admin — a proteção real é a RLS, a UI só evita mostrar o link à toa).
+
+---
+
+### 📝 Tabela — Trilha de auditoria (`trilha_auditoria`, novo, AUD-04)
+
+Migration: `20260806000004_trilha_auditoria.sql`.
+
+Motivação: a única tabela de auditoria que o sistema já teve (`arqvalor.auditoria`) foi removida em `20260523000002` por estar sem nenhum produtor de dados — 0 registros em 7 semanas, nunca conectada a um trigger. Nada a substituiu até esta migration. Aprendendo com o erro anterior, esta versão já nasce conectada a triggers reais.
+
+#### `trilha_auditoria`
+`id`, `user_id` (FK `usuarios.id ON DELETE RESTRICT`), `tabela TEXT`, `operacao TEXT CHECK IN ('INSERT','UPDATE','DELETE')`, `registro_id UUID`, `dados_antigos JSONB`, `dados_novos JSONB`, `alterado_em TIMESTAMPTZ DEFAULT now()`. Índice em `(user_id, registro_id, alterado_em DESC)`.
+**Append-only de verdade**: RLS só tem policy de `SELECT` (`user_id = auth.uid()`) — nenhuma policy de INSERT/UPDATE/DELETE para nenhum role, nem `service_role`. Só o trigger (`SECURITY DEFINER`, roda como owner da função) grava.
+Escopo mínimo de propósito: só `transacoes` (cobre lançamentos E transferências, que são linhas de `transacoes` com `id_par_transferencia`) e `inv_operacoes` (compra/venda/aporte/resgate/dividendo/rendimento) — as duas fontes de "por que meu saldo/minha posição mudou?". Extensível pro mesmo padrão em `contas`/`categorias`/`objetivos` se necessário no futuro.
+`fn_registrar_trilha_auditoria()` — trigger genérico reusável (chave em `TG_TABLE_NAME`/`TG_OP`), grava snapshot ANTES (UPDATE/DELETE) e/ou DEPOIS (INSERT/UPDATE) como JSONB via `to_jsonb(NEW/OLD)`.
+`fn_excluir_dados_usuario` foi recriada nesta mesma migration pra: (1) apagar a trilha do usuário como 1º passo de limpeza (referencia `usuarios` via FK RESTRICT), e (2) incluir `inv_operacoes` no bloco `DISABLE/ENABLE TRIGGER USER` que já existia pra `categorias`/`transacoes`/`contas` — sem isso, o DELETE de `inv_operacoes` recriaria entradas de trilha DEPOIS do passo de limpeza dela, deixando linha órfã que travaria o DELETE final de `usuarios` (FK RESTRICT).
+
+---
+
+### 🔑 Tabela — Chaves de idempotência (`idempotency_keys`, novo, AUD-06)
+
+Migration: `20260806000005_idempotency_keys.sql`.
+
+#### `idempotency_keys`
+PK composta `(user_id, rota, chave)` — `rota` é um rótulo fixo por endpoint (`"POST /transacoes"`, `"POST /transferencias"`), não a URL completa. `status_code INTEGER`, `resposta JSONB`, `criado_em TIMESTAMPTZ DEFAULT now()`. `ON DELETE CASCADE` em `user_id`.
+RLS escopada ao próprio usuário, mesmo padrão de qualquer tabela de domínio.
+Uso: claim-first via `INSERT` (não check-then-write — evitaria a própria race que a feature existe pra fechar). Colisão (`23505` — chave já reivindicada) devolve a resposta cacheada (replay) se já tiver sido gravada, ou 409 se a 1ª tentativa ainda estiver em voo. Ver `comIdempotencia()` na tabela de helpers de `_shared/utils.ts` acima.
+
+---
+
 ### Funções
 
 | Função | Tipo | Papel |
@@ -388,13 +468,16 @@ Cache compartilhado (sem `user_id`) de composição de ETF: PK `(etf_ticker, hol
 | `fn_antecipar_parcelas(p_transacao_id, p_user_id)` | RPC | Soma valores das parcelas seguintes na atual, ajusta `total_parcelas`, salva `valor_projetado`, deleta as seguintes |
 | `fn_saldo_conta_ate(p_conta_id, p_ate)` | SQL stable | Saldo da conta até timestamp |
 | `fn_sincronizar_usuario` | trigger AFTER INSERT em `auth.users` | Cria `arqvalor.usuarios` + contas seed (Carteira, Nubank, Inter, C6) + categorias pai/filho seed (Moradia, Alimentação, Transporte, Saúde, Renda, Transferências) + transações/transferência de exemplo (`20260716000001`) + `SET search_path` (`20260723000002`) |
-| `fn_remover_usuario` | trigger BEFORE DELETE em `auth.users` | Remove `arqvalor.usuarios` (cascade nas demais via FK) |
+| `fn_remover_usuario` | trigger BEFORE DELETE em `auth.users` | Delega para `fn_excluir_dados_usuario(OLD.id)` (FK-safe em todas as tabelas de domínio, não só `usuarios`) — corrigido em `20260806000007` após a versão anterior (`DELETE FROM arqvalor.usuarios` direto, sem ordem FK-safe) falhar com "Database error deleting user" para qualquer caller que não fosse a Edge Function `excluir_conta` (ex.: botão "Delete User" do Dashboard, scripts ad-hoc) |
 | `fn_criar_transferencia(p_rows jsonb)` | RPC, `SECURITY INVOKER` | Insere **todas** as linhas do par (2 por parcela) num único `INSERT ... SELECT ... FROM jsonb_array_elements` — atomicidade via transação implícita. Chamada por `functions/transferencias`. Nome real da função **não** é `fn_criar_transferencia_atomica` (esse é só o nome do arquivo de migration) |
+| `fn_atualizar_par_transferencia(p_id_par_transferencia, p_campos jsonb)` | RPC, `SECURITY INVOKER` | Espelha `valor`/`data`/`status`/`observacao` (só esses 4 campos — `conta_id`/`categoria_id`/`tipo`/`descricao` diferem por natureza entre as 2 pernas) nas DUAS transações de `id_par_transferencia` num único `UPDATE`. Chamada por `functions/transacoes` (`PUT /transacoes/:id`) quando a transação editada pertence a um par, em vez de um `UPDATE` isolado (`20260804000001`) |
+| `fn_atualizar_transacoes_transferencia(p_updates jsonb)` | RPC, `SECURITY INVOKER` | Recebe array `{id, campos}` — 2 (SOMENTE_ESTE) ou 2×N (TODOS/ESTE_E_SEGUINTES) itens — e aplica tudo num único `UPDATE ... FROM jsonb_array_elements`. Substitui os 2 (ou 2×N) `UPDATE`s sequenciais que `functions/transferencias` `editar()` fazia antes, que podiam deixar o par com valor/status divergente em caso de falha no meio (`20260804000002`) |
+| `fn_atualizar_transacoes_lote(p_updates jsonb)` | RPC, `SECURITY INVOKER` | Mesmo padrão `{id, campos}` em lote, mas para qualquer série de recorrência (não só transferências) — usada por `functions/transacoes` `editar()` ao recalcular datas/status de uma série inteira (escopo TODOS/ESTE_E_SEGUINTES). Substitui um loop `for` de `UPDATE`s que, em erro parcial, apenas logava e continuava — retornando HTTP 200 mesmo com parcelas não atualizadas (`20260804000003`) |
 | `fn_excluir_transferencias(p_ids)` | RPC, `SECURITY INVOKER` | Desarma `id_par_transferencia` e apaga as transações do par/série numa única transação |
 | `fn_criar_transacoes_com_dividendos(p_rows, p_dividendo)` | RPC, `SECURITY INVOKER` | Insere transação(ões) de provento e espelha `inv_dividendos` atomicamente |
 | `fn_excluir_transacoes_e_dividendos(p_ids)` | RPC, `SECURITY INVOKER` | Exclusão atômica de transações + dividendos vinculados |
 | `fn_saldo_total_antes_de(p_user_id, p_data)` | RPC, `SECURITY INVOKER` | Saldo **global** (todas as contas ativas) do usuário na véspera de uma data — otimização de `GET /transacoes?saldo=true`, evita window function cara em `vw_transacoes_com_saldo` |
-| `fn_calcular_progresso_objetivo(p_objetivo_id)` | SQL stable, `SECURITY INVOKER` | Calcula `valor_atingido`/`percentual`/`status` de um objetivo conforme seu `tipo` |
+| `fn_calcular_progresso_objetivo(p_objetivo_id)` | SQL stable, `SECURITY INVOKER` | Calcula `valor_atingido`/`percentual`/`status` de um objetivo conforme seu `tipo`. Ramo CRESCIMENTO reconciliado com `ObjetivoDetalhe.tsx` em `20260806000006` (**AUD-03** — uma migration anterior focada em SONHO tinha sobrescrito sem querer a fórmula completa YoY/YTD/NET/COMP_YTD do CRESCIMENTO por uma versão v1 simplificada; ver `BUSINESS_RULES.md` § "Cálculo de CRESCIMENTO") |
 | `fn_atualizar_progresso_objetivo` | trigger `BEFORE I/U` em `objetivos` | Grava o resultado de `fn_calcular_progresso_objetivo` (usa `NEW.*` direto, sem re-SELECT) |
 | `fn_sincronizar_progresso_objetivo(p_user_id)` | RPC, `SECURITY INVOKER` | Recalcula todos os objetivos ativos do usuário em massa + grava snapshot do dia em `objetivos_progresso` (`POST /objetivos/sincronizar-progresso`) |
 | `fn_saldo_contas_ate(p_contas UUID[], p_data)` | SQL stable | Saldo agregado de N contas até uma data — usada pelo cálculo de `saldo_base`/SONHO |
@@ -586,6 +669,22 @@ Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já 
 - `20260722000001_fn_atomicas_transacoes_dividendos.sql` — atualiza `fn_criar_transferencia` (inclui `observacao`) + cria `fn_criar_transacoes_com_dividendos`, `fn_excluir_transacoes_e_dividendos`, `fn_excluir_transferencias`
 - `20260723000001_seed_investimentos_exemplo.sql` — `fn_seed_investimentos_exemplo` + trigger `trg_z_seed_investimentos_exemplo` (dados de exemplo de investimentos para usuário novo)
 - `20260723000002_fn_sincronizar_usuario_search_path.sql` — adiciona `SET search_path` em `fn_sincronizar_usuario`
+- `20260730000001_app_releases.sql` — tabela `app_releases` (releases OTA do app Android) + bucket Storage público `app-releases`, ver seção "Tabela — Releases OTA (Android)"
+- `20260731000001_app_releases_session_key.sql` — coluna `session_key` em `app_releases` (suporte a bundles cifrados, E2E v2 do `@capgo/capacitor-updater`)
+- `20260804000001_fn_atualizar_par_transferencia.sql` — cria `fn_atualizar_par_transferencia` (fix: editar 1 perna de um par de transferência via `/transacoes` deixava a outra com status divergente)
+- `20260804000002_fn_atualizar_transacoes_transferencia.sql` — cria `fn_atualizar_transacoes_transferencia` (edição atômica do par/série via `/transferencias`)
+- `20260804000003_fn_atualizar_transacoes_lote.sql` — cria `fn_atualizar_transacoes_lote` (edição em lote atômica de série de recorrência via `/transacoes`, substitui loop de `UPDATE`s que podia falhar parcialmente e ainda responder 200)
+- `20260804000004_fix_assistente_trgm_index.sql` — troca `idx_assistente_user_descricao_trgm` (que apesar do nome era um B-tree comum, duplicado do unique index) por um índice GIN trigram de verdade (`pg_trgm`) sobre `lower(descricao)` — só o GIN acelera o `ILIKE '%termo%'` que a rota `GET /assistente?q=` realmente faz
+- `20260804000005_dedup_inv_dividendos.sql` — `UNIQUE INDEX ux_inv_dividendos_dedup (user_id, ativo_id, conta_id, tipo_dividendo_id, data_pagamento, valor)` em `inv_dividendos`, contra duplicação por corrida do cron diário de dividendos BRL (achado real de bug, corrigido manualmente antes desta migration)
+- `20260806000001_usuarios_admin.sql` — coluna `usuarios.admin BOOLEAN DEFAULT false` (única fonte da verdade pra gating de telas admin)
+- `20260806000002_cron_execucoes.sql` — tabela `cron_execucoes` (histórico de execução dos 4 cron jobs) + RLS admin-only, ver seção "Tabela — Histórico de execução de cron"
+- `20260806000003_timezone_america_sao_paulo.sql` — **AUD-01**: `ALTER DATABASE postgres SET timezone TO 'America/Sao_Paulo'` — `CURRENT_DATE`/`now()` sem fuso explícito passam a resolver no horário do Brasil em vez de UTC (o lado Deno da mesma correção são os helpers `hojeBR()`/`mesCorrenteBR()` em `_shared/utils.ts`, aplicados em ~15 pontos de `transacoes`, `transferencias`, `objetivos`, `faturas` e `investimentos`)
+- `20260806000004_trilha_auditoria.sql` — **AUD-04**: tabela `trilha_auditoria` (append-only — RLS só com SELECT pro próprio dono, nenhuma policy de INSERT/UPDATE/DELETE) + trigger genérico `fn_registrar_trilha_auditoria()` conectado a `transacoes` e `inv_operacoes`; recria `fn_excluir_dados_usuario` pra limpar a trilha e desligar/religar o trigger de `inv_operacoes` durante o wipe de conta
+- `20260806000005_idempotency_keys.sql` — **AUD-06**: tabela `idempotency_keys` (PK composta `user_id+rota+chave`, `ON DELETE CASCADE`) — suporte a `comIdempotencia()` (`_shared/utils.ts`), plugado em `POST /transacoes` e `POST /transferencias`; claim-first via INSERT (não check-then-write), replay da resposta cacheada em caso de colisão, fail-open se a chave vier ausente ou a tabela ainda não existir
+- `20260806000006_crescimento_comp_ytd_reconciliado.sql` — **AUD-03**: recria `fn_atualizar_progresso_objetivo`/`fn_calcular_progresso_objetivo` unindo `saldo_base` (SONHO, de `20260605000001`) com a fórmula YoY/YTD/NET/COMP_YTD completa pro CRESCIMENTO (de `20260603000006`, que tinha sido perdida sem intenção quando a primeira foi recriada por cima) — banco e tela (`ObjetivoDetalhe.tsx`) passam a calcular a mesma fórmula, ver `BUSINESS_RULES.md` § "Cálculo de CRESCIMENTO"
+- `20260806000007_hardening_fn_remover_usuario.sql` — **AUD-12 residual**: recria `fn_remover_usuario` (trigger BEFORE DELETE em `auth.users`) pra delegar em `fn_excluir_dados_usuario(OLD.id)` em vez de um `DELETE FROM usuarios` cru sem ordem FK-safe — torna qualquer caminho de exclusão de usuário seguro (Dashboard, script administrativo), não só o fluxo padrão do app
+
+⚠️ **As 5 migrations `20260806000003`–`20260806000007` (fase de remediação da auditoria, AUD-01/03/04/06/12) ainda não foram aplicadas em produção** — escritas, com `deno check` limpo, mas pendentes de `supabase db push`/SQL Editor. O código Deno que depende delas (`comIdempotencia`, `hojeBR`/`mesCorrenteBR`) já está preparado pra rodar sem elas também (fail-open), então o deploy das Edge Functions não quebra nada mesmo antes das migrations serem aplicadas — mas os ganhos (timezone correto, trilha de auditoria, idempotência efetiva, CRESCIMENTO reconciliado, exclusão de usuário robusta) só valem depois de aplicadas.
 
 ---
 
@@ -603,6 +702,9 @@ Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já 
 | Cron jobs | Rotas `*-cron` da função `investimentos` não passam por JWT — autenticam via header `x-cron-secret` (valor no Vault do Supabase), chamadas só via `pg_net` a partir de `pg_cron` |
 | IA (chat/mentores) | `api_key` de cada provedor nunca sai em texto puro do banco — AES-256-GCM via `IA_KEYS_ENCRYPTION_KEY`. Avaliação por mentores (`/investimentos/avaliacoes/*`) usa as mesmas credenciais do usuário, chamadas feitas client-side (uma por mentor × ativo) |
 | Frontend | Nunca armazena `service_role`; só `anon_key` pública |
+| Sessão (Android) | Storage da sessão Supabase é `sessionStorage` no app nativo (`Capacitor.isNativePlatform()`) vs `localStorage` no desktop/web — morre com o processo no Android; `useAutoLogout` cai de 15min pra 5min no nativo. Ver `FrontEnd/src/lib/supabase.ts` e CLAUDE.md › "Sessão + biometria (Android)" |
+| Biometria (Android) | Credenciais de login (e-mail+senha) ficam em `EncryptedSharedPreferences` via `@capgo/capacitor-native-biometric`, nunca em texto puro no JS; digital sempre reautentica do zero (`signInWithPassword`), não guarda/reusa refresh token. Ver `FrontEnd/src/lib/biometria.ts` |
+| Releases OTA | `arqvalor.app_releases` tem `SELECT` público (sem JWT — o app consulta antes até de logar) mas `INSERT`/`UPDATE` só via `service_role`, nunca pela API/frontend. Bundle é assinado/cifrado (`@capgo/cli`, E2E v2) antes de subir — o plugin no dispositivo só aceita bundle assinado com o par da `publicKey` embutida no APK |
 
 ---
 
@@ -628,7 +730,7 @@ Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já 
 
 - Jest roda contra Supabase real usando `TEST_EMAIL`/`TEST_PASSWORD`.
 - Suite `99_limpar` chama `functions/limpar` para zerar dados ao fim.
-- E2E roda no Firefox via Playwright; em CI o `playwright.config.ts` sobe o Vite dev server automaticamente (`webServer`); localmente basta `npm run test:e2e`.
+- E2E roda no Firefox via Playwright (`npm run test:e2e`, projeto `firefox`); em CI o `playwright.config.ts` sobe o Vite dev server automaticamente (`webServer`). Projeto extra `mobile` (`npm run test:e2e:mobile`, engine Chromium + `devices['Pixel 7']`) reexecuta a mesma suíte em viewport/toque de Android — não roda por padrão, cobre layout responsivo mas não os trechos gateados por `Capacitor.isNativePlatform()`.
 - Auth state em `FrontEnd/e2e/fixtures/auth.json` é gerado por `auth.setup.ts` (não commitar).
 - CI usa 4 workflows GitHub Actions:
   - `.github/workflows/backend-api-tests.yml` — testes Jest (push/PR develop)

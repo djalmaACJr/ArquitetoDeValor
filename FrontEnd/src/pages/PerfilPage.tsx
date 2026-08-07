@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import {
   User, Lock, Check, AlertCircle, Trash2, Bookmark, X, ChevronDown,
   Pencil, Sparkles, ArrowRight, Wand2, RefreshCw, Search, ChevronLeft, ChevronRight,
-  Palette, Users, MessageCircle, Info, UserPlus, Mail, Share2, Fingerprint,
+  Palette, Users, MessageCircle, Info, UserPlus, Mail, Share2, Fingerprint, Activity,
 } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import {
@@ -15,7 +15,8 @@ import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import Mascote, { type MascoteNome, type MascotePose } from '../components/ui/Mascote'
 import { useIAPreferencia } from '../hooks/useIAPreferencia'
 import { PROVEDORES, PROVEDOR_PADRAO, modeloSugerido, rotuloModelo } from '../lib/iaProvedores'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
+import { useAdmin } from '../hooks/useAdmin'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -1108,6 +1109,7 @@ function SecaoIA() {
 export default function PerfilPage() {
   const { session } = useAuth()
   const navigate    = useNavigate()
+  const isAdmin      = useAdmin()
   // qc precisa estar em escopo antes de salvarNome — declarado aqui no topo
   // (havia uma 2ª declaração em ~L958 dentro de outra seção; removida).
   const qc = useQueryClient()
@@ -1601,6 +1603,21 @@ export default function PerfilPage() {
                 </form>
               )}
               <Alerta fb={fbDigital}/>
+            </Secao>
+          </div>
+        )}
+
+        {/* ── Administração — só usuarios.admin = true (RLS garante o
+            isolamento real; esta condição só evita mostrar o link à toa) ── */}
+        {isAdmin && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Secao titulo="Administração" icone={<Activity size={15}/>}>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[16px] text-white/50">Histórico de execução dos cron jobs do sistema.</p>
+                <Link to="/admin/crons" className={`${btn} bg-white/5 text-white/70 hover:bg-white/10 shrink-0`}>
+                  Ver execuções
+                </Link>
+              </div>
             </Secao>
           </div>
         )}

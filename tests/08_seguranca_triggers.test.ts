@@ -13,7 +13,7 @@
 // ============================================================
 
 import {
-  api, apiB, tryGetTokenB,
+  api, apiB, tryGetTokenB, limparUserBSeDinamico,
   limparConta, limparCategoria, limparTransacao,
 } from "./setup";
 
@@ -34,6 +34,11 @@ describe("Segurança — Triggers do banco", () => {
       );
     }
   });
+
+  // tryGetTokenB() acima pode ter criado um usuário descartável (sem
+  // TEST_EMAIL_B configurado) — exclui no fim da suíte. Não faz nada se
+  // User B veio de credenciais reais do .env.
+  afterAll(async () => { await limparUserBSeDinamico(); });
   // ── SEG-TRG01: cross-FK conta_id (User A insere com conta de B) ─
   test("SEG-TRG01 — inserir tx com conta_id de outro user → bloqueado", async () => {
     if (!temUserB) { console.log("⊘ pulado: sem User B"); return; }

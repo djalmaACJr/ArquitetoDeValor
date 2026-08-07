@@ -15,7 +15,7 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId, extrairAcao, corsPreFlight,
-         verificarExistencia, camposParaAtualizar, calcularDataParcela } from "../_shared/utils.ts";
+         verificarExistencia, camposParaAtualizar, calcularDataParcela, hojeBR } from "../_shared/utils.ts";
 import { registrarOrigem } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWarn } from "../_shared/logger.ts";
 // Usamos `npm:` (suportado no Supabase Edge Runtime) em vez de esm.sh:
@@ -683,7 +683,7 @@ async function confirmar(c: ReturnType<typeof db>, req: Request, sessaoId: strin
     const diaPagto = conta?.dia_pagamento ?? 5;
     const dataLancto = venc
       ? `${venc.slice(0, 7)}-${String(diaPagto).padStart(2, "0")}`
-      : new Date().toISOString().slice(0, 10);
+      : hojeBR();
 
     // Função interna: cria/atualiza 1 transação para um grupo de itens.
     const processarGrupo = async (

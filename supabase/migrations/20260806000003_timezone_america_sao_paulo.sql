@@ -1,0 +1,33 @@
+-- ============================================================
+-- Fuso horário do banco — America/Sao_Paulo (achado de auditoria AUD-01)
+--
+-- Instâncias Supabase usam UTC por padrão. Sem isso, qualquer função que
+-- use CURRENT_DATE/CURRENT_TIMESTAMP/now() pra decidir "hoje" (ex.:
+-- fn_calcular_progresso_objetivo, ramo OBJETIVO, que usa CURRENT_DATE como
+-- corte de período) sofre o MESMO bug já corrigido no lado Deno das Edge
+-- Functions: das 21h00 às 23h59 (horário de Brasília), o relógio do banco
+-- já pensa que é o dia seguinte — mesma classe de corrupção silenciosa de
+-- dado financeiro, só que dentro do Postgres em vez do Deno.
+--
+-- Por que ALTER DATABASE (nível de sessão/conexão) em vez de trocar cada
+-- função individualmente:
+--   • Ponto único — qualquer função nova que use CURRENT_DATE/now() já
+--     nasce correta, sem precisar lembrar de tratar fuso horário toda vez.
+--   • TIMESTAMPTZ (criado_em, atualizado_em, etc.) sempre armazena em UTC
+--     internamente — mudar o timezone da sessão NÃO altera o valor
+--     gravado, só como CURRENT_DATE/now()/to_char() o EXIBEM/comparam.
+--     Nenhum dado existente muda de valor com esta migration.
+--   • pg_cron agenda em UTC independente do timezone do banco (é um
+--     comportamento próprio da extensão, não lê essa configuração) — os
+--     4 cron jobs continuam dsparando nos mesmos horários UTC de sempre.
+--   • Generated columns ano_tx/mes_tx (arqvalor.transacoes) derivam da
+--     coluna `data` (DATE, definida pelo usuário), não de CURRENT_DATE —
+--     não são afetadas.
+--
+-- Idempotente: ALTER DATABASE ... SET é seguro de rodar múltiplas vezes.
+-- Efeito só vale para conexões NOVAS após a mudança (conexões já abertas
+-- mantêm o timezone com que começaram) — Edge Functions/PostgREST abrem
+-- conexão nova a cada request, então o efeito é imediato na prática.
+-- ============================================================
+
+ALTER DATABASE postgres SET timezone TO 'America/Sao_Paulo';

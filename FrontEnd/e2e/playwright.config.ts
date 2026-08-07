@@ -67,5 +67,25 @@ export default defineConfig({
       },
       dependencies: ['data'],
     },
+    // Reexecuta a MESMA suíte em viewport/toque de Android (engine Chromium
+    // — igual à WebView do app), pra pegar regressões de layout responsivo
+    // e alvo de toque que o Firefox desktop não exercita. NÃO roda por
+    // padrão em `npm run test:e2e` (dobraria o tempo de toda execução) —
+    // só via `npm run test:e2e:mobile`, pensado pra rodar antes de builds
+    // do Android.
+    //
+    // Limitação conhecida: NÃO cobre os trechos gateados por
+    // `Capacitor.isNativePlatform()` (biometria, swipe de mês, teclado
+    // nativo no valor) — isso só existe dentro do app real, o Chromium aqui
+    // não tem o bridge do Capacitor. Esses fluxos continuam dependendo de
+    // teste manual no aparelho/emulador.
+    {
+      name: 'mobile',
+      use: {
+        ...devices['Pixel 7'],
+        storageState: './fixtures/auth.json',
+      },
+      dependencies: ['data'],
+    },
   ],
 })

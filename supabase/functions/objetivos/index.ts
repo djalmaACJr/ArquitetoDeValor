@@ -4,7 +4,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import {
   json, erro, db, autenticar, extrairId,
-  verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight,
+  verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight, hojeBR,
 } from "../_shared/utils.ts";
 import { registrarOrigem } from "../_shared/utils.ts";
 import {
@@ -237,7 +237,7 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   let revisoes = (atual?.revisoes ?? []) as unknown[];
   if (body.valor_meta !== undefined && Number(body.valor_meta) !== atual?.valor_meta) {
     revisoes = [...revisoes, {
-      data:                  new Date().toISOString().split("T")[0],
+      data:                  hojeBR(),
       valor_meta_anterior:   atual?.valor_meta,
       motivo:                body.motivo_revisao ?? "Revisão de meta",
     }];
