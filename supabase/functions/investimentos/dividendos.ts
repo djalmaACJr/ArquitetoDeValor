@@ -597,6 +597,7 @@ export async function provisionarProventosUsd(
             valor: valorBRL, payDate,
             // rate por ação convertido p/ BRL (mesma moeda do valor lançado)
             valorPorCota: Number((cashPorAcao * ptax).toFixed(8)),
+            contaExclusiva: posicoes.length === 1,
           });
           if (r === "criado") criados++;
           else if (r === "atualizado") atualizados++;
@@ -657,7 +658,7 @@ export function descricaoProvento(ticker: string, nome?: string | null): string 
 export async function upsertDividendoProvisionado(admin: Db, p: {
   userId: string; ativoId: string; contaId: string; tipoAtivo: string;
   tipoDivId: string; categoriaId: string; ticker: string; valor: number; payDate: string;
-  nome?: string | null; valorPorCota?: number | null;
+  nome?: string | null; valorPorCota?: number | null; contaExclusiva?: boolean;
 }): Promise<"criado" | "atualizado" | "ignorado" | { erro: string }> {
   // Dividendo por cota (rate da fonte) na moeda do lançamento; usado por DY/YoC.
   const vpc = p.valorPorCota != null && Number.isFinite(p.valorPorCota) && p.valorPorCota > 0
@@ -666,11 +667,25 @@ export async function upsertDividendoProvisionado(admin: Db, p: {
   const mesIni = `${p.payDate.slice(0, 7)}-01`;
   const mesFim = primeiroDiaProximoMes(p.payDate);
 
-  const { data: candidatos } = await admin.from("inv_dividendos")
+  // Busca de dedup: normalmente restrita à conta da POSIÇÃO (contaId), pois um
+  // mesmo ativo pode ter posições legítimas em contas diferentes (cada uma com
+  // seu próprio provento). MAS `inv_dividendos.conta_id` pode divergir da conta
+  // da posição — `trg_sync_transacao_dividendo` propaga pra cá qualquer edição
+  // manual do lançamento no Extrato, inclusive troca de conta (ex.: usuário
+  // corrige pra onde o dinheiro realmente caiu, fora da conta de custódia).
+  // Quando o ativo só tem UMA posição ativa (`contaExclusiva`), não há
+  // ambiguidade possível — o provento só pode ser dela, esteja o registro em
+  // qual conta estiver hoje. Sem essa relaxação, mover a conta do lançamento
+  // faz esta busca (filtrada por contaId = conta da posição) nunca mais achar
+  // o registro já movido, e o próximo cron cria um segundo do zero com o valor
+  // bruto da fonte (achado real: BBDC3/JSCP duplicado em 2026-08 desta forma).
+  let consultaCandidatos = admin.from("inv_dividendos")
     .select("id, transacao_extrato_id, valor, data_pagamento, valor_por_cota, transacoes(status)")
-    .eq("user_id", p.userId).eq("ativo_id", p.ativoId).eq("conta_id", p.contaId)
+    .eq("user_id", p.userId).eq("ativo_id", p.ativoId)
     .eq("tipo_dividendo_id", p.tipoDivId)
     .gte("data_pagamento", mesIni).lt("data_pagamento", mesFim);
+  if (!p.contaExclusiva) consultaCandidatos = consultaCandidatos.eq("conta_id", p.contaId);
+  const { data: candidatos } = await consultaCandidatos;
 
   type Cand = { id: string; transacao_extrato_id: string | null; valor: number; data_pagamento: string; valor_por_cota: number | null; transacoes?: { status?: string } | null };
   const lista = (candidatos ?? []) as Cand[];
@@ -1073,6 +1088,7 @@ export async function provisionarProventosBrl(
             categoriaId: String(tipo.categoria_id), ticker: ativo.ticker,
             valor: valorBRL, payDate, nome: ativo.nome,
             valorPorCota: rate,
+            contaExclusiva: posicoes.length === 1,
           });
           if (r === "criado" || r === "atualizado") {
             if (r === "criado") criados++; else atualizados++;
