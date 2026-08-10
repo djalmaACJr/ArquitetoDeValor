@@ -813,7 +813,7 @@ export default function LancamentosPage() {
           <button
             onClick={() => setFiltrosExpandidos(v => !v)}
             aria-expanded={filtrosExpandidos}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[15px] font-medium transition-all flex-shrink-0"
+            className="flex items-center gap-1.5 px-2.5 h-9 rounded-lg border text-[15px] font-medium transition-all flex-shrink-0"
             style={{
               borderColor: temFiltroAtivo || !comSaldo ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.12)',
               color: temFiltroAtivo || !comSaldo ? '#4da6ff' : '#8b92a8',
@@ -854,7 +854,7 @@ export default function LancamentosPage() {
                 title={buscaMultiMes ? 'Repetir pesquisa' : 'Atualizar lançamentos'}
                 className="flex items-center justify-center border rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
                 style={{
-                  width: 34, height: 34,
+                  width: 36, height: 36,
                   color: '#8b92a8',
                   background: 'rgba(255,255,255,0.03)',
                   borderColor: 'rgba(255,255,255,0.1)',

@@ -92,7 +92,7 @@ export function MonthPicker({ value, onChange, min, max, className = '', onHover
           disabled={!!(min && value <= min)}
           title="Mês anterior"
           aria-label="Mês anterior"
-          className="p-1.5 rounded-md bg-blue-400/10 border border-blue-400/20 text-blue-300
+          className="flex items-center justify-center h-9 w-9 flex-shrink-0 rounded-md bg-blue-400/10 border border-blue-400/20 text-blue-300
                      hover:bg-blue-400/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         >
           <ChevronLeft size={14} />
@@ -101,7 +101,7 @@ export function MonthPicker({ value, onChange, min, max, className = '', onHover
         {/* Usa mesLabel('longo') da utils — formato "Abril/2026" */}
         <button
           onClick={() => setOpen(o => !o)}
-          className="flex flex-1 sm:flex-none min-w-0 sm:min-w-[148px] items-center gap-1.5 px-3 py-1.5 rounded-md justify-center
+          className="flex flex-1 sm:flex-none min-w-0 sm:min-w-[148px] items-center gap-1.5 px-3 h-9 rounded-md justify-center
                      bg-blue-400/10 border border-blue-400/20 text-blue-300 text-[17px] font-semibold
                      hover:bg-blue-400/20 transition-colors"
         >
@@ -115,7 +115,7 @@ export function MonthPicker({ value, onChange, min, max, className = '', onHover
           disabled={!!(max && value >= max)}
           title="Próximo mês"
           aria-label="Próximo mês"
-          className="p-1.5 rounded-md bg-blue-400/10 border border-blue-400/20 text-blue-300
+          className="flex items-center justify-center h-9 w-9 flex-shrink-0 rounded-md bg-blue-400/10 border border-blue-400/20 text-blue-300
                      hover:bg-blue-400/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         >
           <ChevronRight size={14} />

@@ -1745,7 +1745,7 @@ export default function DashboardPage() {
               onClick={() => setFiltrosExpandidos(v => !v)}
               aria-expanded={filtrosExpandidos}
               className={
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[16px] font-medium transition-colors flex-shrink-0 ' +
+                'flex items-center gap-1.5 px-3 h-9 rounded-lg border text-[16px] font-medium transition-colors flex-shrink-0 ' +
                 (temFiltroAtivo
                   ? 'border-blue-400/60 text-blue-600 bg-blue-50 dark:border-blue-400/40 dark:text-blue-400 dark:bg-blue-400/10'
                   : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800')
@@ -1764,7 +1764,7 @@ export default function DashboardPage() {
               onClick={handleRefresh}
               title="Atualizar dados"
               disabled={refreshing || loading}
-              className="flex items-center justify-center gap-1.5 text-[16px] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors disabled:opacity-50 flex-shrink-0"
+              className="flex items-center justify-center gap-1.5 text-[16px] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 h-9 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors disabled:opacity-50 flex-shrink-0"
             >
               <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''}/>
             </button>

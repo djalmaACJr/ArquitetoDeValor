@@ -2,10 +2,12 @@
 // Botão + dropdown para salvar e aplicar filtros nomeados.
 // Exibe TODOS os filtros do usuário (qualquer página) com badge de origem.
 // Exclusão de filtros só é permitida na tela de Perfil.
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { Bookmark } from 'lucide-react'
 import { useFiltrosSalvos } from '../../hooks/useFiltrosSalvos'
 import { PAGINA_FILTRO_LABEL as PAGINA_LABEL } from '../../lib/constants'
+
+const MARGEM_VIEWPORT = 16 // px de respiro mínimo até a borda da tela
 
 interface Props {
   /** Identificador da página — ex.: 'extrato', 'relatorios' */
@@ -27,7 +29,11 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
   const [salvando,      setSalvando]      = useState(false)
   // ID do filtro existente com o mesmo nome — quando preenchido, exibe confirmação
   const [confirmandoId, setConfirmandoId] = useState<string | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
+  const ref     = useRef<HTMLDivElement>(null)
+  const painel  = useRef<HTMLDivElement>(null)
+  // Posição horizontal do dropdown, calculada em px relativos ao wrapper
+  // (`ref`, position:relative) — null enquanto não medido ainda.
+  const [dropdownLeft, setDropdownLeft] = useState(0)
 
   useEffect(() => {
     if (!aberto) return
@@ -40,6 +46,34 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
     document.addEventListener('mousedown', onClickFora)
     return () => document.removeEventListener('mousedown', onClickFora)
   }, [aberto])
+
+  // Reposiciona o dropdown pra nunca sair da tela — o botão pode estar em
+  // qualquer ponto da barra de filtros (meio, início, fim), então nem
+  // "right-0" nem "left-0" fixos bastam: um corta a esquerda quando o botão
+  // está à esquerda, o outro corta a direita quando está à direita (achado
+  // real: Android, "Filtros (6)" no fim da fileira do Dashboard). Mede a
+  // tela de verdade e ajusta — roda em useLayoutEffect (antes do paint), então
+  // o valor "stale" de uma abertura anterior nunca chega a ser desenhado.
+  useLayoutEffect(() => {
+    if (!aberto || !ref.current || !painel.current) return
+    const posicionar = () => {
+      if (!ref.current || !painel.current) return
+      const wrapperRect = ref.current.getBoundingClientRect()
+      const largura     = painel.current.getBoundingClientRect().width
+      const viewport    = window.innerWidth
+      // Padrão: borda direita do painel alinhada à borda direita do botão.
+      let esquerdaViewport = wrapperRect.right - largura
+      if (esquerdaViewport < MARGEM_VIEWPORT) {
+        esquerdaViewport = MARGEM_VIEWPORT
+      } else if (esquerdaViewport + largura > viewport - MARGEM_VIEWPORT) {
+        esquerdaViewport = viewport - MARGEM_VIEWPORT - largura
+      }
+      setDropdownLeft(esquerdaViewport - wrapperRect.left)
+    }
+    posicionar()
+    window.addEventListener('resize', posicionar)
+    return () => window.removeEventListener('resize', posicionar)
+  }, [aberto, filtros.length])
 
   const handleSalvar = async () => {
     const n = nome.trim()
@@ -82,7 +116,7 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
       {temFiltroAtivo && onLimpar && (
         <button
           onClick={onLimpar}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[15px] font-medium transition-all hover:bg-white/5"
+          className="flex items-center gap-1 px-2.5 h-9 rounded-lg border text-[15px] font-medium transition-all hover:bg-white/5"
           style={{ borderColor: 'rgba(248,113,113,0.3)', color: '#f87171' }}
         >
           × Limpar
@@ -92,7 +126,7 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
       <button
         onClick={() => setAberto(v => !v)}
         title="Filtros salvos"
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all"
+        className="flex items-center gap-1.5 px-3 h-9 rounded-lg border transition-all"
         style={{
           background:  aberto ? 'rgba(77,166,255,0.1)' : 'transparent',
           borderColor: aberto ? 'rgba(77,166,255,0.4)' : 'rgba(255,255,255,0.1)',
@@ -105,15 +139,22 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
         </span>
       </button>
 
-      {/* Dropdown — ancorado pela esquerda e com largura limitada à viewport
-          (mesmo padrão do MultiSelect): "right-0" com minWidth fixo cortava a
-          metade esquerda do painel em telas estreitas quando o botão não
-          estava colado na borda direita (achado real: Android, botão no meio
-          da barra de filtros). */}
+      {/* Dropdown — posição horizontal calculada em JS (useLayoutEffect acima)
+          pra nunca sair da viewport, não importa onde o botão esteja na
+          fileira de filtros. "left"/"right" fixos no CSS não bastam aqui:
+          um corta a esquerda quando o botão está à esquerda da tela, o
+          outro corta a direita quando está à direita (achado real: Android,
+          botão "Filtros (N)" no fim da fileira do Dashboard). O cálculo roda
+          em useLayoutEffect (antes do paint), então mesmo o valor inicial de
+          fallback (0) nunca chega a ser desenhado na tela. */}
       {aberto && (
         <div
-          className="absolute top-full left-0 mt-1 z-50 w-[300px] max-w-[calc(100vw-2rem)] rounded-xl border shadow-xl"
-          style={{ background: '#1a1f2e', borderColor: 'rgba(255,255,255,0.1)' }}
+          ref={painel}
+          className="absolute top-full mt-1 z-50 w-[300px] max-w-[calc(100vw-2rem)] rounded-xl border shadow-xl"
+          style={{
+            background: '#1a1f2e', borderColor: 'rgba(255,255,255,0.1)',
+            left: dropdownLeft,
+          }}
         >
           {/* Header */}
           <div className="px-4 py-2.5 border-b border-white/10">

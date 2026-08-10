@@ -137,7 +137,7 @@ export function MultiSelect({
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-1.5 bg-[#252d42] border border-white/10 rounded-lg
-          px-3 py-2 text-[17px] outline-none transition-colors text-left"
+          px-3 h-9 text-[17px] outline-none transition-colors text-left"
         style={{ borderColor: open ? '#00c896' : undefined, color: resumo ? '#e8eaf0' : '#8b92a8' }}
       >
         <span className="flex-1 truncate">{resumo ?? placeholder}</span>

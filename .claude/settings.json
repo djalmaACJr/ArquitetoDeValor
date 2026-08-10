@@ -84,7 +84,12 @@
       "Bash(python3 -c ' *)",
       "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs/31211372934/jobs\" -H \"Accept: application/vnd.github+json\")",
       "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs/31211373001/jobs\" -H \"Accept: application/vnd.github+json\")",
-      "Bash(curl -sL https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs/31211372934/logs -o C:/Users/djalma/AppData/Local/Temp/claude/c--Pessoal-ArquitetoDeValor/f903a1b7-bc36-4836-951d-e8896456f45f/scratchpad/backend_logs.zip -w 'HTTP:%{http_code} SIZE:%{size_download}\\\\n')"
+      "Bash(curl -sL https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs/31211372934/logs -o C:/Users/djalma/AppData/Local/Temp/claude/c--Pessoal-ArquitetoDeValor/f903a1b7-bc36-4836-951d-e8896456f45f/scratchpad/backend_logs.zip -w 'HTTP:%{http_code} SIZE:%{size_download}\\\\n')",
+      "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs/31395700539/jobs\" -H \"Accept: application/vnd.github+json\")",
+      "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs/31395700326/jobs\" -H \"Accept: application/vnd.github+json\")",
+      "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/commits/aa929c8/check-runs\" -H \"Accept: application/vnd.github+json\")",
+      "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/check-runs/93477944711/annotations\" -H \"Accept: application/vnd.github+json\")",
+      "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/check-runs/93477944214/annotations\" -H \"Accept: application/vnd.github+json\")"
     ]
   }
 }
