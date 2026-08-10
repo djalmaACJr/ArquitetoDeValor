@@ -794,15 +794,16 @@ export default function LancamentosPage() {
         </div>
 
         {/* Mês + alternar barra de filtros — sempre visíveis, independem de scroll */}
-        <div className="flex items-center flex-wrap gap-2 mb-2">
-          <div className="flex items-center gap-1.5 min-w-0" data-tutorial="extrato-mes">
+        <div className="flex items-center flex-nowrap gap-2 mb-2">
+          <div className="flex flex-1 items-center gap-1.5 min-w-0" data-tutorial="extrato-mes">
             <MonthPicker value={mes} onChange={setMes}
+              className="flex-1 min-w-0"
               onHoverPrev={() => prefetchAdj(-1)}
               onHoverNext={() => prefetchAdj(1)}
             />
             {fetching && !loading && (
               <span
-                className="inline-block w-3.5 h-3.5 rounded-full border-2 border-transparent animate-spin"
+                className="inline-block w-3.5 h-3.5 rounded-full border-2 border-transparent animate-spin flex-shrink-0"
                 style={{ borderTopColor: '#4da6ff', borderRightColor: 'rgba(77,166,255,0.3)' }}
               />
             )}
@@ -812,7 +813,7 @@ export default function LancamentosPage() {
           <button
             onClick={() => setFiltrosExpandidos(v => !v)}
             aria-expanded={filtrosExpandidos}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[15px] font-medium transition-all"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[15px] font-medium transition-all flex-shrink-0"
             style={{
               borderColor: temFiltroAtivo || !comSaldo ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.12)',
               color: temFiltroAtivo || !comSaldo ? '#4da6ff' : '#8b92a8',
@@ -828,10 +829,13 @@ export default function LancamentosPage() {
           </button>
         </div>
 
-        {/* Filtros — Conta/Categoria/Status/Saldo anterior, recolhível */}
+        {/* Filtros — Conta/Categoria/Status/Saldo anterior, recolhível.
+            flex-col no mobile: cada bloco (Conta+Categoria / Status+Atualizar+Filtros
+            salvos / Saldo anterior) ocupa 1 linha só — nunca quebra no meio, e não
+            fica alto demais a ponto de empurrar o extrato inteiro pra fora da tela. */}
         {filtrosExpandidos && (
-        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 mb-2 items-center">
-        <div className="contents sm:flex sm:items-center sm:gap-2" data-tutorial="extrato-filtros">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 mb-2 sm:items-center">
+        <div className="contents" data-tutorial="extrato-filtros">
           <FiltrosLancamentos
             pagina="extrato"
             filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
@@ -865,7 +869,7 @@ export default function LancamentosPage() {
         </div>
 
         {/* Toggle moderno — incluir saldo anterior */}
-        <div className="col-span-2 sm:col-span-1 flex flex-col gap-0.5 min-w-0" data-tutorial="extrato-saldo-anterior">
+        <div className="w-full sm:w-auto flex flex-col gap-0.5 min-w-0" data-tutorial="extrato-saldo-anterior">
           <button
             onClick={() => { if (filtCats.length === 0) setComSaldo(v => !v) }}
             disabled={filtCats.length > 0}
@@ -923,7 +927,10 @@ export default function LancamentosPage() {
             )}
           </div>
           {(pesquisa || temFiltroAtivo) && (
-            <div className="flex gap-1 flex-wrap sm:flex-nowrap flex-shrink-0">
+            <div
+              className="flex gap-1 flex-nowrap flex-shrink-0 overflow-x-auto max-w-full"
+              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' } as React.CSSProperties}
+            >
               {(['MES_ATUAL', 'MESES_ANTERIORES', 'PROXIMOS_MESES'] as const).map(e => {
                 const labels = { MES_ATUAL: 'Mês atual', MESES_ANTERIORES: 'Meses anteriores', PROXIMOS_MESES: 'Próximos meses' }
                 const ativo = escopoPesquisa === e

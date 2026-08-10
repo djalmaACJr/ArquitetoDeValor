@@ -53,80 +53,91 @@ export function FiltrosLancamentos({
 
   return (
     <>
-      <MultiSelect
-        placeholder="Todas as contas"
-        className={classNameContas}
-        values={filtContas}
-        onChange={setFiltContas}
-        options={contas
-          .filter(c => c.ativa)
-          .slice()
-          .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
-          .map(c => ({
-            value: c.conta_id,
-            label: c.nome,
-            cor:   c.cor ?? undefined,
-          }))}
-      />
+      {/* Linha 1 — Conta + Categoria, lado a lado (classNameContas/Cats = "w-full"
+          preenche a coluna do grid, não a tela inteira). Sem largura fixa aqui —
+          herda 100% do container pai quando ele empilha em coluna (LancamentosPage/
+          DashboardPage no mobile) e o conteúdo intrínseco quando o pai é uma linha
+          normal (RelatoriosPage, que passa larguras fixas tipo "w-44"). */}
+      <div className="grid grid-cols-2 gap-2 sm:contents">
+        <MultiSelect
+          placeholder="Todas as contas"
+          className={classNameContas}
+          values={filtContas}
+          onChange={setFiltContas}
+          options={contas
+            .filter(c => c.ativa)
+            .slice()
+            .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+            .map(c => ({
+              value: c.conta_id,
+              label: c.nome,
+              cor:   c.cor ?? undefined,
+            }))}
+        />
 
-      <MultiSelect
-        placeholder="Categorias"
-        className={classNameCats}
-        values={filtCats}
-        onChange={setFiltCats}
-        options={[
-          ...catsPai.map(p => ({
-            value: p.id,
-            label: p.descricao,
-            icone: p.icone ?? undefined,
-            cor:   p.cor   ?? undefined,
-          })),
-          ...catsSub.map(s => {
-            const pai = catsPai.find(p => p.id === s.id_pai)
-            return {
-              value: s.id,
-              label: s.descricao,
-              icone: s.icone ?? undefined,
-              cor:   s.cor   ?? undefined,
-              grupo: pai?.descricao ?? '',
-              idPai: s.id_pai ?? undefined,
-            }
-          }),
-        ]}
-      />
+        <MultiSelect
+          placeholder="Categorias"
+          className={classNameCats}
+          values={filtCats}
+          onChange={setFiltCats}
+          options={[
+            ...catsPai.map(p => ({
+              value: p.id,
+              label: p.descricao,
+              icone: p.icone ?? undefined,
+              cor:   p.cor   ?? undefined,
+            })),
+            ...catsSub.map(s => {
+              const pai = catsPai.find(p => p.id === s.id_pai)
+              return {
+                value: s.id,
+                label: s.descricao,
+                icone: s.icone ?? undefined,
+                cor:   s.cor   ?? undefined,
+                grupo: pai?.descricao ?? '',
+                idPai: s.id_pai ?? undefined,
+              }
+            }),
+          ]}
+        />
+      </div>
 
-      <MultiSelect
-        placeholder="Todos status"
-        className={classNameStatus}
-        values={filtStatus}
-        onChange={setFiltStatus}
-        options={STATUS_OPCOES}
-      />
+      {/* Linha 2 — Status + slot (ex.: atualizar) + Filtros salvos, sempre juntos
+          na mesma linha (nunca separados pelo grid de 2 colunas do mobile) */}
+      <div className="flex flex-nowrap items-center gap-2 sm:contents">
+        <MultiSelect
+          placeholder="Todos status"
+          className={`flex-1 min-w-0 sm:flex-none ${classNameStatus}`}
+          values={filtStatus}
+          onChange={setFiltStatus}
+          options={STATUS_OPCOES}
+        />
 
-      {slotAposStatus}
+        {slotAposStatus}
 
-      <FiltrosSalvosBtn
-        pagina={pagina}
-        filtAtual={{ filtContas, filtCats, filtStatus, ...(extras ?? {}) }}
-        temFiltroAtivo={
-          filtContas.length > 0 ||
-          filtCats.length   > 0 ||
-          filtStatus.length > 0 ||
-          !!extrasFiltroAtivo
-        }
-        onAplicar={d => {
-          setFiltContas((d.filtContas as string[]) ?? [])
-          setFiltCats((d.filtCats   as string[]) ?? [])
-          setFiltStatus((d.filtStatus as string[]) ?? [])
-          onAplicarExtras?.(d)
-        }}
-        onLimpar={() => {
-          setFiltContas([])
-          setFiltCats([])
-          setFiltStatus([])
-          onLimparExtras?.()
-        }}
-      />
+        <FiltrosSalvosBtn
+          pagina={pagina}
+          filtAtual={{ filtContas, filtCats, filtStatus, ...(extras ?? {}) }}
+          temFiltroAtivo={
+            filtContas.length > 0 ||
+            filtCats.length   > 0 ||
+            filtStatus.length > 0 ||
+            !!extrasFiltroAtivo
+          }
+          onAplicar={d => {
+            setFiltContas((d.filtContas as string[]) ?? [])
+            setFiltCats((d.filtCats   as string[]) ?? [])
+            setFiltStatus((d.filtStatus as string[]) ?? [])
+            onAplicarExtras?.(d)
+          }}
+          onLimpar={() => {
+            setFiltContas([])
+            setFiltCats([])
+            setFiltStatus([])
+            onLimparExtras?.()
+          }}
+        />
+      </div>
     </>
   )
 }

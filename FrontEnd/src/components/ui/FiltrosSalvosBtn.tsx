@@ -105,11 +105,15 @@ export function FiltrosSalvosBtn({ pagina, filtAtual, temFiltroAtivo, onAplicar,
         </span>
       </button>
 
-      {/* Dropdown */}
+      {/* Dropdown — ancorado pela esquerda e com largura limitada à viewport
+          (mesmo padrão do MultiSelect): "right-0" com minWidth fixo cortava a
+          metade esquerda do painel em telas estreitas quando o botão não
+          estava colado na borda direita (achado real: Android, botão no meio
+          da barra de filtros). */}
       {aberto && (
         <div
-          className="absolute top-9 right-0 z-50 rounded-xl border shadow-xl"
-          style={{ background: '#1a1f2e', borderColor: 'rgba(255,255,255,0.1)', minWidth: 300 }}
+          className="absolute top-full left-0 mt-1 z-50 w-[300px] max-w-[calc(100vw-2rem)] rounded-xl border shadow-xl"
+          style={{ background: '#1a1f2e', borderColor: 'rgba(255,255,255,0.1)' }}
         >
           {/* Header */}
           <div className="px-4 py-2.5 border-b border-white/10">

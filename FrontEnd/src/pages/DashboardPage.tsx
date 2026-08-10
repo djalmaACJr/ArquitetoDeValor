@@ -1735,14 +1735,17 @@ export default function DashboardPage() {
       {/* Topbar */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-5">
         <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Dashboard</h1>
-        <div className="w-full lg:w-auto grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2">
-          <div className="contents sm:flex sm:items-center sm:gap-2" data-tutorial="dashboard-filtros">
+        <div className="w-full lg:w-auto flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
+          {/* Linha 1 (mobile) — Filtros + Atualizar + Ocultar sempre juntos,
+              nunca separados em linhas diferentes */}
+          <div className="flex items-center gap-2">
             {/* Recolhida por padrão no Android — o mês continua sempre visível */}
             <button
+              data-tutorial="dashboard-filtros"
               onClick={() => setFiltrosExpandidos(v => !v)}
               aria-expanded={filtrosExpandidos}
               className={
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[16px] font-medium transition-colors ' +
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[16px] font-medium transition-colors flex-shrink-0 ' +
                 (temFiltroAtivo
                   ? 'border-blue-400/60 text-blue-600 bg-blue-50 dark:border-blue-400/40 dark:text-blue-400 dark:bg-blue-400/10'
                   : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800')
@@ -1755,33 +1758,35 @@ export default function DashboardPage() {
               )}
               {filtrosExpandidos ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>
-            {filtrosExpandidos && (
-              <FiltrosLancamentos
-                pagina="dashboard"
-                filtContas={contasFiltro} filtCats={filtCats} filtStatus={filtStatus}
-                setFiltContas={setContasFiltro} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
-                classNameContas="w-full sm:w-40"
-                classNameCats="w-full sm:w-44"
-                classNameStatus="w-full sm:w-36"
-              />
-            )}
+
+            {/* Botao atualizar */}
+            <button
+              onClick={handleRefresh}
+              title="Atualizar dados"
+              disabled={refreshing || loading}
+              className="flex items-center justify-center gap-1.5 text-[16px] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors disabled:opacity-50 flex-shrink-0"
+            >
+              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''}/>
+            </button>
+
+            <div data-tutorial="dashboard-ocultar" className="flex-shrink-0">
+              <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
+            </div>
           </div>
 
-          {/* Botao atualizar */}
-          <button
-            onClick={handleRefresh}
-            title="Atualizar dados"
-            disabled={refreshing || loading}
-            className="flex items-center justify-center gap-1.5 text-[16px] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''}/>
-          </button>
+          {/* Linha 2 (se expandido) — campos de filtro, cada bloco na sua linha */}
+          {filtrosExpandidos && (
+            <FiltrosLancamentos
+              pagina="dashboard"
+              filtContas={contasFiltro} filtCats={filtCats} filtStatus={filtStatus}
+              setFiltContas={setContasFiltro} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
+              classNameContas="w-full sm:w-40"
+              classNameCats="w-full sm:w-44"
+              classNameStatus="w-full sm:w-36"
+            />
+          )}
 
-          <div data-tutorial="dashboard-ocultar" className="min-w-0">
-            <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
-          </div>
-
-          <div data-tutorial="dashboard-mes" className="col-span-2 sm:col-span-1">
+          <div data-tutorial="dashboard-mes" className="w-full sm:w-auto">
             <MonthPicker
               value={mes}
               onChange={setMes}
@@ -1790,7 +1795,7 @@ export default function DashboardPage() {
             />
           </div>
 
-          <div data-tutorial="dashboard-novo-lancamento" className="col-span-2 sm:col-span-1">
+          <div data-tutorial="dashboard-novo-lancamento" className="w-full sm:w-auto">
             <BotaoNovoLancamento
               onSelect={tipo => navigate('/lancamentos', { state: { novoLancamento: true, tipoInicial: tipo } })}
               onLembrete={() => { setLembreteEditando(null); setDataInicialLembrete(undefined); setModalLembreteAberto(true) }}

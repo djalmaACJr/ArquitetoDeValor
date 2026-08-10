@@ -70,7 +70,21 @@
       "Bash(grep -v \"^$\")",
       "Bash(grep -n \"Access-Control-Allow-Headers\\\\|Idempotency\\\\|allow-headers\\\\|allowHeaders\" -i FrontEnd/../supabase/functions/_shared/utils.ts)",
       "Read(//c/Pessoal/ArquitetoDeValor/supabase/functions/_shared/**)",
-      "Bash(command -v supabase)"
+      "Bash(command -v supabase)",
+      "Bash(xargs -n1 basename)",
+      "Bash(python3 -c \"import datetime; print\\(datetime.datetime.utcfromtimestamp\\(1786129291967/1000\\)\\)\")",
+      "Bash(date -u -d @$\\(\\(1786129291967/1000\\)\\))",
+      "Bash(node -e \"console.log\\(new Date\\(1786129291967\\).toISOString\\(\\)\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\([f for f in d['functions'] if f['slug']=='investimentos']\\)\")",
+      "Bash(grep -o '\"slug\":\"investimentos\".\\\\{0,60\\\\}')",
+      "PowerShell($env:GH_TOKEN -ne $null)",
+      "PowerShell($env:GITHUB_TOKEN -ne $null)",
+      "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs?per_page=15\" -H \"Accept: application/vnd.github+json\")",
+      "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs?per_page=20\" -H \"Accept: application/vnd.github+json\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs/31211372934/jobs\" -H \"Accept: application/vnd.github+json\")",
+      "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs/31211373001/jobs\" -H \"Accept: application/vnd.github+json\")",
+      "Bash(curl -sL https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/actions/runs/31211372934/logs -o C:/Users/djalma/AppData/Local/Temp/claude/c--Pessoal-ArquitetoDeValor/f903a1b7-bc36-4836-951d-e8896456f45f/scratchpad/backend_logs.zip -w 'HTTP:%{http_code} SIZE:%{size_download}\\\\n')"
     ]
   }
 }
