@@ -333,10 +333,17 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
           implícito da nav (que cortava o botão, posicionado propositalmente
           "a cavalo" da borda direita com `-right-3`). No mobile a nav é
           `fixed` (ignora ancestrais não-transformados), então o wrapper
-          vazio não afeta nada. */}
+          vazio não afeta nada.
+          `min-h-0` é necessário porque este wrapper é item de um flex
+          container (`.app-shell`) — sem isso, o "automatic minimum size"
+          do flexbox deixa o wrapper crescer além de `h-[100svh]` sempre
+          que a nav (com muitos itens/submenu aberto) precisa de mais
+          altura que a viewport, empurrando o botão de colapsar (ancorado
+          perto do topo do wrapper) pra fora da área visível assim que a
+          nav ganha scroll interno. */}
       <div
         className={isDesktop
-          ? `relative sticky top-0 h-[100svh] flex-shrink-0 transition-all duration-300 ${colapsado ? 'w-[60px]' : 'w-[216px]'}`
+          ? `relative sticky top-0 h-[100svh] min-h-0 flex-shrink-0 transition-all duration-300 ${colapsado ? 'w-[60px]' : 'w-[216px]'}`
           : ''}
       >
       <nav
