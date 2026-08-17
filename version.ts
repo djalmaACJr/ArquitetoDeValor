@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "6.0.2"
+export const APP_VERSION = "6.0.3"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -16,7 +16,7 @@ export const getVersionInfo = () => ({
   },
   current: {
     level: "patch",
-    description: "Legendas ocultas por padrão no Android para os gráficos de Receitas/Despesas por categoria no Dashboard"
+    description: "Cabeçalho do Extrato/Dashboard em uma linha só, filtros ocultos por padrão e calendário do Extrato com zoom automático e aviso ao clicar em dia sem lançamento"
   }
 })
 

@@ -729,20 +729,26 @@ export async function upsertDividendoProvisionado(admin: Db, p: {
     const round8 = (n: number) => Number(n.toFixed(8));
     const vpcAtual = existente.valor_por_cota != null ? round8(Number(existente.valor_por_cota)) : null;
     const vpcMudou = vpc != null && vpcAtual !== round8(vpc);
-    const mudou = Number(existente.valor) !== p.valor
-      || String(existente.data_pagamento).slice(0, 10) !== p.payDate
-      || vpcMudou;
-    if (!mudou) return "ignorado";
+    const valorMudou = Number(existente.valor) !== p.valor;
+    const dataMudou = String(existente.data_pagamento).slice(0, 10) !== p.payDate;
+    if (!valorMudou && !dataMudou && !vpcMudou) return "ignorado";
     await admin.from("inv_dividendos")
       .update({ valor: p.valor, data_pagamento: p.payDate, ...(vpc != null ? { valor_por_cota: vpc } : {}) })
       .eq("id", existente.id);
-    if (existente.transacao_extrato_id) {
+    if (existente.transacao_extrato_id && (valorMudou || dataMudou)) {
       // Ainda em projeção: acompanha o valor/data mais recentes da fonte.
       await admin.from("transacoes")
         .update({ valor: p.valor, data: p.payDate, valor_projetado: p.valor })
         .eq("id", existente.transacao_extrato_id);
     }
-    return "atualizado";
+    // "Atualizado" (conta pro aviso de login + toca a transação) só quando algo
+    // que o usuário REALMENTE VÊ mudou (valor ou data). Uma variação só no
+    // valor_por_cota — a taxa bruta da fonte, usada apenas internamente pro
+    // DY/YoC — ainda é persistida acima (mantém a métrica precisa), mas sozinha
+    // não conta como novidade: ela nunca muda o que aparece no extrato, e
+    // notificar isso todo dia (achado real: aviso repetido com valor/data/conta/
+    // descrição idênticos) inflava o login sem nenhuma mudança perceptível.
+    return (valorMudou || dataMudou) ? "atualizado" : "ignorado";
   }
 
   // Sem inv_dividendos provisionado: tenta ADOTAR um lançamento manual que o

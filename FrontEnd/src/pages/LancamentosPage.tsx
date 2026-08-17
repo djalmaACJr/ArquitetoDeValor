@@ -1,5 +1,5 @@
 // src/pages/LancamentosPage.tsx
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Capacitor } from '@capacitor/core'
 
@@ -29,6 +29,10 @@ function fmtDataLabel(iso: string) {
   const d = new Date(iso + 'T12:00:00')
   const label = d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
   return label.charAt(0).toUpperCase() + label.slice(1)
+}
+function fmtDataCurta(iso: string) {
+  const d = new Date(iso + 'T12:00:00')
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 }
 function agruparPorData<T extends { data: string }>(items: T[]): [string, T[]][] {
   const map = new Map<string, T[]>()
@@ -90,36 +94,57 @@ function AcaoBtn({ onClick, title, color = '#8b92a8', children }: {
 // ── Calendário de dias ────────────────────────────────────────
 const DIAS_ABR = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
 
-function CalendarioStrip({ mes, diasComMovimento, hoje, onSelectDia }: {
+function CalendarioStrip({ mes, diasComMovimento, hoje, onSelectDia, onDiaVazio }: {
   mes: string
   diasComMovimento: Set<string>
   hoje: string
   onSelectDia?: (data: string) => void
+  onDiaVazio?: (data: string) => void
 }) {
+  const wrapRef      = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const hojeRef      = useRef<HTMLButtonElement>(null)
+  const [escala,        setEscala]        = useState(1)
+  const [alturaNatural, setAlturaNatural] = useState(0)
   const [ano, m]     = mes.split('-').map(Number)
   const totalDias    = new Date(ano, m, 0).getDate()
   const isMesCorrente = mes === hoje.slice(0, 7)
 
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-    if (hojeRef.current) {
-      const el = hojeRef.current
-      const offset = el.offsetLeft - container.clientWidth / 2 + el.offsetWidth / 2
-      container.scrollTo({ left: Math.max(0, offset), behavior: 'instant' })
-    } else {
-      container.scrollTo({ left: 0, behavior: 'instant' })
+  // Quando a faixa de dias não cabe na largura disponível, encolhe tudo
+  // proporcionalmente (como um zoom out) em vez de forçar rolagem
+  // horizontal — assim o mês inteiro fica visível de cara, do dia 1 ao
+  // último. Só sobra rolagem residual se o piso de escala (0.6) ainda não
+  // for suficiente em telas extremamente estreitas.
+  useLayoutEffect(() => {
+    const wrap  = wrapRef.current
+    const inner = containerRef.current
+    if (!wrap || !inner) return
+    function recalcular() {
+      const disponivel = wrap!.clientWidth
+      const natural     = inner!.scrollWidth
+      setAlturaNatural(inner!.offsetHeight)
+      if (disponivel <= 0 || natural <= 0) return
+      setEscala(Math.min(1, Math.max(disponivel / natural, 0.6)))
     }
-  }, [mes])
+    recalcular()
+    const ro = new ResizeObserver(recalcular)
+    ro.observe(wrap)
+    return () => ro.disconnect()
+  }, [totalDias])
 
   return (
     <div
-      ref={containerRef}
-      className="flex gap-1 overflow-x-auto mb-4"
-      style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' } as React.CSSProperties}
+      ref={wrapRef}
+      className="overflow-x-auto mb-4"
+      style={{
+        scrollbarWidth: 'none', msOverflowStyle: 'none',
+        height: alturaNatural ? alturaNatural * escala : undefined,
+      } as React.CSSProperties}
     >
+      <div
+        ref={containerRef}
+        className="flex gap-1"
+        style={{ transform: `scale(${escala})`, transformOrigin: 'left top', width: 'max-content' }}
+      >
       {Array.from({ length: totalDias }, (_, i) => {
         const d         = i + 1
         const data      = `${mes}-${String(d).padStart(2, '0')}`
@@ -153,15 +178,14 @@ function CalendarioStrip({ mes, diasComMovimento, hoje, onSelectDia }: {
         return (
           <button
             key={data}
-            ref={ehHoje ? hojeRef : undefined}
             onClick={() => {
-              if (!temMov) return
-              onSelectDia?.(data)
+              if (temMov) onSelectDia?.(data)
+              else onDiaVazio?.(data)
             }}
             style={{
               minWidth: 42, flexShrink: 0, display: 'flex', flexDirection: 'column',
               alignItems: 'center', gap: 3, padding: '6px 4px', borderRadius: 10,
-              border, background: bg, cursor: temMov ? 'pointer' : 'default',
+              border, background: bg, cursor: 'pointer',
               opacity, transition: 'background 0.15s',
             }}
           >
@@ -175,6 +199,7 @@ function CalendarioStrip({ mes, diasComMovimento, hoje, onSelectDia }: {
           </button>
         )
       })}
+      </div>
     </div>
   )
 }
@@ -215,6 +240,12 @@ export default function LancamentosPage() {
   const [feedback,           setFeedback]           = useState<string | null>(null)
   const [confirmandoExcLote, setConfirmandoExcLote] = useState(false)
   const [modalLembreteAberto, setModalLembreteAberto] = useState(false)
+  // Aviso flutuante de "dia sem lançamento" no calendário — precisa ser fixed
+  // (não o <Toast> inline padrão) porque o clique dispara um scroll até o dia
+  // mais próximo, e um aviso em fluxo normal ficaria escondido atrás do
+  // cabeçalho sticky assim que a rolagem termina.
+  const [avisoCalendario, setAvisoCalendario] = useState<string | null>(null)
+  const avisoCalendarioTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Navegação por teclado ← → entre meses
   const navMes = useCallback((delta: number) => {
@@ -302,7 +333,10 @@ export default function LancamentosPage() {
 
   // Cleanup do timer ao desmontar
   useEffect(() => {
-    return () => { if (destaqueTimerRef.current) clearTimeout(destaqueTimerRef.current) }
+    return () => {
+      if (destaqueTimerRef.current) clearTimeout(destaqueTimerRef.current)
+      if (avisoCalendarioTimerRef.current) clearTimeout(avisoCalendarioTimerRef.current)
+    }
   }, [])
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
 
@@ -750,54 +784,44 @@ export default function LancamentosPage() {
     [lancamentosParaExibir]
   )
 
+  // Clique num dia do calendário sem lançamento: pula pro dia com movimento
+  // mais próximo (dentro do mês exibido) e avisa com um toast.
+  const avisarCalendario = useCallback((msg: string) => {
+    setAvisoCalendario(msg)
+    if (avisoCalendarioTimerRef.current) clearTimeout(avisoCalendarioTimerRef.current)
+    avisoCalendarioTimerRef.current = setTimeout(() => setAvisoCalendario(null), 3500)
+  }, [])
+
+  const handleDiaVazio = useCallback((diaClicado: string) => {
+    const diasDoMes = Array.from(diasComMovimento).filter(d => d.startsWith(mes))
+    if (diasDoMes.length === 0) {
+      avisarCalendario(`Nenhum lançamento em ${mesLabel(mes, 'longo')}`)
+      return
+    }
+    const alvo = Number(diaClicado.slice(-2))
+    let maisProximo = diasDoMes[0]
+    let melhorDist = Infinity
+    for (const d of diasDoMes) {
+      const dist = Math.abs(Number(d.slice(-2)) - alvo)
+      if (dist < melhorDist) { melhorDist = dist; maisProximo = d }
+    }
+    handleSelectDia(maisProximo)
+    avisarCalendario(`Sem lançamentos em ${fmtDataCurta(diaClicado)} — mostrando ${fmtDataCurta(maisProximo)}`)
+  }, [diasComMovimento, mes, handleSelectDia, avisarCalendario])
+
 
   return (
     <div className="p-5">
       {/* ── Sticky: topbar + mês + filtros + pesquisa + calendário ── */}
       <div ref={stickyRef} className="sticky top-0 z-20 -mx-5 px-5 pt-4 pb-2" style={{ background: '#0d1220', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-        {/* Topbar */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-          <h1 className="text-[21px] font-bold" style={{ color: '#e8eaf0' }}>
+        {/* Topbar — título, mês, filtros, exportar e novo lançamento, tudo em uma linha só */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <h1 className="text-[21px] font-bold flex-shrink-0" style={{ color: '#e8eaf0' }}>
             Lançamentos
           </h1>
-          <div className="w-full sm:w-auto flex items-center gap-2">
-            <button
-              data-tutorial="extrato-exportar"
-              onClick={exportarXlsx}
-              disabled={lancamentosParaExibir.length === 0}
-              title="Exportar extrato como XLSX"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[16px] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{
-                borderColor: 'rgba(255,255,255,0.12)',
-                color: '#8b92a8',
-                background: 'rgba(255,255,255,0.03)',
-              }}
-              onMouseEnter={e => {
-                if (lancamentosParaExibir.length === 0) return
-                const el = e.currentTarget as HTMLElement
-                el.style.borderColor = 'rgba(0,200,150,0.45)'
-                el.style.color = '#00c896'
-              }}
-              onMouseLeave={e => {
-                const el = e.currentTarget as HTMLElement
-                el.style.borderColor = 'rgba(255,255,255,0.12)'
-                el.style.color = '#8b92a8'
-              }}
-            >
-              <FileDown size={14} />
-              <span className="hidden sm:inline">Exportar XLS</span>
-            </button>
-            <div data-tutorial="extrato-novo-lancamento" className="flex-1 sm:flex-none">
-              <BotaoNovoLancamento onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
-            </div>
-          </div>
-        </div>
 
-        {/* Mês + alternar barra de filtros — sempre visíveis, independem de scroll */}
-        <div className="flex items-center flex-nowrap gap-2 mb-2">
-          <div className="flex flex-1 items-center gap-1.5 min-w-0" data-tutorial="extrato-mes">
+          <div className="flex items-center gap-1.5 flex-shrink-0" data-tutorial="extrato-mes">
             <MonthPicker value={mes} onChange={setMes}
-              className="flex-1 min-w-0"
               onHoverPrev={() => prefetchAdj(-1)}
               onHoverNext={() => prefetchAdj(1)}
             />
@@ -827,6 +851,38 @@ export default function LancamentosPage() {
             )}
             {filtrosExpandidos ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           </button>
+
+          <div className="flex-1" />
+
+          <button
+            data-tutorial="extrato-exportar"
+            onClick={exportarXlsx}
+            disabled={lancamentosParaExibir.length === 0}
+            title="Exportar extrato como XLSX"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[16px] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+            style={{
+              borderColor: 'rgba(255,255,255,0.12)',
+              color: '#8b92a8',
+              background: 'rgba(255,255,255,0.03)',
+            }}
+            onMouseEnter={e => {
+              if (lancamentosParaExibir.length === 0) return
+              const el = e.currentTarget as HTMLElement
+              el.style.borderColor = 'rgba(0,200,150,0.45)'
+              el.style.color = '#00c896'
+            }}
+            onMouseLeave={e => {
+              const el = e.currentTarget as HTMLElement
+              el.style.borderColor = 'rgba(255,255,255,0.12)'
+              el.style.color = '#8b92a8'
+            }}
+          >
+            <FileDown size={14} />
+            <span className="hidden sm:inline">Exportar XLS</span>
+          </button>
+          <div data-tutorial="extrato-novo-lancamento" className="flex-shrink-0">
+            <BotaoNovoLancamento onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
+          </div>
         </div>
 
         {/* Filtros — Conta/Categoria/Status/Saldo anterior, recolhível.
@@ -952,7 +1008,7 @@ export default function LancamentosPage() {
         {/* Calendário — oculto em busca multi-mês */}
         {!buscaMultiMes && (
           <div data-tutorial="extrato-calendario">
-            <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} onSelectDia={handleSelectDia} />
+            <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} onSelectDia={handleSelectDia} onDiaVazio={handleDiaVazio} />
           </div>
         )}
       </div>
@@ -971,6 +1027,17 @@ export default function LancamentosPage() {
       )}
 
       <Toast msg={feedback} />
+
+      {/* Aviso flutuante — dia sem lançamento no calendário. Fixed pra não
+          sumir atrás do cabeçalho sticky quando o clique rola a página. */}
+      {avisoCalendario && (
+        <div
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-40 px-4 py-2.5 rounded-lg border text-[15px] font-semibold shadow-lg whitespace-nowrap"
+          style={{ background: 'rgba(13,18,32,0.95)', borderColor: 'rgba(0,200,150,0.35)', color: '#00c896', backdropFilter: 'blur(4px)' }}
+        >
+          {avisoCalendario}
+        </div>
+      )}
 
       {/* Tutorial do mascote (oculta após o usuário fechar) */}
       <div className="mt-4">
