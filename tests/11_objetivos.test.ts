@@ -54,7 +54,13 @@ describe("Objetivos — CA-OBJ01 a CA-OBJ13", () => {
     contaCalculoId = novaConta.conta_id ?? novaConta.id;
 
     await limparObjetivosJest();
-  }, 60000); // margem extra: hook depende de auth+edge function, sujeito a cold start esporádico
+  }, 150000); // margem extra: hook depende de auth+edge function, sujeito a cold start esporádico —
+  // 60s não bastava mais (achado real, ago/2026): o projeto Supabase está no
+  // plano Pro mas SEM Compute Instance pago selecionado, rodando no compute
+  // compartilhado/burstable padrão — sob carga sustentada (as 3 suítes mais
+  // pesadas rodando logo antes desta, ~6min contínuos) o crédito de burst de
+  // CPU esgota e um GET /contas trivial pode levar bem mais que 60s pra
+  // responder. 150s dá margem sem mascarar uma regressão de verdade.
 
   afterAll(async () => {
     await limparObjetivosJest();
@@ -71,7 +77,7 @@ describe("Objetivos — CA-OBJ01 a CA-OBJ13", () => {
     // (sem TEST_EMAIL_B configurado) — exclui aqui, não faz nada se User B
     // veio de credenciais reais do .env.
     await limparUserBSeDinamico();
-  }, 60000);
+  }, 150000); // mesmo motivo do beforeAll acima
 
   // ── CA-OBJ01 ────────────────────────────────────────────────
   test("CA-OBJ01 — POST /objetivos cria SONHO e retorna 201 com campos corretos", async () => {

@@ -271,6 +271,8 @@ Antes da migration `20260505000001`, qualquer UPDATE em `transacoes` revalidava 
 | `12_investimentos.test.ts` | CA-INV01..26 |
 | `99_limpar.test.ts` | CA-LIM01..11 (limpeza pós-suite) |
 
+> ⚠️ **`11_objetivos.test.ts` pode falhar por timeout sob carga** (achado ago/2026): o projeto Supabase está no plano **Pro sem Compute Instance pago selecionado** — roda no compute compartilhado/burstable padrão. `--runInBand` executa `12_investimentos`/`04_transferencias`/`03_transacoes` (as 3 suítes mais pesadas) logo antes de `11_objetivos`; sob ~6min de carga contínua o burst de CPU esgota e até um `GET /contas` trivial no `beforeAll` pode passar de 60s. Os hooks `beforeAll`/`afterAll` desse arquivo já têm timeout de 150s por causa disso. Se voltar a estourar, a causa raiz não é bug de código — é adicionar um Compute Instance pago (Dashboard → Settings → Compute and Disk) ou aceitar mais alguma margem.
+
 ### E2E (Playwright) — `FrontEnd/e2e/tests/`
 
 `00_cadastro`, `01_contas`, `02_categorias`, `03_navegacao`, `04_extrato`, `05_dashboard`, `06_relatorios`, `07_transferencias`, `08_lembretes`, `09_assistente`, `10_objetivos`, `11_investimentos`, `zz_teardown` (+ `auth.setup.ts`, `data.setup.ts`, `helpers.ts`).
