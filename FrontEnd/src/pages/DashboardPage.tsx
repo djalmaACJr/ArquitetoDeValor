@@ -6,7 +6,7 @@ import MascoteDica from '../components/ui/MascoteDica'
 import { falaResultadoMes } from '../lib/conteudoMascotes'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
-import { ChevronDown, ChevronUp, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus, Search, Filter } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronRight, RefreshCw, History, Bell, Check, Trash2, Pencil, X, Plus, Search, Filter, Eye } from 'lucide-react'
 import { useDashboard } from '../hooks/useDashboard'
 import { log } from '../lib/logger'
 import { mesLabel, formatBRL, formatData, proximoMes, hojeLocal, mesAtual, dataParaYMD, MESES_ABREV, CORES_CATEGORIA } from '../lib/utils'
@@ -35,7 +35,8 @@ ChartJS.register(
 import type { Conta, Transacao, DespesaCategoria } from '../types'
 import type { Lancamento } from '../hooks/useLancamentos'
 import { useSaldoBaseMes } from '../hooks/useSaldoBaseMes'
-import { supabase } from '../lib/supabase'
+import { useTrilhaAuditoria, type TrilhaAuditoriaItem, type OperacaoAuditoria } from '../hooks/useTrilhaAuditoria'
+import DiffAuditoria from '../components/ui/DiffAuditoria'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import CalendarioDashboard from '../components/ui/CalendarioDashboard'
@@ -1017,15 +1018,13 @@ const GraficoDonut = memo(function GraficoDonut({ titulo, subtitulo, total, dado
 })
 
 // -- Card de últimas alterações ------------------------------------
-interface AlteracaoItem {
-  id: string
-  descricao: string
-  valor: number
-  tipo: string
-  data: string
-  status: string
-  conta_id: string
-  atualizado_em: string
+// Fonte: trilha_auditoria (tabela=transacoes), não a tabela transacoes
+// direto — assim EXCLUSÕES também aparecem (a linha já não existe mais em
+// transacoes pra listar por lá, mas o snapshot fica em dados_antigos).
+// Ver ARCHITECTURE.md § "Trilha de auditoria".
+type SnapshotTransacao = {
+  descricao?: string | null; valor?: number; tipo?: string
+  data?: string; status?: string; conta_id?: string
 }
 
 function formatRelativo(iso: string): string {
@@ -1040,24 +1039,81 @@ function formatRelativo(iso: string): string {
   return formatData(iso.split('T')[0])
 }
 
-const CardUltimasAlteracoes = memo(function CardUltimasAlteracoes({ contas, onEditar }: { contas: Conta[]; onEditar: (id: string) => void }) {
-  const [aberto,  setAberto]  = useState(false)
-  const [items,   setItems]   = useState<AlteracaoItem[]>([])
-  const [loading, setLoading] = useState(false)
-  const [stamp,   setStamp]   = useState(0)
+const ROTULO_OPERACAO: Record<OperacaoAuditoria, string> = {
+  INSERT: 'criado', UPDATE: 'editado', DELETE: 'excluído',
+}
+const COR_OPERACAO: Record<OperacaoAuditoria, string> = {
+  INSERT: 'bg-green-500', UPDATE: 'bg-amber-400', DELETE: 'bg-red-400',
+}
 
+// Modal "Ver alterações" — mostra o diff de UM evento da trilha (o item já
+// traz dados_antigos/dados_novos, sem precisar de nova chamada). Estilo
+// dark fixo, mesmo padrão de ModalLembrete/Drawer usados no resto do app.
+function ModalVerAlteracao({ item, onClose, contas }: { item: TrilhaAuditoriaItem | null; onClose: () => void; contas: Conta[] }) {
   useEffect(() => {
-    if (!aberto) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true)
-    supabase
-      .schema('arqvalor')
-      .from('transacoes')
-      .select('id, descricao, valor, tipo, data, status, conta_id, atualizado_em')
-      .order('atualizado_em', { ascending: false })
-      .limit(50)
-      .then(({ data }) => { setItems(data ?? []); setLoading(false) })
-  }, [aberto, stamp])
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape' && item) onClose() }
+    document.addEventListener('keydown', fn)
+    return () => document.removeEventListener('keydown', fn)
+  }, [item, onClose])
+
+  if (!item) return null
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/60 z-[200]" onClick={onClose} />
+      <div role="dialog" aria-modal="true"
+        className="fixed z-[201] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
+          w-[min(440px,calc(100vw-32px))] max-h-[80vh] rounded-2xl border border-white/10 flex flex-col"
+        style={{ background: '#1a1f2e' }}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <div className="flex items-center gap-2">
+            <History size={15} style={{ color: '#4da6ff' }} />
+            <span className="text-[18px] font-semibold" style={{ color: '#e8eaf0' }}>
+              Lançamento {ROTULO_OPERACAO[item.operacao]}
+            </span>
+          </div>
+          <button onClick={onClose}
+            className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/30"
+            style={{ color: '#8b92a8' }}>
+            <X size={14} />
+          </button>
+        </div>
+        <div className="p-5 overflow-y-auto">
+          <p className="text-[13px] mb-3" style={{ color: '#8b92a8' }}>{formatDataHoraCompleta(item.alterado_em)}</p>
+          <DiffAuditoria item={item} contas={contas} />
+        </div>
+      </div>
+    </>
+  )
+}
+
+function formatDataHoraCompleta(iso: string): string {
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+const CardUltimasAlteracoes = memo(function CardUltimasAlteracoes({ contas, onEditar }: { contas: Conta[]; onEditar: (id: string) => void }) {
+  const [aberto,      setAberto]      = useState(false)
+  // Filtro opcional por conta — 'todas' = sem filtro
+  const [contaFiltro, setContaFiltro] = useState<string>('todas')
+  // Localizar/filtrar por descrição — client-side, sobre os itens já carregados
+  const [busca,       setBusca]       = useState('')
+  const [verAlteracao, setVerAlteracao] = useState<TrilhaAuditoriaItem | null>(null)
+
+  const contasOrdenadas = [...contas].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+
+  const { itens: itensBrutos, loading, recarregar } = useTrilhaAuditoria(
+    { tabela: 'transacoes', conta_id: contaFiltro === 'todas' ? undefined : contaFiltro, limit: 50 },
+    aberto,
+  )
+
+  const buscaNorm = busca.trim().toLowerCase()
+  const itens = buscaNorm
+    ? itensBrutos.filter(item => {
+        const snap = (item.dados_novos ?? item.dados_antigos) as SnapshotTransacao | null
+        return (snap?.descricao ?? '').toLowerCase().includes(buscaNorm)
+      })
+    : itensBrutos
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
@@ -1074,9 +1130,30 @@ const CardUltimasAlteracoes = memo(function CardUltimasAlteracoes({ contas, onEd
 
       {aberto && (
         <div className="mt-3">
-          <div className="flex justify-end mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <div className="relative flex-1 min-w-[140px]">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"/>
+              <input
+                type="text"
+                value={busca}
+                onChange={e => setBusca(e.target.value)}
+                placeholder="Localizar por descrição..."
+                className="w-full text-[14px] pl-7 pr-2 py-1 rounded-md border border-gray-200 dark:border-gray-600 bg-transparent text-gray-700 dark:text-gray-200 placeholder:text-gray-400"
+              />
+            </div>
+            <select
+              value={contaFiltro}
+              onChange={e => setContaFiltro(e.target.value)}
+              className="text-[14px] bg-blue-400/10 border border-blue-400/30 rounded-md text-av-blue px-2 py-1 cursor-pointer"
+              style={{ colorScheme: 'auto' }}
+            >
+              <option value="todas">Todas as contas</option>
+              {contasOrdenadas.map(c => (
+                <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>
+              ))}
+            </select>
             <button
-              onClick={() => setStamp(Date.now())}
+              onClick={() => recarregar()}
               className="text-[14px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 flex items-center gap-1"
             >
               <RefreshCw size={10}/> Atualizar
@@ -1084,27 +1161,44 @@ const CardUltimasAlteracoes = memo(function CardUltimasAlteracoes({ contas, onEd
           </div>
           {loading ? (
             <p className="text-[16px] text-gray-400 text-center py-4">Carregando...</p>
-          ) : items.length === 0 ? (
-            <p className="text-[16px] text-gray-400 text-center py-4">Nenhuma alteração encontrada.</p>
+          ) : itens.length === 0 ? (
+            <p className="text-[16px] text-gray-400 text-center py-4">
+              {buscaNorm ? 'Nenhuma alteração encontrada para essa busca.' : 'Nenhuma alteração encontrada.'}
+            </p>
           ) : (
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {items.map(item => {
-                const conta = contas.find(c => c.conta_id === item.conta_id)
-                const isRec = item.tipo === 'RECEITA'
+              {itens.map(item => {
+                const snap = (item.dados_novos ?? item.dados_antigos) as SnapshotTransacao | null
+                const conta = contas.find(c => c.conta_id === snap?.conta_id)
+                const isRec = snap?.tipo === 'RECEITA'
+                const excluido = item.operacao === 'DELETE'
                 return (
-                  <div key={item.id} onClick={() => onEditar(item.id)} className="flex items-start gap-2 py-1.5 border-b border-gray-100 dark:border-gray-700 last:border-0 cursor-pointer hover:bg-white/5 rounded transition-colors">
-                    <span className={`mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 ${isRec ? 'bg-green-500' : 'bg-red-400'}`}/>
+                  <div key={item.id} className="flex items-start gap-2 py-1.5 border-b border-gray-100 dark:border-gray-700 last:border-0 rounded">
+                    <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${COR_OPERACAO[item.operacao]}`}/>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[16px] text-gray-700 dark:text-gray-200 truncate">{item.descricao || '—'}</p>
+                      <p className={`text-[16px] truncate ${excluido ? 'line-through text-gray-400 dark:text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>
+                        {snap?.descricao || '—'}
+                      </p>
                       <p className="text-[14px] text-gray-400 truncate">
-                        {formatData(item.data)} · {conta?.nome ?? '—'} · {formatRelativo(item.atualizado_em)}
+                        {snap?.data ? formatData(snap.data) : '—'} · {conta?.nome ?? '—'} · {ROTULO_OPERACAO[item.operacao]} {formatRelativo(item.alterado_em)}
                       </p>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className={`text-[16px] font-semibold ${isRec ? 'text-green-500' : 'text-red-400'}`}>
-                        {formatBRL(item.valor)}
+                        {snap?.valor != null ? formatBRL(snap.valor) : '—'}
                       </p>
-                      <p className="text-[13px] text-gray-400 uppercase">{item.status}</p>
+                      <div className="flex items-center justify-end gap-1 mt-1">
+                        {!excluido && (
+                          <button onClick={() => onEditar(item.registro_id)} title="Editar registro"
+                            className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                            <Pencil size={13} />
+                          </button>
+                        )}
+                        <button onClick={() => setVerAlteracao(item)} title="Ver o que foi alterado"
+                          className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                          <Eye size={13} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )
@@ -1113,6 +1207,8 @@ const CardUltimasAlteracoes = memo(function CardUltimasAlteracoes({ contas, onEd
           )}
         </div>
       )}
+
+      <ModalVerAlteracao item={verAlteracao} onClose={() => setVerAlteracao(null)} contas={contas} />
     </div>
   )
 })

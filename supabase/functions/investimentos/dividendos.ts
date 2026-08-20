@@ -689,7 +689,22 @@ export async function upsertDividendoProvisionado(admin: Db, p: {
 
   type Cand = { id: string; transacao_extrato_id: string | null; valor: number; data_pagamento: string; valor_por_cota: number | null; transacoes?: { status?: string } | null };
   const lista = (candidatos ?? []) as Cand[];
-  const existente = lista.find((d) => d.transacoes?.status === "PROJECAO");
+  // Entre as projeções do mês, só reaproveita a que já tem a MESMA data do
+  // evento sendo processado. NUNCA cai para "a projeção do mês, seja qual
+  // for" (mesmo havendo só 1 candidata) — essa versão anterior partia do
+  // pressuposto de que uma única projeção diferente no mês só podia ser o
+  // MESMO evento com data corrigida pela fonte, e reaproveitava reescrevendo
+  // a data. Na prática um ativo pode ter 2+ tranches do mesmo tipo em DATAS
+  // diferentes dentro do mês (não só na mesma data, caso já coberto pela
+  // soma em provisionarProventosBrl) — cada execução então alternava qual
+  // das duas "ganhava" a única linha existente, ficando permanentemente
+  // "atualizado" e o valor/data oscilando entre os dois
+  // eventos a cada dia (achado real: BBDC3/JSCP setembro/2026 — payDate
+  // oscilando entre 01/09 e 15/09, cada um com seu próprio valor, porque só
+  // existia 1 registro em inv_dividendos pra representar os dois). Sem data
+  // exata, sempre cria um registro NOVO — nunca corrompe um existente.
+  const projecoesDoMes = lista.filter((d) => d.transacoes?.status === "PROJECAO");
+  const existente = projecoesDoMes.find((d) => String(d.data_pagamento).slice(0, 10) === p.payDate);
 
   // Já existe um registro NÃO-projeção (pago/pendente pelo usuário, ou
   // dividendo sem transação) para esta MESMA data de pagamento: não mexe,
@@ -1442,10 +1457,21 @@ export async function coletarProventosB3(ativo: AtivoBrl): Promise<ProventoB3[] 
   if (brutos.length === 0) return [];
 
   const classeAlvo = classeDoTicker(ativo.ticker, ativo.acoes_subtipo);
-  // Dedup por (payDate|label): para ações prioriza o ISIN da classe certa.
+  // Dedup por (payDate|label|rate) — o rate entra na chave de propósito.
+  // O objetivo aqui é só juntar o MESMO pagamento reportado sob classes
+  // diferentes (ON/PN) do mesmo emissor (a busca é por emissor, sem o
+  // sufixo do papel, então a B3 devolve os cashDividends de TODAS as
+  // classes misturados) — nunca colapsar tranches genuinamente distintas
+  // anunciadas na mesma data com o mesmo label. Sem o rate na chave, 2
+  // JCPs legítimos no mesmo dia (mesmo label "JRS CAP PROPRIO", valores por
+  // ação diferentes) caíam na mesma chave e o 2º sobrescrevia o 1º — a
+  // soma por (data, tipo) em provisionarProventosBrl nunca via as duas
+  // tranches, só a que sobrou (achado real: BBDC3/JSCP setembro/2026, dois
+  // JCPs de R$0,27 e R$0,32/ação no mesmo payDate — o app só provisionava
+  // R$62,76, nunca a soma R$116,55 que a B3 realmente paga).
   const escolhido = new Map<string, ProventoB3 & { classe: "ON" | "PN" | null }>();
   for (const b of brutos) {
-    const chave = `${b.payDate}|${b.label}`;
+    const chave = `${b.payDate}|${b.label}|${b.rate}`;
     const atual = escolhido.get(chave);
     if (!atual) { escolhido.set(chave, b); continue; }
     if (ativo.tipo_ativo !== "FII" && classeAlvo) {

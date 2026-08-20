@@ -523,6 +523,12 @@ verify_jwt = false
 import_map = "./functions/convite/deno.json"
 entrypoint = "./functions/convite/index.ts"
 
+[functions.auditoria]
+enabled = true
+verify_jwt = false
+import_map = "./functions/auditoria/deno.json"
+entrypoint = "./functions/auditoria/index.ts"
+
 [functions.app_updates]
 enabled = true
 verify_jwt = false

@@ -1618,6 +1618,12 @@ export default function PerfilPage() {
                   Ver execuções
                 </Link>
               </div>
+              <div className="flex items-center justify-between gap-3 mt-3">
+                <p className="text-[16px] text-white/50">Trilha de auditoria (quem mudou o quê, quando).</p>
+                <Link to="/admin/auditoria" className={`${btn} bg-white/5 text-white/70 hover:bg-white/10 shrink-0`}>
+                  Ver auditoria
+                </Link>
+              </div>
             </Secao>
           </div>
         )}

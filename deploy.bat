@@ -24,11 +24,12 @@ echo  14 - faturas
 echo  15 - objetivos
 echo  16 - investimentos
 echo  17 - convite
-echo  18 - Configurar nivel de logs
-echo  19 - Configurar IA_KEYS_ENCRYPTION_KEY (cripto das api_keys de IA)
-echo  20 - Deploy com --debug (usar nesta maquina)
+echo  18 - auditoria
+echo  19 - Configurar nivel de logs
+echo  20 - Configurar IA_KEYS_ENCRYPTION_KEY (cripto das api_keys de IA)
+echo  21 - Deploy com --debug (usar nesta maquina)
 echo.
-set /p opcao="Digite a opcao desejada (1-20): "
+set /p opcao="Digite a opcao desejada (1-21): "
 
 if "%opcao%"=="1"  goto todos
 if "%opcao%"=="2"  goto contas
@@ -47,9 +48,10 @@ if "%opcao%"=="14" goto faturas
 if "%opcao%"=="15" goto objetivos
 if "%opcao%"=="16" goto investimentos
 if "%opcao%"=="17" goto convite
-if "%opcao%"=="18" goto config_log
-if "%opcao%"=="19" goto config_ia_key
-if "%opcao%"=="20" goto debug_mode
+if "%opcao%"=="18" goto auditoria
+if "%opcao%"=="19" goto config_log
+if "%opcao%"=="20" goto config_ia_key
+if "%opcao%"=="21" goto debug_mode
 echo Opcao invalida! & pause & exit /b
 
 :debug_mode
@@ -76,8 +78,9 @@ echo  14 - faturas
 echo  15 - objetivos
 echo  16 - investimentos
 echo  17 - convite
+echo  18 - auditoria
 echo.
-set /p mod_debug="Digite o modulo (1-17): "
+set /p mod_debug="Digite o modulo (1-18): "
 
 if "%mod_debug%"=="1"  goto debug_todos
 if "%mod_debug%"=="2"  goto debug_contas
@@ -96,6 +99,7 @@ if "%mod_debug%"=="14" goto debug_faturas
 if "%mod_debug%"=="15" goto debug_objetivos
 if "%mod_debug%"=="16" goto debug_investimentos
 if "%mod_debug%"=="17" goto debug_convite
+if "%mod_debug%"=="18" goto debug_auditoria
 echo Opcao invalida! & pause & exit /b
 
 :debug_contas
@@ -210,6 +214,13 @@ call supabase functions deploy convite --project-ref ftpelncgrakpphytfrfo --debu
 echo [OK] convite deployed
 goto fim
 
+:debug_auditoria
+echo.
+echo [DEPLOY --debug] auditoria...
+call supabase functions deploy auditoria --project-ref ftpelncgrakpphytfrfo --debug
+echo [OK] auditoria deployed
+goto fim
+
 :debug_todos
 echo.
 echo [DEPLOY --debug] contas...
@@ -259,6 +270,9 @@ call supabase functions deploy investimentos --project-ref ftpelncgrakpphytfrfo 
 echo.
 echo [DEPLOY --debug] convite...
 call supabase functions deploy convite --project-ref ftpelncgrakpphytfrfo --debug
+echo.
+echo [DEPLOY --debug] auditoria...
+call supabase functions deploy auditoria --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [OK] Todos os modulos deployados com --debug
 goto fim
@@ -449,6 +463,13 @@ call supabase functions deploy convite --project-ref ftpelncgrakpphytfrfo
 echo [OK] convite deployed
 goto fim
 
+:auditoria
+echo.
+echo [DEPLOY] auditoria...
+call supabase functions deploy auditoria --project-ref ftpelncgrakpphytfrfo
+echo [OK] auditoria deployed
+goto fim
+
 :todos
 echo.
 echo [DEPLOY] contas...
@@ -498,6 +519,9 @@ call supabase functions deploy investimentos --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] convite...
 call supabase functions deploy convite --project-ref ftpelncgrakpphytfrfo
+echo.
+echo [DEPLOY] auditoria...
+call supabase functions deploy auditoria --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [OK] Todos os modulos deployados
 goto fim

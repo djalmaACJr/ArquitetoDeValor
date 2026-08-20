@@ -34,6 +34,7 @@ const DetalheInvestimentoPage = lazy(() => import('./pages/DetalheInvestimentoPa
 const DividendosPage         = lazy(() => import('./pages/DividendosPage'))
 const SobrePage              = lazy(() => import('./pages/SobrePage'))
 const AdminCronsPage         = lazy(() => import('./pages/AdminCronsPage'))
+const AdminAuditoriaPage     = lazy(() => import('./pages/AdminAuditoriaPage'))
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
@@ -101,6 +102,7 @@ export default function App() {
             <Route path="perfil"       element={<PerfilPage/>}/>
             <Route path="sobre"        element={<SobrePage/>}/>
             <Route path="admin/crons"  element={<AdminCronsPage/>}/>
+            <Route path="admin/auditoria" element={<AdminAuditoriaPage/>}/>
           </Route>
           <Route path="*" element={<Navigate to="/" replace/>}/>
         </Routes>

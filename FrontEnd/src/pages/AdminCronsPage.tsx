@@ -1,6 +1,6 @@
 // src/pages/AdminCronsPage.tsx
 //
-// Histórico de execução dos 4 cron jobs do sistema — só visível pra quem
+// Histórico de execução dos cron jobs do sistema — só visível pra quem
 // tem `usuarios.admin = true`. A proteção de dado real é a RLS de
 // cron_execucoes (ver migration 20260806000002); esta página só decide se
 // mostra ou não o link/conteúdo — um usuário não-admin que forçar a rota
@@ -20,6 +20,7 @@ import { useCronExecucoes, type CronExecucao } from '../hooks/useCronExecucoes'
 
 const JOBS = [
   'dividendos-diario', 'dividendos-br-diario', 'snapshot-diario', 'rendimento-cripto-diario',
+  'trilha-auditoria-purge-diario',
 ] as const
 
 function formatDataHora(iso: string): string {
@@ -122,7 +123,7 @@ export default function AdminCronsPage() {
         </button>
       </div>
       <p className="text-[14px] mb-4" style={{ color: '#8b92a8' }}>
-        Últimas 100 execuções dos 4 jobs agendados (dividendos USD/BRL, snapshot mensal, rendimento cripto).
+        Últimas 100 execuções dos jobs agendados (dividendos USD/BRL, snapshot mensal, rendimento cripto, purga da trilha de auditoria).
       </p>
 
       <div className="flex flex-wrap gap-2 mb-4">

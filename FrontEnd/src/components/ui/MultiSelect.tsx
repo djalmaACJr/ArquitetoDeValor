@@ -156,12 +156,12 @@ export function MultiSelect({
       {/* Dropdown — AUMENTADO EM TAMANHO */}
       {open && (
         <div className="absolute top-full left-0 mt-1 z-[50] min-w-full w-max max-w-[calc(100vw-2rem)] sm:max-w-md
-          bg-[#1a1f2e] border border-white/10 rounded-xl shadow-xl overflow-hidden"
+          bg-[#1a1f2e] border border-white/10 rounded-xl shadow-xl overflow-hidden flex flex-col"
           style={{ maxHeight: '50vh' }}> {/* ← AUMENTADO DE 280px para 50vh */}
 
           {/* Busca */}
           {options.length > 6 && (
-            <div className="p-2.5 border-b border-white/10 sticky top-0 bg-[#1a1f2e]">
+            <div className="p-2.5 border-b border-white/10 shrink-0 bg-[#1a1f2e]">
               <input
                 value={busca} onChange={e => setBusca(e.target.value)}
                 placeholder="Buscar..."
@@ -175,7 +175,7 @@ export function MultiSelect({
           )}
 
           {/* Opções — AUMENTADO ESPAÇAMENTO */}
-          <div className="overflow-y-auto" style={{ maxHeight: '50vh', scrollbarWidth: 'thin' }}>
+          <div className="overflow-y-auto flex-1 min-h-0" style={{ scrollbarWidth: 'thin' }}>
             {/* Item "Adicionar todos" — atalho para selecionar/limpar tudo */}
             {selecionarTodos && options.length > 0 && (
               <button
@@ -256,7 +256,7 @@ export function MultiSelect({
 
           {/* Rodapé com contagem */}
           {values.length > 0 && (
-            <div className="px-3 py-2.5 border-t border-white/10 flex items-center justify-between sticky bottom-0 bg-[#1a1f2e]">
+            <div className="px-3 py-2.5 border-t border-white/10 flex items-center justify-between shrink-0 bg-[#1a1f2e]">
               <span className="text-[15px]" style={{ color: '#8b92a8' }}>
                 {values.length} selecionado{values.length > 1 ? 's' : ''}
               </span>

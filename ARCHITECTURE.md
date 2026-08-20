@@ -146,6 +146,7 @@ supabase/functions/
 │   ├── index.ts                 # sessão de importação de fatura (upload → parse → revisão → confirmação)
 │   └── parsers/                 # nubank.ts, c6.ts, inter.ts, mercadopago.ts, generico.ts, helpers.ts, tipos.ts, index.ts (dispatcher)
 ├── app_updates/index.ts        # POST /app_updates — endpoint público (sem JWT), consultado pelo @capgo/capacitor-updater a cada abertura do app Android; ver tabela app_releases
+├── auditoria/index.ts          # GET /auditoria — consulta trilha_auditoria (filtros tabela/operacao/registro_id/user_id/desde/ate); RLS decide o que cada chamador vê
 └── limpar/index.ts             # usado em testes (reativa contas inativas antes do UPDATE/DELETE)
 ```
 
@@ -430,18 +431,31 @@ Gravada automaticamente por `executarComLogDeCron()` (`_shared/utils.ts`), que e
 
 ---
 
-### 📝 Tabela — Trilha de auditoria (`trilha_auditoria`, novo, AUD-04)
+### 📝 Tabela — Trilha de auditoria (`trilha_auditoria`, AUD-04, estendida 2026-08-20)
 
-Migration: `20260806000004_trilha_auditoria.sql`.
+Migrations: `20260806000004_trilha_auditoria.sql` (criação, escopo mínimo) → `20260820000001_trilha_auditoria_extensao.sql` (escopo estendido a quase todo o sistema).
 
-Motivação: a única tabela de auditoria que o sistema já teve (`arqvalor.auditoria`) foi removida em `20260523000002` por estar sem nenhum produtor de dados — 0 registros em 7 semanas, nunca conectada a um trigger. Nada a substituiu até esta migration. Aprendendo com o erro anterior, esta versão já nasce conectada a triggers reais.
+Motivação original: a única tabela de auditoria que o sistema já teve (`arqvalor.auditoria`) foi removida em `20260523000002` por estar sem nenhum produtor de dados — 0 registros em 7 semanas, nunca conectada a um trigger. Nada a substituiu até `20260806000004`, que nasceu já conectada a triggers reais mas com escopo mínimo de propósito (só `transacoes` + `inv_operacoes`). A extensão de `20260820000001` veio de uma investigação de duplicação de provento (ago/2026) onde não havia trilha nenhuma pra responder "quando e por que esse registro mudou" fora de `transacoes`/`inv_operacoes` — nem endpoint nem UI liam a tabela até então.
 
 #### `trilha_auditoria`
 `id`, `user_id` (FK `usuarios.id ON DELETE RESTRICT`), `tabela TEXT`, `operacao TEXT CHECK IN ('INSERT','UPDATE','DELETE')`, `registro_id UUID`, `dados_antigos JSONB`, `dados_novos JSONB`, `alterado_em TIMESTAMPTZ DEFAULT now()`. Índice em `(user_id, registro_id, alterado_em DESC)`.
-**Append-only de verdade**: RLS só tem policy de `SELECT` (`user_id = auth.uid()`) — nenhuma policy de INSERT/UPDATE/DELETE para nenhum role, nem `service_role`. Só o trigger (`SECURITY DEFINER`, roda como owner da função) grava.
-Escopo mínimo de propósito: só `transacoes` (cobre lançamentos E transferências, que são linhas de `transacoes` com `id_par_transferencia`) e `inv_operacoes` (compra/venda/aporte/resgate/dividendo/rendimento) — as duas fontes de "por que meu saldo/minha posição mudou?". Extensível pro mesmo padrão em `contas`/`categorias`/`objetivos` se necessário no futuro.
-`fn_registrar_trilha_auditoria()` — trigger genérico reusável (chave em `TG_TABLE_NAME`/`TG_OP`), grava snapshot ANTES (UPDATE/DELETE) e/ou DEPOIS (INSERT/UPDATE) como JSONB via `to_jsonb(NEW/OLD)`.
-`fn_excluir_dados_usuario` foi recriada nesta mesma migration pra: (1) apagar a trilha do usuário como 1º passo de limpeza (referencia `usuarios` via FK RESTRICT), e (2) incluir `inv_operacoes` no bloco `DISABLE/ENABLE TRIGGER USER` que já existia pra `categorias`/`transacoes`/`contas` — sem isso, o DELETE de `inv_operacoes` recriaria entradas de trilha DEPOIS do passo de limpeza dela, deixando linha órfã que travaria o DELETE final de `usuarios` (FK RESTRICT).
+**Append-only de verdade**: nenhuma policy de INSERT/UPDATE/DELETE para nenhum role, nem `service_role` — só o trigger (`SECURITY DEFINER`, roda como owner da função) grava. Duas policies de `SELECT` (permissivas, somadas por OR): `trilha_auditoria_select_own` (`user_id = auth.uid()`, qualquer usuário vê a própria trilha) e `trilha_auditoria_admin_select` (`usuarios.admin = true`, admin vê a de todos — adicionada em `20260820000001`, mesmo padrão de `cron_execucoes_admin_select`).
+`fn_registrar_trilha_auditoria()` — trigger genérico reusável (chave em `TG_TABLE_NAME`/`TG_OP`), grava snapshot ANTES (UPDATE/DELETE) e/ou DEPOIS (INSERT/UPDATE) como JSONB via `to_jsonb(NEW/OLD)`. Sem mudanças desde a criação — a extensão só liga o mesmo trigger em mais tabelas.
+
+**Escopo (desde `20260820000001`)**: `transacoes` (cobre lançamentos E transferências, linhas com `id_par_transferencia`), `contas`, `categorias`, `lembretes`, `filtros_salvos`, `assistente_lancamentos`, `objetivos`, e todo o módulo de investimentos (`inv_ativos`, `inv_alocacoes_tipo`, `inv_posicoes`, `inv_operacoes`, `inv_dividendos`, `inv_historico_mensal`, `inv_tipos_dividendo`, `inv_questionarios`, `inv_avaliacoes`) e importação de fatura (`fatura_import_sessao`, `fatura_import_item`).
+**Fora do escopo, de propósito**: `usuarios` (perfil/preferências, não "dado transacional" — mutaria a cada login/cron e viraria ruído), `objetivos_progresso` (não tem coluna `user_id`, o trigger genérico não se aplica sem alterar o schema), e as tabelas compartilhadas sem `user_id` (cotações, `inv_proventos_fundo`, `inv_etf_holdings`, `app_releases`, `cron_execucoes`, `idempotency_keys`, a própria `trilha_auditoria`).
+
+`fn_excluir_dados_usuario` foi recriada em cada uma dessas duas migrations pra manter o mesmo cuidado: (1) apagar a trilha do usuário como 1º passo de limpeza (referencia `usuarios` via FK RESTRICT), e (2) incluir TODA tabela recém-auditada no bloco `DISABLE/ENABLE TRIGGER USER` que já existia pra `categorias`/`transacoes`/`contas` — sem isso, o DELETE de qualquer uma delas recriaria entradas de trilha DEPOIS do passo de limpeza, deixando linha órfã que travaria o DELETE final de `usuarios` (FK RESTRICT).
+
+#### Consulta — `GET /auditoria` (`supabase/functions/auditoria/index.ts`)
+Filtros via querystring: `tabela`, `operacao` (`INSERT|UPDATE|DELETE`), `registro_id`, `user_id`, `desde`/`ate` (`YYYY-MM-DD` sobre `alterado_em`), `limit` (padrão 100, máx. 500). A proteção real é a RLS acima — o handler roda com o client do próprio usuário (`db(req)`, não `dbAdmin()`) e só formata a resposta, mesmo padrão de `investimentos/admin.ts::rotaCronExecucoes`: usuário comum só recebe a própria trilha, admin recebe a de todos. Consumida por `useTrilhaAuditoria` e exibida em `AdminAuditoriaPage.tsx` (`/admin/auditoria`, só visível/populada para admin).
+
+#### Retenção rotativa (`config_auditoria`, `20260820000002_trilha_auditoria_retencao.sql`)
+`trilha_auditoria` é append-only e cresce indefinidamente sem expurgo — esta migration adiciona um período de retenção configurável (padrão 365 dias).
+- **`config_auditoria`** — tabela singleton (`id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1)`, 1 linha fixa): `retencao_dias INTEGER CHECK (BETWEEN 30 AND 3650)`, `atualizado_em`, `atualizado_por → usuarios`. RLS: `SELECT`/`UPDATE` só pra `usuarios.admin = true` (mesmo padrão EXISTS de `cron_execucoes`); sem policy de INSERT/DELETE — a linha já nasce semeada e nunca é recriada pela API.
+- **`fn_purgar_trilha_auditoria()`** — `SECURITY DEFINER`, lê `retencao_dias` (365 se a config sumir), apaga `trilha_auditoria` mais antiga que isso, grava o resultado (`removidos`, `retencao_dias`) em `cron_execucoes` como job `trilha-auditoria-purge-diario` — reaproveita a mesma tabela/tela (`/admin/crons`) dos outros jobs em vez de criar observabilidade paralela.
+- **Agendamento**: pg_cron puro (`0 8 * * *` = 05h BRT), **sem `pg_net`** — diferente dos outros 4 cron jobs (que chamam uma Edge Function via HTTP), a purga é só um `DELETE` por data, não precisa de fonte externa nem de Vault/secret.
+- **`GET`/`PUT /auditoria/config`** (mesma Edge Function `auditoria`) — expõe/edita `retencao_dias`. Handler sem checagem de admin no código: roda com o client do usuário e a RLS decide (`GET` devolve `null` pra quem não é admin; `PUT` sem linha afetada vira 403). Consumido por `useConfigAuditoria` e editável no painel no topo de `AdminAuditoriaPage.tsx`.
 
 ---
 
@@ -535,6 +549,8 @@ Todos autenticam via header `x-cron-secret` (não JWT de usuário), lendo URL/se
 | `dividendos-br-diario` | `30 9 * * *` (06h30 BRT) | `POST /investimentos/dividendos-cron-br` | Provisiona proventos futuros de ativos em BRL (B3, sem API key) |
 
 A rota `/investimentos/rendimento-cripto-cron` é agendada por `20260625000005_cron_rendimento_cripto.sql` (job `rendimento-cripto-diario`, `0 10 * * *` = 07h BRT, diário) — confirmado que o job existe e nenhuma migration posterior o desagenda (`cron.unschedule`).
+
+Um 5º job, **`trilha-auditoria-purge-diario`** (`0 8 * * *` = 05h BRT), difere dos 4 acima: não chama nenhuma Edge Function via `pg_net` — roda `SELECT arqvalor.fn_purgar_trilha_auditoria()` direto no Postgres (puro `DELETE` por data, sem fonte externa). Ver seção "Retenção rotativa" acima.
 
 ### Row Level Security
 
@@ -683,8 +699,10 @@ Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já 
 - `20260806000005_idempotency_keys.sql` — **AUD-06**: tabela `idempotency_keys` (PK composta `user_id+rota+chave`, `ON DELETE CASCADE`) — suporte a `comIdempotencia()` (`_shared/utils.ts`), plugado em `POST /transacoes` e `POST /transferencias`; claim-first via INSERT (não check-then-write), replay da resposta cacheada em caso de colisão, fail-open se a chave vier ausente ou a tabela ainda não existir
 - `20260806000006_crescimento_comp_ytd_reconciliado.sql` — **AUD-03**: recria `fn_atualizar_progresso_objetivo`/`fn_calcular_progresso_objetivo` unindo `saldo_base` (SONHO, de `20260605000001`) com a fórmula YoY/YTD/NET/COMP_YTD completa pro CRESCIMENTO (de `20260603000006`, que tinha sido perdida sem intenção quando a primeira foi recriada por cima) — banco e tela (`ObjetivoDetalhe.tsx`) passam a calcular a mesma fórmula, ver `BUSINESS_RULES.md` § "Cálculo de CRESCIMENTO"
 - `20260806000007_hardening_fn_remover_usuario.sql` — **AUD-12 residual**: recria `fn_remover_usuario` (trigger BEFORE DELETE em `auth.users`) pra delegar em `fn_excluir_dados_usuario(OLD.id)` em vez de um `DELETE FROM usuarios` cru sem ordem FK-safe — torna qualquer caminho de exclusão de usuário seguro (Dashboard, script administrativo), não só o fluxo padrão do app
+- `20260820000001_trilha_auditoria_extensao.sql` — estende `trg_trilha_auditoria` de `transacoes`/`inv_operacoes` (escopo original de `20260806000004`) para praticamente todo o resto do sistema (`contas`, `categorias`, `lembretes`, `filtros_salvos`, `assistente_lancamentos`, `objetivos`, `inv_ativos`, `inv_alocacoes_tipo`, `inv_posicoes`, `inv_dividendos`, `inv_historico_mensal`, `inv_tipos_dividendo`, `inv_questionarios`, `inv_avaliacoes`, `fatura_import_sessao`, `fatura_import_item`); adiciona policy `trilha_auditoria_admin_select` (admin vê a trilha de todos); recria `fn_excluir_dados_usuario` incluindo as tabelas novas no bloco DISABLE/ENABLE TRIGGER USER. Consumida por `GET /auditoria` (`supabase/functions/auditoria/`) e exibida em `/admin/auditoria`
+- `20260820000002_trilha_auditoria_retencao.sql` — tabela singleton `config_auditoria` (`retencao_dias`, padrão 365, editável só por admin) + `fn_purgar_trilha_auditoria()` (apaga trilha mais antiga que a retenção configurada, loga em `cron_execucoes`) + agendamento pg_cron diário `trilha-auditoria-purge-diario` (sem `pg_net` — SQL puro). Exposta por `GET`/`PUT /auditoria/config`, editável no painel de `AdminAuditoriaPage.tsx`
 
-⚠️ **As 5 migrations `20260806000003`–`20260806000007` (fase de remediação da auditoria, AUD-01/03/04/06/12) ainda não foram aplicadas em produção** — escritas, com `deno check` limpo, mas pendentes de `supabase db push`/SQL Editor. O código Deno que depende delas (`comIdempotencia`, `hojeBR`/`mesCorrenteBR`) já está preparado pra rodar sem elas também (fail-open), então o deploy das Edge Functions não quebra nada mesmo antes das migrations serem aplicadas — mas os ganhos (timezone correto, trilha de auditoria, idempotência efetiva, CRESCIMENTO reconciliado, exclusão de usuário robusta) só valem depois de aplicadas.
+⚠️ **Confira o status de aplicação antes de assumir que as migrations abaixo já rodaram em produção** — a nota original (2026-08-06) dizia que as 5 migrations `20260806000003`–`20260806000007` (fase de remediação da auditoria, AUD-01/03/04/06/12) ainda não tinham sido aplicadas; `20260820000001` (acima) depende de `20260806000004` já estar aplicada (estende o mesmo trigger) — aplique ambas juntas, na ordem, se nenhuma das duas rodou ainda. — escritas, com `deno check` limpo, mas pendentes de `supabase db push`/SQL Editor. O código Deno que depende delas (`comIdempotencia`, `hojeBR`/`mesCorrenteBR`) já está preparado pra rodar sem elas também (fail-open), então o deploy das Edge Functions não quebra nada mesmo antes das migrations serem aplicadas — mas os ganhos (timezone correto, trilha de auditoria, idempotência efetiva, CRESCIMENTO reconciliado, exclusão de usuário robusta) só valem depois de aplicadas.
 
 ---
 
