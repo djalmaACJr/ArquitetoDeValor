@@ -77,6 +77,7 @@ e2e/
 - **Browser**: Firefox Desktop (`npm run test:e2e`) ou Chromium/Pixel 7 (`npm run test:e2e:mobile`)
 - **Timeout**: 30 segundos
 - **Retries**: 0 (local), 1 (CI)
+- **CI**: o workflow `.github/workflows/frontend-e2e.yml` só dispara em push/PR pra `develop` quando o diff toca `FrontEnd/**` (ou o próprio arquivo do workflow) — um commit fora dessa pasta (ex.: só migrations, só `tests/`) não aciona E2E nem o workflow de Qualidade de Código (`frontend-quality.yml`, mesmo filtro). `backend-api-tests.yml` e `frontend-lint.yml` não têm esse filtro, rodam em qualquer push.
 
 ## 📊 Relatórios
 
