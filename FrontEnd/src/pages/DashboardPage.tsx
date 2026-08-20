@@ -1732,8 +1732,11 @@ export default function DashboardPage() {
 
   return (
     <div className="p-5">
-      {/* Topbar — título, mês, filtros, atualizar, ocultar e novo lançamento, tudo em uma linha só */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+      {/* Topbar — título, mês, filtros, atualizar, ocultar e novo lançamento, tudo em uma linha só.
+          No mobile (linhas quebradas pelo flex-wrap) centraliza cada linha; no desktop volta ao
+          alinhamento padrão (esquerda), que é o que deixa o "+ Novo lançamento" empurrado pro
+          fim da linha pelo spacer flex-1 logo abaixo. */}
+      <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-3">
         <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100 flex-shrink-0">Dashboard</h1>
 
         <div data-tutorial="dashboard-mes" className="flex-shrink-0">

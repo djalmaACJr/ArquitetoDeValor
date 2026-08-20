@@ -146,6 +146,7 @@ ArquitetoDeValor/
 - [Supabase CLI](https://supabase.com/docs/guides/cli) (para deploy das Edge Functions)
 - Conta no [Supabase](https://supabase.com/)
 - Git
+- **(Opcional, só para build do app Android)** [JDK 21 (LTS)](https://adoptium.net/temurin/releases/?version=21) + Android SDK — ver [seção 9](#9-opcional-build-do-app-android)
 
 ---
 
@@ -239,6 +240,37 @@ VITE_SUPABASE_ANON_KEY=sua_anon_key_aqui
 ```
 
 > O Playwright abre a aplicação no browser — ela precisa dessas chaves para autenticar no Supabase. Em CI elas são injetadas via secrets.
+
+### 9. (Opcional) Build do app Android
+
+A pasta `FrontEnd/android/` já é o projeto nativo gerado pelo Capacitor — só falta ter o JDK e o Android SDK instalados na máquina.
+
+**JDK — precisa ser a versão 21 (LTS), nem 17 nem 24.** O projeto (`app/capacitor.build.gradle` e `capacitor-cordova-android-plugins/build.gradle`) fixa `sourceCompatibility`/`targetCompatibility` em `JavaVersion.VERSION_21`, e o `gradlew.bat` já vem com o Gradle 9.6.1 embutido (não precisa instalar Gradle à parte).
+
+```powershell
+# Windows, via winget
+winget install EclipseAdoptium.Temurin.21.JDK
+
+# Depois, confirme:
+java -version   # deve mostrar "21.x.x"
+```
+
+Se preferir instalar manualmente, baixe o **Eclipse Temurin 21** em [adoptium.net](https://adoptium.net/temurin/releases/?version=21) e garanta que `JAVA_HOME` aponte para a instalação (o instalador do Temurin já oferece isso como opção).
+
+**Android SDK** — se você não usa o Android Studio, instale ao menos as `cmdline-tools` e rode `sdkmanager --licenses` + `sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"`. Se já usa o Android Studio, ele cuida disso sozinho (SDK Manager). Garanta que `ANDROID_HOME`/`ANDROID_SDK_ROOT` aponte pro SDK (normalmente `%LOCALAPPDATA%\Android\Sdk` no Windows) — o `gradlew.bat` também lê o `local.properties` gerado pelo Android Studio como alternativa.
+
+Com JDK 21 e SDK prontos, builde e instale no celular conectado via USB (com "Instalar via USB" ativo no aparelho):
+
+```bash
+# Na raiz do repo — build + sync + instala o APK debug
+./instalar_android.bat
+
+# Equivalente manual (dentro de FrontEnd/):
+npm run build
+npx cap sync android
+cd android
+gradlew.bat installDebug
+```
 
 ---
 

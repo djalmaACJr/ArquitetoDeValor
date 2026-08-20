@@ -1,6 +1,6 @@
 @echo off
 set "ROOT=%~dp0"
-set "ADB=C:\Users\djalma\AppData\Local\Android\Sdk\platform-tools\adb.exe"
+set "ADB=%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
 
 echo ======================================================
 echo    ARQUITETO DE VALOR - INSTALADOR ANDROID (USB)
