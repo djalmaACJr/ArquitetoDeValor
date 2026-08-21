@@ -1828,13 +1828,18 @@ export default function DashboardPage() {
 
   return (
     <div className="p-5">
-      {/* Topbar — título, mês, filtros, atualizar, ocultar e novo lançamento, tudo em uma linha só.
-          No mobile (linhas quebradas pelo flex-wrap) centraliza cada linha; no desktop volta ao
-          alinhamento padrão (esquerda), que é o que deixa o "+ Novo lançamento" empurrado pro
-          fim da linha pelo spacer flex-1 logo abaixo. */}
-      <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-3">
-        <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100 flex-shrink-0">Dashboard</h1>
+      <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100 text-center sm:text-left mb-3">Dashboard</h1>
 
+      {/* Barra fixa — mês e "+ Novo lançamento" ficam sempre visíveis ao rolar a tela
+          (`sticky top-0`, relativo ao <main> que rola em AppLayout). Fundo opaco via
+          --bg-page (mesmo token do app-shell) pra não deixar o conteúdo por baixo
+          transparecendo; -mx-5/px-5 estica o fundo até a borda do container com p-5.
+          Centralizados como uma unidade só (mês + botão juntos) — antes o botão vinha
+          numa linha separada empurrado por um spacer flex-1, que só funcionava alinhado
+          à direita no desktop; no mobile (linhas quebradas) ficava desalinhado do resto,
+          que é centralizado. */}
+      <div className="sticky top-0 z-20 -mx-5 px-5 py-2 mb-3 flex flex-wrap items-center justify-center sm:justify-start gap-3 border-b border-gray-200 dark:border-gray-700"
+        style={{ background: 'var(--bg-page)' }}>
         <div data-tutorial="dashboard-mes" className="flex-shrink-0">
           <MonthPicker
             value={mes}
@@ -1844,6 +1849,16 @@ export default function DashboardPage() {
           />
         </div>
 
+        <div data-tutorial="dashboard-novo-lancamento" className="flex-shrink-0">
+          <BotaoNovoLancamento
+            onSelect={tipo => navigate('/lancamentos', { state: { novoLancamento: true, tipoInicial: tipo } })}
+            onLembrete={() => { setLembreteEditando(null); setDataInicialLembrete(undefined); setModalLembreteAberto(true) }}
+          />
+        </div>
+      </div>
+
+      {/* Filtros, atualizar e ocultar — rolam com o resto do conteúdo (não fixos) */}
+      <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-3">
         {/* Recolhida por padrão no Android — o mês continua sempre visível */}
         <button
           data-tutorial="dashboard-filtros"
@@ -1876,15 +1891,6 @@ export default function DashboardPage() {
 
         <div data-tutorial="dashboard-ocultar" className="flex-shrink-0">
           <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
-        </div>
-
-        <div className="flex-1" />
-
-        <div data-tutorial="dashboard-novo-lancamento" className="flex-shrink-0">
-          <BotaoNovoLancamento
-            onSelect={tipo => navigate('/lancamentos', { state: { novoLancamento: true, tipoInicial: tipo } })}
-            onLembrete={() => { setLembreteEditando(null); setDataInicialLembrete(undefined); setModalLembreteAberto(true) }}
-          />
         </div>
       </div>
 

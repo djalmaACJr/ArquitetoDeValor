@@ -1457,27 +1457,34 @@ export async function coletarProventosB3(ativo: AtivoBrl): Promise<ProventoB3[] 
   if (brutos.length === 0) return [];
 
   const classeAlvo = classeDoTicker(ativo.ticker, ativo.acoes_subtipo);
-  // Dedup por (payDate|label|rate) — o rate entra na chave de propósito.
-  // O objetivo aqui é só juntar o MESMO pagamento reportado sob classes
-  // diferentes (ON/PN) do mesmo emissor (a busca é por emissor, sem o
-  // sufixo do papel, então a B3 devolve os cashDividends de TODAS as
-  // classes misturados) — nunca colapsar tranches genuinamente distintas
-  // anunciadas na mesma data com o mesmo label. Sem o rate na chave, 2
-  // JCPs legítimos no mesmo dia (mesmo label "JRS CAP PROPRIO", valores por
-  // ação diferentes) caíam na mesma chave e o 2º sobrescrevia o 1º — a
-  // soma por (data, tipo) em provisionarProventosBrl nunca via as duas
-  // tranches, só a que sobrou (achado real: BBDC3/JSCP setembro/2026, dois
-  // JCPs de R$0,27 e R$0,32/ação no mesmo payDate — o app só provisionava
-  // R$62,76, nunca a soma R$116,55 que a B3 realmente paga).
+
+  // 1) Restringe à classe do PAPEL DO USUÁRIO antes de deduplicar. A busca é
+  // por emissor (sem o sufixo do ticker), então a B3 devolve cashDividends
+  // de TODAS as classes (ON/PN) misturados — e cada classe pode ter uma
+  // rate DIFERENTE pro MESMO evento (comum: JCP com valor/ação distinto por
+  // classe). Isso importa porque o passo 2 abaixo agora dedupla incluindo o
+  // rate na chave (pra não perder tranches genuinamente distintas no mesmo
+  // dia) — sem filtrar a classe primeiro, "1 evento reportado em 2 classes
+  // com rates diferentes" vira "2 eventos" pro dedup por rate, e a soma por
+  // (data, tipo) em provisionarProventosBrl infla o provento (achado real:
+  // BBDC3/setembro-2026 provisionado a ~2,1x o valor correto — a rate da
+  // classe PN, levemente diferente da ON, sobrevivia como tranche "extra").
+  // Ativos sem classe determinável (FII, ou B3 sem ISIN na linha) não
+  // filtram — mantém o comportamento anterior pra esses casos.
+  const daClasse = (ativo.tipo_ativo === "FII" || !classeAlvo)
+    ? brutos
+    : brutos.filter((b) => b.classe === classeAlvo || b.classe === null);
+  const base = daClasse.length > 0 ? daClasse : brutos; // filtro zerou tudo → não bloqueia, usa a lista crua
+
+  // 2) Dedup por (payDate|label|rate) sobre a lista JÁ restrita à classe —
+  // aqui um rate diferente é sempre um evento genuinamente distinto (não
+  // mais um artefato de classe diferente), então soma corretamente em
+  // provisionarProventosBrl. Repetição exata (mesma chave) é reemissão da
+  // própria fonte — mantém só a primeira ocorrência.
   const escolhido = new Map<string, ProventoB3 & { classe: "ON" | "PN" | null }>();
-  for (const b of brutos) {
+  for (const b of base) {
     const chave = `${b.payDate}|${b.label}|${b.rate}`;
-    const atual = escolhido.get(chave);
-    if (!atual) { escolhido.set(chave, b); continue; }
-    if (ativo.tipo_ativo !== "FII" && classeAlvo) {
-      // Substitui se o novo casa com a classe e o atual não
-      if (b.classe === classeAlvo && atual.classe !== classeAlvo) escolhido.set(chave, b);
-    }
+    if (!escolhido.has(chave)) escolhido.set(chave, b);
   }
   return [...escolhido.values()].map(({ payDate, rate, label }) => ({ payDate, rate, label }));
 }
