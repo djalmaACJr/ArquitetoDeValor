@@ -35,6 +35,7 @@ import {
   rotaDividendos, rotaDividendosBuscarBr, rotaDividendosBuscarUsd,
   rotaDividendosBackfillRate, rotaDividendosDiagnostico, rotaAssociarExtratoMassa,
   rotaTiposDividendo, rotaDividendosCron, rotaDividendosCronBr,
+  rotaCupomTesouroCron, rotaCupomTesouroBuscar,
 } from "./dividendos.ts";
 import { rotaHistorico, rotaSnapshotAuto, rotaSnapshotBackfill, rotaSnapshotCron } from "./snapshot.ts";
 import { rotaRendimentoCripto, rotaRendimentoCriptoCron } from "./rendimento-cripto.ts";
@@ -57,7 +58,7 @@ Deno.serve(async (req: Request) => {
   // Job do servidor: autentica por secret (header x-cron-secret), sem JWT
   // de usuário. Tratado ANTES de autenticar() por isso.
   //
-  // Todos os 4 crons abaixo passam por executarComLogDeCron(), que grava
+  // Todos os 5 crons abaixo passam por executarComLogDeCron(), que grava
   // sucesso/erro + duração em arqvalor.cron_execucoes (tela /admin/crons).
   // Nasceu da auditoria 2026-08-06: dividendos-diario ficou 19 dias
   // falhando sem NENHUM sinal visível — ver comentário na migration
@@ -88,6 +89,14 @@ Deno.serve(async (req: Request) => {
     catch (e) { logError("Handler rendimento-cripto-cron", e); return erro("Erro interno", 500); }
   }
 
+  // Job do servidor: provisiona pagamento de cupom semestral do Tesouro
+  // Direto (Tesouro Transparente/STN). Sem JWT — x-cron-secret. Só futuro
+  // (sem janela retroativa) — ver comentário em provisionarCupomTesouro.
+  if (recurso === "cupom-tesouro-cron") {
+    try { return await executarComLogDeCron("cupom-tesouro-diario", () => rotaCupomTesouroCron(req, m)); }
+    catch (e) { logError("Handler cupom-tesouro-cron", e); return erro("Erro interno", 500); }
+  }
+
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
   const userId = auth;
@@ -104,6 +113,7 @@ Deno.serve(async (req: Request) => {
       case "dividendos":      return await rotaDividendos(c, req, m, userId);
       case "dividendos-buscar-br": return await rotaDividendosBuscarBr(c, req, m, userId);
       case "dividendos-buscar-usd": return await rotaDividendosBuscarUsd(c, req, m, userId);
+      case "cupom-tesouro-buscar": return await rotaCupomTesouroBuscar(c, req, m, userId);
       case "dividendos-backfill-rate": return await rotaDividendosBackfillRate(c, m, userId);
       case "dividendos-diagnostico": return await rotaDividendosDiagnostico(c, m, userId);
       case "migrar-conta":    return await rotaMigrarConta(c, req, m, userId);

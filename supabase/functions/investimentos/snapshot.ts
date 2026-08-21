@@ -13,6 +13,7 @@ import {
   carregarTesouroMtM, valorRFPosicoes, sincronizarTesouro, ptaxPorMesMap,
   fimSerieRF, resolverHistoricoCotado, resolverHistoricoCripto,
   INDICES_DATA_CORTE, TESOURO_DATA_CORTE,
+  baixarCupomTesouro, datasCupomParaAtivo, tesouroSemestral, type CupomTesouro,
 } from "./mercado.ts";
 import { fecharPosicoesVencidas } from "./posicoes.ts";
 
@@ -279,6 +280,13 @@ export async function executarSnapshotMes(
   const vencsTesouro = lista.filter((g) => g.tipo === "TESOURO_DIRETO").map((g) => g.vencimento ?? "");
   if (mesAno === mesCorrente) await garantirTesouroMesCorrente(client, vencsTesouro, mesCorrente);
   const mtmTesouro = await carregarTesouroMtM(client, vencsTesouro);
+  // Cupons semestrais pagos — só usados no fallback de valorRFPosicoes
+  // (quando não há PU de marcação a mercado pro título); a marcação a
+  // mercado, quando disponível, já reflete o preço pós-cupom sozinha.
+  // Best-effort: fonte externa fora do ar não derruba o snapshot inteiro.
+  const cupons: CupomTesouro[] = vencsTesouro.length > 0
+    ? await baixarCupomTesouro().catch((e) => { logError("snapshot cupom tesouro", e); return []; })
+    : [];
 
   let atualizados = 0;
   const ignorados: { ticker: string; motivo: string }[] = [];
@@ -298,7 +306,11 @@ export async function executarSnapshotMes(
       if (g.vencimento && g.vencimento.slice(0, 7) < mesAno) {
         ignorados.push({ ticker: g.ticker, motivo: "título vencido" }); continue;
       }
-      valor = valorRFPosicoes(g.posicoes, g.tipo, g.indexador, g.vencimento, g.nome, mesAno, dataRef, g.taxa, cdiSerie, ipcaSerie, cdi, ipca, mtmTesouro);
+      const menorCompra = g.posicoes.reduce((min, p) => p.data_compra < min ? p.data_compra : min, g.posicoes[0]?.data_compra ?? mesAno);
+      const datasResetCupom = g.tipo === "TESOURO_DIRETO"
+        ? datasCupomParaAtivo(cupons, g.indexador, tesouroSemestral(g.nome), g.vencimento, menorCompra, dataRef.toISOString().slice(0, 10))
+        : undefined;
+      valor = valorRFPosicoes(g.posicoes, g.tipo, g.indexador, g.vencimento, g.nome, mesAno, dataRef, g.taxa, cdiSerie, ipcaSerie, cdi, ipca, mtmTesouro, datasResetCupom);
     } else {
       const cot = precos.get(g.ticker);
       if (cot == null) { ignorados.push({ ticker: g.ticker, motivo: "cotação indisponível" }); continue; }
@@ -464,6 +476,11 @@ export async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userI
     if (!count) { try { await sincronizarTesouro(TESOURO_DATA_CORTE); } catch (e) { logError("backfill tesouro CSV", e); } }
   }
   const mtmTesouro = await carregarTesouroMtM(c, vencsTesouro);
+  // Cupons semestrais — mesmo raciocínio de executarSnapshotMes: só usado no
+  // fallback de valorRFPosicoes quando não há PU de marcação a mercado.
+  const cupons: CupomTesouro[] = vencsTesouro.length > 0
+    ? await baixarCupomTesouro().catch((e) => { logError("backfill cupom tesouro", e); return []; })
+    : [];
 
   // sempre carrega PTAX se houver cotado — a moeda real (USD) só é descoberta
   // ao buscar a série, então não dá pra confiar só na moeda cadastrada.
@@ -539,7 +556,11 @@ export async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userI
 
       let valor: number;
       if (ehRF(g.tipo)) {
-        valor = valorRFPosicoes(posMes, g.tipo, g.indexador, g.vencimento, g.nome, me, dataRef, g.taxa, cdiSerie, ipcaSerie, cdi, ipca, mtmTesouro);
+        const menorCompra = posMes.reduce((min, p) => p.data_compra < min ? p.data_compra : min, posMes[0]?.data_compra ?? me);
+        const datasResetCupom = g.tipo === "TESOURO_DIRETO"
+          ? datasCupomParaAtivo(cupons, g.indexador, tesouroSemestral(g.nome), g.vencimento, menorCompra, dataRef.toISOString().slice(0, 10))
+          : undefined;
+        valor = valorRFPosicoes(posMes, g.tipo, g.indexador, g.vencimento, g.nome, me, dataRef, g.taxa, cdiSerie, ipcaSerie, cdi, ipca, mtmTesouro, datasResetCupom);
       } else {
         let preco = precoPorMes!.get(me);
         if (preco == null) { semCotacaoMes++; continue; } // sem cotação naquele mês

@@ -425,7 +425,7 @@ Migrations: `20260806000001_usuarios_admin.sql` (coluna `usuarios.admin`), `2026
 Motivação: auditoria de 2026-08-04 encontrou o job `dividendos-diario` falhando 100% das vezes por 19 dias direto (segredo de URL ausente no Vault, depois timeout de `pg_net` curto demais) sem NENHUM sinal visível em lugar nenhum — só foi descoberto porque um usuário notou proventos faltando e a causa foi rastreada manualmente via SQL Editor/Logs Explorer. Esta tabela é o registro que faltava.
 
 #### `cron_execucoes`
-**Sem `user_id`** — metadado operacional do sistema, não dado de usuário (mesma categoria de `app_releases`). `id`, `job_nome TEXT` (`dividendos-diario`\|`dividendos-br-diario`\|`snapshot-diario`\|`rendimento-cripto-diario`), `status TEXT CHECK IN ('sucesso','erro')`, `resumo JSONB` (corpo `dados` da resposta, formato livre por job), `erro TEXT`, `duracao_ms INTEGER`, `executado_em TIMESTAMPTZ DEFAULT now()`.
+**Sem `user_id`** — metadado operacional do sistema, não dado de usuário (mesma categoria de `app_releases`). `id`, `job_nome TEXT` (`dividendos-diario`\|`dividendos-br-diario`\|`snapshot-diario`\|`rendimento-cripto-diario`\|`cupom-tesouro-diario`\|`trilha-auditoria-purge-diario`), `status TEXT CHECK IN ('sucesso','erro')`, `resumo JSONB` (corpo `dados` da resposta, formato livre por job), `erro TEXT`, `duracao_ms INTEGER`, `executado_em TIMESTAMPTZ DEFAULT now()`.
 RLS: `SELECT` só para quem tem `usuarios.admin = true` (policy com subquery `EXISTS`); sem policy de INSERT/UPDATE/DELETE para `anon`/`authenticated` — só `service_role` grava.
 Gravada automaticamente por `executarComLogDeCron()` (`_shared/utils.ts`), que envolve as 4 rotas de cron dentro de `investimentos/index.ts` — mede duração, tenta extrair o corpo `dados` da Response como resumo, e nunca lança (uma falha ao gravar o log não pode derrubar a resposta real do cron). Consumida por `GET /investimentos/cron-execucoes` (`investimentos/admin.ts`) e exibida em `AdminCronsPage.tsx` (`/admin/crons`, só visível/populada para admin — a proteção real é a RLS, a UI só evita mostrar o link à toa).
 
@@ -550,7 +550,9 @@ Todos autenticam via header `x-cron-secret` (não JWT de usuário), lendo URL/se
 
 A rota `/investimentos/rendimento-cripto-cron` é agendada por `20260625000005_cron_rendimento_cripto.sql` (job `rendimento-cripto-diario`, `0 10 * * *` = 07h BRT, diário) — confirmado que o job existe e nenhuma migration posterior o desagenda (`cron.unschedule`).
 
-Um 5º job, **`trilha-auditoria-purge-diario`** (`0 8 * * *` = 05h BRT), difere dos 4 acima: não chama nenhuma Edge Function via `pg_net` — roda `SELECT arqvalor.fn_purgar_trilha_auditoria()` direto no Postgres (puro `DELETE` por data, sem fonte externa). Ver seção "Retenção rotativa" acima.
+A rota `/investimentos/cupom-tesouro-cron` é agendada por `20260821000001_cron_cupom_tesouro.sql` (job `cupom-tesouro-diario`, `30 10 * * *` = 07h30 BRT, diário) — provisiona pagamento de cupom semestral de títulos "com Juros Semestrais" do Tesouro Direto, fonte Tesouro Transparente/STN (CSV público, `baixarCupomTesouro()` em `mercado.ts`). Diferente dos 4 crons de dividendos de ações: só processa eventos **futuros** (`data_resgate >= hoje`, sem janela retroativa) — cupons já pagos o usuário já lança na mão, e reconciliar retroativamente arriscaria sobrescrever correção manual. Ver `provisionarCupomTesouro` em `dividendos.ts`.
+
+Um 6º job, **`trilha-auditoria-purge-diario`** (`0 8 * * *` = 05h BRT), difere dos demais: não chama nenhuma Edge Function via `pg_net` — roda `SELECT arqvalor.fn_purgar_trilha_auditoria()` direto no Postgres (puro `DELETE` por data, sem fonte externa). Ver seção "Retenção rotativa" acima.
 
 ### Row Level Security
 

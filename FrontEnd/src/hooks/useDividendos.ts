@@ -127,6 +127,18 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
+  // Idem para cupom semestral do Tesouro Direto (Tesouro Transparente/STN).
+  // Só provisiona eventos futuros — cupons já pagos o usuário lança na mão.
+  const buscarTesouro = async (): Promise<OpResult<ResultadoBuscaProventos>> => {
+    const res = await apiMutate<ResultadoBuscaProventos>('/investimentos/cupom-tesouro-buscar', 'POST')
+    if (res.ok) {
+      await invalidar()
+      await qc.invalidateQueries({ queryKey: qk.invAvisosDividendos(uid) })
+      await qc.invalidateQueries({ queryKey: qk.invNovidadesProventos(uid) })
+    }
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   // Preenche o dividendo-por-cota (rate) dos proventos antigos re-buscando da
   // B3. É o que destrava DY/Yield on Cost no padrão investidor10 no histórico.
   const backfillRate = async (): Promise<OpResult<ResultadoBackfillRate>> => {
@@ -161,6 +173,7 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     excluir,
     buscarBrl,
     buscarUsd,
+    buscarTesouro,
     diagnostico,
     backfillRate,
     associarMassa,

@@ -44,10 +44,25 @@ export function primeiraTaxa(txt: string): number {
 }
 
 export const DIA_MS = 86_400_000;
-// Valor acumulado de uma posição de renda fixa, do aporte até dataRef
-export function valorRF(custo: number, dataCompra: string, dataRef: Date, taxaAa: number): number {
-  const ini  = new Date(`${String(dataCompra).slice(0, 10)}T12:00:00Z`).getTime();
-  const dias = Math.max(0, (dataRef.getTime() - ini) / DIA_MS);
+// Valor acumulado de uma posição de renda fixa, do aporte até dataRef.
+// `datasReset` (opcional, ISO YYYY-MM-DD): datas de cupom semestral pago
+// dentro da janela — o juros-sobre-juros reinicia no cupom mais recente
+// (o que já acumulou até ali saiu em dinheiro, não continua compondo). Usado
+// só por Tesouro Prefixado "com Juros Semestrais"; todo outro chamador (CDB/
+// LCI/LCA prefixado, sem cupom periódico) não passa nada e mantém o
+// comportamento de sempre.
+export function valorRF(
+  custo: number, dataCompra: string, dataRef: Date, taxaAa: number, datasReset?: string[],
+): number {
+  let ini = new Date(`${String(dataCompra).slice(0, 10)}T12:00:00Z`).getTime();
+  const fim = dataRef.getTime();
+  if (datasReset) {
+    for (const d of datasReset) {
+      const t = new Date(`${d}T12:00:00Z`).getTime();
+      if (Number.isFinite(t) && t > ini && t <= fim) ini = t;
+    }
+  }
+  const dias = Math.max(0, (fim - ini) / DIA_MS);
   if (taxaAa <= 0 || dias === 0) return custo;
   return custo * Math.pow(1 + taxaAa, dias / 365);
 }
@@ -750,6 +765,70 @@ export function nomeTesouro(indexador: string, vencimento: string, semestral: bo
 export function tesouroSemestral(nome: string): boolean {
   const s = String(nome ?? "");
   return /semestr|ntn-?f/i.test(s) || (/ntn-?b/i.test(s) && !/princ/i.test(s));
+}
+
+// "Tipo Titulo" no formato oficial do STN, SEM o ano (o CSV de cupons abaixo
+// traz o ano numa coluna própria — Vencimento do Titulo) — espelha
+// FrontEnd/src/lib/tesouro.ts::tipoTituloTesouro. Só Prefixado e IPCA+ têm
+// variação "com Juros Semestrais"; Selic (POS_FIXADO) nunca paga cupom.
+export function tipoTituloTesouro(indexador: string | null, semestral: boolean): string | null {
+  if (indexador !== "PREFIXADO" && indexador !== "HIBRIDO") return null;
+  const base = indexador === "PREFIXADO" ? "Tesouro Prefixado" : "Tesouro IPCA+";
+  return semestral ? `${base} com Juros Semestrais` : base;
+}
+
+// ============================================================
+// Cupom de juros semestrais do Tesouro Direto — Tesouro Transparente/STN
+// (mesma proveniência do CSV de PU já usado pra marcação a mercado; dataset
+// "Resgates do Tesouro Direto", recurso "Pagamento de Cupom de Juros").
+// ============================================================
+export const CUPOM_TESOURO_CSV_URL =
+  "https://www.tesourotransparente.gov.br/ckan/dataset/f30db6e4-6123-416c-b094-be8dfc823601/" +
+  "resource/de2af5cf-9dbd-4566-b933-da6871cce030/download/cupomjurostesourodireto.csv";
+
+export interface CupomTesouro {
+  tipoTitulo: string; vencimento: string; dataResgate: string; puCupom: number;
+}
+
+// Baixa e parseia o CSV oficial de pagamento de cupons semestrais. Colunas:
+// Tipo Titulo;Vencimento do Titulo;Data Resgate;PU;Quantidade;Valor — "PU"
+// aqui é o valor do CUPOM por unidade/cota (não o preço do título; Valor ≈
+// PU × Quantidade confere linha a linha), o equivalente do "rate" usado pros
+// proventos de ações. Arquivo pequeno (algumas centenas de linhas, não passa
+// de dezenas de KB) — sem necessidade de streaming como o CSV de PU.
+export async function baixarCupomTesouro(): Promise<CupomTesouro[]> {
+  const res = await fetch(CUPOM_TESOURO_CSV_URL, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`Tesouro Transparente (cupons) respondeu ${res.status}`);
+  const texto = await res.text();
+  const out: CupomTesouro[] = [];
+  for (const linha of texto.split("\n").slice(1)) { // pula cabeçalho
+    const cols = linha.split(";");
+    if (cols.length < 4) continue;
+    const vencimento  = brDataISO(cols[1]);
+    const dataResgate = brDataISO(cols[2]);
+    const pu = brNumero(cols[3]);
+    if (!cols[0]?.trim() || !vencimento || !dataResgate || !Number.isFinite(pu) || pu <= 0) continue;
+    out.push({ tipoTitulo: cols[0].trim(), vencimento, dataResgate, puCupom: pu });
+  }
+  return out;
+}
+
+// Datas de cupom (ISO, ordenadas) já pagas pra um título específico do
+// usuário, dentro de [desde, ate] — usadas pra "resetar" o juros-sobre-juros
+// da acumulação de fallback (valorRFAcumulado) quando o PU de marcação a
+// mercado não está disponível pro título. Casa por tipoTitulo (derivado do
+// indexador/semestral do ativo) + vencimento exato.
+export function datasCupomParaAtivo(
+  cupons: CupomTesouro[], indexador: string | null, semestral: boolean, vencimento: string | null,
+  desde: string, ate: string,
+): string[] {
+  const tipoTitulo = tipoTituloTesouro(indexador, semestral);
+  if (!tipoTitulo || !vencimento) return [];
+  return cupons
+    .filter((c) => c.tipoTitulo === tipoTitulo && c.vencimento === vencimento
+      && c.dataResgate >= desde && c.dataResgate <= ate)
+    .map((c) => c.dataResgate)
+    .sort();
 }
 
 export function taxaDoTesouro(nome: string, rate: number): string {
@@ -1504,21 +1583,33 @@ export async function carregarIndicesMensais(c: Db, desde: string): Promise<{ cd
 // corridos no 1º e no último mês. Prefixado não depende de série (taxa fixa).
 // Mês sem dado (ex.: corrente ainda não publicado) → carry-forward do último
 // conhecido; sem série alguma → cai na taxa anual atual (comportamento antigo).
+// `datasReset` (opcional, ISO YYYY-MM-DD): datas de cupom semestral pago
+// dentro da janela compra→referência — ver comentário de `valorRF` acima.
+// Só se aplica de fato à família HIBRIDO (Tesouro IPCA+ com Juros
+// Semestrais); passado adiante pro PREFIXADO via `valorRF`; POS_FIXADO
+// (Selic) não tem variação com cupom, nunca chega com datasReset preenchido.
 export function valorRFAcumulado(
   custo: number, dataCompra: string, dataRef: Date,
   indexador: string | null, taxa: string | null,
   cdiSerie: SerieIndice, ipcaSerie: SerieIndice,
   cdiAtualAa: number, ipcaAtualAa: number,
+  datasReset?: string[],
 ): number {
   const t = String(taxa ?? "");
   // Prefixado / sem indexador: taxa fixa composta nos dias corridos.
   if (indexador === "PREFIXADO" || !indexador) {
-    return valorRF(custo, dataCompra, dataRef, primeiraTaxa(t));
+    return valorRF(custo, dataCompra, dataRef, primeiraTaxa(t), datasReset);
   }
 
-  const ini = new Date(`${String(dataCompra).slice(0, 10)}T00:00:00Z`).getTime();
+  let ini = new Date(`${String(dataCompra).slice(0, 10)}T00:00:00Z`).getTime();
   const fim = dataRef.getTime();
   if (!Number.isFinite(ini) || fim <= ini) return custo;
+  if (datasReset) {
+    for (const d of datasReset) {
+      const dt = new Date(`${d}T00:00:00Z`).getTime();
+      if (Number.isFinite(dt) && dt > ini && dt <= fim) ini = dt;
+    }
+  }
 
   const usaIPCA   = indexador === "HIBRIDO";
   const aditivo   = usaIPCA || (indexador === "POS_FIXADO" && /\+/.test(t));
@@ -1563,12 +1654,16 @@ export function valorRFAcumulado(
 // prefixado/IPCA+ usa a marcação a mercado escalando o custo pela razão
 // PU_alvo / PU_compra (robusto a como a quantidade foi cadastrada); sem PU
 // disponível, cai para a acumulação pela série do indexador (valorRFAcumulado).
+// `datasResetCupom` (opcional): só entra em jogo nesse fallback — quando o PU
+// de marcação a mercado está disponível (caso normal), ele já reflete o preço
+// "limpo" pós-cupom sozinho (é cotação real), então o reset é redundante ali.
 export function valorRFPosicoes(
   posicoes: { valor_custo: number; data_compra: string }[],
   tipo: string, indexador: string | null, venc: string | null, nome: string,
   mes: string, dataRef: Date,
   taxa: string | null, cdiSerie: SerieIndice, ipcaSerie: SerieIndice,
   cdiAtualAa: number, ipcaAtualAa: number, mtm: SerieMtM,
+  datasResetCupom?: string[],
 ): number {
   // Após o vencimento o título não rende mais (o resgate ocorre ali). Congela
   // a acumulação na data de vencimento — sem isso o valor de um CDB/LCI/LCA
@@ -1586,6 +1681,8 @@ export function valorRFPosicoes(
         return soma + p.valor_custo * (puAlvo / puCompra);
       }
     }
-    return soma + valorRFAcumulado(p.valor_custo, p.data_compra, ref, indexador, taxa, cdiSerie, ipcaSerie, cdiAtualAa, ipcaAtualAa);
+    return soma + valorRFAcumulado(
+      p.valor_custo, p.data_compra, ref, indexador, taxa, cdiSerie, ipcaSerie, cdiAtualAa, ipcaAtualAa, datasResetCupom,
+    );
   }, 0);
 }

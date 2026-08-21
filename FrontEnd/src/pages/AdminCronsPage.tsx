@@ -20,7 +20,7 @@ import { useCronExecucoes, type CronExecucao } from '../hooks/useCronExecucoes'
 
 const JOBS = [
   'dividendos-diario', 'dividendos-br-diario', 'snapshot-diario', 'rendimento-cripto-diario',
-  'trilha-auditoria-purge-diario',
+  'cupom-tesouro-diario', 'trilha-auditoria-purge-diario',
 ] as const
 
 function formatDataHora(iso: string): string {

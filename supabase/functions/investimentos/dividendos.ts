@@ -14,6 +14,7 @@ import {
   resolverMeta, precosCripto, precosBrapi, resolverNomes, ptaxAtual,
   garantirSincronizado, ultimaCotacaoPtax, nomeTesouro, tesouroSemestral, tickerTesouro,
   fetchB3, brDataISO, brNumero, B3_HEADERS,
+  baixarCupomTesouro, tipoTituloTesouro, type CupomTesouro,
 } from "./mercado.ts";
 import { recomputarPosicao, acharOuCriarPosicao } from "./posicoes.ts";
 
@@ -1125,56 +1126,149 @@ export async function provisionarProventosBrl(
     } catch (e) { logError("dividendos-cron-br ativo", e); }
   }
 
-  // Persiste (ou limpa) o aviso por usuário processado. Sobrescreve sempre:
-  // ao mapear a categoria que faltava, a próxima execução zera o aviso.
-  for (const userId of usuariosTocados) {
-    const m = pend.get(userId);
-    const tiposAviso = m && m.size > 0
-      ? [...m.entries()].map(([tipo, info]) => ({
-          tipo, motivo: info.motivo, tickers: [...info.tickers].slice(0, 30),
-        }))
-      : [];
-    const aviso = tiposAviso.length > 0 ? { atualizado_em: hoje, tipos: tiposAviso } : null;
-    await admin.from("usuarios").update({ inv_dividendos_avisos: aviso }).eq("id", userId);
-  }
-
-  // Persiste novidades p/ exibir no login. Mescla com o que ainda não foi
-  // visto (o frontend zera ao visualizar) para não perder avisos antigos.
-  for (const [userId, info] of nov) {
-    const { data: cur } = await admin.from("usuarios")
-      .select("inv_dividendos_novidades").eq("id", userId).single();
-    const prev = (cur?.inv_dividendos_novidades ?? null) as NovidadesPayload | null;
-    // Dedup por ativo+tipo+data: se o mesmo provento mudar de novo antes do
-    // usuário ver o aviso anterior, mantém só a ocorrência mais recente
-    // (evita listar o mesmo item repetido a cada execução do cron).
-    const itensPorChave = new Map<string, NovidadeItem>();
-    for (const it of [...info.itens, ...(prev?.itens ?? [])]) {
-      const chave = `${it.ticker}|${it.tipo}|${it.data_pagamento}`;
-      if (!itensPorChave.has(chave)) itensPorChave.set(chave, it);
-    }
-    const payload: NovidadesPayload = {
-      gerado_em:   new Date().toISOString(),
-      criados:     info.criados + (prev?.criados ?? 0),
-      atualizados: info.atualizados + (prev?.atualizados ?? 0),
-      itens:       [...itensPorChave.values()].slice(0, 25),
-    };
-    await admin.from("usuarios").update({ inv_dividendos_novidades: payload }).eq("id", userId);
-
-    // Registro DURÁVEL na agenda: 1 lembrete-resumo CONCLUÍDO por execução
-    // (a notificação do login some ao ser vista; este fica no histórico).
-    const partes: string[] = [];
-    if (info.criados > 0)     partes.push(`${info.criados} provisionado(s)`);
-    if (info.atualizados > 0) partes.push(`${info.atualizados} atualizado(s)`);
-    if (partes.length > 0) {
-      const desc = `Proventos B3 (busca automática): ${partes.join(", ")}`.slice(0, 200);
-      const { error: errLem } = await admin.from("lembretes")
-        .insert({ user_id: userId, data: hoje, descricao: desc, status: "CONCLUIDO" });
-      if (errLem) logError("dividendos-br lembrete", errLem);
-    }
-  }
+  // Persiste avisos de mapeamento pendente + novidades de login + lembrete
+  // durável (sobrescreve avisos sempre; mescla novidades com o que ainda não
+  // foi visto). Compartilhado com provisionarCupomTesouro.
+  await persistirAvisosENovidades(admin, hoje, "Proventos B3", pend, usuariosTocados, nov);
 
   logSuccess("Dividendos BR", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados, falhasFonte, erros });
   return { processados, criados, atualizados, pulados, falhas_fonte: falhasFonte, fontes_falha: fontesFalha, erros, erro_exemplo: erroExemplo };
+}
+
+// ============================================================
+// /investimentos/cupom-tesouro-cron (POST, x-cron-secret) — JOB diário
+// /investimentos/cupom-tesouro-buscar (POST, JWT) — disparo manual
+//
+// Provisiona o pagamento de CUPOM SEMESTRAL de títulos do Tesouro Direto
+// "com Juros Semestrais" — fonte: Tesouro Transparente/STN (CSV público de
+// pagamento de cupons, mesma proveniência do CSV de PU já usado pra
+// marcação a mercado; ver baixarCupomTesouro em mercado.ts).
+//
+// Diferenças de propósito em relação a provisionarProventosBrl (ações/FII):
+//   • Só o FUTURO a partir de hoje (>= hojeISO()) — SEM janela retroativa.
+//     Cupons já pagos no passado o usuário já lança/lançou na mão (pedido
+//     explícito: "os passados já tenho lançados, deixe somente pros
+//     próximos") — e o dataset do STN tem defasagem de alguns meses, então
+//     tentar reconciliar retroativamente aqui arriscaria sobrescrever o que
+//     já foi corrigido manualmente.
+//   • Uma ÚNICA busca (CSV pequeno, sem rate limit de fonte externa) casada
+//     contra TODOS os ativos TESOURO_DIRETO de TODOS os usuários — não há
+//     chamada HTTP por ativo como no fluxo B3.
+//   • Só processa ativos com "Juros Semestrais" no nome (tesouroSemestral) —
+//     título sem cupom periódico (Selic, ou Prefixado/IPCA+ sem JS) não gera
+//     provento intermediário, só resgate no vencimento.
+//   • tipo_dividendo: procura um tipo do usuário com "tesouro" no nome
+//     (ILIKE), priorizando o mapeado (com categoria) — mesmo padrão de
+//     tolerância a nome customizado usado pro tipo "Dividendos" no fluxo USD.
+// ============================================================
+export async function rotaCupomTesouroCron(req: Request, m: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  const naoAutorizado = autenticarCron(req);
+  if (naoAutorizado) return naoAutorizado;
+  logRequest("POST", "/investimentos/cupom-tesouro-cron", {});
+  return json({ dados: await provisionarCupomTesouro(dbAdmin(), null) });
+}
+
+export async function rotaCupomTesouroBuscar(c: Db, _req: Request, m: string, userId: string) {
+  if (m !== "POST") return erro("Método não permitido", 405);
+  logRequest("POST", "/investimentos/cupom-tesouro-buscar", { userId });
+  return json({ dados: await provisionarCupomTesouro(c, userId) });
+}
+
+export async function provisionarCupomTesouro(
+  admin: Db, filtroUserId: string | null,
+): Promise<ResultadoProvisaoProventos> {
+  const hoje = hojeISO();
+
+  let consulta = admin.from("inv_ativos")
+    .select("id, user_id, ticker, nome, rf_indexador, rf_vencimento")
+    .eq("tipo_ativo", "TESOURO_DIRETO");
+  if (filtroUserId) consulta = consulta.eq("user_id", filtroUserId);
+  const { data: ativos, error } = await consulta;
+  if (error) { logError("cupom-tesouro ativos", error); throw new Error(error.message); }
+  if (!ativos || ativos.length === 0) {
+    return { processados: 0, criados: 0, atualizados: 0, pulados: 0, falhas_fonte: 0, fontes_falha: [], erros: 0, erro_exemplo: null };
+  }
+
+  let cupons: CupomTesouro[];
+  try { cupons = await baixarCupomTesouro(); }
+  catch (e) {
+    logError("cupom-tesouro CSV", e);
+    return { processados: 0, criados: 0, atualizados: 0, pulados: 0, falhas_fonte: 1, fontes_falha: ["Tesouro Transparente"], erros: 0, erro_exemplo: null };
+  }
+
+  const tiposPorUser = new Map<string, { id: string; categoria_id: string | null } | null>();
+  async function tipoTesouroDoUsuario(uid: string) {
+    if (tiposPorUser.has(uid)) return tiposPorUser.get(uid)!;
+    const { data } = await admin.from("inv_tipos_dividendo")
+      .select("id, categoria_id").eq("user_id", uid).ilike("nome", "%tesouro%");
+    const lista = (data ?? []) as { id: string; categoria_id: string | null }[];
+    const tipo = lista.find((t) => t.categoria_id) ?? lista[0] ?? null;
+    tiposPorUser.set(uid, tipo);
+    return tipo;
+  }
+
+  const pend = new Map<string, Map<string, { motivo: string; tickers: Set<string> }>>();
+  const usuariosTocados = new Set<string>();
+  const nov = new Map<string, { criados: number; atualizados: number; itens: NovidadeItem[] }>();
+
+  let processados = 0, criados = 0, atualizados = 0, pulados = 0, erros = 0;
+  let erroExemplo: string | null = null;
+  for (const ativo of (ativos ?? []) as { id: string; user_id: string; ticker: string; nome: string; rf_indexador: string | null; rf_vencimento: string | null }[]) {
+    try {
+      if (!tesouroSemestral(ativo.nome)) continue; // sem cupom periódico
+      const { data: posicoes } = await admin.from("inv_posicoes")
+        .select("conta_id, quantidade").eq("ativo_id", ativo.id).eq("status", "ATIVA");
+      if (!posicoes || posicoes.length === 0) continue;
+      usuariosTocados.add(ativo.user_id);
+      processados++;
+
+      // Casa por Tipo Titulo (indexador + "com Juros Semestrais") + vencimento
+      // exato — mesma chave que datasCupomParaAtivo usa pro reset de
+      // valorRFAcumulado (ver mercado.ts), só que aqui precisamos do PU
+      // (valor do cupom por unidade) junto, não só a data.
+      const tipoTitulo = tipoTituloTesouro(ativo.rf_indexador, true);
+      const linhas = cupons.filter((c) => c.tipoTitulo === tipoTitulo && c.vencimento === ativo.rf_vencimento
+        && c.dataResgate >= hoje);
+      if (linhas.length === 0) continue;
+
+      const tipoDiv = await tipoTesouroDoUsuario(ativo.user_id);
+      if (!tipoDiv?.categoria_id) {
+        pulados++;
+        registrarPendencia(pend, ativo.user_id, "Tesouro", tipoDiv ? "sem_categoria" : "tipo_inexistente", ativo.ticker);
+        continue;
+      }
+
+      for (const linha of linhas) {
+        for (const pos of posicoes as { conta_id: string; quantidade: number }[]) {
+          const valorBRL = Number((linha.puCupom * Number(pos.quantidade)).toFixed(2));
+          if (valorBRL <= 0) continue;
+          const r = await upsertDividendoProvisionado(admin, {
+            userId: ativo.user_id, ativoId: ativo.id, contaId: pos.conta_id,
+            tipoAtivo: "TESOURO_DIRETO", tipoDivId: String(tipoDiv.id),
+            categoriaId: String(tipoDiv.categoria_id), ticker: ativo.ticker, nome: ativo.nome,
+            valor: valorBRL, payDate: linha.dataResgate,
+            valorPorCota: linha.puCupom,
+            contaExclusiva: posicoes.length === 1,
+          });
+          if (r === "criado" || r === "atualizado") {
+            if (r === "criado") criados++; else atualizados++;
+            registrarNovidade(nov, ativo.user_id, {
+              ticker: ativo.ticker, tipo: "Tesouro", data_pagamento: linha.dataResgate,
+              valor: valorBRL, acao: r,
+            });
+          } else if (typeof r === "object") {
+            erros++; erroExemplo ??= `${ativo.ticker}: ${r.erro}`;
+          }
+        }
+      }
+    } catch (e) { logError("cupom-tesouro ativo", e); }
+  }
+
+  await persistirAvisosENovidades(admin, hoje, "Cupom Tesouro Direto", pend, usuariosTocados, nov);
+
+  logSuccess("Cupom Tesouro", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados, erros });
+  return { processados, criados, atualizados, pulados, falhas_fonte: 0, fontes_falha: [], erros, erro_exemplo: erroExemplo };
 }
 
 // ============================================================
@@ -1423,6 +1517,59 @@ export function registrarPendencia(
   const cur = m.get(tipo);
   if (cur) cur.tickers.add(ticker);
   else m.set(tipo, { motivo, tickers: new Set([ticker]) });
+}
+
+// Persiste (avisos de mapeamento pendente + novidades de login + lembrete
+// durável) ao final de uma rotina de provisão — compartilhado entre
+// provisionarProventosBrl e provisionarCupomTesouro pra não duplicar a
+// lógica de merge (mesma mecânica dos dois: sobrescreve avisos, mescla
+// novidades com o que ainda não foi visto, dedup por ticker+tipo+data).
+// `labelFonte` só muda o texto do lembrete-resumo (ex.: "Proventos B3" vs
+// "Cupom Tesouro Direto").
+export async function persistirAvisosENovidades(
+  admin: Db, hoje: string, labelFonte: string,
+  pend: Map<string, Map<string, { motivo: string; tickers: Set<string> }>>,
+  usuariosTocados: Set<string>,
+  nov: Map<string, { criados: number; atualizados: number; itens: NovidadeItem[] }>,
+): Promise<void> {
+  for (const userId of usuariosTocados) {
+    const m = pend.get(userId);
+    const tiposAviso = m && m.size > 0
+      ? [...m.entries()].map(([tipo, info]) => ({
+          tipo, motivo: info.motivo, tickers: [...info.tickers].slice(0, 30),
+        }))
+      : [];
+    const aviso = tiposAviso.length > 0 ? { atualizado_em: hoje, tipos: tiposAviso } : null;
+    await admin.from("usuarios").update({ inv_dividendos_avisos: aviso }).eq("id", userId);
+  }
+
+  for (const [userId, info] of nov) {
+    const { data: cur } = await admin.from("usuarios")
+      .select("inv_dividendos_novidades").eq("id", userId).single();
+    const prev = (cur?.inv_dividendos_novidades ?? null) as NovidadesPayload | null;
+    const itensPorChave = new Map<string, NovidadeItem>();
+    for (const it of [...info.itens, ...(prev?.itens ?? [])]) {
+      const chave = `${it.ticker}|${it.tipo}|${it.data_pagamento}`;
+      if (!itensPorChave.has(chave)) itensPorChave.set(chave, it);
+    }
+    const payload: NovidadesPayload = {
+      gerado_em:   new Date().toISOString(),
+      criados:     info.criados + (prev?.criados ?? 0),
+      atualizados: info.atualizados + (prev?.atualizados ?? 0),
+      itens:       [...itensPorChave.values()].slice(0, 25),
+    };
+    await admin.from("usuarios").update({ inv_dividendos_novidades: payload }).eq("id", userId);
+
+    const partes: string[] = [];
+    if (info.criados > 0)     partes.push(`${info.criados} provisionado(s)`);
+    if (info.atualizados > 0) partes.push(`${info.atualizados} atualizado(s)`);
+    if (partes.length > 0) {
+      const desc = `${labelFonte} (busca automática): ${partes.join(", ")}`.slice(0, 200);
+      const { error: errLem } = await admin.from("lembretes")
+        .insert({ user_id: userId, data: hoje, descricao: desc, status: "CONCLUIDO" });
+      if (errLem) logError(`${labelFonte} lembrete`, errLem);
+    }
+  }
 }
 
 export interface AtivoBrl {

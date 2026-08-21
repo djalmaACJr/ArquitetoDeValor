@@ -98,24 +98,25 @@ export default function DividendosPage() {
   const [associando,   setAssociando]   = useState(false)
   const [toast,        setToast]        = useState<string | null>(null)
 
-  const { dividendos, loading, excluir, buscarBrl, buscarUsd, backfillRate, associarMassa } = useDividendos()
+  const { dividendos, loading, excluir, buscarBrl, buscarUsd, buscarTesouro, backfillRate, associarMassa } = useDividendos()
 
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 6000) }
 
-  // Busca proventos nas duas fontes: B3 (ativos BRL) e Polygon (ativos USD).
+  // Busca proventos nas três fontes: B3 (ativos BRL), Polygon (ativos USD) e
+  // Tesouro Transparente (cupom semestral do Tesouro Direto).
   async function buscarProventos() {
     setBuscando(true)
-    const [br, usd] = await Promise.all([buscarBrl(), buscarUsd()])
+    const [br, usd, tesouro] = await Promise.all([buscarBrl(), buscarUsd(), buscarTesouro()])
     setBuscando(false)
-    if (!br.ok && !usd.ok) { showToast(br.erro ?? usd.erro ?? 'Erro ao buscar proventos'); return }
+    if (!br.ok && !usd.ok && !tesouro.ok) { showToast(br.erro ?? usd.erro ?? tesouro.erro ?? 'Erro ao buscar proventos'); return }
 
     const soma = (k: 'processados' | 'criados' | 'atualizados' | 'pulados' | 'falhas_fonte' | 'erros') =>
-      (br.dados?.[k] ?? 0) + (usd.dados?.[k] ?? 0)
+      (br.dados?.[k] ?? 0) + (usd.dados?.[k] ?? 0) + (tesouro.dados?.[k] ?? 0)
     const criados = soma('criados'), atualizados = soma('atualizados')
     const pulados = soma('pulados'), falhas = soma('falhas_fonte')
     const processados = soma('processados'), errosGravar = soma('erros')
-    const erroExemplo = br.dados?.erro_exemplo ?? usd.dados?.erro_exemplo ?? null
-    const tickersFalha = [...(br.dados?.fontes_falha ?? []), ...(usd.dados?.fontes_falha ?? [])]
+    const erroExemplo = br.dados?.erro_exemplo ?? usd.dados?.erro_exemplo ?? tesouro.dados?.erro_exemplo ?? null
+    const tickersFalha = [...(br.dados?.fontes_falha ?? []), ...(usd.dados?.fontes_falha ?? []), ...(tesouro.dados?.fontes_falha ?? [])]
 
     const partes: string[] = []
     if (criados + atualizados > 0) partes.push(`Busca concluída — ${criados} novo(s), ${atualizados} atualizado(s).`)
