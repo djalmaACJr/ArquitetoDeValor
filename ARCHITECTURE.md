@@ -470,6 +470,22 @@ Uso: claim-first via `INSERT` (não check-then-write — evitaria a própria rac
 
 ---
 
+### 🩺 Monitoramento de falha antes da Edge Function (`cron-saude-diario`, ago/2026)
+
+Migration: `20260821000002_cron_saude.sql`.
+
+Motivação: achado real em produção — `rendimento-cripto-diario` ficou **falhando 100% das vezes por pelo menos 30 dias** (o secret `edge_url_rendimento_cripto_cron` nunca foi criado no Vault) e **nenhuma linha apareceu em `cron_execucoes`**. Causa: a falha acontece em `cron.job_run_details` — o Postgres tenta montar a chamada via `pg_net` (`net.http_post`), a URL vem `NULL` do Vault, e o `INSERT` em `net.http_request_queue` viola `NOT NULL` **antes** da Edge Function ser invocada. `executarComLogDeCron()` só grava de **dentro** da function — nunca chegou a rodar, nunca logou nada. O próprio `cron_execucoes` (criado pra resolver exatamente esse tipo de "falha silenciosa", AUD conforme `20260806000002`) tinha esse ponto cego específico.
+
+`fn_verificar_saude_cron()` — `SECURITY DEFINER`, SQL puro (sem `pg_net`/Vault, de propósito — não teria sentido o detector de "cron não consegue nem começar por causa do pg_net/Vault" ter a mesma dependência frágil). Lê `cron.job_run_details` (log nativo do `pg_cron`, já existe, nenhuma tabela nossa) das últimas ~26h, e para cada falha aí encontrada faz `INSERT` em `cron_execucoes` como uma linha `status='erro'` normal — mesma tabela/tela (`/admin/crons`) que já existia, sem superfície nova. Dedup por `(job_nome, executado_em)`: não duplica se a janela de 26h se sobrepuser entre execuções diárias. Também grava seu próprio resultado (`sucesso`, `resumo: {falhas_detectadas: N}`) — visível como qualquer outro job.
+
+Agendado `0 11 * * *` (08h BRT) — depois de todos os outros 6 jobs do dia, pra já pegar qualquer falha da manhã.
+
+#### Aviso de login pros admins (`usuarios.cron_avisos_vistos_em`)
+
+Mesma migration adiciona a coluna `cron_avisos_vistos_em TIMESTAMPTZ` em `usuarios` — "visto até" **por admin** (cada um dispensa por conta própria, não é global). `NULL` = nunca visto, o frontend trata como "últimos 7 dias" pra não despejar histórico inteiro na primeira vez. `useAvisosCron` (reaproveita `useCronExecucoes`, sem endpoint novo) filtra `status='erro' AND executado_em > cron_avisos_vistos_em`, exibido por `AvisosCronAdmin.tsx` — card de notificação no login (canto inferior esquerdo, só admin, mesmo padrão de `NovidadesProventos`), montado em `AppLayout.tsx`. Dispensar grava `now()` direto na coluna (acesso direto a `usuarios`, mesma exceção documentada em `CLAUDE.md`).
+
+---
+
 ### Funções
 
 | Função | Tipo | Papel |
@@ -553,6 +569,8 @@ A rota `/investimentos/rendimento-cripto-cron` é agendada por `20260625000005_c
 A rota `/investimentos/cupom-tesouro-cron` é agendada por `20260821000001_cron_cupom_tesouro.sql` (job `cupom-tesouro-diario`, `30 10 * * *` = 07h30 BRT, diário) — provisiona pagamento de cupom semestral de títulos "com Juros Semestrais" do Tesouro Direto, fonte Tesouro Transparente/STN (CSV público, `baixarCupomTesouro()` em `mercado.ts`). Diferente dos 4 crons de dividendos de ações: só processa eventos **futuros** (`data_resgate >= hoje`, sem janela retroativa) — cupons já pagos o usuário já lança na mão, e reconciliar retroativamente arriscaria sobrescrever correção manual. Ver `provisionarCupomTesouro` em `dividendos.ts`.
 
 Um 6º job, **`trilha-auditoria-purge-diario`** (`0 8 * * *` = 05h BRT), difere dos demais: não chama nenhuma Edge Function via `pg_net` — roda `SELECT arqvalor.fn_purgar_trilha_auditoria()` direto no Postgres (puro `DELETE` por data, sem fonte externa). Ver seção "Retenção rotativa" acima.
+
+Um 7º job, **`cron-saude-diario`** (`0 11 * * *` = 08h BRT, `20260821000002_cron_saude.sql`), monitora os OUTROS 6 — também SQL puro, de propósito (ver seção "Monitoramento de falha antes da Edge Function" abaixo).
 
 ### Row Level Security
 

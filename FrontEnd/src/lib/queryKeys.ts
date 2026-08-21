@@ -42,6 +42,7 @@ export const qk = {
   // isolamento real; ver migration 20260806000002_cron_execucoes.sql)
   usuarioAdmin: (uid: Uid) => ['usuario-admin', uid] as const,
   cronExecucoes: (uid: Uid) => ['cron-execucoes', uid] as const,
+  cronAvisosVistos: (uid: Uid) => ['cron-avisos-vistos', uid] as const,
   trilhaAuditoria: (uid: Uid, f?: unknown) => ['trilha-auditoria', uid, f ?? null] as const,
   configAuditoria: (uid: Uid) => ['config-auditoria', uid] as const,
 

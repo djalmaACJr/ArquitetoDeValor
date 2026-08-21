@@ -5,6 +5,7 @@ import { Menu } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import Sidebar from './Sidebar'
 import NovidadesProventos from '../ui/NovidadesProventos'
+import AvisosCronAdmin from '../ui/AvisosCronAdmin'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useAutoLogout } from '../../hooks/useAutoLogout'
@@ -181,6 +182,9 @@ export default function AppLayout() {
 
       {/* Aviso de login: proventos provisionados pelo job BRL */}
       <NovidadesProventos />
+      {/* Aviso de login (só admin): cron com falha, inclusive falhas que nem
+          chegaram a invocar a Edge Function (pg_cron/pg_net) */}
+      <AvisosCronAdmin />
     </div>
   )
 }
