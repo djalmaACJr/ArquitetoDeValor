@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
 import { Fingerprint } from 'lucide-react'
+import type { AuthError } from '@supabase/supabase-js'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
 import { consumirRotaPosExpiracao } from '../lib/retornoPosExpiracao'
@@ -16,6 +17,38 @@ import {
 // (por dispositivo — limpo no logout junto com o resto do estado do
 // usuário, ver lib/clientCache.ts). Sem isso, todo login voltaria a oferecer.
 const LS_BIOMETRIA_RECUSADA = 'arqvalor:biometria-recusada'
+
+// signInWithPassword() resolve com {error} (não rejeita) tanto pra senha
+// errada quanto pra qualquer outro problema no lado do servidor (rate
+// limit, e-mail não confirmado, erro de banco, timeout). Antes, QUALQUER
+// erro aqui virava "Email ou senha inválidos." — um usuário com a senha
+// CERTA via essa mensagem sempre que o Auth tropeçava em algo que não
+// tinha nada a ver com a credencial dele (ex.: o bug de trigger corrigido
+// em 20260822000001, que quebrava até o cadastro). Só `invalid_credentials`
+// (e a falta de `code` num erro 400, formato antigo do GoTrue) realmente
+// significa "e-mail ou senha errados" — o resto é falha do lado do servidor
+// e merece uma mensagem que não acuse o usuário de ter digitado errado.
+function mensagemErroLogin(err: AuthError): string {
+  switch (err.code) {
+    case 'invalid_credentials':
+      return 'Email ou senha inválidos.'
+    case 'email_not_confirmed':
+      return 'Confirme seu e-mail antes de entrar — verifique sua caixa de entrada.'
+    case 'user_banned':
+      return 'Esta conta está bloqueada. Entre em contato com o suporte.'
+    case 'over_request_rate_limit':
+      return 'Muitas tentativas seguidas. Aguarde um instante e tente novamente.'
+    default:
+      if (!err.code && err.status === 400) return 'Email ou senha inválidos.'
+      return 'Não foi possível entrar agora. Tente novamente em instantes.'
+  }
+}
+
+// Só desativa a digital quando o erro realmente indica credencial inválida
+// (senha trocada em outro dispositivo) — nunca por causa de um erro do
+// servidor, senão o app tira uma digital que continua válida.
+const credencialInvalida = (err: AuthError) =>
+  err.code === 'invalid_credentials' || (!err.code && err.status === 400)
 
 // Dentro do WebView do app Android (Capacitor), window.location.origin é
 // "https://localhost" — não um domínio real alcançável pelo link do e-mail
@@ -107,7 +140,7 @@ export default function LoginPage() {
       const { error: err } = await signIn(email, password)
       if (err) {
         console.error('[login] signInWithPassword falhou', err)
-        setError('Email ou senha inválidos.')
+        setError(mensagemErroLogin(err))
         return
       }
       // Logout por inatividade guarda a rota em que o usuário estava —
@@ -142,11 +175,19 @@ export default function LoginPage() {
       const { email: emailSalvo, senha } = await entrarComBiometria()
       const { error: err } = await signIn(emailSalvo, senha)
       if (err) {
-        // Credenciais salvas não batem mais (ex.: senha trocada em outro
-        // dispositivo) — limpa e pede pra entrar manual e reativar.
-        await desativarBiometria()
-        setDigitalAtiva(false)
-        setError('Sua senha mudou. Entre com e-mail e senha e ative a digital de novo.')
+        console.error('[login] signInWithPassword (digital) falhou', err)
+        if (credencialInvalida(err)) {
+          // Credenciais salvas não batem mais (ex.: senha trocada em outro
+          // dispositivo) — limpa e pede pra entrar manual e reativar.
+          await desativarBiometria()
+          setDigitalAtiva(false)
+          setError('Sua senha mudou. Entre com e-mail e senha e ative a digital de novo.')
+        } else {
+          // Erro do servidor, não da credencial salva — mantém a digital
+          // ativa, senão o usuário perdia a conveniência por um problema
+          // que nada tem a ver com a senha guardada.
+          setError(mensagemErroLogin(err))
+        }
         return
       }
       const { data } = await supabase.auth.getSession()
