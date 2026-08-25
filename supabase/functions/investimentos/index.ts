@@ -21,6 +21,8 @@
 //   rendimento-cripto.ts   — yield de cripto (rota manual + cron)
 //   import-export.ts       — migrar-conta, atualizar-ativos, importar, restaurar
 //   dashboard.ts            — /dashboard, /ranking
+//   indicadores.ts          — /indicadores (watchlist de ETF/ETF internacional
+//                             usada como benchmark na página Gerenciar dados)
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { erro, db, autenticar, corsPreFlight, executarComLogDeCron } from "../_shared/utils.ts";
@@ -44,6 +46,7 @@ import {
 } from "./import-export.ts";
 import { dashboard, ranking } from "./dashboard.ts";
 import { rotaCronExecucoes } from "./admin.ts";
+import { rotaIndicadores } from "./indicadores.ts";
 
 Deno.serve(async (req: Request) => {
   registrarOrigem(req);
@@ -131,6 +134,7 @@ Deno.serve(async (req: Request) => {
       case "ranking":         return m === "GET" ? await ranking(c, url.searchParams) : erro("Método não permitido", 405);
       case "busca-externa":   return m === "GET" ? await buscaExterna(url.searchParams) : erro("Método não permitido", 405);
       case "cron-execucoes":  return await rotaCronExecucoes(c, m, userId);
+      case "indicadores":     return await rotaIndicadores(c, req, m, userId);
       case "ptax":
         if (m === "GET")  return await rotaPtax(c, url.searchParams);
         if (m === "POST") return await sincronizarPtaxResposta(c);

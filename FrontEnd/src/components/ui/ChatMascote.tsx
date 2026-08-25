@@ -7,13 +7,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { X, Send, Trash2, Paperclip, Camera, Users, Info } from 'lucide-react'
+import { X, Send, Trash2, Paperclip, Camera, Users, Info, Bot } from 'lucide-react'
 import Mascote, { type MascoteNome, type MascotePose } from './Mascote'
 import { useChatMascote } from '../../hooks/useChatMascote'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useContextoIA, serializarContexto } from '../../context/ContextoIAContext'
 import { useIAPreferencia } from '../../hooks/useIAPreferencia'
-import { provedorPorId } from '../../lib/iaProvedores'
+import { provedorPorId, rotuloModelo } from '../../lib/iaProvedores'
 import { capturarTela } from '../../lib/screenshot'
 
 // Artigo definido por personagem (gênero do mascote, NÃO do apelido).
@@ -94,9 +94,10 @@ export default function ChatMascote({
 
   // Screenshot — só relevante se o provedor da config em uso aceitar visão.
   // Com `configId`, vale o provedor daquela config; senão, o da ativa.
-  const { provedorAtivo, configs } = useIAPreferencia()
+  const { ativa, provedorAtivo, configs } = useIAPreferencia()
+  const configEmUso = configId ? configs.find(c => c.id === configId) : ativa
   const provedorEmUso = configId
-    ? provedorPorId(configs.find(c => c.id === configId)?.provedor ?? '')
+    ? provedorPorId(configEmUso?.provedor ?? '')
     : provedorAtivo
   const suportaVisao = !!provedorEmUso?.visao
   const [screenshot, setScreenshot] = useState<string | null>(null)
@@ -249,9 +250,19 @@ export default function ChatMascote({
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {mensagens.length === 0 && (
             <div className="flex flex-col items-center text-center py-6">
-              <div className="mb-3">
+              <div className="mb-2">
                 <Mascote nome={nome} pose="feliz" size={120} />
               </div>
+              {provedorEmUso && (
+                <span
+                  title={`Este mentor está respondendo com ${provedorEmUso.label} · ${rotuloModelo(provedorEmUso, configEmUso?.modelo)}`}
+                  className="mb-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[12.5px] font-semibold border cursor-help"
+                  style={{ background: 'rgba(139,92,246,0.14)', borderColor: 'rgba(139,92,246,0.5)', color: '#a78bfa' }}
+                >
+                  <Bot size={14} />
+                  {provedorEmUso.label}
+                </span>
+              )}
               <p className="text-[16px] font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
                 Olá! Sou {ARTIGO[nome]} {apelido}.
               </p>

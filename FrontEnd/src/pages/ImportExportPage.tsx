@@ -4,6 +4,7 @@ import {
   Trash2, Download, Upload, AlertTriangle, CheckCircle2,
   FileSpreadsheet, ChevronDown, ChevronUp, X, Loader2, RefreshCw,
   DatabaseBackup, RotateCcw, Save, DollarSign, TrendingUp, Landmark, Percent,
+  Plus, Search,
 } from 'lucide-react'
 import { Line } from 'react-chartjs-2'
 import {
@@ -23,8 +24,10 @@ import { usePtax, usePtaxSerie } from '../hooks/usePtax'
 import { useIndicesEconomicos, type IndiceNome, type PontoIndice } from '../hooks/useIndicesEconomicos'
 import { useBackfillHistorico } from '../hooks/useInvestimentosHistorico'
 import { useOperacaoLonga } from '../hooks/useOperacaoLonga'
+import { useInvIndicadores } from '../hooks/useInvIndicadores'
+import { useBuscaAtivoExterno } from '../hooks/useInvestimentosAtivos'
 import { MonthPicker } from '../components/ui/MonthPicker'
-import type { Conta, CartaoVirtual } from '../types'
+import type { Conta, CartaoVirtual, InvIndicador, TipoIndicador, ResultadoBuscaAtivo } from '../types'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, type TipoAtivoInvestimento,
 } from '../lib/constants'
@@ -97,6 +100,7 @@ interface InvestimentosBackup {
   alocacoes:       Record<string, unknown>[]
   questionarios?:  Record<string, unknown>[]
   avaliacoes?:     Record<string, unknown>[]
+  indicadores?:    Record<string, unknown>[]
   perfil?:         Record<string, unknown> | null
   pesos?:          Record<string, unknown> | null  // pesos globais dos critérios
 }
@@ -3067,7 +3071,7 @@ function SecaoBackup() {
 
       // 5. Investimentos (ativos, posições, operações, dividendos, histórico, tipos, alocações)
       addLog('ok', 'Buscando investimentos...')
-      const [rAtivos, rPos, rOps, rDiv, rHist, rTipos, rAloc, rQuest, rAval] = await Promise.all([
+      const [rAtivos, rPos, rOps, rDiv, rHist, rTipos, rAloc, rQuest, rAval, rIndic] = await Promise.all([
         apiFetch('/investimentos/ativos'),
         apiFetch('/investimentos/posicoes'),
         apiFetch('/investimentos/operacoes'),
@@ -3077,6 +3081,7 @@ function SecaoBackup() {
         apiFetch('/investimentos/alocacoes'),
         apiFetch('/investimentos/questionarios'),
         apiFetch('/investimentos/avaliacoes'),
+        apiFetch('/investimentos/indicadores'),
       ])
       // Perfil de investidor + pesos globais (usuarios.* — preferências JSONB inline).
       let perfilInv: Record<string, unknown> | null = null
@@ -3097,6 +3102,7 @@ function SecaoBackup() {
         alocacoes:       extrairLista<Record<string, unknown>>(rAloc.dados),
         questionarios:   extrairLista<Record<string, unknown>>(rQuest.dados),
         avaliacoes:      extrairLista<Record<string, unknown>>(rAval.dados),
+        indicadores:     ((rIndic.dados as { indicadores?: Record<string, unknown>[] } | null)?.indicadores) ?? [],
         perfil:          perfilInv,
         pesos:           pesosInv,
       }
@@ -3166,6 +3172,7 @@ function SecaoBackup() {
               'Investimentos (ativos, posições, operações, dividendos, histórico)',
               'Configurações de investimentos (metas, perfil, pesos e questionários de avaliação)',
               'Avaliações dos mentores (notas das IAs por ativo)',
+              'Indicadores de mercado (watchlist de ETF/ETF internacional)',
               'Lembretes (avulsos e vinculados a lançamentos)',
               'Objetivos (metas, sonhos e projetos)',
             ].map((item, i) => (
@@ -3500,12 +3507,13 @@ function SecaoRestore() {
           tipos_dividendo: inv.tipos_dividendo, alocacoes: inv.alocacoes,
           questionarios: inv.questionarios ?? [],
           avaliacoes: inv.avaliacoes ?? [],
+          indicadores: inv.indicadores ?? [],
         })
         if (res.ok) {
-          const d = res.dados as { ativos?: number; posicoes?: number; operacoes?: number; dividendos?: number; historico?: number; questionarios?: number; avaliacoes?: number; avisos?: string[] } | null
-          addLog('ok', `Investimentos: ${d?.ativos ?? 0} ativos, ${d?.posicoes ?? 0} posições, ${d?.operacoes ?? 0} operações, ${d?.dividendos ?? 0} dividendos, ${d?.historico ?? 0} snapshots, ${d?.questionarios ?? 0} questionários, ${d?.avaliacoes ?? 0} avaliações restauradas`)
+          const d = res.dados as { ativos?: number; posicoes?: number; operacoes?: number; dividendos?: number; historico?: number; questionarios?: number; avaliacoes?: number; indicadores?: number; avisos?: string[] } | null
+          addLog('ok', `Investimentos: ${d?.ativos ?? 0} ativos, ${d?.posicoes ?? 0} posições, ${d?.operacoes ?? 0} operações, ${d?.dividendos ?? 0} dividendos, ${d?.historico ?? 0} snapshots, ${d?.questionarios ?? 0} questionários, ${d?.avaliacoes ?? 0} avaliações, ${d?.indicadores ?? 0} indicadores restaurados`)
           for (const a of d?.avisos ?? []) addLog('aviso', a)
-          for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo'], ['inv-alocacoes'], ['inv-questionarios'], ['inv-avaliacoes']]) {
+          for (const k of [['inv-ativos'], ['inv-posicoes'], ['inv-operacoes'], ['inv-dividendos'], ['inv-historico'], ['inv-dashboard'], ['inv-ranking'], ['inv-tipos-dividendo'], ['inv-alocacoes'], ['inv-questionarios'], ['inv-avaliacoes'], ['inv-indicadores']]) {
             qc.invalidateQueries({ queryKey: k })
           }
         } else addLog('erro', `Investimentos: ${res.erro}`)
@@ -3956,13 +3964,223 @@ function CardIndice({ indice, titulo, subtitulo, cor, icon }: {
   )
 }
 
-// Os 3 quadros na mesma linha (empilham em telas estreitas), com um único
-// botão que sincroniza PTAX + índices (IPCA/SELIC) de uma vez.
+// Toggle de tipo (2 opções) usado pelo modal "Adicionar indicador" — mesmo
+// visual do PeriodoSeg acima, mas para ETF nacional × ETF internacional.
+const TIPOS_INDICADOR_OPCOES: { value: TipoIndicador; label: string }[] = [
+  { value: 'ETF', label: 'ETF' }, { value: 'ETF_INTERNACIONAL', label: 'ETF Internacional' },
+  { value: 'INDICE', label: 'Índice B3' },
+]
+
+function fmtPrecoResultado(r: ResultadoBuscaAtivo): string {
+  if (r.preco == null) return ''
+  return r.moeda === 'USD'
+    ? `US$ ${r.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `R$ ${r.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+// Forma comum do item escolhido, venha ele da busca externa (ETF/ETF
+// internacional, ResultadoBuscaAtivo) ou da lista curada (índice B3 puro,
+// OpcaoIndiceB3) — unifica o "selecionado" e o payload de criação.
+interface IndicadorEscolhido { ticker: string; nome: string; moeda: string; preco?: number | null }
+
+// Modal "Adicionar indicador". ETF/ETF_INTERNACIONAL usam busca externa
+// (mesma fonte/endpoint do cadastro de ativo em DrawerAtivo, via
+// useBuscaAtivoExterno) — são negociáveis, aparecem nela. Um ÍNDICE B3 puro
+// (SMLL, IBOV, IFIX...) NÃO é negociável e não aparece nessa busca, então
+// usa a lista curada que o backend devolve em `opcoesIndice` (ver
+// indicadores.ts). Em ambos os casos só grava a entrada na watchlist
+// (arqvalor.inv_indicadores) — não cria posição.
+function ModalAdicionarIndicador({ onClose, onAdicionado }: {
+  onClose: () => void; onAdicionado: () => void
+}) {
+  const [tipo, setTipo] = useState<TipoIndicador>('ETF')
+  const [busca, setBusca] = useState('')
+  const [buscaDeb, setBuscaDeb] = useState('')
+  const [selecionado, setSelecionado] = useState<IndicadorEscolhido | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const { criar, opcoesIndice } = useInvIndicadores()
+
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaDeb(busca), 400)
+    return () => clearTimeout(t)
+  }, [busca])
+
+  const ehIndice = tipo === 'INDICE'
+  // useBuscaAtivoExterno não cobre 'INDICE' (não é um TipoAtivoInvestimento —
+  // índice puro não tem ativo/posição, não faz sentido cadastrar); nesse caso
+  // o termo fica vazio (query desabilitada) e o tipo passado é só um
+  // placeholder inofensivo, nunca chega a ser usado numa requisição real.
+  const { resultados, buscando, erroBusca } = useBuscaAtivoExterno(
+    ehIndice ? 'ETF' : tipo, !ehIndice && !selecionado ? buscaDeb : '')
+
+  function mudarTipo(t: TipoIndicador) {
+    setTipo(t); setBusca(''); setBuscaDeb(''); setSelecionado(null); setErro(null)
+  }
+
+  async function salvar() {
+    if (!selecionado) return
+    setSalvando(true); setErro(null)
+    const r = await criar({ ticker: selecionado.ticker, tipo, nome: selecionado.nome, moeda: selecionado.moeda })
+    setSalvando(false)
+    if (r.ok) onAdicionado(); else setErro(r.erro ?? 'Erro ao adicionar indicador')
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-[19px] font-bold text-gray-800 dark:text-gray-100">Adicionar indicador</p>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <PeriodoSeg value={tipo} onChange={mudarTipo} opcoes={TIPOS_INDICADOR_OPCOES} cor="#8b5cf6" />
+
+          {ehIndice ? (
+            // Índice B3 puro — sem negociação, sem busca: lista fechada.
+            !selecionado && (
+              opcoesIndice.length === 0 ? (
+                <p className="text-[13px] text-gray-400">Carregando índices disponíveis...</p>
+              ) : (
+                <div className="max-h-52 overflow-y-auto space-y-1">
+                  {opcoesIndice.map((op) => (
+                    <button key={op.ticker} type="button"
+                      onClick={() => setSelecionado({ ticker: op.ticker, nome: op.nome, moeda: 'BRL' })}
+                      className="w-full text-left px-2.5 py-1.5 rounded-md border border-gray-200 dark:border-white/10 hover:border-purple-400/60 hover:bg-purple-500/10 flex items-center gap-2">
+                      <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{op.ticker}</span>
+                      <span className="text-[12px] truncate text-gray-400">{op.nome}</span>
+                    </button>
+                  ))}
+                </div>
+              )
+            )
+          ) : (
+            <>
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={busca}
+                  onChange={(e) => { setBusca(e.target.value); setSelecionado(null) }}
+                  placeholder={tipo === 'ETF_INTERNACIONAL' ? 'Ex.: SPY, QQQ, VOO...' : 'Ex.: IVVB11, BOVA11...'}
+                  className="w-full pl-8 pr-8 py-2 rounded-lg border border-gray-200 dark:border-white/10 bg-transparent text-[15px] text-gray-800 dark:text-gray-100 outline-none focus:border-purple-400"
+                />
+                {buscando && <RefreshCw size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-gray-400" />}
+              </div>
+
+              {buscaDeb.length >= 2 && !buscando && !selecionado && (
+                resultados.length === 0 && !erroBusca ? (
+                  <p className="text-[13px] text-gray-400">Nada encontrado para "{buscaDeb}".</p>
+                ) : (
+                  <div className="max-h-52 overflow-y-auto space-y-1">
+                    {resultados.map((r) => (
+                      <button key={r.ticker} type="button"
+                        onClick={() => setSelecionado({
+                          ticker: r.ticker, nome: r.nome, moeda: r.moeda || (tipo === 'ETF_INTERNACIONAL' ? 'USD' : 'BRL'), preco: r.preco,
+                        })}
+                        className="w-full text-left px-2.5 py-1.5 rounded-md border border-gray-200 dark:border-white/10 hover:border-purple-400/60 hover:bg-purple-500/10 flex items-center justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{r.ticker}</span>
+                          <span className="text-[12px] ml-2 truncate text-gray-400">{r.nome}</span>
+                        </span>
+                        {r.preco != null && <span className="text-[12px] shrink-0 text-av-green">{fmtPrecoResultado(r)}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {erroBusca && <p className="text-[13px]" style={{ color: '#ffb74d' }}>{erroBusca}</p>}
+            </>
+          )}
+
+          {selecionado && (
+            <div className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 flex items-center justify-between gap-2">
+              <span className="text-[14px] text-gray-800 dark:text-gray-100 min-w-0 truncate">
+                <b>{selecionado.ticker}</b> — {selecionado.nome}
+              </span>
+              <button onClick={() => { setSelecionado(null); setBusca('') }} className="text-gray-400 hover:text-gray-600 shrink-0">
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
+          {erro && <p className="text-[13px] text-red-400">{erro}</p>}
+        </div>
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose}
+            className="px-4 py-2 rounded-lg text-[15px] font-semibold text-gray-500 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+            Cancelar
+          </button>
+          <Btn onClick={salvar} disabled={!selecionado} loading={salvando} cor="#8b5cf6">Adicionar</Btn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Card de um indicador da watchlist do usuário — mesmo layout/mecânica dos
+// cards fixos acima (Section + seletor de período + LinhaEvolucao), mas a
+// série é a COTAÇÃO (preço mensal do ticker), não uma taxa acumulada.
+function CardIndicadorUsuario({ indicador, serie, onExcluir }: {
+  indicador: InvIndicador; serie: PontoIndice[]; onExcluir: () => void
+}) {
+  const [periodo, setPeriodo] = useState<PeriodoIndice>('ano')
+  const n = periodo === 'tri' ? 3 : periodo === 'ano' ? 12 : 60
+  const pts = serie.slice(-n)
+  const labels = pts.map((p) => labelComp(p.competencia))
+  const valores = pts.map((p) => p.valor)
+  const atual = serie.length ? serie[serie.length - 1] : null
+  const inicio = pts.length ? pts[0] : null
+  const variacaoPct = atual && inicio && inicio.valor > 0 ? (atual.valor / inicio.valor - 1) * 100 : null
+  const simbolo = indicador.moeda === 'USD' ? 'US$' : 'R$'
+  const cor = indicador.cor || '#8b5cf6'
+  const fmtMoeda = (v: number) => `${simbolo} ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+  return (
+    <Section titulo={indicador.ticker} subtitulo={indicador.nome} icon={TrendingUp} cor={cor} defaultOpen fill>
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-[13px] text-gray-400">Cotação mais recente</p>
+            <p className="text-[24px] font-bold text-gray-800 dark:text-gray-100 leading-tight">
+              {atual ? fmtMoeda(atual.valor) : '—'}
+            </p>
+            {atual && <p className="text-[12px] text-gray-400">Até {labelComp(atual.competencia)}</p>}
+          </div>
+          <button onClick={onExcluir} title="Remover indicador"
+            className="text-gray-400 hover:text-red-400 transition-colors p-1 -m-1">
+            <Trash2 size={14} />
+          </button>
+        </div>
+        {variacaoPct != null && (
+          <p className="text-[13px] font-semibold" style={{ color: variacaoPct >= 0 ? '#00c896' : '#f87171' }}>
+            {variacaoPct >= 0 ? '+' : ''}{variacaoPct.toFixed(2).replace('.', ',')}% no período
+          </p>
+        )}
+        <div className="flex justify-end">
+          <PeriodoSeg value={periodo} onChange={setPeriodo} opcoes={PERIODOS_INDICE} cor={cor} />
+        </div>
+        <LinhaEvolucao labels={labels} valores={valores} cor={cor} fmt={fmtMoeda} />
+      </div>
+    </Section>
+  )
+}
+
+// Os quadros fixos (PTAX/IPCA/SELIC/CDI) na mesma linha, seguidos dos
+// indicadores custom do usuário (ETF/ETF internacional) — botão único
+// sincroniza PTAX + índices; "Adicionar indicador" abre o modal de busca.
 function SecaoIndicadores() {
   const qc = useQueryClient()
   const [sincronizando, setSincronizando] = useState(false)
   useOperacaoLonga(sincronizando) // suspende auto-logout durante a sincronização
   const [msg, setMsg] = useState<string | null>(null)
+  const [modalAberto, setModalAberto] = useState(false)
+  const [paraExcluir, setParaExcluir] = useState<InvIndicador | null>(null)
+  const { indicadores, series, excluir } = useInvIndicadores()
 
   const sincronizar = async () => {
     setSincronizando(true); setMsg(null)
@@ -3985,6 +4203,7 @@ function SecaoIndicadores() {
     <div className="space-y-3">
       <div className="flex items-center gap-3 flex-wrap">
         <Btn onClick={sincronizar} loading={sincronizando} cor="#10b981"><RefreshCw size={14} /> Sincronizar indicadores</Btn>
+        <Btn onClick={() => setModalAberto(true)} cor="#8b5cf6"><Plus size={14} /> Adicionar indicador</Btn>
         {msg && <span className="text-[14px]" style={{ color: msg.startsWith('Erro') ? '#f87171' : '#10b981' }}>{msg}</span>}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -3992,7 +4211,24 @@ function SecaoIndicadores() {
         <CardIndice indice="IPCA"  titulo="IPCA (inflação)" subtitulo="Acum. 12 meses · IBGE/BCB" cor="#f59e0b" icon={TrendingUp} />
         <CardIndice indice="SELIC" titulo="SELIC"           subtitulo="Acum. 12 meses · BCB"      cor="#3b82f6" icon={Landmark} />
         <CardIndice indice="CDI"   titulo="CDI"             subtitulo="Acum. 12 meses · BCB"      cor="#8b5cf6" icon={Percent} />
+        {indicadores.map((ind) => (
+          <CardIndicadorUsuario key={ind.id} indicador={ind} serie={series[ind.ticker] ?? []}
+            onExcluir={() => setParaExcluir(ind)} />
+        ))}
       </div>
+
+      {modalAberto && (
+        <ModalAdicionarIndicador onClose={() => setModalAberto(false)} onAdicionado={() => setModalAberto(false)} />
+      )}
+      {paraExcluir && (
+        <ModalConfirmacao
+          titulo="Remover indicador"
+          mensagem={<>Remover <b>{paraExcluir.ticker}</b> da sua lista de indicadores?</>}
+          onConfirmar={async () => { await excluir(paraExcluir.id); setParaExcluir(null) }}
+          onCancelar={() => setParaExcluir(null)}
+          labelBtn="Remover"
+        />
+      )}
     </div>
   )
 }

@@ -7,7 +7,7 @@ import { useLocation } from 'react-router-dom'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import ModalLembrete from '../components/ui/ModalLembrete'
-import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X, RefreshCw, FileDown, ChevronUp, ChevronDown, ArrowUp, Filter } from 'lucide-react'
+import { Pencil, Zap, Check, Repeat2, ArrowLeftRight, Search, X, RefreshCw, FileDown, ChevronUp, ChevronDown, ArrowUp, Filter, CalendarDays } from 'lucide-react'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import MascoteTutorial from '../components/ui/MascoteTutorial'
@@ -809,6 +809,30 @@ export default function LancamentosPage() {
     avisarCalendario(`Sem lançamentos em ${fmtDataCurta(diaClicado)} — mostrando ${fmtDataCurta(maisProximo)}`)
   }, [diasComMovimento, mes, handleSelectDia, avisarCalendario])
 
+  // Botão "Hoje" do calendário — se o mês exibido não for o atual, troca de
+  // mês primeiro e só então foca o dia (precisa esperar `useLancamentos`
+  // recarregar pra saber se hoje tem movimento); se já estiver no mês
+  // atual, foca direto.
+  const [pendingIrHoje, setPendingIrHoje] = useState(false)
+  const mesHoje = hoje.slice(0, 7)
+
+  const irParaHoje = useCallback(() => {
+    if (mes !== mesHoje) {
+      setPendingIrHoje(true)
+      setPgState({ mes: mesHoje })
+      return
+    }
+    if (diasComMovimento.has(hoje)) handleSelectDia(hoje)
+    else handleDiaVazio(hoje)
+  }, [mes, mesHoje, hoje, diasComMovimento, handleSelectDia, handleDiaVazio, setPgState])
+
+  useEffect(() => {
+    if (!pendingIrHoje || mes !== mesHoje || loading || fetching) return
+    setPendingIrHoje(false)
+    if (diasComMovimento.has(hoje)) handleSelectDia(hoje)
+    else handleDiaVazio(hoje)
+  }, [pendingIrHoje, mes, mesHoje, loading, fetching, diasComMovimento, hoje, handleSelectDia, handleDiaVazio])
+
 
   return (
     <div className="p-5">
@@ -1007,8 +1031,20 @@ export default function LancamentosPage() {
         </div>
         {/* Calendário — oculto em busca multi-mês */}
         {!buscaMultiMes && (
-          <div data-tutorial="extrato-calendario">
-            <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} onSelectDia={handleSelectDia} onDiaVazio={handleDiaVazio} />
+          <div data-tutorial="extrato-calendario" className="flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <CalendarioStrip mes={mes} diasComMovimento={diasComMovimento} hoje={hoje} onSelectDia={handleSelectDia} onDiaVazio={handleDiaVazio} />
+            </div>
+            <button
+              onClick={irParaHoje}
+              title="Ir para o dia de hoje"
+              aria-label="Ir para o dia de hoje"
+              className="flex-shrink-0 flex items-center gap-1 px-2.5 h-8 mb-4 rounded-md border transition-colors hover:opacity-80"
+              style={{ background: 'rgba(0,200,150,0.1)', borderColor: 'rgba(0,200,150,0.3)', color: '#00c896' }}
+            >
+              <CalendarDays size={14} />
+              <span className="text-[14px] font-semibold">Hoje</span>
+            </button>
           </div>
         )}
       </div>

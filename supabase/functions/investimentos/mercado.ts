@@ -371,6 +371,181 @@ export async function gravarCache(rows: { ticker: string; mes_ano: string; preco
   if (error) logError("Upsert cotacoes_ativos", error);
 }
 
+// ── Cache DIÁRIO (arqvalor.cotacoes_ativos_diarias) ───────────
+// Mesma natureza do cache mensal acima, granularidade de dia — usado só
+// pelo filtro "Semana" do ranking de destaques (Mês/Semestre/Ano usam o
+// snapshot MENSAL já existente, inv_historico_mensal — ver ranking() em
+// dashboard.ts). Semana precisa de um ponto no tempo real, dia a dia, que a
+// granularidade de mês não representa.
+
+export async function gravarCacheDiario(rows: { ticker: string; data: string; preco: number; moeda: string }[]) {
+  if (rows.length === 0) return;
+  const admin = dbAdmin();
+  const linhas = rows
+    .filter((r) => r.ticker && RE_DATA.test(r.data) && Number.isFinite(r.preco) && r.preco >= 0)
+    .map((r) => ({ ticker: r.ticker.toUpperCase(), data: r.data, preco: r.preco, moeda: r.moeda, atualizado_em: new Date().toISOString() }));
+  if (linhas.length === 0) return;
+  const { error } = await admin.from("cotacoes_ativos_diarias").upsert(linhas, { onConflict: "ticker,data" });
+  if (error) logError("Upsert cotacoes_ativos_diarias", error);
+}
+
+// Última cotação com `data <= dataAlvo`, por ticker (mesmo padrão "última
+// cotação até a data" já usado em conversorCustoBRL/PTAX).
+export async function lerCacheDiario(
+  c: Db, tickers: string[], dataAlvo: string,
+): Promise<Map<string, { preco: number; moeda: string; data: string }>> {
+  const out = new Map<string, { preco: number; moeda: string; data: string }>();
+  await Promise.all(tickers.map(async (tk) => {
+    const { data } = await c.from("cotacoes_ativos_diarias")
+      .select("preco, moeda, data").eq("ticker", tk.toUpperCase()).lte("data", dataAlvo)
+      .order("data", { ascending: false }).limit(1).maybeSingle();
+    if (data) out.set(tk.toUpperCase(), { preco: Number(data.preco), moeda: String(data.moeda), data: String(data.data) });
+  }));
+  return out;
+}
+
+// Janela (period1/period2, em segundos Unix) ao REDOR de `dataAlvo` — não a
+// série inteira. Buscar `range=10y`/`days=365` baixa e faz o parse de
+// milhares de pontos por ativo à toa: numa carteira com várias dezenas de
+// ativos isso empilha JSON grande + laço de milhares de itens por ticker,
+// CPU/memória suficiente pra estourar o limite da Edge Function numa única
+// requisição interativa (achado real: WORKER_RESOURCE_LIMIT / "Erro 546").
+// 21 dias pra trás cobre folgado qualquer feriado/fim de semana prolongado
+// até achar o último pregão ≤ dataAlvo; 2 pra frente é só margem.
+function janelaDiaria(dataAlvo: string): { de: number; ate: number } {
+  const alvoMs = new Date(`${dataAlvo}T12:00:00Z`).getTime();
+  return { de: Math.floor((alvoMs - 21 * DIA_MS) / 1000), ate: Math.floor((alvoMs + 2 * DIA_MS) / 1000) };
+}
+
+// Busca 1 candidato de ticker no Yahoo, só na janela em torno de `dataAlvo`.
+// Prazo curto (6s) — chamada em PARALELO pra cada candidato por
+// historicoDiarioCotado, não em série, pra não empilhar timeout de vários
+// candidatos numa carteira com vários ativos faltando cache.
+async function umCandidatoDiario(sym: string, de: number, ate: number): Promise<{ precos: Map<string, number>; moeda: string } | null> {
+  try {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?period1=${de}&period2=${ate}&interval=1d`,
+      { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(6000) },
+    );
+    if (!res.ok) return null;
+    const data = await res.json() as {
+      chart?: { result?: { meta?: { currency?: string }; timestamp?: number[]; indicators?: { quote?: { close?: (number | null)[] }[] } }[] };
+    };
+    const r  = data.chart?.result?.[0];
+    const moeda = String(r?.meta?.currency ?? "").toUpperCase() || (sym.endsWith(".SA") ? "BRL" : "USD");
+    const ts = r?.timestamp ?? [];
+    const cl = r?.indicators?.quote?.[0]?.close ?? [];
+    const precos = new Map<string, number>();
+    for (let i = 0; i < ts.length; i++) {
+      const px = cl[i];
+      if (px == null) continue;
+      precos.set(new Date(ts[i] * 1000).toISOString().slice(0, 10), Number(px));
+    }
+    return precos.size > 0 ? { precos, moeda } : null;
+  } catch (e) { logError("yahoo hist diário", e); return null; }
+}
+
+// Série diária (só a janela em torno de `dataAlvo`, ver `janelaDiaria`) —
+// variante de historicoYahoo/historicoCotado usada só pelo backfill do cache
+// diário. Mesma fonte/URL; só a chave do mapa muda (dia em vez de mês) e o
+// range pedido é estreito em vez da série inteira.
+export async function historicoDiarioCotado(ticker: string, dataAlvo: string): Promise<{ precos: Map<string, number>; moeda: string }> {
+  const candidatos = candidatosTicker(ticker);
+  if (candidatos.length > 0) {
+    const { de, ate } = janelaDiaria(dataAlvo);
+    // Todos os candidatos em paralelo (não em série) — o primeiro que trouxer
+    // dado vence; timeout de UM candidato não empurra o próximo.
+    const resultados = await Promise.all(candidatos.map((s) => umCandidatoDiario(s, de, ate)));
+    const achado = resultados.find((r) => r != null);
+    if (achado) return achado;
+  }
+  // brapi (B3) como fallback — só devolve o dia mais recente, mas cobre o
+  // caso raro de o Yahoo não responder pra nenhum candidato.
+  for (const b of basesTicker(ticker)) {
+    const cot = await precosBrapi([b]);
+    const v = cot.get(b.toUpperCase());
+    if (v) return { precos: new Map([[hojeISO(), v.preco]]), moeda: v.moeda };
+  }
+  return { precos: new Map<string, number>(), moeda: "BRL" };
+}
+
+// Série diária de criptomoeda, só a janela em torno de `dataAlvo` (mesma
+// razão da versão cotada acima). CoinGecko free ainda assim não cobre
+// janelas com mais de ~365 dias no passado — mesma ressalva de sempre.
+export async function historicoCriptoDiario(ticker: string, dataAlvo: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const id = await coingeckoId(ticker);
+  if (!id) return out;
+  const { de, ate } = janelaDiaria(dataAlvo);
+  try {
+    const data = await fetchJson(
+      `https://api.coingecko.com/api/v3/coins/${id}/market_chart/range?vs_currency=brl&from=${de}&to=${ate}`,
+    ) as { prices?: [number, number][] };
+    for (const [ts, px] of data.prices ?? []) {
+      out.set(new Date(ts).toISOString().slice(0, 10), Number(px)); // asc → último ponto do dia prevalece
+    }
+  } catch (e) { logError("coingecko hist diário", e); }
+  return out;
+}
+
+// Processa itens em lotes de tamanho `concorrencia`, sem enfileirar lote
+// NOVO depois de `ateMs` (epoch ms) — itens restantes simplesmente não são
+// processados (o chamador já cai no fallback de "faltou"). Existe pra
+// limitar CONCORRÊNCIA, não só tempo total: numa carteira com muitos ativos,
+// disparar dezenas de fetches simultâneos pode estourar o limite de MEMÓRIA
+// da Edge Function bem antes do timeout de cada fetch individual vencer.
+async function executarEmLotes<T>(
+  itens: T[], concorrencia: number, ateMs: number, tarefa: (item: T) => Promise<void>,
+): Promise<void> {
+  for (let i = 0; i < itens.length; i += concorrencia) {
+    if (Date.now() >= ateMs) break;
+    await Promise.all(itens.slice(i, i + concorrencia).map(tarefa));
+  }
+}
+
+// Preço de cada ticker NUMA DATA do passado: tenta o cache diário; se faltar
+// cobertura até `dataAlvo`, faz o backfill da série completa (Yahoo/CoinGecko)
+// de uma vez, grava no cache e tenta de novo. Tickers cuja fonte não cobre a
+// data (cripto > 365 dias, ativo listado depois da data) voltam ausentes do
+// mapa — o chamador cai no fallback de "desde a compra". `prazoMs` limita
+// tanto o tempo quanto (via `executarEmLotes`) a concorrência do backfill —
+// numa carteira grande, o que não coube fica pra próxima consulta (o cache
+// é permanente, então a carteira "esquenta" aos poucos, sem nunca travar
+// uma única requisição interativa).
+export async function resolverValorDiarioCotado(
+  c: Db, cotados: string[], cripto: string[], dataAlvo: string, prazoMs = 8_000,
+): Promise<Map<string, { preco: number; moeda: string }>> {
+  const todos = [...new Set([...cotados, ...cripto].map((t) => t.toUpperCase()))];
+  if (todos.length === 0) return new Map();
+
+  let cache = await lerCacheDiario(c, todos, dataAlvo);
+  const faltamCot = cotados.filter((t) => !cache.has(t.toUpperCase()));
+  const faltamCr  = cripto.filter((t) => !cache.has(t.toUpperCase()));
+
+  if (faltamCot.length > 0 || faltamCr.length > 0) {
+    const ateMs = Date.now() + prazoMs;
+    const novas: { ticker: string; data: string; preco: number; moeda: string }[] = [];
+    // 3 tickers por vez (≤ 6 fetches concorrentes, já que cada ticker tenta
+    // até 2 candidatos em paralelo) — cabe folgado no limite de memória da
+    // isolate mesmo numa carteira grande.
+    await executarEmLotes(faltamCot, 3, ateMs, async (tk) => {
+      const { precos, moeda } = await historicoDiarioCotado(tk, dataAlvo);
+      for (const [dia, preco] of precos) novas.push({ ticker: tk, data: dia, preco, moeda: moeda || "BRL" });
+    });
+    await executarEmLotes(faltamCr, 3, ateMs, async (tk) => {
+      const precos = await historicoCriptoDiario(tk, dataAlvo);
+      for (const [dia, preco] of precos) novas.push({ ticker: tk, data: dia, preco, moeda: "BRL" });
+    });
+    if (novas.length > 0) {
+      await gravarCacheDiario(novas);
+      cache = await lerCacheDiario(c, todos, dataAlvo);
+    }
+  }
+  const out = new Map<string, { preco: number; moeda: string }>();
+  for (const [tk, v] of cache) out.set(tk, { preco: v.preco, moeda: v.moeda });
+  return out;
+}
+
 // Cotação ATUAL via Yahoo (fallback p/ ativos que a brapi não cobre, ex.: EUA).
 // Tenta o símbolo puro (EUA) e o .SA (B3); devolve preço + moeda detectada.
 export async function precoAtualYahoo(ticker: string): Promise<{ preco: number; moeda: string } | null> {
@@ -933,8 +1108,16 @@ export async function buscaTesouro(q: string): Promise<ResultadoBusca[]> {
     // combinando nome e ano em qualquer ordem…
     const alvo = normaliza(`${item.tipo} ${ticker} ${nomeTesouro(indexador, item.venc, semestral)}`);
     if (!termos.every((t) => alvo.includes(t))) continue;
+    // Nome amigável COM o ano do vencimento (igual ao cadastro manual e ao
+    // que "Padronizar Tesouro" normaliza) — o "Tipo Titulo" cru do STN
+    // (item.tipo) não carrega o ano, ele vem numa coluna separada do CSV.
+    // Usar item.tipo aqui deixava o ativo cadastrado como só "Tesouro IPCA+"
+    // sem vencimento, e normalizar-tesouro depois não corrigia porque só
+    // renomeia nomes vazios/iguais ao ticker antigo (nunca sobrescreve um
+    // nome não-vazio, pra não apagar edição manual do usuário).
+    const nomeAmigavel = nomeTesouro(indexador, item.venc, semestral) || item.tipo;
     todos.push({
-      ticker, nome: item.tipo, preco: item.puVenda, moeda: "BRL",
+      ticker, nome: nomeAmigavel, preco: item.puVenda, moeda: "BRL",
       emissor: "Governo Federal", taxa: taxaDoTesouro(item.tipo, item.taxaVenda),
       vencimento: item.venc, indexador,
     });

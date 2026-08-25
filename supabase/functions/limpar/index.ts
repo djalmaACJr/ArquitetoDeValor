@@ -135,7 +135,8 @@ async function limparContas(c: ReturnType<typeof db>, userId: string) {
 // receitas normais — `inv_dividendos.transacao_extrato_id` tem ON DELETE
 // SET NULL, então apagar os dividendos não remove nem altera as transações.
 // Também NÃO apaga configuração reutilizável (inv_tipos_dividendo /
-// inv_alocacoes_tipo), seeds/ajustes recriados só no cadastro.
+// inv_alocacoes_tipo / inv_indicadores — a watchlist de benchmark não é
+// derivada de posição nenhuma), seeds/ajustes recriados só no cadastro.
 // (A exclusão de CONTA, via fn_excluir_dados_usuario, sim remove tudo.)
 // Retorna o total de registros excluídos por tabela.
 async function excluirDadosInvestimentos(

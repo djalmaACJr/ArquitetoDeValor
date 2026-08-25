@@ -26,7 +26,7 @@
 // (arquiteta-sentada, raposa-sentada, raposa-espantada). A função
 // `arquivoPara` cuida disso — o consumidor sempre passa a forma canônica.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export type MascoteNome  = 'sabio' | 'arquiteta' | 'gato' | 'raposa'
 export type MascotePose  =
@@ -51,6 +51,14 @@ const LABEL: Record<MascoteNome, string> = {
  * vocabulário dos consumidores.
  */
 function arquivoPara(nome: MascoteNome, pose: MascotePose): string {
+  // "andando" só existe como vídeo (mascote-andando.webm, ver LoadingMascote)
+  // — nunca teve PNG estático. Um <img> pedindo essa pose sempre dava 404 em
+  // silêncio (achado real: o avatar do mentor sumia do cabeçalho de
+  // Investimentos sempre que a dica sorteada usava essa pose, e só voltava
+  // navegando pra outra página — o componente nunca tentava de novo depois
+  // de falhar uma vez). Cai pra "sentado" — mais neutro pra um headshot
+  // estático do que tentar simular caminhada parada.
+  if (pose === 'andando') return arquivoPara(nome, 'sentado')
   if (pose === 'sentado' && (nome === 'arquiteta' || nome === 'raposa')) return `${nome}-sentada`
   if (pose === 'espantado' && nome === 'raposa') return `${nome}-espantada`
   return `${nome}-${pose}`
@@ -76,6 +84,10 @@ export default function Mascote({
   alt?:   string
 }) {
   const [erro, setErro] = useState(false)
+  // Rede de segurança adicional: se `nome`/`pose` mudar (ex.: dica nova
+  // sorteada na mesma montagem), tenta carregar de novo em vez de continuar
+  // escondido por causa de uma falha antiga de uma pose diferente.
+  useEffect(() => { setErro(false) }, [nome, pose])
   if (erro) return null
 
   return (

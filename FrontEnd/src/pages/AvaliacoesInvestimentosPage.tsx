@@ -1243,9 +1243,18 @@ export default function AvaliacoesInvestimentosPage() {
             nome: rotuloMentor(m.nome, m.provedor), nota: m.nota, erro: m.erro,
           })),
         })),
+        // Carteira do usuário — ausente até aqui: sem isso, perguntar ao
+        // mentor "e a minha carteira?" não tinha nenhum dado de posição pra
+        // responder (achado real do usuário). Vem do mesmo ranking já
+        // buscado nesta página (sem requisição nova).
+        carteira: (ranking?.ativos ?? []).map((a) => ({
+          ticker: a.ticker, tipo_ativo: a.tipo_ativo, quantidade: a.quantidade,
+          valor_investido: a.valor_custo, valor_mercado: a.valor_mercado,
+          participacao_pct: a.participacao_pct, dividend_yield_pct: a.dividend_yield_pct,
+        })),
       },
     }
-  }, [carregandoIA, loadingAtivos, loadingAval, avaliacoes, ativos, configs.length]))
+  }, [carregandoIA, loadingAtivos, loadingAval, avaliacoes, ativos, configs.length, ranking]))
 
   if (carregandoIA || loadingAtivos || loadingAval || loadingRanking) return <LoadingMascote />
 

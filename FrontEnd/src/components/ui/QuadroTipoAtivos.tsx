@@ -85,7 +85,7 @@ const DIMENSOES: { value: Dimensao; label: string }[] = [
 // Componente compartilhado entre a página de Investimentos (sem ações) e
 // Meus ativos (com botões Posições/Histórico/Editar via prop `acoes`).
 export default function QuadroTipoAtivos({
-  tipo, dados, linhas, acoes, defaultAberto = false, focoSinal, focoGrupo,
+  tipo, dados, linhas, acoes, defaultAberto = false, focoSinal, focoGrupo, alca, totalCarteira,
 }: {
   tipo:          TipoAtivoInvestimento
   dados:         InvestimentoDashboardTipo | null
@@ -96,13 +96,22 @@ export default function QuadroTipoAtivos({
   // Quando informado, o foco realça apenas este agrupamento (a fatia da rosca
   // que originou o gráfico). Sem ele, o realce recai sobre o quadro inteiro.
   focoGrupo?:    { dim: Dimensao; chave: string } | null
+  // Alça de arrastar (ex.: AlcaArrastar de useOrdemReordenavel) — renderizada
+  // DENTRO do cabeçalho do quadro, antes do indicador de tipo. Opcional: só
+  // quem envolve este componente numa lista reordenável passa.
+  alca?:         ReactNode
+  // Valor de mercado da carteira INTEIRA (não só deste tipo) — necessário só
+  // pra mostrar "R$ faltando pra bater a meta" no cabeçalho recolhido.
+  totalCarteira?: number
 }) {
   const location = useLocation()
   // Origem para o botão "voltar" da página de detalhe — preserva de qual página
   // (Meus ativos, Investimentos, …) o usuário abriu o ativo.
   const origem = location.pathname + location.search
   const [aberto, setAberto] = useState(defaultAberto)
-  const [dim, setDim] = useState<Dimensao>('categoria')
+  // FII vem por padrão sem agrupamento — os demais tipos agrupam por
+  // categoria por padrão (o usuário ainda pode trocar via o seletor).
+  const [dim, setDim] = useState<Dimensao>(tipo === 'FII' ? 'nenhum' : 'categoria')
   const [catsFechadas, setCatsFechadas] = useState<Set<string>>(new Set())
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'saldo', dir: 'desc' })
   const [destaque, setDestaque] = useState(false)
@@ -377,10 +386,21 @@ export default function QuadroTipoAtivos({
         borderColor: destaque && destaqueChave === null ? cor : 'rgba(255,255,255,0.1)',
         boxShadow: destaque && destaqueChave === null ? `0 0 0 2px ${cor}, 0 0 26px ${cor}88` : 'none',
       }}>
-      <button onClick={() => setAberto(!aberto)}
-        className={`w-full px-4 py-3 grid grid-cols-2 gap-3 items-center text-left ${mostraDividendos ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
+      {/* div, não <button>: quando `alca` (arrastar) está presente, um
+          <button> engolindo a alça impede o `dragstart` de disparar no
+          Firefox (bug conhecido, Mozilla #646823) — o arraste simplesmente
+          nunca começava. */}
+      <div role="button" tabIndex={0} onClick={() => setAberto(!aberto)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAberto(!aberto) } }}
+        className={`w-full px-4 py-3 grid grid-cols-2 gap-3 items-center text-left cursor-pointer ${mostraDividendos ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
         {/* Tipo + contagem */}
         <div className="flex items-center gap-2 min-w-0">
+          {alca && (
+            // stopPropagation: o botão inteiro do cabeçalho abre/fecha o
+            // quadro ao clicar — sem isso, um clique (sem arrastar) na alça
+            // também alternaria o quadro junto.
+            <span onClick={(e) => e.stopPropagation()}>{alca}</span>
+          )}
           <span className="w-2 h-2 rounded-full shrink-0" style={{ background: cor }} />
           <div className="min-w-0">
             <p className="font-semibold text-[15px]" style={{ color: cor }}>{TIPO_ATIVO_LABEL[tipo]}</p>
@@ -426,10 +446,25 @@ export default function QuadroTipoAtivos({
                 <span className="text-[12px] font-semibold text-white">{dados.percentual_atual.toFixed(2).replace('.', ',')}%</span>
               </div>
             )}
+            {/* Meta de alocação — some visível mesmo com o quadro recolhido
+                (antes só aparecia dentro, aberto). Mostra o % ideal e, logo
+                abaixo, quanto falta (ou sobra) em R$ pra bater essa meta. */}
+            {dados && dados.percentual_ideal > 0 && totalCarteira != null && (() => {
+              const valorIdeal = totalCarteira * dados.percentual_ideal / 100
+              const falta = valorIdeal - dados.valor_mercado
+              return (
+                <p className="text-[11px] mt-0.5" style={{ color: MUTED }}>
+                  Meta {dados.percentual_ideal}%
+                  <span style={{ color: corValor(-dados.desvio_pct) }}>
+                    {' · '}{falta >= 0 ? `faltam ${formatBRL(falta)}` : `${formatBRL(Math.abs(falta))} acima`}
+                  </span>
+                </p>
+              )
+            })()}
           </div>
           {aberto ? <ChevronUp size={15} style={{ color: MUTED }} /> : <ChevronDown size={15} style={{ color: MUTED }} />}
         </div>
-      </button>
+      </div>
 
       {aberto && (
         <div className="border-t border-white/5 px-4 py-3 space-y-3">
@@ -471,16 +506,21 @@ export default function QuadroTipoAtivos({
 
               <div className="overflow-auto max-h-[72vh]">
                 <table className="w-full text-[12px]" style={{ minWidth }}>
-                  <thead>
-                    <tr style={{ color: MUTED }}>
+                  {/* sticky top-0: fica visível rolando a listagem — sem isso
+                      as colunas somem de vista e é fácil perder o que cada
+                      número significa. z-20 > o dos cabeçalhos de grupo
+                      (z-10), que ficam por baixo (top-8, logo abaixo desta
+                      linha) — nunca os dois sticky disputam o mesmo lugar. */}
+                  <thead className="sticky top-0 z-20" style={{ background: HEADER_BG }}>
+                    <tr className="h-8" style={{ color: MUTED }}>
                       {visiveis.map((c) => (
                         <th key={c.id} title={c.title} onClick={c.sortKey ? () => clickSort(c.sortKey!) : undefined}
-                          className={`px-2 py-1.5 font-medium ${alinhar(c.align)} ${c.sortKey ? 'cursor-pointer select-none hover:text-white/80' : ''}`}>
+                          className={`px-2 font-medium ${alinhar(c.align)} ${c.sortKey ? 'cursor-pointer select-none hover:text-white/80' : ''}`}>
                           {c.label}{c.sortKey && sort.key === c.sortKey ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
                         </th>
                       ))}
-                      <th className="px-2 py-1.5 font-medium text-center">Comprar?</th>
-                      {acoes && <th className="px-2 py-1.5 font-medium text-right">Ações</th>}
+                      <th className="px-2 font-medium text-center">Comprar?</th>
+                      {acoes && <th className="px-2 font-medium text-right">Ações</th>}
                     </tr>
                   </thead>
                   {grupos.map((g) => {
@@ -504,7 +544,7 @@ export default function QuadroTipoAtivos({
                         {temGrupos && (
                           <tr className="cursor-pointer" onClick={() => toggleCat(g.chave)}>
                             <td colSpan={nCols} style={estiloHeader}
-                              className="px-2 py-1.5 sticky top-0 z-10 border-t border-white/[0.03] transition-[filter] duration-700 hover:brightness-125">
+                              className="px-2 py-1.5 sticky top-8 z-10 border-t border-white/[0.03] transition-[filter] duration-700 hover:brightness-125">
                               <span className="inline-flex items-center gap-2">
                                 {catAberta ? <ChevronDown size={12} style={{ color: MUTED }} /> : <ChevronRight size={12} style={{ color: MUTED }} />}
                                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: cor }} />

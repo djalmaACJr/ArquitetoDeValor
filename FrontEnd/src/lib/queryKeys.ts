@@ -69,11 +69,17 @@ export const qk = {
   invQuestionarios: (uid: Uid)           => ['inv-questionarios', uid]         as const,
   invAvaliacoes: (uid: Uid)              => ['inv-avaliacoes', uid]            as const,
   invAvaliacaoAgenda: (uid: Uid)         => ['inv-avaliacao-agenda', uid]      as const,
+  invIndicadores: (uid: Uid, desde?: string) => ['inv-indicadores', uid, desde ?? null] as const,
   invPerfil:     (uid: Uid)              => ['inv-perfil', uid]                as const,
   invPesos:      (uid: Uid)              => ['inv-pesos', uid]                 as const,
   invHistorico:  (uid: Uid, f?: unknown) => ['inv-historico', uid, f ?? null]  as const,
   invDashboard:  (uid: Uid, contaId?: string | null) => ['inv-dashboard', uid, contaId ?? null] as const,
   invRanking:    (uid: Uid, contaId?: string | null) => ['inv-ranking', uid, contaId ?? null]   as const,
+  // Página "Destaques" — mesmo endpoint do ranking, mas com o filtro de
+  // período; chave própria (não usa invRanking) pra não colidir de cache
+  // com o card do Painel, que sempre busca sem período (TUDO implícito).
+  invDestaques:  (uid: Uid, contaId?: string | null, periodo?: string) =>
+    ['inv-ranking', uid, contaId ?? null, 'destaques', periodo ?? 'TUDO'] as const,
   // Prefixo 'inv-dashboard' de propósito: cai automaticamente em toda
   // invalidação existente de invDashboardPref(uid) espalhada pelos hooks de
   // investimentos, sem precisar tocar em cada um deles.

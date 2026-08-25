@@ -80,7 +80,10 @@
       "Bash(cd c:/Pessoal/ArquitetoDeValor/FrontEnd *)",
       "PowerShell(cd FrontEnd; npm run build 2>&1 | Select-Object -Last 4; \"EXIT=$LASTEXITCODE\")",
       "PowerShell(npm run lint 2>&1 | Select-Object -Last 40; \"EXIT=$LASTEXITCODE\")",
-      "PowerShell(\"--- log:\")"
+      "PowerShell(\"--- log:\")",
+      "Bash(node -e ' *)",
+      "Bash(npx --yes esbuild supabase/functions/investimentos/posicoes.ts --format=esm --outfile=out.tmp.js)",
+      "Bash(rm -f out.tmp.js)"
     ],
     "additionalDirectories": [
       "C:\\Pessoal\\ArquitetoDeValor\\scripts",

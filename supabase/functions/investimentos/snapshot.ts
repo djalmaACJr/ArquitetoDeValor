@@ -11,7 +11,7 @@ import {
   conversorCustoBRL, resolverPrecosAtuais, sgsUltimo, ptaxAtual, PosicaoCusto,
   garantirSincronizado, carregarIndicesMensais, garantirTesouroMesCorrente,
   carregarTesouroMtM, valorRFPosicoes, sincronizarTesouro, ptaxPorMesMap,
-  fimSerieRF, resolverHistoricoCotado, resolverHistoricoCripto,
+  fimSerieRF, resolverHistoricoCotado, resolverHistoricoCripto, gravarCacheDiario,
   INDICES_DATA_CORTE, TESOURO_DATA_CORTE,
   baixarCupomTesouro, datasCupomParaAtivo, tesouroSemestral, type CupomTesouro,
 } from "./mercado.ts";
@@ -264,6 +264,18 @@ export async function executarSnapshotMes(
   const { precos, cripto: precosCr } = await resolverPrecosAtuais(
     client, mesAno, mesAno === mesCorrente, tickersCotados, tickersCripto,
   );
+  // Aproveita a MESMA cotação já resolvida acima pra alimentar o cache
+  // DIÁRIO (arqvalor.cotacoes_ativos_diarias), usado só pelo filtro "Semana"
+  // do ranking de destaques — só no mês corrente (é "o preço de hoje"; uma
+  // execução de backfill de mês passado não deve gravar sob a data de hoje).
+  // Idempotente (upsert por ticker+data) mesmo rodando 1x por usuário no cron.
+  if (mesAno === mesCorrente) {
+    const hoje = hojeISO();
+    const diarias: { ticker: string; data: string; preco: number; moeda: string }[] = [];
+    for (const [tk, v] of precos)   diarias.push({ ticker: tk, data: hoje, preco: v.preco, moeda: v.moeda });
+    for (const [tk, p] of precosCr) diarias.push({ ticker: tk, data: hoje, preco: p, moeda: "BRL" });
+    if (diarias.length > 0) await gravarCacheDiario(diarias);
+  }
   // a moeda real (USD) só é conhecida após a cotação, então carrega PTAX se
   // houver qualquer cotado (não dá pra confiar só na moeda cadastrada)
   const temCotado = lista.some((g) => ehCotado(g.tipo));

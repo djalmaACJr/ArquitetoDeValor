@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, List, CreditCard, Tag, Target,
@@ -128,10 +128,32 @@ const navFerramentas: NavItem[] = [
   },
 ]
 
+// Delay antes de expandir no hover (só abrir — fechar continua instantâneo).
+// Sem isso o submenu abre no primeiro pixel de mouseenter, e um simples
+// "passar por cima" a caminho de outro item da sidebar já empurra os itens
+// vizinhos pra baixo — ruim de navegar. Cancelado se o mouse sair antes do
+// tempo (então só passar de raspão não abre nada).
+const HOVER_DELAY_MS = 300
+
 function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChild[] }; collapsed: boolean }) {
   const { pathname } = useLocation()
   const anyActive = item.children.some(c => pathname === c.to || pathname.startsWith(c.to + '/'))
   const [open, setOpen] = useState(anyActive)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const cancelarTimer = () => {
+    if (timerRef.current != null) { clearTimeout(timerRef.current); timerRef.current = null }
+  }
+  useEffect(() => cancelarTimer, [])
+
+  const handleEnter = () => {
+    cancelarTimer()
+    timerRef.current = setTimeout(() => setOpen(true), HOVER_DELAY_MS)
+  }
+  const handleLeave = () => {
+    cancelarTimer()
+    setOpen(anyActive)
+  }
 
   if (collapsed) {
     // Sidebar recolhido: o pai segue como ícone único, mas ao passar o mouse
@@ -184,13 +206,14 @@ function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChi
   }
 
   return (
-    // Mouse sobre o item PAI ou seus filhos expande o submenu (UX consistente
-    // com o flyout do estado colapsado). Ao sair, recolhe — exceto quando a
-    // página atual está em uma rota filha (anyActive=true), pra não esconder
+    // Mouse sobre o item PAI ou seus filhos expande o submenu após um pequeno
+    // delay (HOVER_DELAY_MS acima — evita abrir só de passar de raspão). Ao
+    // sair, recolhe IMEDIATO — exceto quando a página atual está em uma rota
+    // filha (anyActive=true), pra não esconder
     // o destino corrente.
     <div
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(anyActive)}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
     >
       {/* Linha do pai: NavLink (vai para o destino default — Resumo geral) com
           um chevron-button separado à direita pra abrir/fechar o submenu.
@@ -211,7 +234,7 @@ function NavExpandable({ item, collapsed }: { item: NavItem & { children: NavChi
           <span className="flex-1 text-left">{item.label}</span>
         </NavLink>
         <button
-          onClick={() => setOpen(v => !v)}
+          onClick={() => { cancelarTimer(); setOpen(v => !v) }}
           title={open ? 'Recolher' : 'Expandir'}
           className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-blue-400/8 transition-colors"
           aria-expanded={open}

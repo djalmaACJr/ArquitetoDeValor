@@ -648,6 +648,94 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect(cripto).toHaveProperty("desvio_pct");
   });
 
+  test("CA-INV27 — GET /investimentos/ranking: sem periodo mantém compatibilidade; com periodo, usa o snapshot mensal (ou degrada com graça sem um)", async () => {
+    // Escopado à conta de teste (conta_id) — não precisa da carteira real
+    // inteira da conta compartilhada de testes: o filtro de período lê só
+    // arqvalor.inv_historico_mensal (sem busca externa nenhuma).
+    const qs = `conta_id=${contaId}`;
+
+    // Sem `periodo` → default TUDO, 100% igual ao comportamento anterior:
+    // valor_mercado_inicio_periodo == valor_custo e rentabilidade_periodo_pct
+    // == rentabilidade_pct (nenhum campo antigo muda).
+    const { status: s1, data: d1 } = await api(`/investimentos/ranking?${qs}`);
+    expect(s1).toBe(200);
+    expect(d1.dados).toHaveProperty("ativos");
+    expect(d1.dados).toHaveProperty("categorias");
+    expect(d1.dados.periodo).toBe("TUDO");
+
+    const semPeriodo = d1.dados.ativos.find((a: any) => a.ticker === TICKER);
+    expect(semPeriodo).toBeTruthy();
+    expect(Number(semPeriodo.valor_mercado_inicio_periodo)).toBeCloseTo(Number(semPeriodo.valor_custo), 6);
+    expect(Number(semPeriodo.rentabilidade_periodo_pct)).toBeCloseTo(Number(semPeriodo.rentabilidade_pct), 6);
+    expect(semPeriodo.periodo_desde_compra).toBe(false);
+
+    const catCripto = d1.dados.categorias.find((c: any) => c.tipo_ativo === "CRIPTOMOEDAS");
+    expect(catCripto).toBeTruthy();
+    expect(catCripto).toHaveProperty("rentabilidade_periodo_pct");
+
+    // Fixture dedicada pra exercitar as DUAS pontas do filtro de período:
+    // comprado há 2 anos (bem antes de qualquer período testado, pra nunca
+    // cair no atalho "comprado dentro do período") + só 1 snapshot mensal,
+    // do mês passado.
+    const { data: dA } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVPER", nome: "Jest Período", tipo_ativo: "ACOES",
+    });
+    const aId = dA.dados.id as string;
+    await api("/investimentos/posicoes", "POST", {
+      ativo_id: aId, conta_id: contaId, quantidade: 10, preco_custo: 20, data_compra: `${mesOffset(-24)}-05`,
+    });
+    await api("/investimentos/historico-mensal", "POST", {
+      ativo_id: aId, conta_id: contaId, mes_ano: mesOffset(-1), valor_mercado: 220,
+    });
+
+    // periodo=MES: acha o snapshot do mês passado (220) — usa ELE, não o
+    // custo — e marca periodo_desde_compra=false (achou dado de verdade).
+    const { status: s2, data: d2 } = await api(`/investimentos/ranking?${qs}&periodo=MES`);
+    expect(s2).toBe(200);
+    expect(d2.dados.periodo).toBe("MES");
+    const comMes = d2.dados.ativos.find((a: any) => a.ticker === "JESTINVPER");
+    expect(comMes).toBeTruthy();
+    expect(comMes.periodo_desde_compra).toBe(false);
+    expect(Number(comMes.valor_mercado_inicio_periodo)).toBeCloseTo(220, 2);
+
+    // periodo=ANO: não existe snapshot tão antigo (só o de 1 mês atrás) —
+    // degrada com graça pra "desde a compra" (valor_custo = 10×20 = 200) em
+    // vez de quebrar/dividir por zero.
+    const { status: s3, data: d3 } = await api(`/investimentos/ranking?${qs}&periodo=ANO`);
+    expect(s3).toBe(200);
+    expect(d3.dados.periodo).toBe("ANO");
+    const comAno = d3.dados.ativos.find((a: any) => a.ticker === "JESTINVPER");
+    expect(comAno).toBeTruthy();
+    expect(comAno.periodo_desde_compra).toBe(true);
+    expect(Number(comAno.valor_mercado_inicio_periodo)).toBeCloseTo(200, 2);
+
+    // periodo=SEMANA e periodo=MES_ATUAL: o ticker de teste (JESTINVPER) não
+    // existe em fonte externa nenhuma (Yahoo/CoinGecko) — o backfill diário
+    // não acha nada e cai pro MESMO fallback de snapshot mensal usado por
+    // MES/SEMESTRE/ANO (não quebra, não crasha, não fica preso tentando
+    // resolver o preço). Os dois usam a mesma busca diária (ver ranking()).
+    for (const periodoDiario of ["SEMANA", "MES_ATUAL"]) {
+      const { status, data } = await api(`/investimentos/ranking?${qs}&periodo=${periodoDiario}`);
+      expect(status).toBe(200);
+      expect(data.dados.periodo).toBe(periodoDiario);
+      const comPeriodo = data.dados.ativos.find((a: any) => a.ticker === "JESTINVPER");
+      expect(comPeriodo).toBeTruthy();
+      expect(Number(comPeriodo.valor_mercado_inicio_periodo)).toBeCloseTo(220, 2);
+    }
+
+    // periodo inválido → cai pro default (TUDO), não quebra a requisição
+    for (const invalido of ["SECULO", "DECADA"]) {
+      const { status, data } = await api(`/investimentos/ranking?${qs}&periodo=${invalido}`);
+      expect(status).toBe(200);
+      expect(data.dados.periodo).toBe("TUDO");
+    }
+
+    // limpeza (histórico cascateia com a posição)
+    const { data: posAll } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
+    for (const pp of posAll?.dados ?? []) await api(`/investimentos/posicoes/${pp.id}`, "DELETE");
+    await api(`/investimentos/ativos/${aId}`, "DELETE");
+  }, 45000);
+
   // Limpeza encadeada do que sobrou (projeção confirmada vira PAGO no extrato)
   test("CA-INV — limpeza: excluir dividendo confirmado, snapshots, posição e ativo", async () => {
     const { status: sDiv } = await api(`/investimentos/dividendos/${dividendoProjId}`, "DELETE");

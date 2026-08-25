@@ -375,6 +375,10 @@ Questionário customizado por tipo de ativo: `user_id`, `tipo_ativo`, `perguntas
 #### `inv_avaliacoes`
 Avaliação consolidada por ativo (mentores IA): `user_id`, `ativo_id → inv_ativos` cascade, `nota_final NUMERIC(4,2) (0..10)`, `consenso JSONB` (pesos + perguntas + respostas por mentor), `historico JSONB` (até 24 entradas `{gerado_em, nota_final, criterios}`), `gerado_em`. `UNIQUE(user_id, ativo_id)` — upsert por ativo.
 
+#### `inv_indicadores`
+Watchlist pessoal de benchmarks exibida na página "Gerenciar dados", ao lado dos indicadores econômicos fixos (PTAX/IPCA/SELIC/CDI): `user_id`, `ticker`, `tipo` (`'ETF'|'ETF_INTERNACIONAL'|'INDICE'`, `CHECK`), `nome`, `moeda VARCHAR(3) DEFAULT 'BRL'`, `cor`. `UNIQUE(user_id, ticker)`. Sem `updated_at`/rota `PUT` (só criar/excluir). Tratada como configuração reutilizável pela rota `limpar` (não é apagada por "Limpar investimentos", só por exclusão de conta).
+`ETF`/`ETF_INTERNACIONAL` são negociáveis: descobertos pela mesma busca externa (`GET /investimentos/busca-externa`, brapi) usada ao cadastrar um ativo, e a cotação vem do cache compartilhado `cotacoes_ativos` via `resolverHistoricoCotado`. `INDICE` é um índice B3 puro (SMLL, IBOV, IFIX...) — **não negociável**, não aparece nessa busca; a lista suportada é curada à mão (`INDICES_B3` em `indicadores.ts`, ticker→símbolo Yahoo) e a cotação vem direto desse símbolo mapeado (`resolverHistoricoIndiceB3`), sem passar pelo palpite multi-candidato `ticker`/`ticker.SA` usado pra ativos — ambíguo demais pra índice (ex.: "SMLL" sozinho já é o ticker de um ETF americano real). Em ambos os casos a cotação em si **não** é armazenada nesta tabela — resolvida sob demanda em `GET /investimentos/indicadores`.
+
 #### `inv_proventos_fundo`
 Cache do histórico de distribuição **por cota do fundo** (independente da posse do usuário): `ativo_id → inv_ativos` cascade, `data_pagamento`, `label` (rótulo bruto da B3), `valor_por_cota NUMERIC(20,8) >0`. `UNIQUE(ativo_id, data_pagamento, label)`. Fora do backup/restore (cache reconstruível). Usada para o DY/YoC cobrir 12 meses completos mesmo com posição há menos de 1 ano.
 

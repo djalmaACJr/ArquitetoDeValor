@@ -45,6 +45,11 @@ const LS_KEYS_USER_SCOPED = [
   'arqvalor:ocultar_valores',      // flag ocultar (sync de arqvalor.usuarios.ocultar_valores)
   'arqvalor:ultima-atividade',     // timestamp de auto-logout (useAutoLogout) — nunca herdar entre usuários
   'arqvalor:biometria-recusada',   // "não perguntar de novo" sobre login por digital (LoginPage)
+  'arqvalor:destaques-ordem-gerais',     // ordem arrastável dos 4 quadros gerais (DestaquesInvestimentosPage)
+  'arqvalor:destaques-ordem-categorias', // ordem arrastável dos quadros "Por tipo de ativo" (idem)
+  'arqvalor:chat-mascote-historico',     // LEGADO: histórico do chat mudou pra arqvalor.usuarios.chat_mascote_historico
+                                          // (useChatMascote já limpa esta chave sozinho); mantida aqui só de rede de
+                                          // segurança, caso algum resquício ainda exista no navegador de alguém.
 ] as const
 
 // Chaves legadas que ainda podem existir no LS de versões anteriores.

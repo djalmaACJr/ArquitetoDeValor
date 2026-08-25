@@ -2,9 +2,12 @@
 // /investimentos/dashboard e /investimentos/ranking — extraído de index.ts.
 import { json, erro } from "../_shared/utils.ts";
 import { logError, logRequest } from "../_shared/logger.ts";
-import { Db, hojeISO } from "./shared.ts";
+import {
+  Db, hojeISO, PERIODOS_RANKING, inicioPeriodoRanking, type PeriodoRanking,
+} from "./shared.ts";
 import {
   conversorCustoBRL, resolverPrecosAtuais, ptaxAtual, PosicaoCusto,
+  resolverValorDiarioCotado,
 } from "./mercado.ts";
 
 export function mapaUltimoMercado(
@@ -215,10 +218,19 @@ export async function ranking(c: Db, params: URLSearchParams) {
   const contaFiltro = params.get("conta_id");
   const tipoFiltro  = params.get("tipo_ativo");
 
+  // Filtro de período do ranking de "Destaques" (Semana/Mês atual/Últimos
+  // 30 dias/Semestre/Ano).
+  // Default TUDO preserva 100% o comportamento anterior (retorno desde a
+  // compra, contra o custo) — quem não manda o param não muda de nada.
+  const periodoParam = (params.get("periodo") ?? "TUDO").toUpperCase();
+  const periodo: PeriodoRanking = (PERIODOS_RANKING as readonly string[]).includes(periodoParam)
+    ? (periodoParam as PeriodoRanking) : "TUDO";
+
   const corte12m = new Date();
   corte12m.setMonth(corte12m.getMonth() - 12);
   const corteISO = corte12m.toISOString().split("T")[0];
   const hojeRanking = hojeISO();
+  const dataInicioNominal = inicioPeriodoRanking(periodo, hojeRanking);
 
   const [posRes, histRes, divRes, opsRes, fundoRes] = await Promise.all([
     (() => {
@@ -331,6 +343,129 @@ export async function ranking(c: Db, params: URLSearchParams) {
     }
   }
 
+  // ── Valor de mercado NO INÍCIO do período ────────────────────────────────
+  // periodo=TUDO não entra aqui: mantém a leitura atual (retorno desde a
+  // compra, contra o custo) sem nenhuma busca extra.
+  //
+  // Fonte: o snapshot MENSAL que já existe (inv_historico_mensal), a mesma
+  // tabela por trás dos gráficos da página do ativo — sem tabela nova, sem
+  // busca externa nenhuma nesta rota. Cobre TODOS os tipos uniformemente
+  // (cotados, cripto E Renda Fixa/Tesouro), porque `gravarSnapshot` já grava
+  // o valor calculado de qualquer tipo ali (cron `snapshot-diario` + botão
+  // "Preencher histórico"). Sem snapshot tão antigo quanto o período pedido
+  // (ativo novo, ou histórico nunca preenchido pra trás), degrada pra "desde
+  // a compra" — mesma leitura de periodo=TUDO pra aquele ativo.
+  const valorInicioPorAtivo = new Map<string, number>();
+  const periodoDesdeCompraPorAtivo = new Map<string, boolean>();
+
+  if (dataInicioNominal) {
+    const alvoMes = dataInicioNominal.slice(0, 7);
+    let qHist = c.from("inv_historico_mensal")
+      .select("ativo_id, conta_id, mes_ano, valor_mercado")
+      .lte("mes_ano", alvoMes)
+      .order("mes_ano", { ascending: false });
+    if (contaFiltro) qHist = qHist.eq("conta_id", contaFiltro);
+    const { data: histPeriodoRows, error: histPeriodoErr } = await qHist;
+    if (histPeriodoErr) logError("Ranking historico periodo", histPeriodoErr);
+
+    // ativo|conta → valor_mercado do snapshot mais recente ≤ alvoMes (já
+    // ordenado desc → a 1ª ocorrência de cada par é a que vale).
+    const valorPorPar = new Map<string, number>();
+    for (const r of histPeriodoRows ?? []) {
+      const k = `${r.ativo_id}|${r.conta_id}`;
+      if (!valorPorPar.has(k)) valorPorPar.set(k, Number(r.valor_mercado));
+    }
+
+    // "Semana" e "Mês atual" não dão pra representar com o snapshot MENSAL:
+    // a data-alvo cai dentro do mês AINDA em andamento, e a única linha do
+    // mês corrente em inv_historico_mensal é reescrita todo dia com o preço
+    // de HOJE — o retorno dava sempre ~0% (achado real, "tudo zerado").
+    // Só pra esses dois, busca o preço de verdade num ponto do passado
+    // (cache diário, backfill sob demanda numa janela estreita — ver
+    // resolverValorDiarioCotado). Renda Fixa/Tesouro ficam de fora dessa
+    // busca: o movimento de dias é imaterial pra esses tipos (acumulação
+    // suave dia a dia), o snapshot mensal já é uma aproximação aceitável.
+    const usaBuscaDiaria = periodo === "SEMANA" || periodo === "MES_ATUAL";
+    let precosDiarios = new Map<string, { preco: number; moeda: string }>();
+    let ptaxDiaria = 0;
+    if (usaBuscaDiaria) {
+      const cotadosAntes: string[] = [];
+      const criptoAntes:  string[] = [];
+      for (const a of porAtivo.values()) {
+        if (a.tipo_ativo === "RENDA_FIXA" || a.tipo_ativo === "TESOURO_DIRETO") continue;
+        const desde = primeiraPosse.get(a.ativo_id) ?? hojeRanking;
+        if (desde > dataInicioNominal) continue; // comprado dentro do período, não precisa
+        (a.tipo_ativo === "CRIPTOMOEDAS" ? criptoAntes : cotadosAntes).push(a.ticker.toUpperCase());
+      }
+      precosDiarios = await resolverValorDiarioCotado(c, cotadosAntes, criptoAntes, dataInicioNominal);
+      // PTAX da data-alvo (ou a mais recente antes dela) — converte ativos em
+      // moeda estrangeira (STOCKS/ETF_INTERNACIONAL) pra BRL, mesma convenção
+      // de conversorCustoBRL/executarSnapshotMes. Sem isso, comparar um preço
+      // cru em USD contra o valor_mercado atual (já em BRL) inflava o retorno
+      // pela cotação do dólar (achado real: "+400%" numa semana).
+      if (cotadosAntes.length > 0) {
+        const { data: ptaxRow } = await c.from("cotacoes_ptax")
+          .select("cotacao_venda").lte("data", dataInicioNominal)
+          .order("data", { ascending: false }).limit(1).maybeSingle();
+        ptaxDiaria = Number(ptaxRow?.cotacao_venda) || await ptaxAtual(c);
+      }
+    }
+
+    for (const a of porAtivo.values()) {
+      const desde = primeiraPosse.get(a.ativo_id) ?? hojeRanking;
+      if (desde > dataInicioNominal) {
+        // Comprado DENTRO do período: o próprio custo já é o valor de
+        // mercado no instante da compra — não precisa de snapshot nenhum.
+        valorInicioPorAtivo.set(a.ativo_id, a.valor_custo);
+        periodoDesdeCompraPorAtivo.set(a.ativo_id, true);
+        continue;
+      }
+
+      if (usaBuscaDiaria && a.tipo_ativo !== "RENDA_FIXA" && a.tipo_ativo !== "TESOURO_DIRETO") {
+        const cot = precosDiarios.get(a.ticker.toUpperCase());
+        const pids = posicoesPorAtivo.get(a.ativo_id) ?? [];
+        const qtdInicio = pids.reduce((s, pid) => s + qtdNaData(checkpoints.get(pid), dataInicioNominal), 0);
+        // Converte pra BRL se o preço veio em moeda estrangeira (STOCKS/
+        // ETF_INTERNACIONAL) — sem PTAX disponível nem pra hoje, não dá pra
+        // confiar no preço cru, então cai pro fallback abaixo.
+        const precoOk = cot && (cot.moeda === "BRL" || ptaxDiaria > 0);
+        if (cot && precoOk && qtdInicio > 0) {
+          const precoBRL = cot.moeda === "BRL" ? cot.preco : cot.preco * ptaxDiaria;
+          valorInicioPorAtivo.set(a.ativo_id, precoBRL * qtdInicio);
+          periodoDesdeCompraPorAtivo.set(a.ativo_id, false);
+          continue;
+        }
+        // fonte não cobriu a data (ex.: cripto > 365 dias) — cai pro
+        // snapshot mensal abaixo, mesmo fallback dos demais períodos.
+      }
+
+      let soma = 0; let achouAlgum = false;
+      for (const k of custoPorPar.keys()) {
+        if (!k.startsWith(`${a.ativo_id}|`)) continue;
+        const v = valorPorPar.get(k);
+        if (v != null) { soma += v; achouAlgum = true; }
+      }
+      valorInicioPorAtivo.set(a.ativo_id, achouAlgum ? soma : a.valor_custo);
+      periodoDesdeCompraPorAtivo.set(a.ativo_id, !achouAlgum);
+    }
+  }
+
+  // Dividendos recebidos DENTRO do período selecionado (distinto da janela
+  // fixa de 12m usada por dividendos_12m/dividend_yield_pct acima — aqui é
+  // exatamente o intervalo do filtro; periodo=TUDO não tem piso, é o
+  // recebido a vida toda).
+  let divPeriodoQ = c.from("inv_dividendos").select("ativo_id, valor").lte("data_pagamento", hojeRanking);
+  if (dataInicioNominal) divPeriodoQ = divPeriodoQ.gte("data_pagamento", dataInicioNominal);
+  if (contaFiltro) divPeriodoQ = divPeriodoQ.eq("conta_id", contaFiltro);
+  const { data: divPeriodoRows, error: divPeriodoErr } = await divPeriodoQ;
+  if (divPeriodoErr) logError("Ranking dividendos periodo", divPeriodoErr);
+  const dividendosPeriodoPorAtivo = new Map<string, number>();
+  for (const d of divPeriodoRows ?? []) {
+    const aid = String(d.ativo_id);
+    if (!porAtivo.has(aid)) continue;
+    dividendosPeriodoPorAtivo.set(aid, (dividendosPeriodoPorAtivo.get(aid) ?? 0) + (Number(d.valor) || 0));
+  }
+
   // Agrupa proventos por (ativo|data|tipo): o dividendo-por-cota (rate) é o
   // mesmo entre contas, então só conta UMA vez por pagamento. Soma o valor
   // recebido (todas as contas) p/ a estimativa e p/ dividendos_12m.
@@ -411,6 +546,11 @@ export async function ranking(c: Db, params: URLSearchParams) {
     // Padrão investidor10: dividendo-por-cota 12m do FUNDO × qtd atual / preço.
     // (fusão inv_dividendos + cache B3 por data de pagamento)
     const rate12m = divPorCota.get(a.ativo_id) ?? 0;
+    // Campos do FILTRO DE PERÍODO (distintos dos "desde a compra" acima).
+    // periodo=TUDO reusa o custo como início — mesmos números de sempre.
+    const valorInicioPeriodo = dataInicioNominal ? (valorInicioPorAtivo.get(a.ativo_id) ?? a.valor_custo) : a.valor_custo;
+    const dividendosPeriodo  = dividendosPeriodoPorAtivo.get(a.ativo_id) ?? 0;
+    const periodoDesdeCompra = dataInicioNominal ? (periodoDesdeCompraPorAtivo.get(a.ativo_id) ?? false) : false;
     return {
       ativo_id:           a.ativo_id,
       ticker:             a.ticker,
@@ -436,10 +576,40 @@ export async function ranking(c: Db, params: URLSearchParams) {
       yoc_real_pct:       a.valor_custo   > 0 ? Number(((a.dividendos_12m / a.valor_custo)   * 100).toFixed(2)) : 0,
       posse_12m:          (primeiraPosse.get(a.ativo_id) ?? hojeRanking) <= corteISO,
       participacao_pct:   totalMercado > 0 ? Number(((a.valor_mercado / totalMercado) * 100).toFixed(2)) : 0,
+      // ── Página "Destaques" (filtro de período) ──────────────────────────
+      valor_mercado_inicio_periodo: Number(valorInicioPeriodo.toFixed(2)),
+      rentabilidade_periodo_pct: valorInicioPeriodo > 0
+        ? Number((((a.valor_mercado - valorInicioPeriodo) / valorInicioPeriodo) * 100).toFixed(2)) : 0,
+      dividendos_periodo: Number(dividendosPeriodo.toFixed(2)),
+      dy_periodo_pct:     a.valor_mercado > 0 ? Number(((dividendosPeriodo / a.valor_mercado) * 100).toFixed(2)) : 0,
+      periodo_desde_compra: periodoDesdeCompra,
     };
   }).sort((x, y) => y.rentabilidade_pct - x.rentabilidade_pct);
 
-  return json({ dados: { total_mercado: Number(totalMercado.toFixed(2)), ativos } });
+  // Ranking por categoria (Tipo de Ativo) — topo da página "Destaques",
+  // mesma agregação de dashboard() mas com os números do período filtrado.
+  type AggCategoria = { tipo_ativo: string; valor_mercado: number; valor_mercado_inicio_periodo: number; dividendos_periodo: number };
+  const porCategoria = new Map<string, AggCategoria>();
+  for (const a of ativos) {
+    const g = porCategoria.get(a.tipo_ativo)
+      ?? { tipo_ativo: a.tipo_ativo, valor_mercado: 0, valor_mercado_inicio_periodo: 0, dividendos_periodo: 0 };
+    g.valor_mercado                += a.valor_mercado;
+    g.valor_mercado_inicio_periodo += a.valor_mercado_inicio_periodo;
+    g.dividendos_periodo           += a.dividendos_periodo;
+    porCategoria.set(a.tipo_ativo, g);
+  }
+  const categorias = [...porCategoria.values()].map((g) => ({
+    tipo_ativo:                   g.tipo_ativo,
+    valor_mercado:                Number(g.valor_mercado.toFixed(2)),
+    valor_mercado_inicio_periodo: Number(g.valor_mercado_inicio_periodo.toFixed(2)),
+    rentabilidade_periodo_pct:    g.valor_mercado_inicio_periodo > 0
+      ? Number((((g.valor_mercado - g.valor_mercado_inicio_periodo) / g.valor_mercado_inicio_periodo) * 100).toFixed(2)) : 0,
+    dividendos_periodo:           Number(g.dividendos_periodo.toFixed(2)),
+    dy_periodo_pct:               g.valor_mercado > 0 ? Number(((g.dividendos_periodo / g.valor_mercado) * 100).toFixed(2)) : 0,
+    participacao_pct:             totalMercado > 0 ? Number(((g.valor_mercado / totalMercado) * 100).toFixed(2)) : 0,
+  })).sort((x, y) => y.rentabilidade_periodo_pct - x.rentabilidade_periodo_pct);
+
+  return json({ dados: { total_mercado: Number(totalMercado.toFixed(2)), periodo, ativos, categorias } });
 }
 
 // ============================================================

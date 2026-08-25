@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
-import type { InvestimentoOperacao, TipoOperacaoInvestimento } from '../types'
+import type { InvestimentoOperacao, TipoAtivoInvestimento, TipoOperacaoInvestimento } from '../types'
 
 export interface CriarOperacaoInput {
   // A operação mantém a posição: informe (ativo_id + conta_id) — a posição é
@@ -15,6 +15,12 @@ export interface CriarOperacaoInput {
   preco_unitario?: number
   valor_total?:    number
   data_operacao:   string
+  // Só faz sentido junto de (ativo_id + conta_id), sem posicao_id: força a
+  // criação de uma posição NOVA em vez de somar na ATIVA existente — usado
+  // para registrar um novo "lote" (ex.: mesmo título comprado depois a uma
+  // taxa diferente). rf_taxa é o rótulo opcional desse lote.
+  novo_lote?:      boolean
+  rf_taxa?:        string
 }
 
 export type EditarOperacaoInput = Partial<CriarOperacaoInput>
@@ -22,12 +28,20 @@ export type EditarOperacaoInput = Partial<CriarOperacaoInput>
 export interface FiltrosOperacoes {
   posicao_id?: string
   ativo_id?:   string
+  tipo_ativo?: TipoAtivoInvestimento
+  // Período (data_operacao), usado no Extrato — ignorado se ativo_id/
+  // posicao_id também vierem junto de tipo_ativo (backend prioriza ativo_id).
+  de?: string
+  ate?: string
 }
 
 async function fetchOperacoes(filtros: FiltrosOperacoes): Promise<InvestimentoOperacao[]> {
   const params = new URLSearchParams()
   if (filtros.posicao_id) params.set('posicao_id', filtros.posicao_id)
   if (filtros.ativo_id)   params.set('ativo_id', filtros.ativo_id)
+  if (filtros.tipo_ativo) params.set('tipo_ativo', filtros.tipo_ativo)
+  if (filtros.de)         params.set('de', filtros.de)
+  if (filtros.ate)        params.set('ate', filtros.ate)
   const qs  = params.toString()
   const res = await apiFetch<InvestimentoOperacao[]>(`/investimentos/operacoes${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar operações')

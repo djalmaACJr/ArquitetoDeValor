@@ -18,6 +18,7 @@ import {
   Drawer, Field, Input, SearchableSelect, Toggle,
   BtnSalvar, BtnCancelar, Segmented, ModalExcluir,
 } from './shared'
+import { CampoData, type CampoDataHandle } from './CampoData'
 import Calculadora, { type InfoConversaoDolar } from './Calculadora'
 import type { Lancamento } from '../../hooks/useLancamentos'
 
@@ -245,7 +246,7 @@ export default function DrawerLancamento({
   const tipoRef              = useRef<HTMLDivElement>(null)
   const valorBtnRef          = useRef<HTMLButtonElement>(null)
   const descricaoRef         = useRef<HTMLInputElement>(null)
-  const dataRef              = useRef<HTMLInputElement>(null)
+  const dataRef              = useRef<CampoDataHandle>(null)
   const ignorarFoco          = useRef(false)
   const criarNovoPreserved   = useRef<null | Pick<FormState, 'tipo' | 'data' | 'conta_id' | 'status'>>(null)
 
@@ -295,15 +296,9 @@ export default function DrawerLancamento({
         categoria_id: categoriaIdInicial ?? '',
       })
       setEscopo('SOMENTE_ESTE'); setExpandindo(false); setQtdAdicional('3'); setCalcAberta(false)
-      // Foco vai para o campo de Data (novo lançamento) e abre o calendário
-      // — facilita confirmar/ajustar a data antes do resto. showPicker requer
-      // ativação do usuário (o clique que abriu o drawer); fallback é só focar.
-      setTimeout(() => {
-        const el = dataRef.current
-        if (!el) return
-        el.focus()
-        try { el.showPicker?.() } catch { /* navegador sem suporte */ }
-      }, 320)
+      // Foco vai para o campo de Data (novo lançamento) e já abre o
+      // calendário — facilita confirmar/ajustar a data antes do resto.
+      setTimeout(() => { dataRef.current?.focus() }, 320)
       return
     }
     if (lancamentoProp) {
@@ -847,7 +842,7 @@ export default function DrawerLancamento({
 
         {/* Data */}
         <Field label="Data *">
-          <Input ref={dataRef} type="date" value={form.data} onChange={e => set({ data: e.target.value })} />
+          <CampoData ref={dataRef} value={form.data} onChange={v => set({ data: v })} />
         </Field>
 
         {/* Descrição — antes da Categoria para que o assistente de lançamento

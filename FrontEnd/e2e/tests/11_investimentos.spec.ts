@@ -294,8 +294,33 @@ test.describe('Investimentos (E2E)', () => {
     await expect(page.getByText(/metas de alocação salvas/i)).toBeVisible({ timeout: 5_000 })
   })
 
-  // ── E2E-INV11 (cleanup) ──────────────────────────────────────
-  test('E2E-INV11 — excluir ativo de teste remove posições em cascata', async ({ page }) => {
+  // ── E2E-INV11 ────────────────────────────────────────────────
+  test('E2E-INV11 — botão "Destaques" do nav abre a página com filtros de período/categoria', async ({ page }) => {
+    test.skip(!ativoId, 'Ativo de teste não foi criado (E2E-INV03 falhou)')
+
+    await page.goto('/investimentos')
+    await expect(page.getByRole('heading', { name: /^investimentos$/i })).toBeVisible({ timeout: 10_000 })
+
+    const atalho = page.getByRole('link', { name: /^destaques$/i })
+    await expect(atalho).toBeVisible({ timeout: 10_000 })
+    await atalho.click()
+
+    await expect(page).toHaveURL(/\/investimentos\/destaques$/)
+    await expect(page.getByRole('heading', { name: /destaques da carteira/i })).toBeVisible({ timeout: 10_000 })
+    // Mesmo nav sticky das demais páginas do módulo, não um header próprio
+    await expect(page.getByRole('link', { name: /^painel$/i })).toBeVisible()
+    await expect(page.getByText(/ranking por categoria/i)).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(/^em alta/i)).toBeVisible()
+    await expect(page.getByText(/^maior participação/i)).toBeVisible()
+
+    // Troca o período — a página não deve quebrar/navegar embora
+    await page.getByRole('combobox').first().selectOption('ANO')
+    await expect(page.getByRole('heading', { name: /destaques da carteira/i })).toBeVisible()
+    await expect(page).toHaveURL(/\/investimentos\/destaques$/)
+  })
+
+  // ── E2E-INV12 (cleanup) ──────────────────────────────────────
+  test('E2E-INV12 — excluir ativo de teste remove posições em cascata', async ({ page }) => {
     test.skip(!ativoId, 'Ativo de teste não foi criado (E2E-INV03 falhou)')
 
     await page.goto(`/investimentos/ativos/${ativoId}`)

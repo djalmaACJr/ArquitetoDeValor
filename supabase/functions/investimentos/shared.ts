@@ -106,6 +106,63 @@ export const recuarDias = (d: string, n: number) => deslocarDias(d, -n);
 export const maiorData  = (a: string, b: string) => (a > b ? a : b);
 export const menorData  = (a: string, b: string) => (a < b ? a : b);
 
+// Recua N meses de uma data YYYY-MM-DD (usado pelo filtro de período do
+// ranking de destaques: Últimos 30 dias/Semestre/Ano). Deixa o rollover de
+// dia-do-mês (ex.: 31/mar − 1 mês) por conta do próprio Date (mesma
+// convenção JS de setUTCMonth), suficiente para uma data "início de
+// período" aproximada.
+export function recuarMeses(dataISO: string, n: number): string {
+  const dt = new Date(`${dataISO}T12:00:00Z`);
+  dt.setUTCMonth(dt.getUTCMonth() - n);
+  return dt.toISOString().slice(0, 10);
+}
+
+// 1º dia do mês corrente (usado por "Mês atual" — diferente de "recuar 1
+// mês" a partir de hoje: dia 24 de agosto vira 01/08, não 24/07).
+export function primeiroDiaMesAtual(hoje: string): string {
+  return `${hoje.slice(0, 7)}-01`;
+}
+
+// 1º dia do ANO corrente (usado por "Ano AAAA" — diferente de "recuar 12
+// meses" a partir de hoje: 24/08/2026 vira 01/01/2026, não 24/08/2025).
+export function primeiroDiaAnoAtual(hoje: string): string {
+  return `${hoje.slice(0, 4)}-01-01`;
+}
+
+// Períodos aceitos pelo filtro de "Destaques" (/investimentos/ranking).
+// TUDO (default) preserva o comportamento atual: retorno desde a compra.
+//
+// O valor no início do período vem do snapshot MENSAL já existente
+// (inv_historico_mensal, mesma fonte da página do ativo) — sem busca externa
+// nova nem tabela nova, EXCETO "SEMANA" e "MES_ATUAL": essas duas pedem um
+// ponto no tempo que cai dentro do mês AINDA em andamento, e a única linha
+// do mês corrente em inv_historico_mensal é reescrita todo dia com o preço
+// de HOJE (o cron roda diariamente) — comparar "hoje" com "hoje" sempre
+// dava ~0%. Por isso as duas usam o cache diário sob demanda (ver ranking()
+// em dashboard.ts e resolverValorDiarioCotado em mercado.ts), com janela
+// estreita de busca (não a série inteira) pra não pesar na Edge Function.
+//
+// "ANO_ATUAL" (Ano AAAA, ano corrente desde 1º de janeiro) fica de FORA
+// dessa exceção de propósito: só cairia no mesmo problema em janeiro (mês
+// atual == início do ano) — resto do ano usa o snapshot mensal normalmente,
+// sem precisar de busca ao vivo. Ressalva aceita (mesma janela estreita que
+// "Mês"/"Semestre" já têm em janeiro-adjacentes).
+export const PERIODOS_RANKING = ["SEMANA", "MES_ATUAL", "MES", "SEMESTRE", "ANO_ATUAL", "ANO", "TUDO"] as const;
+export type PeriodoRanking = typeof PERIODOS_RANKING[number];
+
+// Data de início do período, ou null para TUDO (sem recorte — usa a compra).
+export function inicioPeriodoRanking(periodo: PeriodoRanking, hoje: string): string | null {
+  switch (periodo) {
+    case "SEMANA":     return recuarDias(hoje, 7);
+    case "MES_ATUAL":  return primeiroDiaMesAtual(hoje);
+    case "MES":        return recuarMeses(hoje, 1);
+    case "SEMESTRE":   return recuarMeses(hoje, 6);
+    case "ANO_ATUAL":  return primeiroDiaAnoAtual(hoje);
+    case "ANO":        return recuarMeses(hoje, 12);
+    default:           return null;
+  }
+}
+
 // Insert em lote (chunk de 500) — usado por importação/restore de backup e
 // pela reconciliação de dividendos, para não estourar limites do PostgREST.
 export async function inserirEmLote(

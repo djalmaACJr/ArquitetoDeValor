@@ -1,10 +1,10 @@
 // supabase/functions/investimentos/posicoes.ts
 // Rotas /investimentos/posicoes e /investimentos/operacoes (extraído de index.ts).
 import {
-  json, erro, extrairId, verificarExistencia, camposParaAtualizar,
+  json, erro, extrairId, verificarExistencia, camposParaAtualizar, buscarTodasLinhas,
 } from "../_shared/utils.ts";
 import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
-import { Db, STATUS_POSICAO, TIPOS_OPERACAO, contaExiste, ativoExiste, hojeISO } from "./shared.ts";
+import { Db, STATUS_POSICAO, TIPOS_OPERACAO, TIPOS_ATIVO, contaExiste, ativoExiste, hojeISO } from "./shared.ts";
 
 export async function rotaPosicoes(c: Db, req: Request, m: string, userId: string) {
   const id = extrairId(req, "posicoes");
@@ -23,7 +23,14 @@ export async function rotaPosicoes(c: Db, req: Request, m: string, userId: strin
     if (status && STATUS_POSICAO.includes(status)) q = q.eq("status", status);
     const { data, error } = await q;
     if (error) { logError("Listar posicoes", error); return erro(error.message); }
-    return json({ dados: data });
+    // Enriquece com valor de mercado/rentabilidade por LOTE quando a consulta
+    // é por ativo — só nesse caso vale o custo extra de olhar o snapshot.
+    // O valor de mercado do par (ativo, conta) já existe (mesma fonte usada
+    // pelo dashboard/ranking); aqui só distribui proporcionalmente por lote,
+    // já que todos os lotes do mesmo título compartilham o mesmo preço por
+    // unidade — soma dos lotes bate exatamente com o total mostrado alhures.
+    const dados = ativoId ? await comValorMercadoPorLote(c, data ?? []) : data;
+    return json({ dados });
   }
 
   if (m === "POST" && !id) {
@@ -72,7 +79,7 @@ export async function rotaPosicoes(c: Db, req: Request, m: string, userId: strin
     }
 
     const campos = camposParaAtualizar(body, [
-      "ativo_id", "conta_id", "quantidade", "preco_custo", "data_compra", "status",
+      "ativo_id", "conta_id", "quantidade", "preco_custo", "data_compra", "status", "rf_taxa",
     ]);
     const { data, error } = await c.from("inv_posicoes").update(campos).eq("id", id).select().single();
     if (error) { logError("Editar posicao", error); return erro(error.message); }
@@ -102,22 +109,44 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
   if (m === "GET") {
     const params = new URL(req.url).searchParams;
     logRequest("GET", "/investimentos/operacoes", { params: Object.fromEntries(params) });
-    let q = c.from("inv_operacoes").select("*").order("data_operacao", { ascending: false });
     const posicaoId = params.get("posicao_id");
     const ativoId   = params.get("ativo_id");
-    if (posicaoId) q = q.eq("posicao_id", posicaoId);
+    const tipoAtivo = params.get("tipo_ativo");
+    const de        = params.get("de"); // data_operacao >= de (YYYY-MM-DD)
+    const ate       = params.get("ate"); // data_operacao <= ate (YYYY-MM-DD)
+
+    // inv_operacoes não tem ativo_id/tipo_ativo direto — resolve via posições
+    // (RLS de inv_posicoes já escopa por user_id). Evita trazer TODAS as
+    // operações do usuário só pra filtrar no cliente. Filtro por tipo_ativo
+    // resolve em JS (não em query aninhada do PostgREST — mais simples e
+    // seguro de acertar do que filtrar direto na tabela embutida).
+    let posIdsFiltro: string[] | null = null;
     if (ativoId) {
-      // inv_operacoes não tem ativo_id direto — resolve via posições do
-      // ativo (RLS de inv_posicoes já escopa por user_id). Evita trazer as
-      // operações de TODOS os ativos só para filtrar no cliente.
-      const { data: pos, error: errPos } = await c.from("inv_posicoes")
-        .select("id").eq("ativo_id", ativoId);
+      const { data: pos, error: errPos } = await c.from("inv_posicoes").select("id").eq("ativo_id", ativoId);
       if (errPos) { logError("Listar operacoes (posicoes do ativo)", errPos); return erro(errPos.message); }
-      const posIds = (pos ?? []).map((p) => p.id);
-      if (posIds.length === 0) return json({ dados: [] });
-      q = q.in("posicao_id", posIds);
+      posIdsFiltro = (pos ?? []).map((p) => String(p.id));
+    } else if (tipoAtivo && TIPOS_ATIVO.includes(tipoAtivo)) {
+      const { data: pos, error: errPos } = await c.from("inv_posicoes")
+        .select("id, inv_ativos(tipo_ativo)");
+      if (errPos) { logError("Listar operacoes (posicoes por tipo)", errPos); return erro(errPos.message); }
+      posIdsFiltro = (pos ?? [])
+        .filter((p) => (p.inv_ativos as { tipo_ativo?: string } | null)?.tipo_ativo === tipoAtivo)
+        .map((p) => String(p.id));
     }
-    const { data, error } = await q;
+    if (posIdsFiltro && posIdsFiltro.length === 0) return json({ dados: [] });
+
+    const montar = (deReg: number, ateReg: number) => {
+      let q = c.from("inv_operacoes")
+        .select("*, inv_posicoes(ativo_id, rf_taxa, inv_ativos(ticker, nome, tipo_ativo, moeda)), contas(nome)")
+        .order("data_operacao", { ascending: false })
+        .range(deReg, ateReg);
+      if (posicaoId) q = q.eq("posicao_id", posicaoId);
+      if (posIdsFiltro) q = q.in("posicao_id", posIdsFiltro);
+      if (de)  q = q.gte("data_operacao", de);
+      if (ate) q = q.lte("data_operacao", ate);
+      return q;
+    };
+    const { data, error } = await buscarTodasLinhas(montar);
     if (error) { logError("Listar operacoes", error); return erro(error.message); }
     return json({ dados: data });
   }
@@ -151,7 +180,13 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
       if (!(await ativoExiste(c, String(body.ativo_id)))) return erro("Ativo não encontrado", 404);
       if (!(await contaExiste(c, String(body.conta_id)))) return erro("Conta não encontrada", 404);
       contaId = String(body.conta_id);
-      const resolved = await acharOuCriarPosicao(c, userId, String(body.ativo_id), contaId, String(body.data_operacao));
+      // novo_lote: força uma posição nova em vez de somar na ATIVA existente
+      // (ex.: mesmo título de Tesouro/RF comprado depois a uma taxa diferente).
+      const rfTaxa = typeof body.rf_taxa === "string" && body.rf_taxa.trim() ? body.rf_taxa.trim().slice(0, 60) : null;
+      const resolved = await acharOuCriarPosicao(
+        c, userId, String(body.ativo_id), contaId, String(body.data_operacao),
+        body.novo_lote === true, rfTaxa,
+      );
       if (resolved instanceof Response) return resolved;
       posicaoId = resolved;
     }
@@ -232,20 +267,75 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
   return erro("Método não permitido", 405);
 }
 
+// Anexa valor_mercado/rentabilidade_pct a cada posição, distribuindo o valor
+// de mercado do PAR (ativo, conta) — já calculado no snapshot mensal, mesma
+// fonte que dashboard/ranking usam (vw_inv_ultimo_mercado) — proporcionalmente
+// por quantidade entre os lotes ATIVA daquele par. Todos os lotes do mesmo
+// título compartilham o mesmo preço por unidade (é o mesmo papel no mercado,
+// só o custo de entrada difere por lote), então a distribuição é exata, não
+// uma estimativa. Sem snapshot ainda gravado para o par, os campos ficam null.
+async function comValorMercadoPorLote(
+  c: Db, posicoes: Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  if (posicoes.length === 0) return posicoes;
+  const pares = [...new Set(posicoes.map((p) => `${p.ativo_id}|${p.conta_id}`))];
+  const ativoIds = [...new Set(posicoes.map((p) => String(p.ativo_id)))];
+  const contaIds = [...new Set(posicoes.map((p) => String(p.conta_id)))];
+  const { data: mercado } = await c.from("vw_inv_ultimo_mercado")
+    .select("ativo_id, conta_id, valor_mercado").in("ativo_id", ativoIds).in("conta_id", contaIds);
+  const valorMercadoPar = new Map<string, number>();
+  for (const m of mercado ?? []) valorMercadoPar.set(`${m.ativo_id}|${m.conta_id}`, Number(m.valor_mercado) || 0);
+
+  const qtdAtivaPorPar = new Map<string, number>();
+  for (const chave of pares) {
+    const total = posicoes
+      .filter((p) => `${p.ativo_id}|${p.conta_id}` === chave && p.status === "ATIVA")
+      .reduce((s, p) => s + (Number(p.quantidade) || 0), 0);
+    qtdAtivaPorPar.set(chave, total);
+  }
+
+  return posicoes.map((p) => {
+    const chave = `${p.ativo_id}|${p.conta_id}`;
+    const qtdTotal = qtdAtivaPorPar.get(chave) ?? 0;
+    const valorPar = valorMercadoPar.get(chave);
+    const qtdLote = Number(p.quantidade) || 0;
+    if (p.status !== "ATIVA" || qtdTotal <= 0 || valorPar == null) {
+      return { ...p, valor_mercado: null, rentabilidade_pct: null };
+    }
+    const precoUnitAtual = valorPar / qtdTotal;
+    const valorMercadoLote = precoUnitAtual * qtdLote;
+    const custo = Number(p.valor_custo) || 0;
+    const rentabilidadePct = custo > 0 ? ((valorMercadoLote - custo) / custo) * 100 : null;
+    return { ...p, valor_mercado: valorMercadoLote, rentabilidade_pct: rentabilidadePct };
+  });
+}
+
 // Posição ATIVA do par (ativo, conta) — reusa a existente (ATIVA ou ENCERRADA)
 // ou cria uma vazia (qtd 0) que será preenchida por recomputarPosicao.
+//
+// `forcarNovaPosicao` pula o reaproveitamento e sempre cria uma linha nova —
+// usado quando o usuário registra explicitamente um "novo lote" (ex.: mesmo
+// título de Tesouro/RF comprado depois a uma taxa diferente da 1ª compra).
+// Não há constraint única em (ativo_id, conta_id): múltiplas posições ATIVA
+// para o mesmo par já são suportadas por toda a cadeia (recomputarPosicao,
+// fecharPosicoesVencidas, listagem, dashboard/ranking, snapshot) — só este
+// find-or-create precisava de uma saída explícita do reaproveitamento.
 export async function acharOuCriarPosicao(
   c: Db, userId: string, ativoId: string, contaId: string, dataOp: string,
+  forcarNovaPosicao = false, rfTaxa: string | null = null,
 ): Promise<string | Response> {
-  const { data: existentes } = await c.from("inv_posicoes")
-    .select("id, status").eq("ativo_id", ativoId).eq("conta_id", contaId);
-  const ativa = (existentes ?? []).find((p) => p.status === "ATIVA");
-  if (ativa) return String(ativa.id);
-  const qualquer = (existentes ?? [])[0];
-  if (qualquer) return String(qualquer.id);
+  if (!forcarNovaPosicao) {
+    const { data: existentes } = await c.from("inv_posicoes")
+      .select("id, status").eq("ativo_id", ativoId).eq("conta_id", contaId);
+    const ativa = (existentes ?? []).find((p) => p.status === "ATIVA");
+    if (ativa) return String(ativa.id);
+    const qualquer = (existentes ?? [])[0];
+    if (qualquer) return String(qualquer.id);
+  }
   const { data, error } = await c.from("inv_posicoes").insert({
     user_id: userId, ativo_id: ativoId, conta_id: contaId,
     quantidade: 0, preco_custo: 0, data_compra: dataOp, status: "ATIVA",
+    rf_taxa: rfTaxa,
   }).select("id").single();
   if (error) { logError("Criar posição (operação)", error); return erro(error.message); }
   return String(data.id);
@@ -304,16 +394,30 @@ export async function recomputarPosicao(c: Db, posicaoId: string): Promise<void>
   if (errUpd) { logError("Recomputar posição (update)", errUpd); return; }
   if (pos?.ativo_id && pos?.conta_id) {
     await recalcularProjecoesDividendos(c, String(pos.ativo_id), String(pos.conta_id), qtd);
-    // Posição zerada (ex.: resgate/venda lançado retroativamente pelo robô
-    // investidor10) — os snapshots mensais gravados DEPOIS do fechamento real
-    // ficam órfãos (o ativo+conta segue sendo "marcado a mercado" todo mês
-    // mesmo sem posição), inflando o ganho de capital agregado. Remove os
-    // meses posteriores ao do último evento aplicado.
+    // Posição zerada (venda/resgate total, ou vencimento de RF/Tesouro via
+    // fecharPosicoesVencidas) — os snapshots mensais gravados PARA ESTE MÊS
+    // (rewritten todo dia pelo cron/"Atualizar valores") E os de meses
+    // seguintes (ex.: resgate lançado retroativamente pelo robô investidor10)
+    // ficam órfãos: o ativo+conta segue "marcado a mercado" mesmo sem posição,
+    // inflando o total mostrado no gráfico Evolução do Patrimônio acima do
+    // valor real (achado real, ago/2026 — Tesouro vencido no mês continuava
+    // contando no gráfico, mas já saía do card "Patrimônio total", que só
+    // soma pares com posição ATIVA). Antes só limpava >mesFechamento — faltava
+    // o PRÓPRIO mês do fechamento.
+    //
+    // Só limpa se NENHUM outro lote deste ativo+conta continuar ATIVA — com
+    // múltiplos lotes (mesmo título, taxas diferentes — ver DrawerMovimentacoes
+    // "novo lote"), fechar um não zera o par inteiro: os snapshots ainda
+    // servem aos lotes que restam (o próximo snapshot os recalcula certos).
     if (qtd === 0 && ultimaDataAplicada) {
-      const mesFechamento = ultimaDataAplicada.slice(0, 7);
-      const { error: errDel } = await c.from("inv_historico_mensal").delete()
-        .eq("ativo_id", pos.ativo_id).eq("conta_id", pos.conta_id).gt("mes_ano", mesFechamento);
-      if (errDel) logError("Limpar snapshots órfãos (posição encerrada)", errDel);
+      const { data: outrosAtivos } = await c.from("inv_posicoes")
+        .select("id").eq("ativo_id", pos.ativo_id).eq("conta_id", pos.conta_id).eq("status", "ATIVA");
+      if (!(outrosAtivos ?? []).length) {
+        const mesFechamento = ultimaDataAplicada.slice(0, 7);
+        const { error: errDel } = await c.from("inv_historico_mensal").delete()
+          .eq("ativo_id", pos.ativo_id).eq("conta_id", pos.conta_id).gte("mes_ano", mesFechamento);
+        if (errDel) logError("Limpar snapshots órfãos (posição encerrada)", errDel);
+      }
     }
   }
 }

@@ -15,6 +15,7 @@ import { recomputarPosicao } from "./posicoes.ts";
 import { calcularDesempenho, recalcularSeguinte, snapshotVizinho } from "./snapshot.ts";
 import { descricaoProvento, ptaxVendaAte } from "./dividendos.ts";
 import { validarQuestionario } from "./avaliacoes.ts";
+import { TIPOS_INDICADOR } from "./indicadores.ts";
 
 export async function rotaMigrarConta(c: Db, req: Request, m: string, _userId: string) {
   if (m !== "POST") return erro("Método não permitido", 405);
@@ -146,6 +147,7 @@ export interface AtivoIn {
 export interface PosicaoIn {
   ticker: string; conta_id: string; quantidade: number; preco_custo: number;
   data_compra: string; valor_mercado: number; mes_ano?: string;
+  rf_taxa?: string | null; // rótulo do lote (taxa contratada), quando houver
 }
 export interface OperacaoIn {
   ticker: string; conta_id: string; tipo_operacao: string; quantidade: number;
@@ -244,6 +246,14 @@ export async function rotaNormalizarTesouro(c: Db, _req: Request, m: string, _us
   const renomeados: { de: string; para: string }[] = [];
   const ignorados:  { ticker: string; motivo: string }[] = [];
 
+  // "Tipo Titulo" cru do STN (ex.: "Tesouro IPCA+", "Tesouro IPCA+ com Juros
+  // Semestrais") — sem o ano do vencimento, que vem numa coluna separada do
+  // CSV. Um bug em buscaTesouro (mercado.ts) usava esse valor cru como nome
+  // do ativo ao selecionar um resultado da busca, deixando o cadastro salvo
+  // como só "Tesouro IPCA+" pra sempre (sem vencimento). Corrigido na busca,
+  // mas ativos já cadastrados assim precisam ser re-normalizados aqui.
+  const NOME_SEM_ANO = /^Tesouro (Prefixado|Selic|IPCA\+)(\s+com Juros Semestrais)?$/i;
+
   for (const a of lista) {
     const indexador = a.rf_indexador;
     const venc      = a.rf_vencimento;
@@ -252,19 +262,26 @@ export async function rotaNormalizarTesouro(c: Db, _req: Request, m: string, _us
     const semestral = tesouroSemestral(String(a.nome ?? ""));
     const novo = tickerTesouro(indexador, venc, semestral);
     if (!novo) { ignorados.push({ ticker: a.ticker, motivo: "vencimento inválido" }); continue; }
-    if (novo === atual) continue;                               // já no padrão
-    if (emUso.has(novo)) { ignorados.push({ ticker: a.ticker, motivo: `já existe ${novo}` }); continue; }
 
-    const campos: Record<string, unknown> = { ticker: novo };
-    // Nome: só preenche/normaliza quando vazio ou ainda era o ticker antigo
-    // (nunca sobrescreve um nome editado à mão).
+    const campos: Record<string, unknown> = {};
+    if (novo !== atual) {
+      if (emUso.has(novo)) { ignorados.push({ ticker: a.ticker, motivo: `já existe ${novo}` }); continue; }
+      campos.ticker = novo;
+    }
+    // Nome: preenche/normaliza quando vazio, ainda igual ao ticker (velho ou
+    // novo), ou é o "Tipo Titulo" cru sem ano acima — nunca sobrescreve um
+    // nome que o usuário de fato personalizou.
     const nomeAtual = String(a.nome ?? "").trim();
-    if (!nomeAtual || nomeAtual.toUpperCase() === atual) campos.nome = nomeTesouro(indexador, venc, semestral);
+    if (!nomeAtual || nomeAtual.toUpperCase() === atual || nomeAtual.toUpperCase() === novo ||
+        NOME_SEM_ANO.test(nomeAtual)) {
+      campos.nome = nomeTesouro(indexador, venc, semestral);
+    }
+    if (Object.keys(campos).length === 0) continue; // já está tudo certo
 
     const { error: eUp } = await c.from("inv_ativos").update(campos).eq("id", a.id);
     if (eUp) { ignorados.push({ ticker: a.ticker, motivo: eUp.message }); continue; }
-    emUso.delete(atual); emUso.add(novo);
-    renomeados.push({ de: a.ticker, para: novo });
+    if (campos.ticker) { emUso.delete(atual); emUso.add(novo); }
+    renomeados.push({ de: a.ticker, para: String(campos.ticker ?? atual) });
   }
 
   logSuccess("Tesouro normalizado", { processados: lista.length, renomeados: renomeados.length });
@@ -647,7 +664,7 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
   };
 
   try {
-    const out = { tipos: 0, ativos: 0, posicoes: 0, operacoes: 0, dividendos: 0, historico: 0, alocacoes: 0, questionarios: 0, avaliacoes: 0 };
+    const out = { tipos: 0, ativos: 0, posicoes: 0, operacoes: 0, dividendos: 0, historico: 0, alocacoes: 0, questionarios: 0, avaliacoes: 0, indicadores: 0 };
 
     // ── 1) Tipos de dividendo (por nome) ──
     const tiposIn = arr(body.tipos_dividendo);
@@ -704,10 +721,15 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
 
     // ── 3) Posições (dedup por ativo+conta+data+qtd+custo) ──
     const posIn = arr(body.posicoes);
-    const { data: posEx } = await c.from("inv_posicoes").select("id, ativo_id, conta_id, data_compra, quantidade, preco_custo");
-    const posKey = (av: string, ct: string, dt: unknown, q: unknown, p: unknown) => `${av}|${ct}|${dt}|${Number(q)}|${Number(p)}`;
+    const { data: posEx } = await c.from("inv_posicoes").select("id, ativo_id, conta_id, data_compra, quantidade, preco_custo, rf_taxa");
+    // rf_taxa entra na chave de dedup: dois lotes do mesmo título com mesma
+    // data/qtd/custo mas taxa contratada diferente não podem ser fundidos.
+    const posKey = (av: string, ct: string, dt: unknown, q: unknown, p: unknown, taxa?: unknown) =>
+      `${av}|${ct}|${dt}|${Number(q)}|${Number(p)}|${taxa ?? ""}`;
     const posPorChave = new Map<string, string>();
-    for (const p of posEx ?? []) posPorChave.set(posKey(String(p.ativo_id), String(p.conta_id), String(p.data_compra), p.quantidade, p.preco_custo), String(p.id));
+    for (const p of posEx ?? []) {
+      posPorChave.set(posKey(String(p.ativo_id), String(p.conta_id), String(p.data_compra), p.quantidade, p.preco_custo, p.rf_taxa), String(p.id));
+    }
     const posMap: Record<string, string> = {};
     const posInserir: Record<string, unknown>[] = [];
     const posRef: { oldId: string; key: string }[] = [];
@@ -715,21 +737,22 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
       const ativoId = ativoMap[String(p.ativo_id)];
       const contaId = novaConta(p.conta_id);
       if (!ativoId || !contaId) { avisos.push("Posição ignorada: ativo/conta não restaurados."); continue; }
-      const k = posKey(ativoId, contaId, String(p.data_compra), p.quantidade, p.preco_custo);
+      const k = posKey(ativoId, contaId, String(p.data_compra), p.quantidade, p.preco_custo, p.rf_taxa);
       const existId = posPorChave.get(k);
       if (existId) { if (p.id) posMap[String(p.id)] = existId; continue; }
       posInserir.push({
         user_id: userId, ativo_id: ativoId, conta_id: contaId,
         quantidade: Number(p.quantidade) || 0, preco_custo: Number(p.preco_custo) || 0,
         data_compra: String(p.data_compra), status: p.status === "ENCERRADA" ? "ENCERRADA" : "ATIVA",
+        rf_taxa: p.rf_taxa ?? null,
       });
       posRef.push({ oldId: String(p.id ?? ""), key: k });
     }
     if (posInserir.length) {
-      const cr = await inserirEmLote(c, "inv_posicoes", posInserir, "id, ativo_id, conta_id, data_compra, quantidade, preco_custo");
+      const cr = await inserirEmLote(c, "inv_posicoes", posInserir, "id, ativo_id, conta_id, data_compra, quantidade, preco_custo, rf_taxa");
       out.posicoes = cr.length;
       const novaPorChave = new Map<string, string>();
-      for (const x of cr) novaPorChave.set(posKey(String(x.ativo_id), String(x.conta_id), String(x.data_compra), x.quantidade, x.preco_custo), String(x.id));
+      for (const x of cr) novaPorChave.set(posKey(String(x.ativo_id), String(x.conta_id), String(x.data_compra), x.quantidade, x.preco_custo, x.rf_taxa), String(x.id));
       for (const r of posRef) { const nid = novaPorChave.get(r.key); if (nid) { posPorChave.set(r.key, nid); if (r.oldId) posMap[r.oldId] = nid; } }
     }
 
@@ -853,6 +876,20 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
     if (avalLinhas.length) {
       const { error } = await c.from("inv_avaliacoes").upsert(avalLinhas, { onConflict: "user_id,ativo_id" });
       if (error) avisos.push(`Avaliações: ${error.message}`); else out.avaliacoes = avalLinhas.length;
+    }
+
+    // ── 10) Indicadores (watchlist de benchmark, upsert por ticker) ──
+    const indicIn = arr(body.indicadores).filter((i) =>
+      TIPOS_INDICADOR.includes(String(i.tipo)) && up(i.ticker));
+    if (indicIn.length) {
+      const linhas = indicIn.map((i) => ({
+        user_id: userId, ticker: up(i.ticker), tipo: i.tipo,
+        nome: String(i.nome ?? i.ticker).slice(0, 120),
+        moeda: i.moeda ? up(i.moeda).slice(0, 3) : "BRL",
+        cor: i.cor ?? null,
+      }));
+      const { error } = await c.from("inv_indicadores").upsert(linhas, { onConflict: "user_id,ticker" });
+      if (error) avisos.push(`Indicadores: ${error.message}`); else out.indicadores = linhas.length;
     }
 
     logSuccess("Investimentos restaurados", out);

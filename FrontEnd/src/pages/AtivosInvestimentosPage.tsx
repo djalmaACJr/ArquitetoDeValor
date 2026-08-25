@@ -13,6 +13,8 @@ import {
 import DrawerAtivo from '../components/ui/DrawerAtivo'
 import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
 import QuadroTipoAtivos, { type Dimensao } from '../components/ui/QuadroTipoAtivos'
+import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
+import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
 import ResumoPorInstituicao from '../components/ui/ResumoPorInstituicao'
 import TutorialTour from '../components/ui/TutorialTour'
@@ -264,6 +266,18 @@ export default function AtivosInvestimentosPage() {
       .map(([tipo, linhas]) => ({ tipo, linhas }))
   }, [ativos, pesquisa, soComValor, rankingPorAtivo, contasPorAtivo])
 
+  // Ordem dos quadros por tipo — arrastável pelo usuário, persistida em
+  // arqvalor.usuarios.ordem_quadros (mesmo mecanismo de InvestimentosPage,
+  // chave própria "ativos-tipos" pra não colidir com a ordem do painel).
+  const chavesTipos = useMemo(() => grupos.map((g) => g.tipo), [grupos])
+  const { blob: ordemDb, salvar: salvarOrdemDb } = usePreferenciasOrdemQuadros()
+  const { ordem: ordemTipos, dragHandleProps: alcaTipo, dropTargetProps: alvoTipo, dropTargetOutlineClass: contornoTipo } =
+    useOrdemReordenavel<TipoAtivoInvestimento>('arqvalor:ativos-ordem-tipos', chavesTipos, {
+      valorRemoto: (ordemDb['ativos-tipos'] as TipoAtivoInvestimento[] | undefined) ?? null,
+      aoMudar: (nova) => salvarOrdemDb('ativos-tipos', nova),
+    })
+  const gruposPorTipo = useMemo(() => new Map(grupos.map((g) => [g.tipo, g])), [grupos])
+
   // Fatias das roscas: Ações por segmento (setor) e FIIs por categoria.
   const { segmentosAcoes, categoriasFII } = useMemo(() => {
     const linhasDe = (t: TipoAtivoInvestimento) => grupos.find((g) => g.tipo === t)?.linhas ?? []
@@ -437,13 +451,23 @@ export default function AtivosInvestimentosPage() {
             </div>
           ) : (
             <div className="space-y-3" data-tutorial="ativos-lista">
-              {grupos.map((g) => (
-                <QuadroTipoAtivos key={g.tipo} tipo={g.tipo} dados={dadosPorTipo.get(g.tipo) ?? null}
-                  linhas={g.linhas} defaultAberto
-                  focoSinal={foco?.tipo === g.tipo ? foco.n : null}
-                  focoGrupo={foco?.tipo === g.tipo ? { dim: foco.dim, chave: foco.chave } : null}
-                  acoes={{ onPosicoes: setPosicoesDe, onHistorico: setHistoricoDe, onEditar: abrirEditar }} />
-              ))}
+              {ordemTipos.map((tipo) => {
+                const g = gruposPorTipo.get(tipo)
+                if (!g) return null
+                return (
+                  <div key={tipo} data-quadro-arrastavel
+                    className={`rounded-xl transition-all duration-150 ${contornoTipo(tipo)}`}
+                    {...alvoTipo(tipo)}>
+                    <QuadroTipoAtivos tipo={g.tipo} dados={dadosPorTipo.get(g.tipo) ?? null}
+                      linhas={g.linhas}
+                      focoSinal={foco?.tipo === g.tipo ? foco.n : null}
+                      focoGrupo={foco?.tipo === g.tipo ? { dim: foco.dim, chave: foco.chave } : null}
+                      acoes={{ onPosicoes: setPosicoesDe, onHistorico: setHistoricoDe, onEditar: abrirEditar }}
+                      alca={<AlcaArrastar {...alcaTipo(tipo)} />}
+                      totalCarteira={dashboard?.total_mercado} />
+                  </div>
+                )
+              })}
             </div>
           )}
         </>

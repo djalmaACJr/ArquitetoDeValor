@@ -35,6 +35,14 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
   const [form, setForm] = useState(vazio)
   const [editId, setEditId] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
+  // Lote separado: só faz sentido pra RF/Tesouro, numa compra/aporte novo
+  // (não em edição) quando a conta escolhida já tem posição ATIVA — permite
+  // registrar a mesma "posição = soma das operações" de sempre OU, se
+  // marcado, forçar uma posição nova (ex.: mesmo título comprado depois a
+  // uma taxa diferente da 1ª compra).
+  const ehRFouTesouro = ativo.tipo_ativo === 'RENDA_FIXA' || ativo.tipo_ativo === 'TESOURO_DIRETO'
+  const [novoLote, setNovoLote] = useState(false)
+  const [rfTaxaLote, setRfTaxaLote] = useState('')
   // RF sem PU real: no resgate, "valor resgatado" (reduz a posição, nominal)
   // e "valor recebido" (dinheiro de fato, pode incluir juros acumulados) são
   // números diferentes — mesma separação já usada no encerramento de posição.
@@ -72,7 +80,15 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
     [operacoes, posIds],
   )
 
-  function cancelarEdicao() { setEditId(null); setForm(vazio()); setValorRecebido('') }
+  function cancelarEdicao() {
+    setEditId(null); setForm(vazio()); setValorRecebido(''); setNovoLote(false); setRfTaxaLote('')
+  }
+
+  // Toggle "novo lote" só aparece numa entrada (compra/aporte) nova quando a
+  // conta escolhida já tem posição ATIVA — senão essa própria seria o 1º lote.
+  const mostrarNovoLote = ehRFouTesouro && !editId &&
+    form.tipo_operacao === tipoEntradaPara(ativo.tipo_ativo) &&
+    saldos.some((p) => p.conta_id === form.conta_id)
 
   function iniciarEdicao(o: InvestimentoOperacao) {
     setEditId(o.id)
@@ -123,6 +139,9 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
       preco_unitario: preco,
       valor_total: qtd * preco,
       data_operacao: form.data_operacao,
+      ...(mostrarNovoLote && novoLote
+        ? { novo_lote: true, ...(rfTaxaLote.trim() ? { rf_taxa: rfTaxaLote.trim() } : {}) }
+        : {}),
     }
     const res = editId ? await editar(editId, payload) : await criar(payload)
     setSalvando(false)
@@ -184,12 +203,25 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
             {saldos.map((p) => (
               <div key={p.id} className="space-y-2">
                 <div className="flex items-center justify-between gap-2 text-[13px]">
-                  <span className="text-white font-medium">{p.contas?.nome ?? nomeConta(p.conta_id)}</span>
+                  <span className="text-white font-medium">
+                    {p.contas?.nome ?? nomeConta(p.conta_id)}
+                    {/* Rótulo do lote: só aparece quando o ativo tem mais de 1 posição
+                        ATIVA na mesma conta (lotes com taxa diferente) — evita ruído
+                        no caso comum de posição única. */}
+                    {p.rf_taxa && saldos.filter((s) => s.conta_id === p.conta_id).length > 1 && (
+                      <span className="ml-1.5 text-[11px] font-normal" style={{ color: MUTED }}>· {p.rf_taxa}</span>
+                    )}
+                  </span>
                   <div className="flex items-center gap-2">
                     <span style={{ color: MUTED }}>
                       {rfSemQtde
                         ? <>Valor aplicado · <span className="text-white">{fmt(p.valor_custo)}</span></>
                         : <>{p.quantidade} un. · PM {fmt(p.preco_custo)} · <span className="text-white">{fmt(p.valor_custo)}</span></>}
+                      {p.rentabilidade_pct != null && (
+                        <span className="ml-1.5 font-semibold" style={{ color: p.rentabilidade_pct >= 0 ? '#22c55e' : '#ff5c7a' }}>
+                          ({p.rentabilidade_pct >= 0 ? '+' : ''}{p.rentabilidade_pct.toFixed(2)}%)
+                        </span>
+                      )}
                     </span>
                     <button onClick={() => abrirEncerramento(p)} title="Encerrar posição"
                       className="flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-md border border-white/10 hover:border-red-400/40"
@@ -259,6 +291,21 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast }: {
             </SelectDark>
           </Field>
         </div>
+        {mostrarNovoLote && (
+          <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-2">
+            <label className="flex items-center gap-2 text-[12px] cursor-pointer" style={{ color: MUTED }}>
+              <input type="checkbox" checked={novoLote}
+                onChange={(e) => { setNovoLote(e.target.checked); if (e.target.checked && !rfTaxaLote) setRfTaxaLote(ativo.rf_taxa ?? '') }} />
+              Registrar como novo lote (taxa diferente da posição existente)
+            </label>
+            {novoLote && (
+              <Field label="Taxa deste lote (opcional)">
+                <Input value={rfTaxaLote} onChange={(e) => setRfTaxaLote(e.target.value)}
+                  placeholder="Ex.: IPCA+ 8,00% a.a." maxLength={60} />
+              </Field>
+            )}
+          </div>
+        )}
         {rfSemQtde ? opSaida ? (
           <div className="grid grid-cols-2 gap-3">
             <Field label="Valor resgatado">

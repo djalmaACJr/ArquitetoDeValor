@@ -311,6 +311,14 @@ export interface InvestimentoPosicao {
   status:      StatusPosicaoInvestimento
   created_at:  string
   updated_at:  string
+  // Rótulo do lote (ex.: "IPCA+ 8,22% a.a.") — quando a mesma posição/título
+  // tem mais de um lote comprado em taxas diferentes (ver DrawerMovimentacoes).
+  rf_taxa?:    string | null
+  // Só vêm preenchidos quando a GET de posições foi feita com ?ativo_id=
+  // (comValorMercadoPorLote no backend — distribui o valor de mercado do
+  // par ativo+conta proporcionalmente por lote).
+  valor_mercado?:      number | null
+  rentabilidade_pct?:  number | null
   // joins opcionais (GET lista)
   inv_ativos?: { ticker: string; nome: string; tipo_ativo: TipoAtivoInvestimento } | null
   contas?:     { nome: string } | null
@@ -327,6 +335,13 @@ export interface InvestimentoOperacao {
   valor_total:    number
   data_operacao:  string
   created_at:     string
+  // joins opcionais (GET lista, usados no Extrato) — presentes só quando a
+  // rota efetivamente os embute (GET /investimentos/operacoes sempre embute).
+  inv_posicoes?: {
+    ativo_id: string; rf_taxa: string | null
+    inv_ativos: { ticker: string; nome: string; tipo_ativo: TipoAtivoInvestimento; moeda: string } | null
+  } | null
+  contas?: { nome: string } | null
 }
 
 export interface InvestimentoTipoDividendo {
@@ -511,6 +526,26 @@ export interface ResultadoBuscaAtivo {
   indexador?:  IndexadorRF
 }
 
+// Indicador de mercado (benchmark) que o usuário escolhe acompanhar na
+// página "Gerenciar dados" — ver GET/POST/DELETE /investimentos/indicadores.
+export type TipoIndicador = 'ETF' | 'ETF_INTERNACIONAL' | 'INDICE'
+
+export interface InvIndicador {
+  id:        string
+  ticker:    string
+  tipo:      TipoIndicador
+  nome:      string
+  moeda:     string
+  cor:       string | null
+  criado_em: string
+}
+
+export interface PontoIndicador { competencia: string; valor: number } // valor: preço no mês
+
+// Lista curada de índices B3 puros (não negociáveis, sem busca externa —
+// ver indicadores.ts) oferecida pelo backend em GET /investimentos/indicadores.
+export interface OpcaoIndiceB3 { ticker: string; nome: string }
+
 // Linha por ativo, devolvida por GET /investimentos/ranking
 export interface InvestimentoRankingAtivo {
   ativo_id:           string
@@ -533,11 +568,40 @@ export interface InvestimentoRankingAtivo {
   // false = posse < 12 meses (real e projetado divergem; UI mostra os dois)
   posse_12m:          boolean
   participacao_pct:   number
+  // ── Página "Destaques" (filtro de período: Semana/Mês/Semestre/Ano/Tudo) ──
+  // Com periodo=TUDO (default) estes campos replicam os "desde a compra"
+  // acima (valor_mercado_inicio_periodo = valor_custo).
+  valor_mercado_inicio_periodo: number
+  rentabilidade_periodo_pct:    number
+  dividendos_periodo:           number
+  dy_periodo_pct:                number
+  // true = a posse começou DEPOIS do início nominal do período (ou a fonte
+  // não tinha preço histórico pra data) — o retorno mostrado é "desde a
+  // compra", não o período inteiro selecionado.
+  periodo_desde_compra: boolean
+}
+
+// Período do filtro de "Destaques" — ver GET /investimentos/ranking?periodo=
+// 'MES' = últimos 30 dias corridos (rótulo na UI é "Últimos 30 dias", não
+// "mês calendário" — esse é o 'MES_ATUAL').
+export type PeriodoRanking = 'SEMANA' | 'MES_ATUAL' | 'MES' | 'SEMESTRE' | 'ANO_ATUAL' | 'ANO' | 'TUDO'
+
+// Ranking por categoria (Tipo de Ativo) — topo da página de Destaques
+export interface InvestimentoRankingCategoria {
+  tipo_ativo:                    TipoAtivoInvestimento
+  valor_mercado:                 number
+  valor_mercado_inicio_periodo:  number
+  rentabilidade_periodo_pct:     number
+  dividendos_periodo:            number
+  dy_periodo_pct:                number
+  participacao_pct:              number
 }
 
 export interface InvestimentoRanking {
   total_mercado: number
+  periodo?:      PeriodoRanking
   ativos:        InvestimentoRankingAtivo[]
+  categorias?:   InvestimentoRankingCategoria[]
 }
 
 // Transação candidata para vincular manualmente em importação de fatura

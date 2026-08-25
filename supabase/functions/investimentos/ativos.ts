@@ -93,7 +93,9 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
     }).select().single();
 
     if (error) {
-      if (error.code === "23505") return erro("Já existe um ativo com este ticker", 409);
+      if (error.code === "23505") {
+        return erro(await mensagemDuplicidade(c, userId, ticker, String(body.tipo_ativo)), 409);
+      }
       logError("Criar ativo", error); return erro(error.message);
     }
     logSuccess("Ativo criado", { id: data.id });
@@ -138,7 +140,11 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
 
     const { data, error } = await c.from("inv_ativos").update(campos).eq("id", id).select().single();
     if (error) {
-      if (error.code === "23505") return erro("Já existe um ativo com este ticker", 409);
+      if (error.code === "23505") {
+        const tickerConflito = typeof campos.ticker === "string" ? campos.ticker : "";
+        const tipoConflito = String(campos.tipo_ativo ?? antesRF?.tipo_ativo ?? "");
+        return erro(await mensagemDuplicidade(c, userId, tickerConflito, tipoConflito), 409);
+      }
       logError("Editar ativo", error); return erro(error.message);
     }
     // Propaga tipo_ativo para a cópia desnormalizada em inv_dividendos. Existe
@@ -194,6 +200,31 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
   }
 
   return erro("Rota não encontrada", 404);
+}
+
+// Mensagem de erro (409) quando o INSERT/UPDATE colide com a constraint
+// uq_inv_ativos_user_ticker. Busca o ativo já existente pra citar o nome dele
+// e explicar POR QUE colidiu — sem isso a mensagem genérica ("já existe um
+// ativo com este ticker") não deixa claro que, no caso comum de Tesouro
+// Direto, o motivo é o título ser o MESMO (indexador+vencimento), mesmo com
+// taxa contratada diferente entre compras — e que a ação certa é registrar
+// uma nova operação no ativo existente, não cadastrar outro.
+async function mensagemDuplicidade(
+  c: Db, userId: string, ticker: string, tipoAtivo: string,
+): Promise<string> {
+  if (!ticker) return "Já existe um ativo com este ticker na sua carteira.";
+  const { data: existente } = await c.from("inv_ativos")
+    .select("nome").eq("user_id", userId).eq("ticker", ticker).maybeSingle();
+  const nome = existente?.nome ? `"${existente.nome}"` : `o ticker ${ticker}`;
+  if (tipoAtivo === "TESOURO_DIRETO") {
+    return `Você já tem ${nome} cadastrado — no Tesouro Direto o título é identificado ` +
+      `por indexador + vencimento, não pela taxa contratada (a taxa muda a cada compra, ` +
+      `o título é o mesmo). Para registrar esta nova compra, abra "Movimentações" no ` +
+      `ativo existente em vez de cadastrar um novo.`;
+  }
+  return `Já existe um ativo (${nome}) com o ticker ${ticker} na sua carteira. Se é uma ` +
+    `nova compra do mesmo ativo, registre-a como operação nele; se é um ativo diferente, ` +
+    `ajuste o identificador antes de salvar.`;
 }
 
 export function validarNota(nota: unknown): string | null {

@@ -692,7 +692,12 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
             </Field>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          {/* items-end: o rótulo de "Taxa fixa adicional (% a.a.)" quebra em
+              2 linhas (mais longo que "Vencimento"), o que empurrava só
+              aquele campo pra baixo — alinhando pela base, os dois inputs
+              ficam na mesma altura independente de quantas linhas o rótulo
+              de cada um ocupa. */}
+          <div className="grid grid-cols-2 gap-3 items-end">
             {form.rf_indexador === 'POS_FIXADO' ? (
               posSpread ? (
                 <Field label="Spread (+ % a.a.)">

@@ -16,6 +16,8 @@ import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useDividendos } from '../hooks/useDividendos'
 import { useContas } from '../hooks/useContas'
 import { useAuth } from '../hooks/useAuth'
+import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
+import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { SelectDark, Toast } from '../components/ui/shared'
@@ -183,9 +185,9 @@ const PERIODOS = [
 ]
 
 // Plugin: desenha abaixo de cada coluna os valores de cada série (aplicado /
-// ganho / proventos) nas cores do gráfico — funciona como legenda no eixo X.
-// Números alinhados à direita da coluna (mais fácil de comparar entre meses)
-// e uma linha de total (soma das séries) ao final, em destaque.
+// ganho) nas cores do gráfico, e uma linha de total (soma das séries = valor
+// de mercado) em destaque — funciona como "legenda" no eixo X, pra não
+// precisar passar o mouse só pra ler os números.
 const valoresEixoX = {
   id: 'valoresEixoX',
   afterDatasetsDraw(chart: ChartJS) {
@@ -215,10 +217,7 @@ const valoresEixoX = {
   },
 }
 
-function EvolucaoPatrimonio({ contaId, dividendos }: {
-  contaId: string | null
-  dividendos: { conta_id: string; tipo_ativo: TipoAtivoInvestimento; data_pagamento: string; valor: number }[]
-}) {
+function EvolucaoPatrimonio({ contaId }: { contaId: string | null }) {
   const [periodo, setPeriodo] = useState('12')
   const [tipo, setTipo] = useState<TipoAtivoInvestimento | ''>('')
   const { historico } = useInvestimentosHistorico(contaId ? { conta_id: contaId } : {})
@@ -238,25 +237,17 @@ function EvolucaoPatrimonio({ contaId, dividendos }: {
       .slice(-Number(periodo))
   }, [historico, tipo, periodo])
 
-  // Proventos recebidos por mês (respeita os filtros de conta e tipo)
-  const provPorMes = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const d of dividendos) {
-      if (contaId && d.conta_id !== contaId) continue
-      if (tipo && d.tipo_ativo !== tipo) continue
-      const mes = d.data_pagamento.slice(0, 7)
-      m.set(mes, (m.get(mes) ?? 0) + Number(d.valor))
+  // Diferença simples de um mês pro outro (valor de mercado).
+  const deltaMes = useMemo(() => {
+    if (meses.length < 2) return null
+    const atual    = meses[meses.length - 1][1].mercado
+    const anterior = meses[meses.length - 2][1].mercado
+    const diff = atual - anterior
+    return {
+      mesAtual: meses[meses.length - 1][0], mesAnterior: meses[meses.length - 2][0],
+      diff, pct: anterior > 0 ? (diff / anterior) * 100 : 0,
     }
-    return m
-  }, [dividendos, contaId, tipo])
-
-  // Total exibido na legenda = soma das 3 séries do mês mais recente
-  // (aplicado + ganho + proventos), ou seja, a altura da última barra.
-  const legendaTotal = useMemo(() => {
-    if (meses.length === 0) return 0
-    const [mes, v] = meses[meses.length - 1]
-    return v.mercado + (provPorMes.get(mes) ?? 0)
-  }, [meses, provPorMes])
+  }, [meses])
 
   return (
     <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 lg:col-span-2">
@@ -277,6 +268,27 @@ function EvolucaoPatrimonio({ contaId, dividendos }: {
           </SelectDark>
         </div>
       </div>
+
+      {/* Diferença simples do mês + atalho pros destaques (quem mais puxou
+          a alta/baixa) — pedido explícito: "de forma simples" a variação
+          mês a mês, sem precisar ler o gráfico empilhado. */}
+      {deltaMes && (
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-3 px-3 py-2 rounded-lg bg-white/[0.03]">
+          <span className="text-[13px]" style={{ color: MUTED }}>
+            {fmtMes(deltaMes.mesAnterior)} → {fmtMes(deltaMes.mesAtual)}:{' '}
+            <span className="font-semibold" style={{ color: corValor(deltaMes.diff) }}>
+              {deltaMes.diff >= 0 ? '+' : ''}{formatBRL(deltaMes.diff)}
+            </span>
+            {' '}
+            <span style={{ color: corValor(deltaMes.diff) }}>({fmtPct(deltaMes.pct)})</span>
+          </span>
+          <Link to="/investimentos/destaques?periodo=MES_ATUAL"
+            className="inline-flex items-center gap-1.5 text-[12px] font-medium hover:underline shrink-0"
+            style={{ color: VERDE }}>
+            <Trophy size={13} /> Ver quem mais contribuiu este mês
+          </Link>
+        </div>
+      )}
 
       {meses.length < 2 ? (
         <p className="text-[13px] py-10 text-center" style={{ color: MUTED }}>
@@ -302,43 +314,21 @@ function EvolucaoPatrimonio({ contaId, dividendos }: {
                 borderRadius: 4,
                 stack: 'patrimonio',
               },
-              {
-                label: 'Proventos',
-                data: meses.map(([mes]) => Number((provPorMes.get(mes) ?? 0).toFixed(2))),
-                backgroundColor: '#e8b84b',
-                borderRadius: 4,
-                stack: 'patrimonio',
-              },
             ],
           }}
           options={{
-            ...OPCOES_GRAFICO,
-            layout: { padding: { bottom: 78 } },
+            responsive: true,
+            // Mesmo layout do gráfico "Evolução por tipo de ativo" (Meus
+            // Ativos) — proporção fixa, legenda simples — mais os números por
+            // série embaixo de cada coluna e o tooltip customizado (com
+            // "Total"), que existiam antes e voltaram a pedido.
+            maintainAspectRatio: true,
+            aspectRatio: 2.4,
+            // bottom: espaço pras linhas por série + total desenhadas por valoresEixoX.
+            layout: { padding: { bottom: 60 } },
             interaction: { mode: 'index', intersect: false },
             plugins: {
-              legend: {
-                display: true, position: 'top',
-                labels: {
-                  color: MUTED, boxWidth: 12, font: { size: 11 },
-                  // Acrescenta um item "Total" (soma das 3 séries do mês atual).
-                  generateLabels: (chart) => {
-                    const base = ChartJS.defaults.plugins.legend.labels.generateLabels(chart)
-                    base.push({
-                      text: `Total: ${formatBRL(legendaTotal)}`,
-                      fillStyle: 'transparent', strokeStyle: 'transparent', lineWidth: 0,
-                      fontColor: '#fff', hidden: false,
-                    } as never)
-                    return base
-                  },
-                },
-                // Mantém o toggle padrão só nos itens de série (o "Total" não tem índice).
-                onClick: (_e, item, legend) => {
-                  if (typeof item.datasetIndex !== 'number') return
-                  const ci = legend.chart
-                  if (ci.isDatasetVisible(item.datasetIndex)) ci.hide(item.datasetIndex)
-                  else ci.show(item.datasetIndex)
-                },
-              },
+              legend: { display: true, position: 'top', labels: { color: MUTED, boxWidth: 12, font: { size: 11 } } },
               tooltip: {
                 mode: 'index', intersect: false,
                 bodyFont: { family: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
@@ -576,6 +566,17 @@ export default function InvestimentosPage() {
   // Só contas de investimento ATIVAS são relevantes na carteira
   const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa)
 
+  // Ordem dos quadros "Por tipo de ativo" — arrastável pelo usuário,
+  // persistida em arqvalor.usuarios.ordem_quadros. Precisa ficar ANTES do
+  // `if (loading) return` abaixo — hooks não podem ser condicionais.
+  const chavesTipos = useMemo(() => (dashboard?.tipos ?? []).map((t) => t.tipo_ativo), [dashboard])
+  const { blob: ordemDb, salvar: salvarOrdemDb } = usePreferenciasOrdemQuadros()
+  const { ordem: ordemTipos, dragHandleProps: alcaTipo, dropTargetProps: alvoTipo, dropTargetOutlineClass: contornoTipo } =
+    useOrdemReordenavel<TipoAtivoInvestimento>('arqvalor:investimentos-ordem-tipos', chavesTipos, {
+      valorRemoto: (ordemDb['investimentos-tipos'] as TipoAtivoInvestimento[] | undefined) ?? null,
+      aoMudar: (nova) => salvarOrdemDb('investimentos-tipos', nova),
+    })
+
   // Captura automática (B) + botão "Atualizar valores" (C) do mês corrente
   const mesAtual = new Date().toISOString().slice(0, 7)
   const { atualizar, executando } = useAtualizarValoresMes()
@@ -759,6 +760,7 @@ export default function InvestimentosPage() {
   if (loading) return <LoadingMascote />
 
   const tipos = dashboard?.tipos ?? []
+  const tiposPorChave = new Map(tipos.map((t) => [t.tipo_ativo, t]))
   const ativosRanking = ranking?.ativos ?? []
   const vazio = tipos.length === 0
 
@@ -893,18 +895,28 @@ export default function InvestimentosPage() {
 
           {/* Evolução + composição */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-5" data-tutorial="investimentos-evolucao">
-            <EvolucaoPatrimonio contaId={contaId || null} dividendos={dividendos} />
+            <EvolucaoPatrimonio contaId={contaId || null} />
             <AtivosNaCarteira tipos={tipos}
               onSelecionarTipo={(tipo) => setFoco((f) => ({ tipo, n: (f?.n ?? 0) + 1 }))} />
           </div>
 
-          {/* Lista expansível por tipo */}
+          {/* Lista expansível por tipo — ordem arrastável pelo usuário */}
           <div className="space-y-2" data-tutorial="investimentos-lista">
-            {tipos.map((t) => (
-              <QuadroTipoAtivos key={t.tipo_ativo} tipo={t.tipo_ativo} dados={t}
-                linhas={linhasPorTipo.get(t.tipo_ativo) ?? []}
-                focoSinal={foco?.tipo === t.tipo_ativo ? foco.n : null} />
-            ))}
+            {ordemTipos.map((chave) => {
+              const t = tiposPorChave.get(chave)
+              if (!t) return null
+              return (
+                <div key={chave} data-quadro-arrastavel
+                  className={`rounded-xl transition-all duration-150 ${contornoTipo(chave)}`}
+                  {...alvoTipo(chave)}>
+                  <QuadroTipoAtivos tipo={t.tipo_ativo} dados={t}
+                    linhas={linhasPorTipo.get(t.tipo_ativo) ?? []}
+                    focoSinal={foco?.tipo === t.tipo_ativo ? foco.n : null}
+                    alca={<AlcaArrastar {...alcaTipo(chave)} />}
+                    totalCarteira={dashboard?.total_mercado} />
+                </div>
+              )
+            })}
           </div>
 
           <div data-tutorial="investimentos-destaques">

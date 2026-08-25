@@ -4,6 +4,7 @@ import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import type {
   InvestimentoDashboard, InvestimentoAlocacaoTipo, InvestimentoRanking, TipoAtivoInvestimento,
+  PeriodoRanking,
 } from '../types'
 
 export async function fetchDashboard(contaId?: string | null): Promise<InvestimentoDashboard> {
@@ -71,6 +72,39 @@ export function useInvestimentosRanking(contaId?: string | null) {
 
   return {
     ranking: data ?? null,
+    loading,
+    error: error ? (error as Error).message : null,
+  }
+}
+
+// ── Destaques (ranking + filtro de período) ────────────────────
+// Mesmo endpoint do ranking acima, com o filtro de período da página
+// "Destaques" (Semana/Mês/Semestre/Ano/Período todo) — devolve a carteira
+// INTEIRA (não só o top 3) + o ranking por categoria (Tipo de Ativo).
+
+async function fetchDestaques(contaId: string | null | undefined, periodo: PeriodoRanking): Promise<InvestimentoRanking> {
+  const params = new URLSearchParams()
+  if (contaId) params.set('conta_id', contaId)
+  params.set('periodo', periodo)
+  const res = await apiFetch<InvestimentoRanking>(`/investimentos/ranking?${params.toString()}`)
+  if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar destaques')
+  return res.dados ?? { total_mercado: 0, periodo, ativos: [], categorias: [] }
+}
+
+export function useInvestimentosDestaques(contaId: string | null | undefined, periodo: PeriodoRanking) {
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
+
+  const { data, isLoading: loading, error } = useQuery({
+    queryKey: qk.invDestaques(uid, contaId, periodo),
+    queryFn:  () => fetchDestaques(contaId, periodo),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    enabled: !!uid,
+  })
+
+  return {
+    destaques: data ?? null,
     loading,
     error: error ? (error as Error).message : null,
   }
