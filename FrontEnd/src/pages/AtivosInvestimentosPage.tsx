@@ -39,9 +39,10 @@ const MUTED = '#8b92a8'
 
 // ── Evolução do valor de mercado, empilhada por tipo de ativo ──
 const PERIODOS_EVOLUCAO = [
-  { value: '6',  label: '6 Meses' },
-  { value: '12', label: '12 Meses' },
-  { value: '24', label: '24 Meses' },
+  { value: '6',    label: '6 Meses' },
+  { value: '12',   label: '12 Meses' },
+  { value: '24',   label: '24 Meses' },
+  { value: 'TUDO', label: 'Desde o início' },
 ]
 function fmtMesCurto(anoMes: string): string {
   const [ano, m] = anoMes.split('-')
@@ -64,7 +65,8 @@ function EvolucaoPorTipo() {
       const mt = porMes.get(h.mes_ano)!
       mt.set(tipo, (mt.get(tipo) ?? 0) + Number(h.valor_mercado))
     }
-    const meses = [...porMes.keys()].sort().slice(-Number(periodo))
+    const ordenados = [...porMes.keys()].sort()
+    const meses = periodo === 'TUDO' ? ordenados : ordenados.slice(-Number(periodo))
     const tipos = TIPOS_ATIVO_INV.filter((t) => presentes.has(t))
     return { meses, tipos, porMes }
   }, [historico, periodo])

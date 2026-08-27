@@ -34,6 +34,15 @@ export interface ChamadaIA {
   maxTokens?: number;
   /** Modelo escolhido pelo usuário. Vazio → cada adapter usa seu padrão. */
   modelo?:   string;
+  /**
+   * Liga a busca na web NATIVA do provedor (grounding), quando suportada
+   * (claude/gpt/gemini — ver PROVEDORES_BUSCA_WEB). Opt-in por config de
+   * IA (`ia_configs.busca_web`) porque aumenta custo/latência de cada
+   * chamada — hoje só usado pela avaliação de ativos por mentores
+   * (avaliacoes.ts), como reforço ao contexto factual já injetado no
+   * prompt (ex.: Fatos Relevantes de FII). Ignorado nos demais provedores.
+   */
+  buscaWeb?: boolean;
 }
 
 /** Modelo padrão por provedor — usado quando o usuário não escolheu um. */
@@ -55,6 +64,9 @@ function modeloDe(provedor: string, c: ChamadaIA): string {
 
 /** Provedores com suporte a imagem (visão). */
 export const PROVEDORES_VISAO = new Set(["claude", "gpt", "gemini"]);
+
+/** Provedores com busca na web nativa (grounding) implementada. */
+export const PROVEDORES_BUSCA_WEB = new Set(["claude", "gpt", "gemini"]);
 
 /** Extrai mediaType + base64 puro de uma data URL ou aceita base64 puro (assume image/png). */
 export function parsearImagem(s: string): Imagem | null {
@@ -184,6 +196,12 @@ async function chamarClaude(c: ChamadaIA): Promise<string> {
       max_tokens: tokens(c),
       system:     persona,
       messages:   msgs,
+      // Tool nativa da Anthropic — o modelo decide sozinho se/quando
+      // pesquisar; a resposta ainda vem com blocos `text` normais (+
+      // blocos `server_tool_use`/`web_search_tool_result` que o filtro
+      // abaixo já ignora), então não precisa de mais nada pra usar o
+      // resultado.
+      ...(c.buscaWeb ? { tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }] } : {}),
     }),
   });
   if (!resp.ok) throw erroHttpIA("claude", resp.status, await resp.text());
@@ -239,6 +257,11 @@ async function chamarGPT(c: ChamadaIA): Promise<string> {
       model: modeloDe("gpt", c),
       max_tokens: tokens(c),
       messages: msgs,
+      // `web_search_options` só tem efeito nos modelos "-search-preview"
+      // da OpenAI (Chat Completions) — em outros modelos a API ignora o
+      // campo. Documentado na UI (Perfil → Integração com IA) pro usuário
+      // saber que precisa trocar de modelo pra fazer efeito.
+      ...(c.buscaWeb ? { web_search_options: {} } : {}),
     }),
   });
   if (!resp.ok) throw erroHttpIA("gpt", resp.status, await resp.text());
@@ -305,7 +328,7 @@ const GEMINI_MODELOS = [
   "gemini-1.5-flash-latest",
 ];
 
-async function chamarGeminiModelo(modelo: string, apiKey: string, persona: string, contents: unknown[], maxTokens: number): Promise<Response> {
+async function chamarGeminiModelo(modelo: string, apiKey: string, persona: string, contents: unknown[], maxTokens: number, buscaWeb: boolean): Promise<Response> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${apiKey}`;
   return await fetch(url, {
     method: "POST",
@@ -314,6 +337,10 @@ async function chamarGeminiModelo(modelo: string, apiKey: string, persona: strin
       system_instruction: { parts: [{ text: persona }] },
       contents,
       generationConfig: { maxOutputTokens: maxTokens },
+      // Grounding nativo do Gemini — não precisa de loop de tool-use, o
+      // texto final já vem pronto em `candidates[0].content.parts[].text`
+      // (metadados de citação ficam num campo à parte que ignoramos).
+      ...(buscaWeb ? { tools: [{ google_search: {} }] } : {}),
     }),
   });
 }
@@ -336,7 +363,7 @@ async function chamarGemini(c: ChamadaIA): Promise<string> {
 
   let ultimoErro = "";
   for (const modelo of ordem) {
-    const resp = await chamarGeminiModelo(modelo, apiKey, persona, contents, tokens(c));
+    const resp = await chamarGeminiModelo(modelo, apiKey, persona, contents, tokens(c), !!c.buscaWeb);
     if (resp.ok) {
       const data = await resp.json() as {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
@@ -385,6 +412,7 @@ interface IAConfig {
   api_key:  unknown;   // BlobCriptografado (novo) ou string (legado, ignorado)
   modelo?:  string;
   nome?:    string;
+  busca_web?: boolean; // opt-in de busca na web nativa (só claude/gpt/gemini)
 }
 interface IAConfigsCol {
   ativa:   string | null;
@@ -461,6 +489,7 @@ export interface MentorIA {
   provedor: string;
   modelo:   string | null;
   apiKey:   string;     // já decriptada
+  buscaWeb: boolean;     // opt-in do usuário + suporte do provedor (ver PROVEDORES_BUSCA_WEB)
 }
 
 export type ResultadoMentoresIA =
@@ -505,6 +534,7 @@ export async function lerMentoresIA(cliente: Db, userId: string): Promise<Result
         provedor: c.provedor,
         modelo:   c.modelo ?? null,
         apiKey,
+        buscaWeb: !!c.busca_web && PROVEDORES_BUSCA_WEB.has(c.provedor),
       });
     } catch {
       // Config com chave indecifrável é pulada (não derruba as demais).

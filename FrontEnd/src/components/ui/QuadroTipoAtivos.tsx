@@ -173,7 +173,11 @@ export default function QuadroTipoAtivos({
   // zerado do backend (inv_dividendos não tem linha pra esses tipos).
   const mostraDividendos = !['RENDA_FIXA', 'TESOURO_DIRETO', 'CRIPTOMOEDAS'].includes(tipo)
   const ganhoPerda = dados?.ganho_perda ?? 0
-  const variacaoPct = dados && dados.valor_custo > 0 ? (dados.ganho_perda / dados.valor_custo) * 100 : 0
+  // Reusa o % já calculado por GET /investimentos/dashboard (tipos[].rentabilidade_pct)
+  // em vez de recalcular aqui — mesmo valor hoje, mas evita divergir se a
+  // fórmula do backend mudar (ex.: virar líquida de fluxo) e este quadro ficar
+  // desatualizado silenciosamente.
+  const variacaoPct = dados?.rentabilidade_pct ?? 0
   const idealRef = dados && dados.percentual_ideal > 0 ? dados.desvio_pct : null
 
   // DY/YoC médios do quadro (só FII) — ponderados por valor de mercado/custo,
@@ -519,7 +523,7 @@ export default function QuadroTipoAtivos({
                           {c.label}{c.sortKey && sort.key === c.sortKey ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
                         </th>
                       ))}
-                      <th className="px-2 font-medium text-center">Comprar?</th>
+                      <th className="px-2 font-medium text-center" title="Cruza a nota da avaliação com a alocação do tipo: Comprar = nota boa e tipo abaixo do ideal; Aguardar = nota ruim ou tipo acima do ideal; Neutro = dentro do esperado.">Comprar?</th>
                       {acoes && <th className="px-2 font-medium text-right">Ações</th>}
                     </tr>
                   </thead>

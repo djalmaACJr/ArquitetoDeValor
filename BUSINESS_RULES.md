@@ -425,6 +425,16 @@ Cálculo da rota `/investimentos/ranking`:
 - **YoC** = `rate12m × quantidade_atual ÷ valor_de_custo × 100`.
 - Também expõe `dy_real`/`yoc_real` (dividendos efetivamente recebidos ÷ mercado/custo) e `posse_12m` (indica ao frontend quando "projetado" ≠ "real" por posse menor que 12 meses).
 
+### Renda fixa — taxa escalonada por faixa de valor (`rf_limite_faixa`/`rf_percentual_indice_2`)
+
+Alguns CDBs pagam um percentual do índice até um valor aplicado e outro percentual (normalmente menor) sobre o excedente — ex.: "até R$10.000 rende 120% do CDI; acima disso, 100% do CDI". Só se aplica a `RENDA_FIXA` (não Tesouro) pós-fixado "% do índice" (`rf_indexador=POS_FIXADO` com `rf_percentual_indice` preenchido) — não existe no modo aditivo ("índice + spread") nem em prefixado/híbrido. Os dois campos são tudo-ou-nada (constraint `chk_inv_ativos_rf_faixa_par` + validação espelhada em `validarFaixaRF`).
+
+**Cálculo progressivo (tipo IR)**, não "tudo-ou-nada": `valorRFPosicoes` (`mercado.ts`) ordena os **lotes** (linhas de `inv_posicoes`, não operações individuais) por `data_compra`, mantém um total acumulado dos lotes anteriores e divide CADA lote entre a parte que ainda cabe na 1ª faixa e o excedente — cada parte compõe juros a partir da `data_compra` do próprio lote, com `rf_percentual_indice` (parte 1) e `rf_percentual_indice_2` (parte 2).
+
+⚠️ **Ressalva conhecida**: a divisão é feita por **lote de posição** (`inv_posicoes`), não por operação individual. Como uma posição normalmente agrega TODOS os aportes numa única linha (uma `data_compra` e um `valor_custo` blendados — ver "Modelo posição = soma das operações" abaixo), múltiplos aportes ao longo do tempo que permaneçam na mesma posição contínua são tratados como um único lote datado do 1º aporte — o excedente sobre o limite só reflete corretamente a data real de cada depósito quando cada aporte cria/reabre uma posição própria. Para o caso comum (1 aplicação única, ou uma posição inteiramente resgatada e reaberta a cada novo aporte) o cálculo é exato.
+
+Editar `rf_limite_faixa`/`rf_percentual_indice_2` de um ativo já existente dispara o mesmo recálculo de histórico (`rebuildHistoricoRF`) que mudar indexador/taxa/vencimento.
+
 ### Renda Fixa / Tesouro Direto — valor de mercado
 
 Não usa cotação externa — é **derivado do indexador**: `PREFIXADO` usa juros compostos pela taxa fixa; `POS_FIXADO` usa a série mensal do índice (CDI/SELIC/IPCA via SGS do BCB) × `rf_percentual_indice`; `HIBRIDO` compõe a série do índice com o spread (`rf_taxa_fixa`) mês a mês. Para `TESOURO_DIRETO` prefixado/IPCA+, prioriza **marcação a mercado** via `cotacoes_tesouro` (PU); sem PU disponível, cai para a acumulação por índice. Após o vencimento, o valor fica congelado na data de vencimento.
@@ -445,6 +455,8 @@ Não usa cotação externa — é **derivado do indexador**: `PREFIXADO` usa jur
 - **Avaliação por mentores** (uma ou mais IAs configuradas em `usuarios.ia_configs`): cada mentor responde o mesmo questionário para o mesmo ativo (`POST /avaliacoes/mentor`, chamado em paralelo pelo frontend, uma vez por mentor × ativo, sem persistir). `POST /avaliacoes/salvar` consolida: por pergunta, usa a **média** se `|média − mediana| / média < 10%`, senão a **mediana** (reduz impacto de outliers); calcula nota por critério, nota final ponderada pelos pesos, e nível de consenso (`ALTO/MEDIO/BAIXO`) pelo desvio-padrão das notas dos mentores. **O consenso vira a nota oficial do ativo**, sobrescrevendo `inv_ativos.nota_usuario`/`questionario_respostas`.
 - `inv_avaliacoes.historico` guarda até 24 avaliações passadas para indicar tendência (subiu/desceu/manteve).
 - `usuarios.inv_avaliacao_agenda.frequencia` é só uma preferência de UI — **não há cron server-side de reavaliação**; a reavaliação roda no navegador orquestrando os mentores, e o app calcula a próxima data esperada.
+- **Contexto factual (FII) — Fatos Relevantes/Comunicados (ago/2026)**: por padrão, cada mentor responde só com seu conhecimento de treinamento (nenhum adapter de IA em `_shared/ia.ts` tinha tool-use/busca até então). Pra ativos `FII`, o cron diário `fatos-relevantes-diario` (`POST /investimentos/fatos-relevantes-cron`) cacheia em `inv_fatos_relevantes` (tabela compartilhada, sem `user_id`) os Fatos Relevantes/Comunicados ao Mercado recentes publicados no Fundos.NET (`fnet.bmfbovespa.com.br`, endpoint público não-oficial — sem CSRF/sessão pra leitura, mas com WAF instável em páginas grandes; ver comentários em `fatosRelevantes.ts`). Na hora de avaliar um FII, `avaliarUmMentor` casa o cache com o ativo por TEXTO (núcleo do ticker × `fundo_pregao`/`fundo_nome` — não há CNPJ cadastrado em `inv_ativos`) e injeta um resumo no prompt, priorizado sobre o conhecimento de treinamento. Falha/ausência dessa fonte nunca impede a avaliação — só perde o reforço.
+- **Busca na web nativa (opt-in por mentor, ago/2026)**: cada config de IA (`usuarios.ia_configs`) tem um campo `busca_web` (boolean) — só tem efeito em `claude`/`gpt`/`gemini` (`PROVEDORES_BUSCA_WEB` em `_shared/ia.ts`; os demais ignoram). Quando ligado, `chamarProvedorIA` liga a busca nativa do provedor (`web_search_20250305` da Anthropic, `google_search` do Gemini, `web_search_options` da OpenAI — este último só tem efeito em modelos "-search-preview"). Desligado por padrão (aumenta custo/latência); só afeta a avaliação de ativos por mentores, não o chat do mascote.
 
 ### Snapshot mensal/diário
 
@@ -551,6 +563,7 @@ Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `
 | `status` (objetivo) | `EM_PROGRESSO` \| `ATINGIDO` \| `CANCELADO` |
 | `frequencia` (objetivo) | `DIARIA` \| `SEMANAL` \| `MENSAL` \| `ANUAL` |
 | `nota_usuario`/`nota_final` (investimento) | 0..10 |
+| `rf_limite_faixa`/`rf_percentual_indice_2` (renda fixa) | ≥ 0; tudo-ou-nada (os dois juntos ou nenhum) |
 | `percentual_ideal` (alocação) | 0..100 |
 | `status` (fatura) | `EM_ANALISE` \| `CONFIRMADA` \| `CANCELADA` |
 | `decisao` (item de fatura) | `PENDENTE` \| `CRIAR` \| `ATUALIZAR` \| `IGNORAR` |

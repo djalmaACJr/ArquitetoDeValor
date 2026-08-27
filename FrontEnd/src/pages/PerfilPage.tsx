@@ -14,7 +14,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import Mascote, { type MascoteNome, type MascotePose } from '../components/ui/Mascote'
 import { useIAPreferencia } from '../hooks/useIAPreferencia'
-import { PROVEDORES, PROVEDOR_PADRAO, modeloSugerido, rotuloModelo } from '../lib/iaProvedores'
+import { PROVEDORES, PROVEDOR_PADRAO, SUPORTA_BUSCA_WEB, modeloSugerido, rotuloModelo } from '../lib/iaProvedores'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAdmin } from '../hooks/useAdmin'
 import { useQueryClient } from '@tanstack/react-query'
@@ -624,6 +624,7 @@ function SecaoIA() {
   const [nome,        setNome]        = useState('')
   const [modelo,      setModelo]      = useState('')
   const [modeloCustom, setModeloCustom] = useState(false)  // provedor permiteCustom + id fora da lista
+  const [buscaWeb,    setBuscaWeb]    = useState(false)    // opt-in de busca na web nativa (só claude/gpt/gemini)
   const [expandido,   setExpandido]   = useState<string | null>(null)
   const [fb,          setFb]          = useState<Feedback | null>(null)
   const [confirmRemover, setConfirmRemover] = useState<string | null>(null)
@@ -636,6 +637,7 @@ function SecaoIA() {
     const p = PROVEDORES.find(x => x.id === id) ?? PROVEDORES[0]
     setModelo(modeloSugerido(p))
     setModeloCustom(false)
+    if (!SUPORTA_BUSCA_WEB.has(id)) setBuscaWeb(false)
     setFb(null)
   }
 
@@ -646,6 +648,7 @@ function SecaoIA() {
     const p = PROVEDORES.find(x => x.id === PROVEDOR_PADRAO) ?? PROVEDORES[0]
     setModelo(modeloSugerido(p))
     setModeloCustom(false)
+    setBuscaWeb(false)
     setChave('')
     setNome('')
     setFb(null)
@@ -661,6 +664,7 @@ function SecaoIA() {
     setProvedorId(c.provedor)
     setModelo(mod)
     setModeloCustom(!!(p.permiteCustom && !p.modelos.some(m => m.id === mod)))
+    setBuscaWeb(!!c.busca_web)
     setChave('')
     setNome(c.nome ?? '')
     setFb(null)
@@ -676,11 +680,12 @@ function SecaoIA() {
     e.preventDefault()
     setFb(null)
     const modeloFinal = modelo.trim() || null
+    const buscaWebFinal = SUPORTA_BUSCA_WEB.has(provedorId) && buscaWeb
     let r: { ok: boolean; erro?: string }
     if (editando) {
-      r = await atualizar(editando, { provedor: provedorId, api_key: chave, nome, modelo: modeloFinal })
+      r = await atualizar(editando, { provedor: provedorId, api_key: chave, nome, modelo: modeloFinal, busca_web: buscaWebFinal })
     } else {
-      r = await adicionar(provedorId, chave, nome, modeloFinal)
+      r = await adicionar(provedorId, chave, nome, modeloFinal, buscaWebFinal)
     }
     if (r.ok) {
       setFb({ tipo: 'ok', msg: 'Configuração salva.' })
@@ -768,6 +773,15 @@ function SecaoIA() {
                           {c.nome && (
                             <span className="text-[14px] px-1.5 py-0.5 rounded" style={{ color: 'var(--text-secondary)', background: 'var(--tint-2)' }}>
                               {c.nome}
+                            </span>
+                          )}
+                          {c.busca_web && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                              style={{ background: 'rgba(99,140,255,0.14)', color: '#638cff' }}
+                              title="Busca na web ligada (avaliação de ativos)"
+                            >
+                              <Search size={10}/> Busca web
                             </span>
                           )}
                           {ehAtiva && (
@@ -1004,6 +1018,34 @@ function SecaoIA() {
                   }}
                 />
               </div>
+
+              {/* Busca na web (grounding nativo) — só provedores suportados, só afeta a
+                  avaliação de ativos por mentores (não o chat do mascote). */}
+              {SUPORTA_BUSCA_WEB.has(provedorId) && (
+                <label
+                  className="flex items-start gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer"
+                  style={{ background: 'var(--tint-1)', border: '1px solid var(--border-subtle)' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={buscaWeb}
+                    onChange={e => setBuscaWeb(e.target.checked)}
+                    disabled={salvando}
+                    className="mt-0.5 accent-av-green"
+                  />
+                  <span>
+                    <span className="text-[14px] flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
+                      <Search size={13} style={{ color: 'var(--text-muted)' }}/>
+                      Permitir busca na web nesta config
+                    </span>
+                    <span className="block text-[12px] mt-0.5 leading-relaxed" style={{ color: 'var(--text-faint)' }}>
+                      Reforço opcional só para a avaliação de ativos (mentores) — o mentor pode pesquisar
+                      na internet além do que já sabe. Deixa a avaliação mais lenta e pode ter custo extra
+                      no provedor; não afeta o chat do mascote.
+                    </span>
+                  </span>
+                </label>
+              )}
 
               {/* Instruções específicas */}
               <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tint-1)', border: '1px solid var(--border-subtle)' }}>

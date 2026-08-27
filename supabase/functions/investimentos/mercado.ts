@@ -819,16 +819,23 @@ export async function ptaxPorMesMap(c: Db, desdeISO: string): Promise<Map<string
 // ordem crescente para que a variação % de cada mês saia contra o anterior.
 export async function rebuildHistoricoRF(c: Db, userId: string, ativoId: string): Promise<number> {
   const { data: ativo } = await c.from("inv_ativos")
-    .select("tipo_ativo, nome, rf_indexador, rf_taxa, rf_vencimento")
+    .select("tipo_ativo, nome, rf_indexador, rf_taxa, rf_vencimento, rf_limite_faixa, rf_percentual_indice_2")
     .eq("id", ativoId).maybeSingle();
   if (!ativo) return 0;
   const tipo = String(ativo.tipo_ativo ?? "");
   if (tipo !== "RENDA_FIXA" && tipo !== "TESOURO_DIRETO") return 0;
 
   const { data: posicoes } = await c.from("inv_posicoes")
-    .select("conta_id, quantidade, valor_custo, data_compra")
+    .select("conta_id, quantidade, valor_custo, data_compra, inv_ativos(moeda)")
     .eq("ativo_id", ativoId).eq("status", "ATIVA");
   if (!posicoes || posicoes.length === 0) return 0;
+
+  // Custo em BRL (PTAX da data da compra) — mesma conversão usada por
+  // executarSnapshotMes/gravarSnapshot/rotaHistorico. RF/Tesouro é sempre BRL
+  // na prática, mas o schema não impede moeda≠BRL num inv_ativos; sem isso
+  // este rebuild ficaria na moeda crua enquanto todo outro gravador de
+  // snapshot converte, divergindo silenciosamente se algum dia isso ocorrer.
+  const custoBRL = await conversorCustoBRL(c, posicoes as PosicaoCusto[]);
 
   // Cada conta tem sua própria série de snapshot (ativo pode estar em mais de uma)
   const porConta = new Map<string, { quantidade: number; valor_custo: number; data_compra: string }[]>();
@@ -836,7 +843,7 @@ export async function rebuildHistoricoRF(c: Db, userId: string, ativoId: string)
     const k = String(p.conta_id);
     if (!porConta.has(k)) porConta.set(k, []);
     porConta.get(k)!.push({
-      quantidade: Number(p.quantidade) || 0, valor_custo: Number(p.valor_custo) || 0,
+      quantidade: Number(p.quantidade) || 0, valor_custo: custoBRL(p as PosicaoCusto),
       data_compra: String(p.data_compra),
     });
   }
@@ -846,6 +853,9 @@ export async function rebuildHistoricoRF(c: Db, userId: string, ativoId: string)
   const taxa      = (ativo.rf_taxa as string | null) ?? null;
   const venc      = (ativo.rf_vencimento as string | null) ?? null;
   const nome      = String(ativo.nome ?? "");
+  const limiteFaixa = ativo.rf_limite_faixa != null ? Number(ativo.rf_limite_faixa) : null;
+  const pct2Faixa   = ativo.rf_percentual_indice_2 != null ? Number(ativo.rf_percentual_indice_2) : null;
+  const faixa: FaixaRF | null = limiteFaixa != null && pct2Faixa != null ? { limite: limiteFaixa, percentual2: pct2Faixa } : null;
   const cdi  = await sgsUltimo(432, CDI_FALLBACK);
   const ipca = await sgsUltimo(13522, IPCA_FALLBACK);
   const { cdi: cdiSerie, ipca: ipcaSerie } = await carregarIndicesMensais(c, INDICES_DATA_CORTE);
@@ -871,7 +881,7 @@ export async function rebuildHistoricoRF(c: Db, userId: string, ativoId: string)
       const dataRef = me === mesCorrente
         ? new Date()
         : new Date(Date.UTC(Number(me.slice(0, 4)), Number(me.slice(5, 7)), 0, 12));
-      const valor = valorRFPosicoes(posMes, tipo, indexador, venc, nome, me, dataRef, taxa, cdiSerie, ipcaSerie, cdi, ipca, mtm);
+      const valor = valorRFPosicoes(posMes, tipo, indexador, venc, nome, me, dataRef, taxa, cdiSerie, ipcaSerie, cdi, ipca, mtm, undefined, faixa);
       if (!(valor > 0)) continue;
       await gravarSnapshot(c, userId, ativoId, contaId, me, valor, qtd, precoMedio);
       gravados++;
@@ -1833,6 +1843,12 @@ export function valorRFAcumulado(
   return custo * acc;
 }
 
+// Taxa escalonada por valor aplicado (ex.: CDB "até R$10.000 = 120% CDI,
+// acima = 100% CDI"): limite (R$) da 1ª faixa e percentual do índice válido
+// para o que exceder o limite. Só se aplica ao pós-fixado "% do índice" —
+// ver ressalva em valorRFPosicoes.
+export interface FaixaRF { limite: number; percentual2: number }
+
 // Valor de um conjunto de posições de renda fixa num mês: para Tesouro
 // prefixado/IPCA+ usa a marcação a mercado escalando o custo pela razão
 // PU_alvo / PU_compra (robusto a como a quantidade foi cadastrada); sem PU
@@ -1847,6 +1863,7 @@ export function valorRFPosicoes(
   taxa: string | null, cdiSerie: SerieIndice, ipcaSerie: SerieIndice,
   cdiAtualAa: number, ipcaAtualAa: number, mtm: SerieMtM,
   datasResetCupom?: string[],
+  faixa?: FaixaRF | null,
 ): number {
   // Após o vencimento o título não rende mais (o resgate ocorre ali). Congela
   // a acumulação na data de vencimento — sem isso o valor de um CDB/LCI/LCA
@@ -1856,6 +1873,40 @@ export function valorRFPosicoes(
     const vencMs = new Date(`${venc.slice(0, 10)}T12:00:00Z`).getTime();
     if (Number.isFinite(vencMs) && vencMs < ref.getTime()) ref = new Date(vencMs);
   }
+
+  // Taxa por faixa: só faz sentido em RENDA_FIXA pós-fixado "% do índice"
+  // (não no aditivo "índice + spread", nem prefixado/híbrido/Tesouro — o
+  // Tesouro usa marcação a mercado ou acumulação por indexador, não % fixo
+  // do CDI). Divide CADA posição (lote) entre o que ainda cabe na 1ª faixa —
+  // considerando o total já acumulado nos lotes ANTERIORES, em ordem
+  // cronológica — e o excedente, como faixa progressiva de IR. Cada parte
+  // compõe a partir da MESMA data_compra do lote a que pertence; quando um
+  // ativo tem só 1 aporte (caso comum), isso é exato — com múltiplos aportes
+  // que somam mais de 1 posição/lote na mesma conta, cada lote já carrega sua
+  // própria data, então a ordem cronológica é respeitada por lote (não por
+  // aporte individual dentro de um lote já consolidado).
+  const usaFaixa = !!faixa && tipo === "RENDA_FIXA" && indexador === "POS_FIXADO" && !/\+/.test(String(taxa ?? ""));
+  if (usaFaixa) {
+    const taxa2 = `${faixa!.percentual2}%`;
+    const ordenados = [...posicoes].sort((a, b) => a.data_compra.localeCompare(b.data_compra));
+    let acumulado = 0;
+    let soma = 0;
+    for (const p of ordenados) {
+      const inicio = acumulado;
+      const fim = acumulado + p.valor_custo;
+      const parte1 = Math.max(0, Math.min(fim, faixa!.limite) - inicio);
+      const parte2 = p.valor_custo - parte1;
+      if (parte1 > 0) {
+        soma += valorRFAcumulado(parte1, p.data_compra, ref, indexador, taxa, cdiSerie, ipcaSerie, cdiAtualAa, ipcaAtualAa, datasResetCupom);
+      }
+      if (parte2 > 0) {
+        soma += valorRFAcumulado(parte2, p.data_compra, ref, indexador, taxa2, cdiSerie, ipcaSerie, cdiAtualAa, ipcaAtualAa, datasResetCupom);
+      }
+      acumulado = fim;
+    }
+    return soma;
+  }
+
   return posicoes.reduce((soma, p) => {
     if (tipo === "TESOURO_DIRETO") {
       const puAlvo   = puTesouro(mtm, indexador, venc, nome, mes);

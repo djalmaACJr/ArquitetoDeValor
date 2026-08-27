@@ -701,6 +701,7 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
         rf_subtipo: a.rf_subtipo ?? null, rf_indexador: a.rf_indexador ?? null, rf_taxa: a.rf_taxa ?? null,
         rf_indice: a.rf_indice ?? null, rf_percentual_indice: a.rf_percentual_indice ?? null,
         rf_taxa_fixa: a.rf_taxa_fixa ?? null,
+        rf_limite_faixa: a.rf_limite_faixa ?? null, rf_percentual_indice_2: a.rf_percentual_indice_2 ?? null,
         rf_emissor: a.rf_emissor ?? null, rf_vencimento: a.rf_vencimento ?? null,
         cripto_rendimento_aa: a.cripto_rendimento_aa ?? null,
         cripto_rendimento_inicio: a.cripto_rendimento_inicio ?? null,

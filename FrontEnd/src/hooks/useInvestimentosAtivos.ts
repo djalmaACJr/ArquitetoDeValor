@@ -22,6 +22,10 @@ export interface CriarAtivoInput {
   rf_indice?:            IndiceRF | null
   rf_percentual_indice?: number | null
   rf_taxa_fixa?:         number | null
+  // Taxa escalonada por valor aplicado (ex.: CDB "até R$10.000 = 120% CDI,
+  // acima = 100% CDI") — só no pós-fixado "% do índice". Tudo-ou-nada.
+  rf_limite_faixa?:        number | null
+  rf_percentual_indice_2?: number | null
   rf_taxa?:         string | null
   rf_emissor?:      string | null
   rf_vencimento?:   string | null

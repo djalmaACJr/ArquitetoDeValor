@@ -21,8 +21,25 @@ export interface OpResult<T = void> {
   erro: string | null
 }
 
+// supabase-js serializa getSession()/refresh via Web Locks do navegador (uma
+// trava por projeto, compartilhada entre abas no desktop — ver lib/supabase.ts).
+// Uma trava "presa" (comum com várias abas abertas, ou um refresh que travou
+// numa aba antiga) faz getSession() ficar pendurada para sempre — sem timeout,
+// isso trava o app inteiro em silêncio: o botão fica "salvando..." e nenhum
+// erro aparece, porque a Promise nunca resolve nem rejeita. O timeout garante
+// que sempre sobra um erro visível (toast) em vez de um hang mudo.
+function comTimeout<T>(p: Promise<T>, ms: number, msgTimeout: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(msgTimeout)), ms)
+    p.then((v) => { clearTimeout(t); resolve(v) }, (e) => { clearTimeout(t); reject(e) })
+  })
+}
+
 async function getSession() {
-  const { data: { session } } = await supabase.auth.getSession()
+  const { data: { session } } = await comTimeout(
+    supabase.auth.getSession(), 10000,
+    'Não foi possível confirmar a sessão (tempo esgotado) — feche outras abas do sistema abertas e recarregue a página.',
+  )
   if (!session?.access_token) throw new Error('Não autenticado')
   return session
 }

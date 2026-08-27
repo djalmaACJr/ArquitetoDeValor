@@ -2,13 +2,8 @@
 // /investimentos/dashboard e /investimentos/ranking — extraído de index.ts.
 import { json, erro } from "../_shared/utils.ts";
 import { logError, logRequest } from "../_shared/logger.ts";
-import {
-  Db, hojeISO, PERIODOS_RANKING, inicioPeriodoRanking, type PeriodoRanking,
-} from "./shared.ts";
-import {
-  conversorCustoBRL, resolverPrecosAtuais, ptaxAtual, PosicaoCusto,
-  resolverValorDiarioCotado,
-} from "./mercado.ts";
+import { Db, hojeISO, PERIODOS_RANKING, inicioPeriodoRanking, type PeriodoRanking } from "./shared.ts";
+import { conversorCustoBRL, PosicaoCusto } from "./mercado.ts";
 
 export function mapaUltimoMercado(
   rows: { ativo_id: string; conta_id: string; valor_mercado: number }[],
@@ -58,6 +53,13 @@ export function checkpointsQtdPorPosicao(ops: OperacaoQtd[]): Map<string, Checkp
       const tipo = String(o.tipo_operacao);
       if (tipo === "COMPRA" || tipo === "APORTE") qtd += q;
       else if (tipo === "VENDA" || tipo === "RESGATE") { qtd -= Math.min(q, qtd); if (qtd < 0) qtd = 0; }
+      // RENDIMENTO (só cripto): crédito de tokens a custo zero — mesma regra
+      // de recomputarPosicao (posicoes.ts). Sem isso, a quantidade histórica
+      // reconstruída aqui ficava presa antes do crédito, subestimando a
+      // quantidade na data de qualquer provento posterior (hoje inofensivo
+      // na prática porque cripto não gera inv_dividendos — mas mantém as
+      // duas reconstruções de operações em sincronia).
+      else if (tipo === "RENDIMENTO") qtd += q;
       // DIVIDENDO não altera a posição. Colapsa checkpoints do mesmo dia.
       const data = String(o.data_operacao);
       const ultimo = chk[chk.length - 1];
@@ -352,101 +354,137 @@ export async function ranking(c: Db, params: URLSearchParams) {
   // busca externa nenhuma nesta rota. Cobre TODOS os tipos uniformemente
   // (cotados, cripto E Renda Fixa/Tesouro), porque `gravarSnapshot` já grava
   // o valor calculado de qualquer tipo ali (cron `snapshot-diario` + botão
-  // "Preencher histórico"). Sem snapshot tão antigo quanto o período pedido
-  // (ativo novo, ou histórico nunca preenchido pra trás), degrada pra "desde
-  // a compra" — mesma leitura de periodo=TUDO pra aquele ativo.
+  // "Preencher histórico").
+  //
+  // Metodologia: LÍQUIDA DE FLUXO (aporte/resgate) — mesma convenção do
+  // quadro "Rentabilidade" da página (QuadroRentabilidadeIndices.tsx no
+  // front): cada mês do período contribui seu ganho em R$
+  // (rentabilidade_mes, que o cron já grava descontando fluxos —
+  // calcularDesempenho() em snapshot.ts) e seu % (variacao_percentual); os
+  // meses são COMPOSTOS (juros compostos), nunca só comparados ponta a
+  // ponta. Achado real corrigido: a versão anterior comparava só
+  // valor_mercado(hoje) vs valor_mercado(início do período) inteiro de uma
+  // vez — um aporte ou resgate no meio do caminho inflava/distorcia o %
+  // inteiro, sem como saber quanto da diferença era ganho de verdade e
+  // quanto era só dinheiro entrando/saindo (ex.: real "Ranking por
+  // categoria: 2,64%" vs "Rentabilidade: -1,01%" no mesmo período — o 1º
+  // não descontava um aporte/resgate no meio do ano). Essa composição
+  // mensal também elimina de raiz o bug separado "mês corrente = preço de
+  // hoje, hoje comparado com hoje" que a versão anterior remendava com
+  // busca de preço ao vivo (cotados) + recálculo analítico (RF/Tesouro): o
+  // snapshot do mês corrente já É calculado líquido de fluxo pelo cron,
+  // então usá-lo direto no lugar de comparar dois pontos soltos já resolve
+  // os dois problemas de uma vez, sem precisar de nenhuma busca externa
+  // nesta rota.
   const valorInicioPorAtivo = new Map<string, number>();
+  const pctPeriodoPorAtivo = new Map<string, number>();
   const periodoDesdeCompraPorAtivo = new Map<string, boolean>();
+  // % do período composto (líquido de fluxo) por CATEGORIA e pro TOTAL geral
+  // — mesma técnica de valorInicioPorAtivo/pctPeriodoPorAtivo, mas agregando
+  // os R$ de TODOS os ativos do grupo por mês ANTES de compor (ver comentário
+  // mais abaixo, achado ago/2026: compor por ativo e só depois somar os %
+  // diverge de agregar por grupo e compor uma vez só).
+  const pctPeriodoPorCategoria = new Map<string, number>();
+  let pctPeriodoTotal: number | null = null;
 
   if (dataInicioNominal) {
-    const alvoMes = dataInicioNominal.slice(0, 7);
+    const mesInicio = dataInicioNominal.slice(0, 7);
     let qHist = c.from("inv_historico_mensal")
-      .select("ativo_id, conta_id, mes_ano, valor_mercado")
-      .lte("mes_ano", alvoMes)
-      .order("mes_ano", { ascending: false });
+      .select("ativo_id, conta_id, mes_ano, rentabilidade_mes, variacao_percentual")
+      .gte("mes_ano", mesInicio)
+      .order("mes_ano", { ascending: true });
     if (contaFiltro) qHist = qHist.eq("conta_id", contaFiltro);
     const { data: histPeriodoRows, error: histPeriodoErr } = await qHist;
     if (histPeriodoErr) logError("Ranking historico periodo", histPeriodoErr);
 
-    // ativo|conta → valor_mercado do snapshot mais recente ≤ alvoMes (já
-    // ordenado desc → a 1ª ocorrência de cada par é a que vale).
-    const valorPorPar = new Map<string, number>();
-    for (const r of histPeriodoRows ?? []) {
-      const k = `${r.ativo_id}|${r.conta_id}`;
-      if (!valorPorPar.has(k)) valorPorPar.set(k, Number(r.valor_mercado));
+    // ativo → mes_ano → {ganho R$, início R$} — soma entre CONTAS do mesmo
+    // ativo no mesmo mês primeiro (posições do mesmo ativo em contas
+    // diferentes formam um único "início" mensal), só depois compõe os
+    // meses entre si. Em paralelo, monta as MESMAS somas agrupadas por
+    // categoria (tipo_ativo) e pelo total geral — é ESSENCIAL agregar os
+    // R$ de ganho/início de TODOS os ativos do grupo MÊS A MÊS antes de
+    // compor entre meses (não compor cada ativo sozinho e só DEPOIS somar
+    // os resultados já compostos): a ordem importa, juros compostos não são
+    // lineares. Achado ago/2026: agregar por ativo e só depois somar os %
+    // resultantes (como a linha do total fazia antes) dava um número bem
+    // diferente do quadro "Rentabilidade" (histórico mensal da carteira
+    // inteira, mesma técnica de soma-antes-de-compor) — mesmos dados, duas
+    // contas diferentes por causa da ORDEM soma vs composição.
+    type Acc = { ganho: number; inicio: number };
+    const porAtivoEMes = new Map<string, Map<string, Acc>>();
+    const porCategoriaEMes = new Map<string, Map<string, Acc>>();
+    const porMesTotal = new Map<string, Acc>();
+    const acumula = (mapa: Map<string, Acc>, mes: string, ganhoRS: number, inicio: number) => {
+      const cur = mapa.get(mes) ?? { ganho: 0, inicio: 0 };
+      cur.ganho  += ganhoRS;
+      cur.inicio += inicio;
+      mapa.set(mes, cur);
+    };
+    // Get-or-cria o mapa mensal de uma chave (ativo_id ou tipo_ativo) dentro
+    // de um Map<chave, Map<mês, Acc>>.
+    const mapaDe = (porChave: Map<string, Map<string, Acc>>, chave: string): Map<string, Acc> => {
+      let m = porChave.get(chave);
+      if (!m) { m = new Map<string, Acc>(); porChave.set(chave, m); }
+      return m;
+    };
+    for (const r of (histPeriodoRows ?? []) as
+      { ativo_id: string; mes_ano: string; rentabilidade_mes: number; variacao_percentual: number }[]) {
+      const aid = String(r.ativo_id);
+      const ganhoRS = Number(r.rentabilidade_mes) || 0;
+      const pct     = Number(r.variacao_percentual) || 0;
+      // pct === 0 → sem "mês anterior" pra comparar (1º snapshot do ativo,
+      // mesma guarda de calcularDesempenho — ganhoRS também sai 0 nesse
+      // caso) — sem um "início" confiável pra reconstruir, a linha some
+      // (não soma nada em nenhum dos dois lados, efeito neutro).
+      const inicio = pct !== 0 ? ganhoRS / (pct / 100) : 0;
+      acumula(mapaDe(porAtivoEMes, aid), r.mes_ano, ganhoRS, inicio);
+      const tipo = porAtivo.get(aid)?.tipo_ativo;
+      if (tipo) acumula(mapaDe(porCategoriaEMes, tipo), r.mes_ano, ganhoRS, inicio);
+      acumula(porMesTotal, r.mes_ano, ganhoRS, inicio);
     }
 
-    // "Semana" e "Mês atual" não dão pra representar com o snapshot MENSAL:
-    // a data-alvo cai dentro do mês AINDA em andamento, e a única linha do
-    // mês corrente em inv_historico_mensal é reescrita todo dia com o preço
-    // de HOJE — o retorno dava sempre ~0% (achado real, "tudo zerado").
-    // Só pra esses dois, busca o preço de verdade num ponto do passado
-    // (cache diário, backfill sob demanda numa janela estreita — ver
-    // resolverValorDiarioCotado). Renda Fixa/Tesouro ficam de fora dessa
-    // busca: o movimento de dias é imaterial pra esses tipos (acumulação
-    // suave dia a dia), o snapshot mensal já é uma aproximação aceitável.
-    const usaBuscaDiaria = periodo === "SEMANA" || periodo === "MES_ATUAL";
-    let precosDiarios = new Map<string, { preco: number; moeda: string }>();
-    let ptaxDiaria = 0;
-    if (usaBuscaDiaria) {
-      const cotadosAntes: string[] = [];
-      const criptoAntes:  string[] = [];
-      for (const a of porAtivo.values()) {
-        if (a.tipo_ativo === "RENDA_FIXA" || a.tipo_ativo === "TESOURO_DIRETO") continue;
-        const desde = primeiraPosse.get(a.ativo_id) ?? hojeRanking;
-        if (desde > dataInicioNominal) continue; // comprado dentro do período, não precisa
-        (a.tipo_ativo === "CRIPTOMOEDAS" ? criptoAntes : cotadosAntes).push(a.ticker.toUpperCase());
+    // Compõe (juros compostos) as somas MENSAIS de um grupo — mesma técnica
+    // em qualquer nível (ativo/categoria/total). Meses sem "início" válido
+    // (nenhum ativo do grupo com posição no mês) são ignorados, não zerados.
+    const comporGrupo = (porMes: Map<string, Acc>): { pct: number; ganho: number } | null => {
+      let acc = 1, ganhoTotal = 0, achouAlgum = false;
+      for (const mes of [...porMes.keys()].sort()) {
+        const { ganho, inicio } = porMes.get(mes)!;
+        if (!(inicio > 0)) continue;
+        acc *= 1 + ganho / inicio;
+        ganhoTotal += ganho;
+        achouAlgum = true;
       }
-      precosDiarios = await resolverValorDiarioCotado(c, cotadosAntes, criptoAntes, dataInicioNominal);
-      // PTAX da data-alvo (ou a mais recente antes dela) — converte ativos em
-      // moeda estrangeira (STOCKS/ETF_INTERNACIONAL) pra BRL, mesma convenção
-      // de conversorCustoBRL/executarSnapshotMes. Sem isso, comparar um preço
-      // cru em USD contra o valor_mercado atual (já em BRL) inflava o retorno
-      // pela cotação do dólar (achado real: "+400%" numa semana).
-      if (cotadosAntes.length > 0) {
-        const { data: ptaxRow } = await c.from("cotacoes_ptax")
-          .select("cotacao_venda").lte("data", dataInicioNominal)
-          .order("data", { ascending: false }).limit(1).maybeSingle();
-        ptaxDiaria = Number(ptaxRow?.cotacao_venda) || await ptaxAtual(c);
-      }
-    }
+      return achouAlgum ? { pct: (acc - 1) * 100, ganho: ganhoTotal } : null;
+    };
 
+    for (const [aid, porMes] of porAtivoEMes) {
+      const r = comporGrupo(porMes);
+      if (!r) continue;
+      const ativoAgg = porAtivo.get(aid);
+      if (!ativoAgg) continue;
+      pctPeriodoPorAtivo.set(aid, r.pct);
+      valorInicioPorAtivo.set(aid, ativoAgg.valor_mercado - r.ganho);
+      periodoDesdeCompraPorAtivo.set(aid, false);
+    }
+    for (const [tipo, porMes] of porCategoriaEMes) {
+      const r = comporGrupo(porMes);
+      if (r) pctPeriodoPorCategoria.set(tipo, r.pct);
+    }
+    const composicaoTotal = comporGrupo(porMesTotal);
+    if (composicaoTotal) pctPeriodoTotal = composicaoTotal.pct;
+
+    // Ativos sem nenhuma linha na composição acima — dois casos caem aqui:
+    // (a) comprado DENTRO do período, então o 1º mês de posse nunca teria
+    //     achado nada de qualquer jeito (guarda pct===0 acima) — o próprio
+    //     custo já É o valor de mercado no instante da compra; ou
+    // (b) sem NENHUM snapshot dentro do período (nunca preenchido tão pra
+    //     trás). Os dois degradam pra "desde a compra", mesma leitura de
+    //     periodo=TUDO pra esse ativo.
     for (const a of porAtivo.values()) {
-      const desde = primeiraPosse.get(a.ativo_id) ?? hojeRanking;
-      if (desde > dataInicioNominal) {
-        // Comprado DENTRO do período: o próprio custo já é o valor de
-        // mercado no instante da compra — não precisa de snapshot nenhum.
-        valorInicioPorAtivo.set(a.ativo_id, a.valor_custo);
-        periodoDesdeCompraPorAtivo.set(a.ativo_id, true);
-        continue;
-      }
-
-      if (usaBuscaDiaria && a.tipo_ativo !== "RENDA_FIXA" && a.tipo_ativo !== "TESOURO_DIRETO") {
-        const cot = precosDiarios.get(a.ticker.toUpperCase());
-        const pids = posicoesPorAtivo.get(a.ativo_id) ?? [];
-        const qtdInicio = pids.reduce((s, pid) => s + qtdNaData(checkpoints.get(pid), dataInicioNominal), 0);
-        // Converte pra BRL se o preço veio em moeda estrangeira (STOCKS/
-        // ETF_INTERNACIONAL) — sem PTAX disponível nem pra hoje, não dá pra
-        // confiar no preço cru, então cai pro fallback abaixo.
-        const precoOk = cot && (cot.moeda === "BRL" || ptaxDiaria > 0);
-        if (cot && precoOk && qtdInicio > 0) {
-          const precoBRL = cot.moeda === "BRL" ? cot.preco : cot.preco * ptaxDiaria;
-          valorInicioPorAtivo.set(a.ativo_id, precoBRL * qtdInicio);
-          periodoDesdeCompraPorAtivo.set(a.ativo_id, false);
-          continue;
-        }
-        // fonte não cobriu a data (ex.: cripto > 365 dias) — cai pro
-        // snapshot mensal abaixo, mesmo fallback dos demais períodos.
-      }
-
-      let soma = 0; let achouAlgum = false;
-      for (const k of custoPorPar.keys()) {
-        if (!k.startsWith(`${a.ativo_id}|`)) continue;
-        const v = valorPorPar.get(k);
-        if (v != null) { soma += v; achouAlgum = true; }
-      }
-      valorInicioPorAtivo.set(a.ativo_id, achouAlgum ? soma : a.valor_custo);
-      periodoDesdeCompraPorAtivo.set(a.ativo_id, !achouAlgum);
+      if (valorInicioPorAtivo.has(a.ativo_id)) continue;
+      valorInicioPorAtivo.set(a.ativo_id, a.valor_custo);
+      periodoDesdeCompraPorAtivo.set(a.ativo_id, true);
     }
   }
 
@@ -549,6 +587,11 @@ export async function ranking(c: Db, params: URLSearchParams) {
     // Campos do FILTRO DE PERÍODO (distintos dos "desde a compra" acima).
     // periodo=TUDO reusa o custo como início — mesmos números de sempre.
     const valorInicioPeriodo = dataInicioNominal ? (valorInicioPorAtivo.get(a.ativo_id) ?? a.valor_custo) : a.valor_custo;
+    // % composto (líquido de fluxo) quando disponível — só falta pra
+    // "comprado dentro do período"/sem snapshot no período, onde a comparação
+    // simples com o custo já é exata (não tem fluxo pra confundir: valor_custo
+    // JÁ é o próprio aporte que criou a posição).
+    const pctPeriodoComposto = dataInicioNominal ? pctPeriodoPorAtivo.get(a.ativo_id) : undefined;
     const dividendosPeriodo  = dividendosPeriodoPorAtivo.get(a.ativo_id) ?? 0;
     const periodoDesdeCompra = dataInicioNominal ? (periodoDesdeCompraPorAtivo.get(a.ativo_id) ?? false) : false;
     return {
@@ -578,8 +621,9 @@ export async function ranking(c: Db, params: URLSearchParams) {
       participacao_pct:   totalMercado > 0 ? Number(((a.valor_mercado / totalMercado) * 100).toFixed(2)) : 0,
       // ── Página "Destaques" (filtro de período) ──────────────────────────
       valor_mercado_inicio_periodo: Number(valorInicioPeriodo.toFixed(2)),
-      rentabilidade_periodo_pct: valorInicioPeriodo > 0
-        ? Number((((a.valor_mercado - valorInicioPeriodo) / valorInicioPeriodo) * 100).toFixed(2)) : 0,
+      rentabilidade_periodo_pct: pctPeriodoComposto != null
+        ? Number(pctPeriodoComposto.toFixed(2))
+        : (valorInicioPeriodo > 0 ? Number((((a.valor_mercado - valorInicioPeriodo) / valorInicioPeriodo) * 100).toFixed(2)) : 0),
       dividendos_periodo: Number(dividendosPeriodo.toFixed(2)),
       dy_periodo_pct:     a.valor_mercado > 0 ? Number(((dividendosPeriodo / a.valor_mercado) * 100).toFixed(2)) : 0,
       periodo_desde_compra: periodoDesdeCompra,
@@ -598,18 +642,35 @@ export async function ranking(c: Db, params: URLSearchParams) {
     g.dividendos_periodo           += a.dividendos_periodo;
     porCategoria.set(a.tipo_ativo, g);
   }
-  const categorias = [...porCategoria.values()].map((g) => ({
-    tipo_ativo:                   g.tipo_ativo,
-    valor_mercado:                Number(g.valor_mercado.toFixed(2)),
-    valor_mercado_inicio_periodo: Number(g.valor_mercado_inicio_periodo.toFixed(2)),
-    rentabilidade_periodo_pct:    g.valor_mercado_inicio_periodo > 0
-      ? Number((((g.valor_mercado - g.valor_mercado_inicio_periodo) / g.valor_mercado_inicio_periodo) * 100).toFixed(2)) : 0,
-    dividendos_periodo:           Number(g.dividendos_periodo.toFixed(2)),
-    dy_periodo_pct:               g.valor_mercado > 0 ? Number(((g.dividendos_periodo / g.valor_mercado) * 100).toFixed(2)) : 0,
-    participacao_pct:             totalMercado > 0 ? Number(((g.valor_mercado / totalMercado) * 100).toFixed(2)) : 0,
-  })).sort((x, y) => y.rentabilidade_periodo_pct - x.rentabilidade_periodo_pct);
+  const categorias = [...porCategoria.values()].map((g) => {
+    // % composto (líquido de fluxo), agregado por categoria mês a mês — mesmo
+    // padrão do ativo individual acima. Sem isso (fallback abaixo, só pra
+    // periodo=TUDO ou categoria sem nenhum mês com início válido) cai na
+    // comparação simples início↔fim, que mistura aporte novo com performance.
+    const composto = pctPeriodoPorCategoria.get(g.tipo_ativo);
+    return {
+      tipo_ativo:                   g.tipo_ativo,
+      valor_mercado:                Number(g.valor_mercado.toFixed(2)),
+      valor_mercado_inicio_periodo: Number(g.valor_mercado_inicio_periodo.toFixed(2)),
+      rentabilidade_periodo_pct:    composto != null
+        ? Number(composto.toFixed(2))
+        : (g.valor_mercado_inicio_periodo > 0
+          ? Number((((g.valor_mercado - g.valor_mercado_inicio_periodo) / g.valor_mercado_inicio_periodo) * 100).toFixed(2)) : 0),
+      dividendos_periodo:           Number(g.dividendos_periodo.toFixed(2)),
+      dy_periodo_pct:               g.valor_mercado > 0 ? Number(((g.dividendos_periodo / g.valor_mercado) * 100).toFixed(2)) : 0,
+      participacao_pct:             totalMercado > 0 ? Number(((g.valor_mercado / totalMercado) * 100).toFixed(2)) : 0,
+    };
+  }).sort((x, y) => y.rentabilidade_periodo_pct - x.rentabilidade_periodo_pct);
 
-  return json({ dados: { total_mercado: Number(totalMercado.toFixed(2)), periodo, ativos, categorias } });
+  // Total geral também composto mês a mês (mesma ressalva) — quando
+  // indisponível (periodo=TUDO, sem dataInicioNominal), o frontend cai pro
+  // cálculo simples a partir das categorias, como sempre fez.
+  return json({
+    dados: {
+      total_mercado: Number(totalMercado.toFixed(2)), periodo, ativos, categorias,
+      rentabilidade_periodo_pct_total: pctPeriodoTotal != null ? Number(pctPeriodoTotal.toFixed(2)) : null,
+    },
+  });
 }
 
 // ============================================================

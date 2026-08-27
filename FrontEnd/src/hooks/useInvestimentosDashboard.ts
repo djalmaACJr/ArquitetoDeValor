@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
@@ -79,7 +79,7 @@ export function useInvestimentosRanking(contaId?: string | null) {
 
 // ── Destaques (ranking + filtro de período) ────────────────────
 // Mesmo endpoint do ranking acima, com o filtro de período da página
-// "Destaques" (Semana/Mês/Semestre/Ano/Período todo) — devolve a carteira
+// "Destaques" (Semana/Mês/Semestre/Ano/Desde o início) — devolve a carteira
 // INTEIRA (não só o top 3) + o ranking por categoria (Tipo de Ativo).
 
 async function fetchDestaques(contaId: string | null | undefined, periodo: PeriodoRanking): Promise<InvestimentoRanking> {
@@ -95,17 +95,25 @@ export function useInvestimentosDestaques(contaId: string | null | undefined, pe
   const { session } = useAuth()
   const uid = session?.user?.id ?? null
 
-  const { data, isLoading: loading, error } = useQuery({
+  // placeholderData: keepPreviousData — trocar período/conta troca a query
+  // key inteira; sem isso a tela inteira (ranking + Rentabilidade, que fica
+  // rolado mais abaixo) piscava pra um spinner a cada troca de filtro,
+  // perdendo a posição de rolagem (achado real, pedido explícito pra ficar
+  // "mais dinâmico"). Mantém os dados antigos visíveis até os novos
+  // chegarem; `isFetching` (não `loading`) sinaliza a atualização em fundo.
+  const { data, isLoading: loading, isFetching: atualizando, error } = useQuery({
     queryKey: qk.invDestaques(uid, contaId, periodo),
     queryFn:  () => fetchDestaques(contaId, periodo),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     enabled: !!uid,
+    placeholderData: keepPreviousData,
   })
 
   return {
     destaques: data ?? null,
     loading,
+    atualizando,
     error: error ? (error as Error).message : null,
   }
 }

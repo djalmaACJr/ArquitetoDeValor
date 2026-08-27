@@ -34,6 +34,7 @@ import {
 import { registrarOrigem } from "../_shared/utils.ts";
 import { logError, logRequest, logResponse } from "../_shared/logger.ts";
 import { encriptar, decriptar, mascarar, type BlobCriptografado } from "../_shared/cripto.ts";
+import { PROVEDORES_BUSCA_WEB } from "../_shared/ia.ts";
 
 interface IAConfigPersistida {
   id:       string;
@@ -43,6 +44,12 @@ interface IAConfigPersistida {
   modelo:   string | null;
   api_key:  BlobCriptografado;
   mascara:  string;
+  /**
+   * Liga a busca na web nativa do provedor (grounding) na avaliação de
+   * ativos por mentores — só tem efeito em PROVEDORES_BUSCA_WEB
+   * (claude/gpt/gemini; ver _shared/ia.ts). `false`/ausente nos demais.
+   */
+  busca_web: boolean;
 }
 interface IAConfigsCol {
   ativa:   string | null;
@@ -96,6 +103,7 @@ function exportar(c: IAConfigsCol) {
       nome:     cfg.nome,
       modelo:   cfg.modelo ?? null,
       mascara:  cfg.mascara,
+      busca_web: cfg.busca_web ?? false,
     })),
   };
 }
@@ -190,6 +198,10 @@ async function criar(cliente: ReturnType<typeof db>, userId: string, body: Recor
   }
 
   const modelo = sanitizarModelo(body.modelo);
+  // Só persiste true se o provedor realmente suporta — evita guardar um
+  // toggle "ligado" que nunca teria efeito (usuário confuso achando que
+  // está usando busca na web).
+  const buscaWeb = body.busca_web === true && PROVEDORES_BUSCA_WEB.has(provedor);
 
   const blob = await encriptar(keyTrim);
   const nova: IAConfigPersistida = {
@@ -199,6 +211,7 @@ async function criar(cliente: ReturnType<typeof db>, userId: string, body: Recor
     modelo:   modelo ?? null,
     api_key:  blob,
     mascara:  mascarar(keyTrim),
+    busca_web: buscaWeb,
   };
 
   const col = await lerConfigs(cliente, userId);
@@ -249,6 +262,12 @@ async function atualizar(
   const modeloPatch = sanitizarModelo(body.modelo);
   const novoModelo = modeloPatch === undefined ? (atual.modelo ?? null) : modeloPatch;
 
+  // `undefined` preserva o valor atual; boolean explícito troca (revalidado
+  // contra o provedor final, que pode ter mudado neste mesmo PUT).
+  const buscaWebPatch = typeof body.busca_web === "boolean" ? body.busca_web : undefined;
+  const novoBuscaWeb = (buscaWebPatch === undefined ? (atual.busca_web ?? false) : buscaWebPatch)
+    && PROVEDORES_BUSCA_WEB.has(novoProvedor);
+
   col.configs[idx] = {
     ...atual,
     provedor: novoProvedor,
@@ -256,6 +275,7 @@ async function atualizar(
     modelo:   novoModelo,
     api_key:  novoBlob,
     mascara:  novaMascara,
+    busca_web: novoBuscaWeb,
   };
   await gravarConfigs(cliente, userId, col);
 

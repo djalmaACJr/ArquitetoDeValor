@@ -222,6 +222,14 @@ export const PROVEDORES: IAProvedor[] = [
 
 export const PROVEDOR_PADRAO: IAProvedor['id'] = 'claude'
 
+/**
+ * Provedores com busca na web nativa (grounding) implementada — espelha
+ * `PROVEDORES_BUSCA_WEB` em `supabase/functions/_shared/ia.ts`. Usado pra
+ * mostrar/esconder o toggle "busca na web" em Perfil → Integração com IA
+ * (o toggle só faz sentido pra quem o backend realmente atende).
+ */
+export const SUPORTA_BUSCA_WEB = new Set(['claude', 'gpt', 'gemini'])
+
 export function provedorPorId(id: string | null | undefined): IAProvedor | null {
   if (!id) return null
   return PROVEDORES.find(p => p.id === id) ?? null

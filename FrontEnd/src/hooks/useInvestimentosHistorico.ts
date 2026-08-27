@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
@@ -55,12 +55,16 @@ export function useInvestimentosHistorico(filtros: FiltrosHistorico = {}) {
   const { session } = useAuth()
   const uid = session?.user?.id ?? null
 
+  // placeholderData: mantém o histórico anterior visível ao trocar de conta
+  // (chave muda) em vez de zerar a tela por um instante — mesmo motivo do
+  // keepPreviousData em useInvestimentosDestaques.
   const { data: historico = [], isLoading: loading, error } = useQuery({
     queryKey: qk.invHistorico(uid, filtros),
     queryFn:  () => fetchHistorico(filtros),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     enabled: !!uid,
+    placeholderData: keepPreviousData,
   })
 
   // snapshots alimentam o valor de mercado do dashboard → invalida ambos

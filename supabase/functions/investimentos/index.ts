@@ -41,6 +41,7 @@ import {
 } from "./dividendos.ts";
 import { rotaHistorico, rotaSnapshotAuto, rotaSnapshotBackfill, rotaSnapshotCron } from "./snapshot.ts";
 import { rotaRendimentoCripto, rotaRendimentoCriptoCron } from "./rendimento-cripto.ts";
+import { rotaFatosRelevantesCron } from "./fatosRelevantes.ts";
 import {
   rotaMigrarConta, rotaImportar, rotaAtualizarAtivos, rotaNormalizarTesouro, rotaRestaurar,
 } from "./import-export.ts";
@@ -98,6 +99,14 @@ Deno.serve(async (req: Request) => {
   if (recurso === "cupom-tesouro-cron") {
     try { return await executarComLogDeCron("cupom-tesouro-diario", () => rotaCupomTesouroCron(req, m)); }
     catch (e) { logError("Handler cupom-tesouro-cron", e); return erro("Erro interno", 500); }
+  }
+
+  // Job do servidor: cacheia Fatos Relevantes/Comunicados de FIIs
+  // (Fundos.NET/B3) usados como contexto factual na avaliação por
+  // mentores de IA. Sem JWT — x-cron-secret. Ver fatosRelevantes.ts.
+  if (recurso === "fatos-relevantes-cron") {
+    try { return await executarComLogDeCron("fatos-relevantes-diario", () => rotaFatosRelevantesCron(req, m)); }
+    catch (e) { logError("Handler fatos-relevantes-cron", e); return erro("Erro interno", 500); }
   }
 
   const auth = await autenticar(req);

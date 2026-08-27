@@ -27,13 +27,34 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 
+/** Uma opção de recorte do snapshot enviado à IA (ex.: um tipo de ativo). */
+export interface ContextoIAEscopo {
+  /** Identifica o recorte (ex.: 'ACOES', 'FII'...). */
+  valor: string
+  /** Rótulo exibido no seletor do chat. */
+  label: string
+}
+
 export interface ContextoIA {
   /** Título curto (1 linha) — ex.: "Dashboard · Mai/2026" */
   titulo:    string
   /** Descrição breve do que os dados representam */
   descricao?: string
-  /** Snapshot serializável dos dados da página */
+  /** Snapshot serializável dos dados da página (já recortado por `escopoSelecionado`, se houver) */
   dados:     unknown
+  /**
+   * Recortes alternativos que a página oferece para restringir o que é
+   * enviado à IA (ex.: um ou mais tipos de ativo, em vez da carteira
+   * inteira). Opcional — quando ausente, o chat mostra só o toggle simples
+   * de anexar/não anexar. O seletor no chat só fica ativo quando o usuário
+   * está de fato enviando os dados desta tela (toggle "Enviar dados"
+   * ligado) — antes disso fica desabilitado.
+   */
+  escopos?: ContextoIAEscopo[]
+  /** Valores de `escopos` atualmente marcados (controlado pela página). Vazio = carteira inteira (nenhum recorte). */
+  escopoSelecionado?: string[]
+  /** Chamado quando o usuário muda a seleção no seletor do chat. */
+  aoMudarEscopo?: (valores: string[]) => void
 }
 
 type Setter = (c: ContextoIA | null) => void

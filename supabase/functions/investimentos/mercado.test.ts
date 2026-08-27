@@ -33,7 +33,7 @@
 //     base ≠ 1 (Math.pow(1, 1/12) = 1 exato), permitindo isolar e validar
 //     APENAS a composição da série do indexador.
 
-import { valorRF, valorRFAcumulado, primeiraTaxa, type SerieIndice } from "./mercado.ts";
+import { valorRF, valorRFAcumulado, valorRFPosicoes, primeiraTaxa, type SerieIndice } from "./mercado.ts";
 
 // ── Referência de ponto fixo (BigInt, escala 1e18) — aritmética exata,
 //    sem passar por `number`/Math.pow em nenhum momento. ──────────────
@@ -239,6 +239,94 @@ Deno.test("valorRFAcumulado — série vazia usa fallback anual convertido para 
   const fallbackMensal = Math.pow(1.12, 1 / 12) - 1;
   const esperadoAprox = custo * Math.pow(1 + fallbackMensal, 12);
   assertProximo(atual, esperadoAprox, 1e-2, "fallback de taxa anual não bate com a série mensal derivada");
+});
+
+// ── valorRFPosicoes — taxa escalonada por faixa de valor (CDB "até
+//    R$10.000 = 120% CDI, acima = 100% CDI") ─────────────────────────
+
+Deno.test("valorRFPosicoes — faixa: 1 lote de R$14.000 divide 10.000@120% + 4.000@100%", () => {
+  const taxaMensal = 0.008; // 0,8% a.m. flat (mesma série exata dos testes acima)
+  const meses = mesesEntreYYYYMM("2022-01", 25);
+  const cdiSerie = serieFlat(meses, taxaMensal);
+  const ipcaSerie: SerieIndice = new Map();
+  const dataCompra = "2022-01-01";
+  const dataRef = new Date("2024-01-01T00:00:00Z"); // 24 meses exatos
+
+  const atual = valorRFPosicoes(
+    [{ valor_custo: 14_000, data_compra: dataCompra }],
+    "RENDA_FIXA", "POS_FIXADO", null, "CDB Faixa",
+    "2024-01", dataRef,
+    "120%", cdiSerie, ipcaSerie, 0.12, 0.04, new Map(),
+    undefined,
+    { limite: 10_000, percentual2: 100 },
+  );
+
+  const centavos = (v: number) => BigInt(Math.round(v * 100)) * (ESCALA / 100n);
+  const fator120 = taxaParaFixo("0.0096"); // 0,8% × 120%
+  const fator100 = taxaParaFixo("0.008");  // 0,8% × 100%
+  const esperado =
+    fixoParaNumero(compostoFixo(centavos(10_000), Array(24).fill(fator120))) +
+    fixoParaNumero(compostoFixo(centavos(4_000), Array(24).fill(fator100)));
+
+  assertProximo(atual, esperado, 1e-3, "valorRFPosicoes (faixa, 1 lote) diverge da referência");
+});
+
+Deno.test("valorRFPosicoes — faixa: 2º aporte que cruza o limite só rende a taxa menor no excedente", () => {
+  const taxaMensal = 0.008;
+  const meses = mesesEntreYYYYMM("2022-01", 25);
+  const cdiSerie = serieFlat(meses, taxaMensal);
+  const ipcaSerie: SerieIndice = new Map();
+  const dataRef = new Date("2024-01-01T00:00:00Z");
+
+  // 1º aporte (R$6.000, 24 meses até a referência) fica inteiro na 1ª faixa
+  // (0 → 6.000 ⊂ [0, 10.000]). 2º aporte (R$8.000, só 12 meses até a
+  // referência) soma 6.000 → 14.000: R$4.000 ainda cabem na 1ª faixa
+  // (6.000 → 10.000) e R$4.000 ficam no excedente (10.000 → 14.000).
+  // Passados fora de ordem cronológica de propósito — a função deve ordenar
+  // por data_compra antes de acumular, não depender da ordem do array.
+  const atual = valorRFPosicoes(
+    [
+      { valor_custo: 8_000, data_compra: "2023-01-01" },
+      { valor_custo: 6_000, data_compra: "2022-01-01" },
+    ],
+    "RENDA_FIXA", "POS_FIXADO", null, "CDB Faixa 2 aportes",
+    "2024-01", dataRef,
+    "120%", cdiSerie, ipcaSerie, 0.12, 0.04, new Map(),
+    undefined,
+    { limite: 10_000, percentual2: 100 },
+  );
+
+  const centavos = (v: number) => BigInt(Math.round(v * 100)) * (ESCALA / 100n);
+  const fator120 = taxaParaFixo("0.0096");
+  const fator100 = taxaParaFixo("0.008");
+  const esperado =
+    fixoParaNumero(compostoFixo(centavos(6_000), Array(24).fill(fator120))) +  // 1º aporte, 24m, 120%
+    fixoParaNumero(compostoFixo(centavos(4_000), Array(12).fill(fator120))) +  // 2º aporte, parte na 1ª faixa, 12m, 120%
+    fixoParaNumero(compostoFixo(centavos(4_000), Array(12).fill(fator100)));   // 2º aporte, excedente, 12m, 100%
+
+  assertProximo(atual, esperado, 1e-3, "valorRFPosicoes (faixa, 2 aportes cruzando o limite) diverge da referência");
+});
+
+Deno.test("valorRFPosicoes — sem faixa (undefined) mantém o comportamento de taxa única", () => {
+  const taxaMensal = 0.008;
+  const meses = mesesEntreYYYYMM("2022-01", 25);
+  const cdiSerie = serieFlat(meses, taxaMensal);
+  const ipcaSerie: SerieIndice = new Map();
+  const dataCompra = "2022-01-01";
+  const dataRef = new Date("2024-01-01T00:00:00Z");
+
+  const atual = valorRFPosicoes(
+    [{ valor_custo: 14_000, data_compra: dataCompra }],
+    "RENDA_FIXA", "POS_FIXADO", null, "CDB Sem Faixa",
+    "2024-01", dataRef,
+    "120%", cdiSerie, ipcaSerie, 0.12, 0.04, new Map(),
+  );
+
+  const esperado = fixoParaNumero(compostoFixo(
+    BigInt(Math.round(14_000 * 100)) * (ESCALA / 100n), Array(24).fill(taxaParaFixo("0.0096")),
+  ));
+
+  assertProximo(atual, esperado, 1e-3, "valorRFPosicoes sem faixa deveria manter a taxa única de 120% sobre tudo");
 });
 
 // ── primeiraTaxa: parsing de texto livre ("13,5% a.a." → 0.135) ──────

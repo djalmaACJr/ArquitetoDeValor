@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ListFilter, X, Download } from 'lucide-react'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
-import { SelectDark, Field, Drawer, Input } from '../components/ui/shared'
+import { Field, Drawer, Input } from '../components/ui/shared'
+import { MultiSelect } from '../components/ui/MultiSelect'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
@@ -110,70 +111,99 @@ function montarLinhas(
   return [...deOps, ...deDiv].sort((a, b) => b.data.localeCompare(a.data))
 }
 
-// Filtro "Tipo" (compra/venda/.../provento) — mesmo critério usado na tela e
-// na exportação.
-function filtrarPorTipoMov(
-  linhas: LinhaExtrato[], tipoMov: TipoOperacaoInvestimento | 'PROVENTO' | '',
-): LinhaExtrato[] {
-  if (!tipoMov) return linhas
-  return tipoMov === 'PROVENTO'
-    ? linhas.filter((l) => l.categoria === 'PROVENTO')
-    : linhas.filter((l) => l.tipoOperacao === tipoMov)
+// Todos os 4 filtros (Tipo de ativo/Ativo/Tipo de movimentação/Conta) são
+// multi-seleção e aplicados em memória sobre o já buscado — Tipo de
+// movimentação e Conta nunca existiram como parâmetro de backend (nem
+// operações nem dividendos aceitam); Tipo de ativo/Ativo aceitariam um único
+// valor no backend, mas com múltipla seleção é mais simples manter os 4 no
+// mesmo padrão do que ensinar a API a filtrar por lista. Array vazio = sem
+// filtro (mostra tudo), mesmo critério usado na tela e na exportação.
+
+function filtrarPorTiposAtivo(linhas: LinhaExtrato[], tipos: TipoAtivoInvestimento[]): LinhaExtrato[] {
+  if (tipos.length === 0) return linhas
+  return linhas.filter((l) => l.tipoAtivo !== null && tipos.includes(l.tipoAtivo))
 }
 
-// Filtro "Conta" — não existe no backend (nem operações nem dividendos
-// aceitam conta_id como parâmetro); filtra em memória sobre o já buscado,
-// mesmo padrão do filtro "Tipo" acima.
-function filtrarPorConta(linhas: LinhaExtrato[], contaId: string): LinhaExtrato[] {
-  if (!contaId) return linhas
-  return linhas.filter((l) => l.contaId === contaId)
+function filtrarPorAtivos(linhas: LinhaExtrato[], ativoIds: string[]): LinhaExtrato[] {
+  if (ativoIds.length === 0) return linhas
+  return linhas.filter((l) => l.ativoId !== null && ativoIds.includes(l.ativoId))
+}
+
+function filtrarPorTiposMov(
+  linhas: LinhaExtrato[], tipos: (TipoOperacaoInvestimento | 'PROVENTO')[],
+): LinhaExtrato[] {
+  if (tipos.length === 0) return linhas
+  return linhas.filter((l) =>
+    l.categoria === 'PROVENTO' ? tipos.includes('PROVENTO') : l.tipoOperacao !== null && tipos.includes(l.tipoOperacao),
+  )
+}
+
+function filtrarPorContas(linhas: LinhaExtrato[], contaIds: string[]): LinhaExtrato[] {
+  if (contaIds.length === 0) return linhas
+  return linhas.filter((l) => l.contaId !== null && contaIds.includes(l.contaId))
+}
+
+// Aplica os 4 filtros em sequência — usado tanto pela tela quanto pela
+// exportação (períodos/datasets diferentes, mesmos critérios).
+function aplicarFiltros(
+  linhas: LinhaExtrato[],
+  f: { tiposAtivo: TipoAtivoInvestimento[]; ativoIds: string[]; tiposMov: (TipoOperacaoInvestimento | 'PROVENTO')[]; contaIds: string[] },
+): LinhaExtrato[] {
+  return filtrarPorContas(filtrarPorTiposMov(filtrarPorAtivos(filtrarPorTiposAtivo(linhas, f.tiposAtivo), f.ativoIds), f.tiposMov), f.contaIds)
 }
 
 export default function ExtratoInvestimentosPage() {
-  const [tipoAtivo, setTipoAtivo] = useState<TipoAtivoInvestimento | ''>('')
-  const [ativoId,   setAtivoId]   = useState('')
+  const [tiposAtivo, setTiposAtivo] = useState<TipoAtivoInvestimento[]>([])
+  const [ativoIds,   setAtivoIds]   = useState<string[]>([])
   // Tipo de MOVIMENTAÇÃO (compra/venda/aplicação/resgate/rendimento/provento)
   // — diferente do filtro "Tipo de ativo" acima. 'PROVENTO' é um valor
   // sintético (não existe em TipoOperacaoInvestimento): agrupa os proventos,
   // que não têm tipo_operacao próprio (vêm de inv_dividendos, não inv_operacoes).
-  const [tipoMov,   setTipoMov]   = useState<TipoOperacaoInvestimento | 'PROVENTO' | ''>('')
-  const [contaFiltro, setContaFiltro] = useState('')
+  const [tiposMov,   setTiposMov]   = useState<(TipoOperacaoInvestimento | 'PROVENTO')[]>([])
+  const [contaIds, setContaIds] = useState<string[]>([])
   // Lista paginada por mês (como o Extrato financeiro) em vez de um período
   // livre — evita carregar/rolar anos de movimentações de uma vez só.
   const [mes, setMes] = useState(mesAtual)
   const de  = `${mes}-01`
   const ate = ultimoDiaMes(mes)
 
-  // Lista de ativos pro seletor — já filtrada pelo tipo escolhido, pra não
-  // oferecer um ativo que não bate com o filtro de tipo ao lado.
-  const { ativos } = useInvestimentosAtivos(tipoAtivo ? { tipo: tipoAtivo } : {})
+  // Lista de ativos pro seletor "Ativo" — busca todos (múltipla seleção de
+  // Tipo de ativo não dá pra mandar como parâmetro único ao backend) e
+  // filtra em memória pelos tipos escolhidos, pra não oferecer um ativo que
+  // não bate com o filtro de tipo ao lado.
+  const { ativos } = useInvestimentosAtivos()
+  const ativosDisponiveis = useMemo(
+    () => (tiposAtivo.length > 0 ? ativos.filter((a) => tiposAtivo.includes(a.tipo_ativo)) : ativos),
+    [ativos, tiposAtivo],
+  )
   // Proventos não trazem o nome da conta embutido (diferente de operações) —
   // resolve pelo mapa de contas do usuário.
   const { contas } = useContas()
   const contaNomePorId = useMemo(() => new Map(contas.map((c) => [c.conta_id, c.nome])), [contas])
 
-  const filtroAtivo = ativoId ? { ativo_id: ativoId } : tipoAtivo ? { tipo_ativo: tipoAtivo } : {}
-  const { operacoes, loading: loadingOps, error: erroOps } = useInvestimentosOperacoes({
-    ...filtroAtivo, de, ate,
-  })
+  // Tipo de ativo/Ativo/Tipo de movimentação/Conta são filtrados em memória
+  // (ver `aplicarFiltros`) — só o mês (de/ate) vai pro backend de operações.
+  const { operacoes, loading: loadingOps, error: erroOps } = useInvestimentosOperacoes({ de, ate })
   // Dividendos não tem filtro de período no backend (dataset tipicamente bem
   // menor que operações) — filtra por data no cliente, junto com o merge.
-  const { dividendos, loading: loadingDiv, error: erroDiv } = useDividendos(filtroAtivo)
+  const { dividendos, loading: loadingDiv, error: erroDiv } = useDividendos()
 
   const loading = loadingOps || loadingDiv
   const error = erroOps ?? erroDiv
 
-  // Trocar o tipo pode invalidar o ativo selecionado (não pertence mais à
-  // lista filtrada) — limpa pra evitar um filtro de ativo "órfão" e confuso.
-  function mudarTipo(t: TipoAtivoInvestimento | '') {
-    setTipoAtivo(t)
-    setAtivoId('')
+  // Trocar os tipos pode invalidar ativos selecionados (não pertencem mais à
+  // lista filtrada) — poda pra evitar um filtro de ativo "órfão" e confuso.
+  function mudarTiposAtivo(tipos: TipoAtivoInvestimento[]) {
+    setTiposAtivo(tipos)
+    if (tipos.length === 0) return
+    const idsValidos = new Set(ativos.filter((a) => tipos.includes(a.tipo_ativo)).map((a) => a.id))
+    setAtivoIds((prev) => prev.filter((id) => idsValidos.has(id)))
   }
   // "Limpar filtros" não mexe no mês — isso é navegação/paginação, não um
   // filtro a limpar (equivalente ao Extrato financeiro, que também mantém
   // o mês ao limpar os demais filtros).
-  const temFiltro = !!(tipoAtivo || ativoId || tipoMov || contaFiltro)
-  function limparFiltros() { setTipoAtivo(''); setAtivoId(''); setTipoMov(''); setContaFiltro('') }
+  const temFiltro = tiposAtivo.length > 0 || ativoIds.length > 0 || tiposMov.length > 0 || contaIds.length > 0
+  function limparFiltros() { setTiposAtivo([]); setAtivoIds([]); setTiposMov([]); setContaIds([]) }
 
   // Exportação — período PRÓPRIO (não o mês paginado na tela): abre um
   // drawer pra escolher De/Até antes de gerar o arquivo. Mantém tipo de
@@ -194,20 +224,18 @@ export default function ExtratoInvestimentosPage() {
     setExportando(true)
     setErroExport(null)
     try {
-      const paramsBase = new URLSearchParams(filtroAtivo as Record<string, string>)
-      const paramsOps = new URLSearchParams(paramsBase)
-      paramsOps.set('de', expDe); paramsOps.set('ate', expAte)
+      const paramsOps = new URLSearchParams({ de: expDe, ate: expAte })
       const [resOps, resDiv] = await Promise.all([
         apiFetch<InvestimentoOperacao[]>(`/investimentos/operacoes?${paramsOps.toString()}`),
-        apiFetch<InvestimentoDividendo[]>(`/investimentos/dividendos?${paramsBase.toString()}`),
+        apiFetch<InvestimentoDividendo[]>('/investimentos/dividendos'),
       ])
       if (!resOps.ok) throw new Error(resOps.erro ?? 'Erro ao buscar movimentações')
       if (!resDiv.ok) throw new Error(resDiv.erro ?? 'Erro ao buscar proventos')
 
       const opsRaw = extrairLista<InvestimentoOperacao>(resOps.dados)
       const divRaw = extrairLista<InvestimentoDividendo>(resDiv.dados)
-      const linhasExport = filtrarPorConta(
-        filtrarPorTipoMov(montarLinhas(opsRaw, divRaw, contaNomePorId, expDe, expAte), tipoMov), contaFiltro,
+      const linhasExport = aplicarFiltros(
+        montarLinhas(opsRaw, divRaw, contaNomePorId, expDe, expAte), { tiposAtivo, ativoIds, tiposMov, contaIds },
       ).sort((a, b) => a.data.localeCompare(b.data)) // cronológico no arquivo (a tela é do mais recente pro mais antigo)
 
       if (linhasExport.length === 0) { setErroExport('Nada para exportar nesse período/filtro.'); return }
@@ -271,8 +299,10 @@ export default function ExtratoInvestimentosPage() {
   }, [navMes, modalExport])
 
   const linhas = useMemo<LinhaExtrato[]>(
-    () => filtrarPorConta(filtrarPorTipoMov(montarLinhas(operacoes, dividendos, contaNomePorId, de, ate), tipoMov), contaFiltro),
-    [operacoes, dividendos, contaNomePorId, de, ate, tipoMov, contaFiltro],
+    () => aplicarFiltros(
+      montarLinhas(operacoes, dividendos, contaNomePorId, de, ate), { tiposAtivo, ativoIds, tiposMov, contaIds },
+    ),
+    [operacoes, dividendos, contaNomePorId, de, ate, tiposAtivo, ativoIds, tiposMov, contaIds],
   )
 
   // Resumo do período/filtro atual: entradas e saídas somadas por moeda de
@@ -342,35 +372,29 @@ export default function ExtratoInvestimentosPage() {
       {/* Filtros */}
       <div className="flex items-end gap-3 flex-wrap mb-4 rounded-xl border border-white/10 bg-white/[0.02] p-4">
         <Field label="Tipo de ativo">
-          <SelectDark value={tipoAtivo} onChange={(e) => mudarTipo(e.target.value as TipoAtivoInvestimento | '')}
-            style={{ width: 'auto' }}>
-            <option value="">Todos os tipos</option>
-            {TIPOS_ATIVO_INV.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
-          </SelectDark>
+          <MultiSelect className="w-52" placeholder="Todos os tipos"
+            values={tiposAtivo} onChange={(v) => mudarTiposAtivo(v as TipoAtivoInvestimento[])}
+            options={TIPOS_ATIVO_INV.map((t) => ({ value: t, label: TIPO_ATIVO_LABEL[t] }))} />
         </Field>
         <Field label="Ativo">
-          <SelectDark value={ativoId} onChange={(e) => setAtivoId(e.target.value)} style={{ width: 'auto' }}>
-            <option value="">Todos os ativos</option>
-            {ativos.map((a) => <option key={a.id} value={a.id}>{a.ticker}</option>)}
-          </SelectDark>
+          <MultiSelect className="w-52" placeholder="Todos os ativos"
+            values={ativoIds} onChange={setAtivoIds}
+            options={ativosDisponiveis.map((a) => ({ value: a.id, label: a.ticker }))} />
         </Field>
         <Field label="Tipo Movimentação">
-          <SelectDark value={tipoMov} onChange={(e) => setTipoMov(e.target.value as TipoOperacaoInvestimento | 'PROVENTO' | '')}
-            style={{ width: 'auto' }}>
-            <option value="">Todas as movimentações</option>
-            {/* DIVIDENDO existe no enum mas não é usado na prática — proventos
-                vêm de inv_dividendos, não inv_operacoes (ver "Provento" abaixo). */}
-            {TIPOS_OPERACAO_INV.filter((t) => t !== 'DIVIDENDO').map((t) => (
-              <option key={t} value={t}>{TIPO_OPERACAO_LABEL[t]}</option>
-            ))}
-            <option value="PROVENTO">Provento</option>
-          </SelectDark>
+          <MultiSelect className="w-56" placeholder="Todas as movimentações"
+            values={tiposMov} onChange={(v) => setTiposMov(v as (TipoOperacaoInvestimento | 'PROVENTO')[])}
+            options={[
+              // DIVIDENDO existe no enum mas não é usado na prática — proventos
+              // vêm de inv_dividendos, não inv_operacoes (ver "Provento" abaixo).
+              ...TIPOS_OPERACAO_INV.filter((t) => t !== 'DIVIDENDO').map((t) => ({ value: t, label: TIPO_OPERACAO_LABEL[t] })),
+              { value: 'PROVENTO', label: 'Provento' },
+            ]} />
         </Field>
         <Field label="Conta">
-          <SelectDark value={contaFiltro} onChange={(e) => setContaFiltro(e.target.value)} style={{ width: 'auto' }}>
-            <option value="">Todas as contas</option>
-            {contas.map((c) => <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>)}
-          </SelectDark>
+          <MultiSelect className="w-52" placeholder="Todas as contas"
+            values={contaIds} onChange={setContaIds}
+            options={contas.map((c) => ({ value: c.conta_id, label: c.nome, cor: c.cor ?? undefined }))} />
         </Field>
         <Field label="Mês">
           <MonthPicker value={mes} onChange={setMes} />

@@ -8,6 +8,7 @@ import {
   Db, TIPOS_ATIVO, CRITERIOS_QUESTAO, PESOS_SUGERIDOS_POR_PERFIL,
   PESOS_PADRAO_CRITERIO, TIPO_ATIVO_LABEL_BR,
 } from "./shared.ts";
+import { buscarFatosRelevantesParaAtivo, descreverFatosRelevantes } from "./fatosRelevantes.ts";
 
 export function segmentoTipo(req: Request): string | null {
   const partes = new URL(req.url).pathname.split("/").filter(Boolean);
@@ -365,8 +366,15 @@ export function normalizarRespostas(raw: unknown, idsValidos: Set<string>): Reco
 
 // Um mentor avalia um ativo (1 chamada de IA). Nunca lança — devolve o
 // resultado com `erro` preenchido em caso de falha (não derruba o lote).
+//
+// `c` só é usado para buscar o contexto factual de Fatos Relevantes (FII) —
+// dado compartilhado, cacheado pelo cron `fatos-relevantes-diario` (ver
+// fatosRelevantes.ts). Falha/ausência desse contexto NUNCA impede a
+// avaliação — o mentor só perde esse reforço e segue com seu conhecimento
+// de mercado, como antes.
 export async function avaliarUmMentor(
-  mentor: { id: string; nome: string | null; provedor: string; modelo: string | null; apiKey: string },
+  c: Db,
+  mentor: { id: string; nome: string | null; provedor: string; modelo: string | null; apiKey: string; buscaWeb: boolean },
   ativo: Record<string, unknown>,
   perguntas: PerguntaAv[],
   pesos: Record<string, number>,
@@ -379,15 +387,32 @@ export async function avaliarUmMentor(
   const persona =
     "Você é um analista financeiro especializado em alocação de ativos de longo prazo (Buy and Hold). " +
     "Avalie o ativo informado respondendo ao questionário de auditoria. Para CADA pergunta, escolha o " +
-    "índice (0 a 4) da opção que melhor reflete a realidade do ativo — 0 = pior, 4 = melhor. Use seu " +
+    "índice (0 a 4) da opção que melhor reflete a realidade do ativo — 0 = pior, 4 = melhor. Priorize os " +
+    "Fatos Relevantes/Comunicados informados abaixo (se houver) sobre seu conhecimento de treinamento — " +
+    "eles são publicações oficiais recentes do próprio fundo/empresa. Na ausência deles, use seu " +
     "conhecimento de mercado sobre o ativo. Responda SOMENTE com um JSON válido (sem markdown, sem " +
     'comentários, sem texto fora do JSON) no formato exato: { "respostas": { "<id_da_pergunta>": indice_0_a_4 } }. ' +
     "Inclua TODAS as perguntas. Se não tiver dados sobre algum aspecto, escolha o índice mais neutro/conservador.";
   const perguntasTxt = perguntas.map((p) =>
     `- id "${p.id}" [${p.criterio}]: ${p.texto}\n  opções: ${p.opcoes.map((o, i) => `${i}=${o}`).join(" | ")}`
   ).join("\n");
+
+  // Contexto factual: só existe fonte cacheada pra FII (Fundos.NET). Falha
+  // silenciosa de propósito (ver comentário da função).
+  let blocoFatos = "";
+  if (ativo.tipo_ativo === "FII") {
+    try {
+      const ticker = String(ativo.ticker ?? "");
+      const fatos = await buscarFatosRelevantesParaAtivo(c, ticker, (ativo.nome as string | null) ?? null);
+      blocoFatos = descreverFatosRelevantes(fatos);
+    } catch (e) {
+      logError("Buscar fatos relevantes p/ mentor", e); // nunca derruba a avaliação
+    }
+  }
+
   const userMsg =
     `Ativo a avaliar:\n${descreverAtivo(ativo)}\n\n` +
+    (blocoFatos ? `${blocoFatos}\n\n` : "") +
     `Questionário (${perguntas.length} perguntas):\n${perguntasTxt}\n\n` +
     "Devolva agora o JSON com as respostas (índice 0..4) de TODAS as perguntas.";
 
@@ -398,6 +423,7 @@ export async function avaliarUmMentor(
       mensagens: [{ role: "user", content: userMsg }],
       maxTokens: 4000,
       modelo: mentor.modelo ?? undefined,
+      buscaWeb: mentor.buscaWeb,
     });
     const parsed = extrairJsonObj(bruto);
     const respostas = normalizarRespostas(parsed?.respostas ?? parsed, idsValidos);
@@ -450,7 +476,7 @@ export async function rotaAvaliacoes(c: Db, req: Request, m: string, userId: str
     const mentor = resMentores.mentores.find((x) => x.id === configId);
     if (!mentor) return erro("Mentor não encontrado", 404);
 
-    const r = await avaliarUmMentor(mentor, ativo, perguntas, pesos);
+    const r = await avaliarUmMentor(c, mentor, ativo, perguntas, pesos);
     return json({ dados: r });
   }
 

@@ -7,14 +7,113 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { X, Send, Trash2, Paperclip, Camera, Users, Info, Bot } from 'lucide-react'
+import { X, Send, Trash2, Paperclip, Camera, Users, Info, Bot, ChevronDown, Check } from 'lucide-react'
 import Mascote, { type MascoteNome, type MascotePose } from './Mascote'
 import { useChatMascote } from '../../hooks/useChatMascote'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
-import { useContextoIA, serializarContexto } from '../../context/ContextoIAContext'
+import { useContextoIA, serializarContexto, type ContextoIAEscopo } from '../../context/ContextoIAContext'
 import { useIAPreferencia } from '../../hooks/useIAPreferencia'
 import { provedorPorId, rotuloModelo } from '../../lib/iaProvedores'
 import { capturarTela } from '../../lib/screenshot'
+
+// Seletor compacto (dropdown com checkboxes) do recorte enviado à IA — ex.:
+// carteira inteira (nada marcado) × um ou mais tipos de ativo. Só faz
+// sentido quando o usuário de fato vai enviar os dados da tela: enquanto
+// `desabilitado`, fica visível mas travado (não adianta escolher um recorte
+// pra um envio que não vai acontecer).
+function SeletorEscopo({ opcoes, selecionados, onChange, desabilitado }: {
+  opcoes:       ContextoIAEscopo[]
+  selecionados: string[]
+  onChange:     (valores: string[]) => void
+  desabilitado: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Fecha o dropdown quando o campo é desabilitado (usuário desmarcou
+  // "Enviar dados desta tela") — mesmo padrão "derived state on prop
+  // change" usado no reset de `tituloAnterior` mais abaixo neste arquivo,
+  // evita o anti-pattern de setState síncrono dentro de um useEffect.
+  const [desabilitadoAnterior, setDesabilitadoAnterior] = useState(desabilitado)
+  if (desabilitado !== desabilitadoAnterior) {
+    setDesabilitadoAnterior(desabilitado)
+    if (desabilitado) setOpen(false)
+  }
+
+  useEffect(() => {
+    const fn = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', fn)
+    return () => document.removeEventListener('mousedown', fn)
+  }, [])
+
+  const label =
+    selecionados.length === 0 ? 'Carteira inteira'
+    : selecionados.length === 1 ? (opcoes.find((o) => o.valor === selecionados[0])?.label ?? selecionados[0])
+    : `${selecionados.length} tipos`
+
+  const toggle = (valor: string) =>
+    onChange(selecionados.includes(valor) ? selecionados.filter((v) => v !== valor) : [...selecionados, valor])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={desabilitado}
+        onClick={() => setOpen((o) => !o)}
+        title={desabilitado ? 'Marque “Enviar dados desta tela” para escolher o recorte' : 'O que enviar para a IA'}
+        className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[12px] font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        style={{ borderColor: 'var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
+      >
+        {label}
+        <ChevronDown size={11} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }} />
+      </button>
+
+      {open && !desabilitado && (
+        <div
+          className="absolute z-10 bottom-full mb-1 left-0 w-[200px] rounded-lg border shadow-xl overflow-hidden"
+          style={{ background: 'var(--bg-card)', borderColor: 'var(--border-subtle)' }}
+        >
+          {/* Lista com scroll próprio — abre pra CIMA (perto do fim do
+              drawer) e tem altura travada, então sem isso as opções de mais
+              embaixo ficavam fora da tela e sem jeito de rolar até elas. */}
+          <div className="max-h-[220px] overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => { onChange([]); setOpen(false) }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-[12.5px] hover:bg-white/5 transition-colors"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              <span className="w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0"
+                style={{ borderColor: selecionados.length === 0 ? '#00c896' : 'var(--border-subtle)', background: selecionados.length === 0 ? '#00c896' : 'transparent' }}>
+                {selecionados.length === 0 && <Check size={9} style={{ color: '#0a0f1a' }} />}
+              </span>
+              Carteira inteira
+            </button>
+            <div className="border-t" style={{ borderColor: 'var(--border-subtle)' }} />
+            {opcoes.map((o) => {
+              const sel = selecionados.includes(o.valor)
+              return (
+                <button
+                  key={o.valor}
+                  type="button"
+                  onClick={() => toggle(o.valor)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-left text-[12.5px] hover:bg-white/5 transition-colors"
+                  style={{ color: 'var(--text-primary)' }}
+                >
+                  <span className="w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0"
+                    style={{ borderColor: sel ? '#00c896' : 'var(--border-subtle)', background: sel ? '#00c896' : 'transparent' }}>
+                    {sel && <Check size={9} style={{ color: '#0a0f1a' }} />}
+                  </span>
+                  {o.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // Artigo definido por personagem (gênero do mascote, NÃO do apelido).
 // Arquiteta e Raposa são femininas — usam "a"; demais usam "o".
@@ -356,7 +455,7 @@ export default function ChatMascote({
         {/* Chips de anexos (contexto da página + screenshot) */}
         {(contextoPagina || screenshot) && (
           <div
-            className="px-3 pt-2 pb-1 flex flex-wrap gap-1.5 border-t"
+            className="px-3 pt-2 pb-1 flex flex-wrap items-center gap-1.5 border-t"
             style={{ borderColor: 'var(--border-subtle)' }}
           >
             {contextoPagina && (
@@ -390,6 +489,19 @@ export default function ChatMascote({
                 </span>
                 {anexarContexto && <X size={10}/>}
               </button>
+            )}
+            {/* Escopo do snapshot (ex.: carteira inteira × um ou mais tipos de
+                ativo) — vem logo depois do chip "Enviar dados desta tela",
+                só aparece quando a página oferece recortes alternativos, e
+                fica travado até esse chip ser ligado: escolher recorte pra
+                um envio que não vai acontecer só confunde. */}
+            {contextoPagina?.escopos && contextoPagina.escopos.length > 0 && (
+              <SeletorEscopo
+                opcoes={contextoPagina.escopos}
+                selecionados={contextoPagina.escopoSelecionado ?? []}
+                onChange={(v) => contextoPagina.aoMudarEscopo?.(v)}
+                desabilitado={!anexarContexto}
+              />
             )}
             {screenshot && (
               <button

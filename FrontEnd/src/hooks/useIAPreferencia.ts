@@ -22,6 +22,8 @@ export interface IAConfig {
   mascara:  string         // ex.: "sk-ant-...f4a2"
   nome?:    string | null
   modelo?:  string | null  // modelo escolhido (null → padrão do provedor)
+  /** Busca na web nativa (grounding) na avaliação de ativos por mentores — só claude/gpt/gemini. */
+  busca_web?: boolean
 }
 
 interface IAConfigsCol {
@@ -67,6 +69,7 @@ export function useIAPreferencia() {
     api_key:  string,
     nome?:    string,
     modelo?:  string | null,
+    buscaWeb?: boolean,
   ): Promise<{ ok: boolean; erro?: string }> => {
     const p = provedorPorId(provedor)
     if (!p) return { ok: false, erro: 'Provedor inválido.' }
@@ -80,6 +83,7 @@ export function useIAPreferencia() {
       api_key:  api_key.trim(),
       nome:     nome?.trim() || null,
       modelo:   modelo?.trim() || null,
+      busca_web: !!buscaWeb,
     })
     setSalvando(false)
     if (!r.ok || !r.dados) return { ok: false, erro: r.erro ?? 'Falha ao salvar.' }
@@ -90,7 +94,7 @@ export function useIAPreferencia() {
   /** Atualiza uma config existente. `api_key` vazia mantém a anterior. */
   const atualizar = useCallback(async (
     configId: string,
-    patch: { provedor?: string; api_key?: string; nome?: string | null; modelo?: string | null },
+    patch: { provedor?: string; api_key?: string; nome?: string | null; modelo?: string | null; busca_web?: boolean },
   ): Promise<{ ok: boolean; erro?: string }> => {
     if (patch.provedor) {
       const p = provedorPorId(patch.provedor)
@@ -105,6 +109,7 @@ export function useIAPreferencia() {
       api_key:  patch.api_key?.trim() || undefined,
       nome:     patch.nome === undefined ? undefined : (patch.nome ?? null),
       modelo:   patch.modelo === undefined ? undefined : (patch.modelo ?? null),
+      busca_web: patch.busca_web,
     })
     setSalvando(false)
     if (!r.ok || !r.dados) return { ok: false, erro: r.erro ?? 'Falha ao salvar.' }

@@ -3,6 +3,7 @@
 // Todas as páginas que importam daqui refletem automaticamente.
 import React, { useState, useEffect, useRef } from 'react'
 import { X, Check } from 'lucide-react'
+import { formatBRL, parsearValorBR } from '../../lib/utils'
 
 const CORES_SM = [
   '#00c896','#4da6ff','#f0b429','#7F77DD',
@@ -639,6 +640,39 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
     )
   }
 )
+
+// ── InputMoeda ────────────────────────────────────────────────
+// Campo de valor em R$ formatado. `type="number"` não aceita "R$"/pontos de
+// milhar (o navegador só permite dígitos e ponto decimal), então isto é um
+// input de TEXTO com um buffer local: enquanto o campo está focado mostra o
+// que o usuário está digitando (sem reformatar a cada tecla — evitaria bugs
+// de cursor pulando de posição); ao perder o foco, reformata em R$. A fonte
+// da verdade continua sendo `value`/`onChange` (number | null), como um
+// input controlado normal.
+export function InputMoeda({ value, onChange, className, ...rest }: {
+  value: number | null
+  onChange: (v: number | null) => void
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'>) {
+  const [focado, setFocado] = useState(false)
+  const [bruto,  setBruto]  = useState('')
+
+  const exibido = focado ? bruto : (value != null ? formatBRL(value) : '')
+
+  return (
+    <Input {...rest} type="text" inputMode="decimal" value={exibido} className={className}
+      onFocus={(e) => {
+        setFocado(true)
+        setBruto(value != null ? String(value).replace('.', ',') : '')
+        rest.onFocus?.(e)
+      }}
+      onBlur={(e) => { setFocado(false); rest.onBlur?.(e) }}
+      onChange={(e) => {
+        const v = e.target.value
+        setBruto(v)
+        onChange(v.trim() === '' ? null : parsearValorBR(v))
+      }} />
+  )
+}
 
 // ── SelectDark ────────────────────────────────────────────────
 // Apesar do nome histórico, segue o tema ativo: usa tokens semânticos

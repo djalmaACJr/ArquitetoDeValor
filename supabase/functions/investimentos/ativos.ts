@@ -59,6 +59,12 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
     if (erroResp) return erro(erroResp);
     const erroRF = validarCamposRF(body);
     if (erroRF) return erro(erroRF);
+    const erroFaixa = validarFaixaRF(body.rf_limite_faixa, body.rf_percentual_indice_2);
+    if (erroFaixa) return erro(erroFaixa);
+    const erroIndice = validarIndiceObrigatorio(
+      body.rf_indexador, body.rf_indice, body.rf_percentual_indice, body.rf_taxa_fixa,
+    );
+    if (erroIndice) return erro(erroIndice);
 
     if (body.ativo_pai && !(await ativoExiste(c, body.ativo_pai))) {
       return erro("ativo_pai não encontrado", 404);
@@ -79,6 +85,8 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
       rf_indice:            body.rf_indice ?? null,
       rf_percentual_indice: body.rf_percentual_indice ?? null,
       rf_taxa_fixa:         body.rf_taxa_fixa ?? null,
+      rf_limite_faixa:        body.rf_limite_faixa ?? null,
+      rf_percentual_indice_2: body.rf_percentual_indice_2 ?? null,
       rf_taxa:         body.rf_taxa ?? null,
       rf_emissor:      body.rf_emissor ?? null,
       rf_vencimento:   body.rf_vencimento ?? null,
@@ -112,7 +120,7 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
     // Estado dos campos que DEFINEM o valor de mercado da renda fixa, antes do
     // update — para detectar, depois, se a forma de rentabilidade mudou.
     const { data: antesRF } = await c.from("inv_ativos")
-      .select("tipo_ativo, rf_indexador, rf_taxa, rf_vencimento")
+      .select("tipo_ativo, rf_indexador, rf_taxa, rf_vencimento, rf_limite_faixa, rf_percentual_indice_2, rf_indice, rf_percentual_indice, rf_taxa_fixa")
       .eq("id", id).maybeSingle();
 
     if (body.tipo_ativo !== undefined && !TIPOS_ATIVO.includes(String(body.tipo_ativo))) {
@@ -131,12 +139,29 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
       "ticker", "nome", "tipo_ativo", "moeda", "descricao", "nota_usuario",
       "questionario_respostas", "ativo_pai",
       "rf_subtipo", "rf_indexador", "rf_indice", "rf_percentual_indice",
-      "rf_taxa_fixa", "rf_taxa", "rf_emissor",
+      "rf_taxa_fixa", "rf_limite_faixa", "rf_percentual_indice_2", "rf_taxa", "rf_emissor",
       "rf_vencimento", "rf_garantia_fgc", "rf_isento_ir", "fii_categoria",
       "acoes_subtipo", "cripto_rendimento_aa", "cripto_rendimento_inicio",
       "cripto_rendimento_periodicidade", "cotacao_automatica",
     ]);
     if (typeof campos.ticker === "string") campos.ticker = campos.ticker.trim().toUpperCase();
+
+    // Checa o par faixa/percentual2 no estado FINAL (existente + alterações),
+    // não só no body — um PUT parcial que só mexe num dos dois campos ainda
+    // precisa deixar o resultado consistente (mesma regra da constraint
+    // chk_inv_ativos_rf_faixa_par no banco).
+    const limiteFinal = "rf_limite_faixa" in campos ? campos.rf_limite_faixa : antesRF?.rf_limite_faixa;
+    const pct2Final    = "rf_percentual_indice_2" in campos ? campos.rf_percentual_indice_2 : antesRF?.rf_percentual_indice_2;
+    const erroFaixa = validarFaixaRF(limiteFinal, pct2Final);
+    if (erroFaixa) return erro(erroFaixa);
+
+    // Mesma lógica de estado FINAL (existente + alterações) usada acima pra faixa.
+    const indexadorFinal = "rf_indexador" in campos ? campos.rf_indexador : antesRF?.rf_indexador;
+    const indiceFinal     = "rf_indice" in campos ? campos.rf_indice : antesRF?.rf_indice;
+    const percIndiceFinal = "rf_percentual_indice" in campos ? campos.rf_percentual_indice : antesRF?.rf_percentual_indice;
+    const taxaFixaFinal   = "rf_taxa_fixa" in campos ? campos.rf_taxa_fixa : antesRF?.rf_taxa_fixa;
+    const erroIndice = validarIndiceObrigatorio(indexadorFinal, indiceFinal, percIndiceFinal, taxaFixaFinal);
+    if (erroIndice) return erro(erroIndice);
 
     const { data, error } = await c.from("inv_ativos").update(campos).eq("id", id).select().single();
     if (error) {
@@ -171,7 +196,9 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
       antesRF.tipo_ativo    !== data.tipo_ativo    ||
       antesRF.rf_indexador  !== data.rf_indexador  ||
       antesRF.rf_taxa       !== data.rf_taxa       ||
-      antesRF.rf_vencimento !== data.rf_vencimento
+      antesRF.rf_vencimento !== data.rf_vencimento ||
+      antesRF.rf_limite_faixa        !== data.rf_limite_faixa        ||
+      antesRF.rf_percentual_indice_2 !== data.rf_percentual_indice_2
     );
     if (mudouRF && (ehRFTipo(data.tipo_ativo) || ehRFTipo(antesRF?.tipo_ativo))) {
       try {
@@ -227,6 +254,32 @@ async function mensagemDuplicidade(
     `ajuste o identificador antes de salvar.`;
 }
 
+// rf_limite_faixa e rf_percentual_indice_2 (taxa escalonada por valor, ex.:
+// CDB "até R$10.000 = 120% CDI, acima = 100% CDI") são tudo-ou-nada — mesma
+// regra da constraint chk_inv_ativos_rf_faixa_par no banco.
+export function validarFaixaRF(limite: unknown, percentual2: unknown): string | null {
+  if ((limite != null) !== (percentual2 != null)) {
+    return "rf_limite_faixa e rf_percentual_indice_2 devem ser informados juntos";
+  }
+  return null;
+}
+
+// POS_FIXADO/HIBRIDO com taxa numérica (rf_percentual_indice ou rf_taxa_fixa)
+// exige rf_indice: sem ele, o rótulo rf_taxa (derivado em DrawerAtivo.rotuloTaxaRF
+// e usado como fonte do cálculo por primeiraTaxa() em mercado.ts) nunca é
+// montado — fica null — e o motor de renda fixa cai no fallback de 100% do
+// índice, ignorando o percentual configurado. Achado ago/2026: CDB cadastrado
+// sem rf_indice rendeu a 100% CDI em vez dos 120% configurados.
+export function validarIndiceObrigatorio(
+  indexador: unknown, indice: unknown, percentualIndice: unknown, taxaFixa: unknown,
+): string | null {
+  const usaTaxa = percentualIndice != null || taxaFixa != null;
+  if (usaTaxa && (indexador === "POS_FIXADO" || indexador === "HIBRIDO") && indice == null) {
+    return "rf_indice é obrigatório quando rf_percentual_indice ou rf_taxa_fixa é informado";
+  }
+  return null;
+}
+
 export function validarNota(nota: unknown): string | null {
   if (nota == null) return null;
   const n = Number(nota);
@@ -261,14 +314,14 @@ export function validarCamposRF(body: Record<string, unknown>): string | null {
   if (body.rf_indice != null && !INDICES_RF.includes(String(body.rf_indice))) {
     return `rf_indice inválido: ${INDICES_RF.join(" | ")}`;
   }
-  for (const campo of ["rf_percentual_indice", "rf_taxa_fixa"]) {
+  for (const campo of ["rf_percentual_indice", "rf_taxa_fixa", "rf_limite_faixa", "rf_percentual_indice_2"]) {
     const v = body[campo];
     if (v != null && (typeof v !== "number" || !Number.isFinite(v) || v < 0)) {
       return `${campo} deve ser um número ≥ 0`;
     }
   }
-  if (body.rf_taxa != null && String(body.rf_taxa).length > 40) {
-    return "rf_taxa deve ter no máximo 40 caracteres";
+  if (body.rf_taxa != null && String(body.rf_taxa).length > 80) {
+    return "rf_taxa deve ter no máximo 80 caracteres";
   }
   if (body.rf_emissor != null && String(body.rf_emissor).length > 80) {
     return "rf_emissor deve ter no máximo 80 caracteres";

@@ -345,7 +345,7 @@ Módulo maior do sistema. Migrations principais: `20260609000001_investimentos_f
 
 #### `inv_ativos`
 `id`, `user_id`, `ticker VARCHAR(20)`, `nome VARCHAR(120)`, `tipo_ativo (tipo_ativo_inv)`, `moeda VARCHAR(3) DEFAULT 'BRL'`, `descricao`, `nota_usuario NUMERIC(4,2) (0..10)`, `ativo_pai → inv_ativos` (agrupamento), `logo_url`, `setor TEXT` (bruto em inglês, via brapi), `questionario_respostas JSONB` (`{pergunta_id: índice 0..4}`).
-Campos condicionais por tipo: **Renda Fixa** — `rf_subtipo`, `rf_indexador`, `rf_indice (indice_rf)`, `rf_percentual_indice NUMERIC(7,3)` (ex. 110 = 110% do CDI), `rf_taxa_fixa NUMERIC(7,3)` (spread/prefixado), `rf_taxa VARCHAR(40)` (texto livre legado), `rf_emissor`, `rf_vencimento DATE`, `rf_garantia_fgc`, `rf_isento_ir`. **FII** — `fii_categoria (categoria_fii)`. **Ações** — `acoes_subtipo (acoes_subtipo)`. **Cripto** — `cripto_rendimento_aa NUMERIC(8,4)` (%a.a.), `cripto_rendimento_inicio DATE` (default = 1º aporte), `cripto_rendimento_periodicidade` (`DIARIA|SEMANAL|MENSAL`, só afeta a base de composição — materialização é sempre semanal).
+Campos condicionais por tipo: **Renda Fixa** — `rf_subtipo`, `rf_indexador`, `rf_indice (indice_rf)`, `rf_percentual_indice NUMERIC(7,3)` (ex. 110 = 110% do CDI), `rf_taxa_fixa NUMERIC(7,3)` (spread/prefixado), `rf_limite_faixa NUMERIC(15,2)` + `rf_percentual_indice_2 NUMERIC(7,3)` (taxa escalonada por valor aplicado, ex. CDB "até R$10.000 = 120% CDI, acima = 100% CDI" — tudo-ou-nada, `chk_inv_ativos_rf_faixa_par`, só no pós-fixado "% do índice"; ver `BUSINESS_RULES.md`), `rf_taxa VARCHAR(40)` (texto livre legado), `rf_emissor`, `rf_vencimento DATE`, `rf_garantia_fgc`, `rf_isento_ir`. **FII** — `fii_categoria (categoria_fii)`. **Ações** — `acoes_subtipo (acoes_subtipo)`. **Cripto** — `cripto_rendimento_aa NUMERIC(8,4)` (%a.a.), `cripto_rendimento_inicio DATE` (default = 1º aporte), `cripto_rendimento_periodicidade` (`DIARIA|SEMANAL|MENSAL`, só afeta a base de composição — materialização é sempre semanal).
 `UNIQUE(user_id, ticker)`.
 ⚠️ Código referencia tipo `REIT` que não existe em `tipo_ativo_inv` — ver "Pontos de atenção".
 
@@ -392,6 +392,7 @@ Cache compartilhado (sem `user_id`) de composição de ETF: PK `(etf_ticker, hol
 | `cotacoes_ativos` | `(ticker, mes_ano)` | preço mensal cacheado | brapi / Yahoo Finance / CoinGecko |
 | `indices_economicos` | `(indice, competencia)` | `IPCA\|SELIC\|CDI` mensal (%) | SGS (BCB) |
 | `cotacoes_tesouro` | `(tipo_titulo, vencimento, mes_ano)` | PU/taxa de venda (só títulos com marcação a mercado) | Tesouro Transparente (STN) |
+| `inv_fatos_relevantes` | `id` (doc do Fundos.NET) | Fato Relevante/Comunicado de FII: fundo, categoria, resumo, data, url do PDF | Fundos.NET (B3) |
 
 #### View `vw_inv_ultimo_mercado`
 `DISTINCT ON (user_id, ativo_id, conta_id)` sobre `inv_historico_mensal` ordenado por `mes_ano DESC` — só o snapshot mais recente por par.
@@ -482,7 +483,7 @@ Motivação: achado real em produção — `rendimento-cripto-diario` ficou **fa
 
 `fn_verificar_saude_cron()` — `SECURITY DEFINER`, SQL puro (sem `pg_net`/Vault, de propósito — não teria sentido o detector de "cron não consegue nem começar por causa do pg_net/Vault" ter a mesma dependência frágil). Lê `cron.job_run_details` (log nativo do `pg_cron`, já existe, nenhuma tabela nossa) das últimas ~26h, e para cada falha aí encontrada faz `INSERT` em `cron_execucoes` como uma linha `status='erro'` normal — mesma tabela/tela (`/admin/crons`) que já existia, sem superfície nova. Dedup por `(job_nome, executado_em)`: não duplica se a janela de 26h se sobrepuser entre execuções diárias. Também grava seu próprio resultado (`sucesso`, `resumo: {falhas_detectadas: N}`) — visível como qualquer outro job.
 
-Agendado `0 11 * * *` (08h BRT) — depois de todos os outros 6 jobs do dia, pra já pegar qualquer falha da manhã.
+Agendado `0 11 * * *` (08h BRT) — depois de todos os outros 7 jobs do dia, pra já pegar qualquer falha da manhã.
 
 #### Aviso de login pros admins (`usuarios.cron_avisos_vistos_em`)
 
@@ -572,9 +573,11 @@ A rota `/investimentos/rendimento-cripto-cron` é agendada por `20260625000005_c
 
 A rota `/investimentos/cupom-tesouro-cron` é agendada por `20260821000001_cron_cupom_tesouro.sql` (job `cupom-tesouro-diario`, `30 10 * * *` = 07h30 BRT, diário) — provisiona pagamento de cupom semestral de títulos "com Juros Semestrais" do Tesouro Direto, fonte Tesouro Transparente/STN (CSV público, `baixarCupomTesouro()` em `mercado.ts`). Diferente dos 4 crons de dividendos de ações: só processa eventos **futuros** (`data_resgate >= hoje`, sem janela retroativa) — cupons já pagos o usuário já lança na mão, e reconciliar retroativamente arriscaria sobrescrever correção manual. Ver `provisionarCupomTesouro` em `dividendos.ts`.
 
+A rota `/investimentos/fatos-relevantes-cron` é agendada por `20260827000003_inv_fatos_relevantes.sql` (job `fatos-relevantes-diario`, `45 10 * * *` = 07h45 BRT, diário) — cacheia em `inv_fatos_relevantes` (tabela compartilhada, sem `user_id`) os Fatos Relevantes/Comunicados ao Mercado recentes de FIIs publicados no Fundos.NET (B3), usados como contexto factual na avaliação de ativos por mentores de IA. Ver `fatosRelevantes.ts` e BUSINESS_RULES.md § "Avaliação de ativos por mentores de IA".
+
 Um 6º job, **`trilha-auditoria-purge-diario`** (`0 8 * * *` = 05h BRT), difere dos demais: não chama nenhuma Edge Function via `pg_net` — roda `SELECT arqvalor.fn_purgar_trilha_auditoria()` direto no Postgres (puro `DELETE` por data, sem fonte externa). Ver seção "Retenção rotativa" acima.
 
-Um 7º job, **`cron-saude-diario`** (`0 11 * * *` = 08h BRT, `20260821000002_cron_saude.sql`), monitora os OUTROS 6 — também SQL puro, de propósito (ver seção "Monitoramento de falha antes da Edge Function" abaixo).
+Um 8º job, **`cron-saude-diario`** (`0 11 * * *` = 08h BRT, `20260821000002_cron_saude.sql`), monitora os OUTROS 7 — também SQL puro, de propósito (ver seção "Monitoramento de falha antes da Edge Function" abaixo).
 
 ### Row Level Security
 
@@ -725,6 +728,8 @@ Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já 
 - `20260806000007_hardening_fn_remover_usuario.sql` — **AUD-12 residual**: recria `fn_remover_usuario` (trigger BEFORE DELETE em `auth.users`) pra delegar em `fn_excluir_dados_usuario(OLD.id)` em vez de um `DELETE FROM usuarios` cru sem ordem FK-safe — torna qualquer caminho de exclusão de usuário seguro (Dashboard, script administrativo), não só o fluxo padrão do app
 - `20260820000001_trilha_auditoria_extensao.sql` — estende `trg_trilha_auditoria` de `transacoes`/`inv_operacoes` (escopo original de `20260806000004`) para praticamente todo o resto do sistema (`contas`, `categorias`, `lembretes`, `filtros_salvos`, `assistente_lancamentos`, `objetivos`, `inv_ativos`, `inv_alocacoes_tipo`, `inv_posicoes`, `inv_dividendos`, `inv_historico_mensal`, `inv_tipos_dividendo`, `inv_questionarios`, `inv_avaliacoes`, `fatura_import_sessao`, `fatura_import_item`); adiciona policy `trilha_auditoria_admin_select` (admin vê a trilha de todos); recria `fn_excluir_dados_usuario` incluindo as tabelas novas no bloco DISABLE/ENABLE TRIGGER USER. Consumida por `GET /auditoria` (`supabase/functions/auditoria/`) e exibida em `/admin/auditoria`
 - `20260820000002_trilha_auditoria_retencao.sql` — tabela singleton `config_auditoria` (`retencao_dias`, padrão 365, editável só por admin) + `fn_purgar_trilha_auditoria()` (apaga trilha mais antiga que a retenção configurada, loga em `cron_execucoes`) + agendamento pg_cron diário `trilha-auditoria-purge-diario` (sem `pg_net` — SQL puro). Exposta por `GET`/`PUT /auditoria/config`, editável no painel de `AdminAuditoriaPage.tsx`
+- `20260827000001_inv_rf_faixa_taxa.sql` — colunas `rf_limite_faixa`/`rf_percentual_indice_2` em `inv_ativos` (taxa escalonada por valor aplicado, ex. CDB "até R$10.000 = 120% CDI, acima = 100% CDI") + constraint `chk_inv_ativos_rf_faixa_par` (tudo-ou-nada). Cálculo progressivo por lote de posição em `valorRFPosicoes` (`mercado.ts`) — ver `BUSINESS_RULES.md` § "Renda fixa — taxa escalonada por faixa de valor"
+- `20260827000003_inv_fatos_relevantes.sql` — tabela compartilhada `inv_fatos_relevantes` (cache de Fatos Relevantes/Comunicados de FIIs do Fundos.NET/B3, mesmo padrão de `cotacoes_ativos`: sem `user_id`, leitura liberada a `authenticated`, escrita só `service_role`) + agendamento pg_cron `fatos-relevantes-diario` (`45 10 * * *` = 07h45 BRT) chamando `POST /investimentos/fatos-relevantes-cron`. Ver `fatosRelevantes.ts` e BUSINESS_RULES.md § "Avaliação de ativos por mentores de IA"
 
 ⚠️ **Confira o status de aplicação antes de assumir que as migrations abaixo já rodaram em produção** — a nota original (2026-08-06) dizia que as 5 migrations `20260806000003`–`20260806000007` (fase de remediação da auditoria, AUD-01/03/04/06/12) ainda não tinham sido aplicadas; `20260820000001` (acima) depende de `20260806000004` já estar aplicada (estende o mesmo trigger) — aplique ambas juntas, na ordem, se nenhuma das duas rodou ainda. — escritas, com `deno check` limpo, mas pendentes de `supabase db push`/SQL Editor. O código Deno que depende delas (`comIdempotencia`, `hojeBR`/`mesCorrenteBR`) já está preparado pra rodar sem elas também (fail-open), então o deploy das Edge Functions não quebra nada mesmo antes das migrations serem aplicadas — mas os ganhos (timezone correto, trilha de auditoria, idempotência efetiva, CRESCIMENTO reconciliado, exclusão de usuário robusta) só valem depois de aplicadas.
 

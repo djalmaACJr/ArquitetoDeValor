@@ -147,7 +147,12 @@ export function primeiroDiaAnoAtual(hoje: string): string {
 // atual == início do ano) — resto do ano usa o snapshot mensal normalmente,
 // sem precisar de busca ao vivo. Ressalva aceita (mesma janela estreita que
 // "Mês"/"Semestre" já têm em janeiro-adjacentes).
-export const PERIODOS_RANKING = ["SEMANA", "MES_ATUAL", "MES", "SEMESTRE", "ANO_ATUAL", "ANO", "TUDO"] as const;
+// DOIS_ANOS/CINCO_ANOS: adicionados pro quadro "Rentabilidade" de Destaques
+// (histórico multi-ano) — caem no mesmo caminho de SEMESTRE/ANO (cache
+// mensal, sem busca diária ao vivo), só com uma janela maior.
+export const PERIODOS_RANKING = [
+  "SEMANA", "MES_ATUAL", "MES", "SEMESTRE", "ANO_ATUAL", "ANO", "DOIS_ANOS", "CINCO_ANOS", "TUDO",
+] as const;
 export type PeriodoRanking = typeof PERIODOS_RANKING[number];
 
 // Data de início do período, ou null para TUDO (sem recorte — usa a compra).
@@ -159,6 +164,8 @@ export function inicioPeriodoRanking(periodo: PeriodoRanking, hoje: string): str
     case "SEMESTRE":   return recuarMeses(hoje, 6);
     case "ANO_ATUAL":  return primeiroDiaAnoAtual(hoje);
     case "ANO":        return recuarMeses(hoje, 12);
+    case "DOIS_ANOS":  return recuarMeses(hoje, 24);
+    case "CINCO_ANOS": return recuarMeses(hoje, 60);
     default:           return null;
   }
 }

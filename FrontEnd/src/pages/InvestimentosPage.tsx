@@ -26,6 +26,7 @@ import InvestimentosNav from '../components/ui/InvestimentosNav'
 import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_INVESTIMENTOS } from '../lib/tutoriaisPaginas'
 import { linhaDeRanking, type AtivoLinha } from '../lib/ativosLinha'
+import { acumularGanhoInicioPorMes, type AccGanhoInicio } from '../lib/rentabilidadeComposta'
 import { formatBRL } from '../lib/utils'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
@@ -179,15 +180,27 @@ function CardsResumo({ d, proventos12m }: {
 // ── Evolução do Patrimônio (barras empilhadas) ────────────────
 
 const PERIODOS = [
-  { value: '6',  label: '6 Meses' },
-  { value: '12', label: '12 Meses' },
-  { value: '24', label: '24 Meses' },
+  { value: '6',    label: '6 Meses' },
+  { value: '12',   label: '12 Meses' },
+  { value: '24',   label: '24 Meses' },
+  { value: 'TUDO', label: 'Desde o início' },
 ]
 
+// Δ vs mês anterior de UM mês, líquido de fluxo de aporte/resgate (nunca a
+// diferença simples entre os valores de mercado de dois meses — ver
+// lib/rentabilidadeComposta.ts). null = sem "mês anterior" válido (1º mês da
+// série, ou nenhuma posição do grupo filtrado naquele mês).
+type DeltaMes = { diff: number; pct: number } | null
+
 // Plugin: desenha abaixo de cada coluna os valores de cada série (aplicado /
-// ganho) nas cores do gráfico, e uma linha de total (soma das séries = valor
-// de mercado) em destaque — funciona como "legenda" no eixo X, pra não
-// precisar passar o mouse só pra ler os números.
+// ganho) nas cores do gráfico, uma linha de total (soma das séries = valor
+// de mercado) em destaque, e a diferença vs o mês anterior — funciona como
+// "legenda" no eixo X, pra não precisar passar o mouse só pra ler os
+// números. A diferença mês a mês (não só a do bloco de resumo acima, que só
+// cobre o último mês) fica visível pra CADA coluna da série exibida.
+// Os deltas vêm PRONTOS via `options.plugins.valoresEixoX.deltas` (calculados
+// no componente a partir de rentabilidade_mes/variacao_percentual) — o plugin
+// só desenha, não recalcula diferença de valor de mercado ele mesmo.
 const valoresEixoX = {
   id: 'valoresEixoX',
   afterDatasetsDraw(chart: ChartJS) {
@@ -195,6 +208,8 @@ const valoresEixoX = {
     if (!x) return
     const { ctx } = chart
     const labels = chart.data.labels as string[]
+    const deltas = (chart.options.plugins as { valoresEixoX?: { deltas: DeltaMes[] } } | undefined)
+      ?.valoresEixoX?.deltas
     const larguraCategoria = x.width / labels.length
     ctx.save()
     ctx.textAlign = 'right'
@@ -212,6 +227,15 @@ const valoresEixoX = {
       ctx.font = '700 11px system-ui, sans-serif'
       ctx.fillStyle = '#fff'
       ctx.fillText(fmtCompacto(total), rightEdge, baseY + chart.data.datasets.length * 14 + 4)
+      // Δ vs mês anterior, logo abaixo do Total — R$ numa linha, % na linha
+      // seguinte. 1º mês da série não tem anterior pra comparar.
+      const d = deltas?.[i]
+      if (d) {
+        ctx.font = '600 10px system-ui, sans-serif'
+        ctx.fillStyle = corValor(d.diff)
+        ctx.fillText(`${d.diff >= 0 ? '+' : ''}${fmtCompacto(d.diff)}`, rightEdge, baseY + chart.data.datasets.length * 14 + 18)
+        ctx.fillText(fmtPct(d.pct), rightEdge, baseY + chart.data.datasets.length * 14 + 31)
+      }
     })
     ctx.restore()
   },
@@ -223,31 +247,44 @@ function EvolucaoPatrimonio({ contaId }: { contaId: string | null }) {
   const { historico } = useInvestimentosHistorico(contaId ? { conta_id: contaId } : {})
 
   // Por mês: valor aplicado (qtd × preço médio) e ganho de capital (mercado − aplicado)
+  const historicoFiltrado = useMemo(
+    () => (tipo ? historico.filter((h) => h.inv_ativos?.tipo_ativo === tipo) : historico),
+    [historico, tipo],
+  )
   const meses = useMemo(() => {
     const porMes = new Map<string, { aplicado: number; mercado: number }>()
-    for (const h of historico) {
-      if (tipo && h.inv_ativos?.tipo_ativo !== tipo) continue
+    for (const h of historicoFiltrado) {
       const m = porMes.get(h.mes_ano) ?? { aplicado: 0, mercado: 0 }
       m.aplicado += Number(h.quantidade) * Number(h.preco_medio)
       m.mercado  += Number(h.valor_mercado)
       porMes.set(h.mes_ano, m)
     }
-    return [...porMes.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .slice(-Number(periodo))
-  }, [historico, tipo, periodo])
+    const ordenados = [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b))
+    return periodo === 'TUDO' ? ordenados : ordenados.slice(-Number(periodo))
+  }, [historicoFiltrado, periodo])
 
-  // Diferença simples de um mês pro outro (valor de mercado).
+  // Ganho R$ e valor de início por mês, LÍQUIDOS de fluxo de aporte/resgate
+  // (Σ de todas as posições do grupo antes de qualquer divisão — nunca a
+  // diferença simples de valor_mercado entre dois meses, que mistura ganho
+  // de verdade com dinheiro entrando/saindo). Mesma técnica de
+  // lib/rentabilidadeComposta.ts (usada em QuadroRentabilidadeIndices/
+  // ranking do backend) — um aporte grande no mês não pode mais inflar o Δ
+  // mostrado aqui.
+  const ganhoInicioPorMes = useMemo(() => acumularGanhoInicioPorMes(historicoFiltrado), [historicoFiltrado])
+  const deltasPorMes = useMemo<DeltaMes[]>(() => meses.map(([mes]) => {
+    const acc: AccGanhoInicio | undefined = ganhoInicioPorMes.get(mes)
+    return acc && acc.inicio > 0 ? { diff: acc.ganho, pct: (acc.ganho / acc.inicio) * 100 } : null
+  }), [meses, ganhoInicioPorMes])
+
   const deltaMes = useMemo(() => {
     if (meses.length < 2) return null
-    const atual    = meses[meses.length - 1][1].mercado
-    const anterior = meses[meses.length - 2][1].mercado
-    const diff = atual - anterior
+    const ultimo = deltasPorMes[deltasPorMes.length - 1]
+    if (!ultimo) return null
     return {
       mesAtual: meses[meses.length - 1][0], mesAnterior: meses[meses.length - 2][0],
-      diff, pct: anterior > 0 ? (diff / anterior) * 100 : 0,
+      diff: ultimo.diff, pct: ultimo.pct,
     }
-  }, [meses])
+  }, [meses, deltasPorMes])
 
   return (
     <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 lg:col-span-2">
@@ -269,9 +306,10 @@ function EvolucaoPatrimonio({ contaId }: { contaId: string | null }) {
         </div>
       </div>
 
-      {/* Diferença simples do mês + atalho pros destaques (quem mais puxou
-          a alta/baixa) — pedido explícito: "de forma simples" a variação
-          mês a mês, sem precisar ler o gráfico empilhado. */}
+      {/* Δ do mês (líquido de fluxo, ver deltasPorMes) + atalho pros destaques
+          (quem mais puxou a alta/baixa) — pedido explícito: "de forma
+          simples" a variação mês a mês, sem precisar ler o gráfico
+          empilhado. */}
       {deltaMes && (
         <div className="flex items-center justify-between gap-3 flex-wrap mb-3 px-3 py-2 rounded-lg bg-white/[0.03]">
           <span className="text-[13px]" style={{ color: MUTED }}>
@@ -324,10 +362,12 @@ function EvolucaoPatrimonio({ contaId }: { contaId: string | null }) {
             // "Total"), que existiam antes e voltaram a pedido.
             maintainAspectRatio: true,
             aspectRatio: 2.4,
-            // bottom: espaço pras linhas por série + total desenhadas por valoresEixoX.
-            layout: { padding: { bottom: 60 } },
+            // bottom: espaço pras linhas por série + total + Δ mês anterior (R$ e %) desenhadas por valoresEixoX.
+            layout: { padding: { bottom: 86 } },
             interaction: { mode: 'index', intersect: false },
             plugins: {
+              // @ts-expect-error — opções do plugin custom valoresEixoX, não fazem parte do tipo padrão do Chart.js
+              valoresEixoX: { deltas: deltasPorMes },
               legend: { display: true, position: 'top', labels: { color: MUTED, boxWidth: 12, font: { size: 11 } } },
               tooltip: {
                 mode: 'index', intersect: false,
@@ -346,12 +386,26 @@ function EvolucaoPatrimonio({ contaId }: { contaId: string | null }) {
                     return `${String(ctx.dataset.label).padEnd(maxRotulo)}: ${formatBRL(Number(ctx.parsed.y)).padStart(maxValor)}`
                   },
                   footer: (items) => {
-                    const maxRotulo = Math.max('Total'.length, ...items.map((it) => String(it.dataset.label).length))
+                    // Δ vs mês anterior: mesma info do bloco de resumo acima do
+                    // gráfico (que só cobre o último mês) e das linhas desenhadas
+                    // por valoresEixoX, mas com o valor exato + % — pra QUALQUER
+                    // mês da série, não só o mais recente. Vem de deltasPorMes
+                    // (líquido de fluxo), não de uma subtração ponta-a-ponta.
+                    const idx = items[0]?.dataIndex ?? 0
+                    const d = deltasPorMes[idx] ?? null
+                    const rotulos = ['Total', ...(d ? ['Δ mês ant.'] : [])]
+                    const maxRotulo = Math.max(...rotulos.map((r) => r.length), ...items.map((it) => String(it.dataset.label).length))
                     const valores = items.map((it) => formatBRL(Number(it.parsed.y)))
                     const maxValor = Math.max(...valores.map((v) => v.length))
                     const total = items.reduce((s, it) => s + Number(it.parsed.y), 0)
                     const largura = maxRotulo + 2 + maxValor
-                    return ['='.repeat(largura), `${'Total'.padEnd(maxRotulo)}: ${formatBRL(total).padStart(maxValor)}`]
+                    const linhas = ['='.repeat(largura), `${'Total'.padEnd(maxRotulo)}: ${formatBRL(total).padStart(maxValor)}`]
+                    if (d) {
+                      const valorDiff = `${d.diff >= 0 ? '+' : ''}${formatBRL(d.diff)}`
+                      linhas.push(`${'Δ mês ant.'.padEnd(maxRotulo)}: ${valorDiff.padStart(maxValor)}`)
+                      linhas.push(`${' '.repeat(maxRotulo + 2)}${fmtPct(d.pct).padStart(maxValor)}`)
+                    }
+                    return linhas
                   },
                 },
               },
@@ -552,6 +606,10 @@ function DividendosPorMes({ dividendos }: { dividendos: { data_pagamento: string
 
 export default function InvestimentosPage() {
   const [contaId, setContaId] = useState<string>('')
+  // Escopo do snapshot enviado ao mentor (chat da IA): carteira inteira
+  // (nenhum tipo marcado, default) ou um ou mais tipos de ativo — ver
+  // seletor (checkboxes) em ChatMascote.
+  const [escopoIA, setEscopoIA] = useState<TipoAtivoInvestimento[]>([])
   // Sinal de foco disparado ao clicar numa fatia do gráfico "Ativos na Carteira"
   const [foco, setFoco] = useState<{ tipo: TipoAtivoInvestimento; n: number } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -733,29 +791,55 @@ export default function InvestimentosPage() {
   }, [dividendos])
 
   // ── Snapshot pra IA ───────────────────────────────────────────────────────
+  // Escopos oferecidos no chat: um item por tipo de ativo presente na
+  // carteira (dashboard já só traz tipos com posição). Nenhum marcado =
+  // carteira inteira — ver checkboxes em ChatMascote > SeletorEscopo.
+  const escoposIA = useMemo(
+    () => (dashboard?.tipos ?? []).map((t) => ({ valor: t.tipo_ativo, label: TIPO_ATIVO_LABEL[t.tipo_ativo] })),
+    [dashboard],
+  )
+
   useRegistrarContextoIA(useMemo(() => {
     const tiposD = dashboard?.tipos ?? []
     if (loading || tiposD.length === 0) return null
+
+    // Descarta da seleção tipos que sumiram da carteira atual (ex.: trocou
+    // o filtro de conta) — evita mandar pro mentor um tipo que já não existe
+    // nesta visão. Recorte ativo só quando sobra pelo menos 1 tipo válido.
+    const selecionados = escopoIA.filter((t) => tiposD.some((td) => td.tipo_ativo === t))
+    const recortado = selecionados.length > 0
+    const tiposFiltrados = recortado ? tiposD.filter((t) => selecionados.includes(t.tipo_ativo)) : tiposD
+    const destaquesFiltrados = (ranking?.ativos ?? []).filter((a) => !recortado || selecionados.includes(a.tipo_ativo))
+    const labelEscopo = recortado ? tiposFiltrados.map((t) => TIPO_ATIVO_LABEL[t.tipo_ativo]).join(' + ') : 'Carteira inteira'
+    // Resumo consolidado: soma só dos tipos selecionados quando há recorte
+    // (senão usa direto os totais do dashboard, já vindos prontos do backend).
+    const somar = (campo: 'valor_custo' | 'valor_mercado' | 'ganho_perda' | 'dividendos') =>
+      tiposFiltrados.reduce((s, t) => s + t[campo], 0)
+
     return {
       titulo:    'Investimentos · Painel',
-      descricao: 'Resumo consolidado da carteira por tipo de ativo',
+      descricao: recortado ? `Resumo da carteira restrito a ${labelEscopo}` : 'Resumo consolidado da carteira por tipo de ativo',
+      escopos:            escoposIA,
+      escopoSelecionado:  selecionados,
+      aoMudarEscopo:      (v) => setEscopoIA(v as TipoAtivoInvestimento[]),
       dados: {
         conta_filtro:               contaId || 'todas',
-        total_investido:            dashboard?.total_custo ?? 0,
-        total_mercado:              dashboard?.total_mercado ?? 0,
-        ganho_capital:              dashboard?.ganho_perda ?? 0,
-        dividendos_totais:          dashboard?.total_dividendos ?? 0,
-        proventos_ultimos_12_meses: proventos12m,
-        composicao_por_tipo: tiposD.map((t) => ({
+        escopo:                     labelEscopo,
+        total_investido:            recortado ? somar('valor_custo')   : (dashboard?.total_custo ?? 0),
+        total_mercado:              recortado ? somar('valor_mercado') : (dashboard?.total_mercado ?? 0),
+        ganho_capital:              recortado ? somar('ganho_perda')   : (dashboard?.ganho_perda ?? 0),
+        dividendos_totais:          recortado ? somar('dividendos')    : (dashboard?.total_dividendos ?? 0),
+        ...(recortado ? {} : { proventos_ultimos_12_meses: proventos12m }),
+        composicao_por_tipo: tiposFiltrados.map((t) => ({
           tipo: t.tipo_ativo, valor_mercado: t.valor_mercado, percentual: t.percentual_atual,
         })),
-        destaques: (ranking?.ativos ?? []).slice(0, 15).map((a) => ({
+        destaques: destaquesFiltrados.slice(0, 15).map((a) => ({
           ticker: a.ticker, tipo: a.tipo_ativo, rentabilidade_pct: a.rentabilidade_pct,
           dividend_yield_pct: a.dividend_yield_pct, participacao_pct: a.participacao_pct,
         })),
       },
     }
-  }, [loading, dashboard, ranking, proventos12m, contaId]))
+  }, [loading, dashboard, ranking, proventos12m, contaId, escopoIA, escoposIA]))
 
   if (loading) return <LoadingMascote />
 

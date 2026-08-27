@@ -13,7 +13,7 @@ import {
   carregarTesouroMtM, valorRFPosicoes, sincronizarTesouro, ptaxPorMesMap,
   fimSerieRF, resolverHistoricoCotado, resolverHistoricoCripto, gravarCacheDiario,
   INDICES_DATA_CORTE, TESOURO_DATA_CORTE,
-  baixarCupomTesouro, datasCupomParaAtivo, tesouroSemestral, type CupomTesouro,
+  baixarCupomTesouro, datasCupomParaAtivo, tesouroSemestral, type CupomTesouro, type FaixaRF,
 } from "./mercado.ts";
 import { fecharPosicoesVencidas } from "./posicoes.ts";
 
@@ -204,7 +204,16 @@ export async function gravarSnapshot(
 export interface GrupoPosicao {
   ativoId: string; contaId: string; ticker: string; nome: string; tipo: string; moeda: string;
   indexador: string | null; taxa: string | null; vencimento: string | null;
+  faixa: FaixaRF | null;
   posicoes: { quantidade: number; valor_custo: number; data_compra: string }[];
+}
+
+// Taxa escalonada (rf_limite_faixa/rf_percentual_indice_2) do registro cru de
+// inv_ativos vindo do join — null quando o ativo não usa faixa (caso comum).
+function faixaDoAtivo(a: Record<string, unknown>): FaixaRF | null {
+  const limite = a.rf_limite_faixa != null ? Number(a.rf_limite_faixa) : null;
+  const pct2   = a.rf_percentual_indice_2 != null ? Number(a.rf_percentual_indice_2) : null;
+  return limite != null && pct2 != null ? { limite, percentual2: pct2 } : null;
 }
 
 // Núcleo da captura do mês: agrupa posições ATIVAS do usuário, resolve os
@@ -219,7 +228,7 @@ export async function executarSnapshotMes(
   const dataRef = mesAno === mesCorrente ? new Date() : new Date(Date.UTC(ano, mes, 0, 12));
 
   let q = client.from("inv_posicoes")
-    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, moeda, rf_indexador, rf_taxa, rf_vencimento, cotacao_automatica)")
+    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, moeda, rf_indexador, rf_taxa, rf_vencimento, rf_limite_faixa, rf_percentual_indice_2, cotacao_automatica)")
     .eq("status", "ATIVA").eq("user_id", userId);
   if (contaId) q = q.eq("conta_id", contaId);
   const { data: posicoes, error } = await q;
@@ -245,6 +254,7 @@ export async function executarSnapshotMes(
         moeda: String(a.moeda ?? "BRL").toUpperCase(),
         indexador: (a.rf_indexador as string | null) ?? null, taxa: (a.rf_taxa as string | null) ?? null,
         vencimento: (a.rf_vencimento as string | null) ?? null,
+        faixa: faixaDoAtivo(a),
         posicoes: [],
       });
     }
@@ -322,7 +332,7 @@ export async function executarSnapshotMes(
       const datasResetCupom = g.tipo === "TESOURO_DIRETO"
         ? datasCupomParaAtivo(cupons, g.indexador, tesouroSemestral(g.nome), g.vencimento, menorCompra, dataRef.toISOString().slice(0, 10))
         : undefined;
-      valor = valorRFPosicoes(g.posicoes, g.tipo, g.indexador, g.vencimento, g.nome, mesAno, dataRef, g.taxa, cdiSerie, ipcaSerie, cdi, ipca, mtmTesouro, datasResetCupom);
+      valor = valorRFPosicoes(g.posicoes, g.tipo, g.indexador, g.vencimento, g.nome, mesAno, dataRef, g.taxa, cdiSerie, ipcaSerie, cdi, ipca, mtmTesouro, datasResetCupom, g.faixa);
     } else {
       const cot = precos.get(g.ticker);
       if (cot == null) { ignorados.push({ ticker: g.ticker, motivo: "cotação indisponível" }); continue; }
@@ -430,7 +440,7 @@ export async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userI
   logRequest("POST", "/investimentos/snapshot-backfill", { conta_id: body.conta_id ?? null, ativo_id: body.ativo_id ?? null, ate: mesFim });
 
   let q = c.from("inv_posicoes")
-    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, moeda, rf_indexador, rf_taxa, rf_vencimento, cotacao_automatica)")
+    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, moeda, rf_indexador, rf_taxa, rf_vencimento, rf_limite_faixa, rf_percentual_indice_2, cotacao_automatica)")
     .eq("status", "ATIVA");
   if (body.conta_id) q = q.eq("conta_id", body.conta_id);
   if (body.ativo_id) q = q.eq("ativo_id", body.ativo_id);
@@ -456,6 +466,7 @@ export async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userI
         moeda: String(a.moeda ?? "BRL").toUpperCase(),
         indexador: (a.rf_indexador as string | null) ?? null, taxa: (a.rf_taxa as string | null) ?? null,
         vencimento: (a.rf_vencimento as string | null) ?? null,
+        faixa: faixaDoAtivo(a),
         posicoes: [], inicio: mesCompra,
       });
     }
@@ -572,7 +583,7 @@ export async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userI
         const datasResetCupom = g.tipo === "TESOURO_DIRETO"
           ? datasCupomParaAtivo(cupons, g.indexador, tesouroSemestral(g.nome), g.vencimento, menorCompra, dataRef.toISOString().slice(0, 10))
           : undefined;
-        valor = valorRFPosicoes(posMes, g.tipo, g.indexador, g.vencimento, g.nome, me, dataRef, g.taxa, cdiSerie, ipcaSerie, cdi, ipca, mtmTesouro, datasResetCupom);
+        valor = valorRFPosicoes(posMes, g.tipo, g.indexador, g.vencimento, g.nome, me, dataRef, g.taxa, cdiSerie, ipcaSerie, cdi, ipca, mtmTesouro, datasResetCupom, g.faixa);
       } else {
         let preco = precoPorMes!.get(me);
         if (preco == null) { semCotacaoMes++; continue; } // sem cotação naquele mês

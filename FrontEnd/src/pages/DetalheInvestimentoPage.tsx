@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus } from 'lucide-react'
+import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus, ExternalLink } from 'lucide-react'
 import { Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, Tooltip, Legend,
@@ -30,7 +30,7 @@ import { CRITERIOS_QUESTAO, CRITERIO_LABEL } from '../lib/constants'
 import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
 import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvPesos } from '../hooks/useInvPesos'
-import type { InvestimentoAtivo, QuestionarioRespostas, PerguntaAvaliacao, CriterioQuestao } from '../types'
+import type { InvestimentoAtivo, QuestionarioRespostas, PerguntaAvaliacao, CriterioQuestao, TipoAtivoInvestimento } from '../types'
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement)
 
@@ -46,6 +46,25 @@ function corValor(v: number): string {
   if (v > 0) return '#00c896'
   if (v < 0) return '#ff5c7a'
   return MUTED
+}
+
+// Atalho pra página do ativo no investidor10 — cada categoria do site tem seu
+// próprio caminho (ex.: investidor10.com.br/acoes/petr4/). Renda fixa e
+// Tesouro Direto não têm página por papel individual lá, então ficam de fora
+// (link não aparece pra esses tipos).
+const INVESTIDOR10_CAMINHO: Partial<Record<TipoAtivoInvestimento, string>> = {
+  ACOES:             'acoes',
+  FII:               'fiis',
+  ETF:               'etfs',
+  STOCKS:            'stocks',
+  REIT:              'reits',
+  ETF_INTERNACIONAL: 'etfs-americanos',
+  CRIPTOMOEDAS:      'criptomoedas',
+}
+function linkInvestidor10(ativo: InvestimentoAtivo): string | null {
+  const caminho = INVESTIDOR10_CAMINHO[ativo.tipo_ativo]
+  if (!caminho) return null
+  return `https://investidor10.com.br/${caminho}/${ativo.ticker.toLowerCase()}/`
 }
 
 const PERIODOS_GRAFICO = [
@@ -385,6 +404,7 @@ export default function DetalheInvestimentoPage() {
   const cor = TIPO_ATIVO_COR[ativo.tipo_ativo]
   // Renda fixa, Tesouro e cripto não pagam proventos → escondem os quadros de dividendos.
   const podeDividendos = !['RENDA_FIXA', 'TESOURO_DIRETO', 'CRIPTOMOEDAS'].includes(ativo.tipo_ativo)
+  const urlInvestidor10 = linkInvestidor10(ativo)
 
   async function confirmarExclusao() {
     if (!ativo) return
@@ -424,6 +444,14 @@ export default function DetalheInvestimentoPage() {
                   style={{ color: MUTED }}>
                   {setorLabel(ativo.setor)}
                 </span>
+              )}
+              {urlInvestidor10 && (
+                <a href={urlInvestidor10} target="_blank" rel="noopener noreferrer"
+                  title="Abrir página do ativo no investidor10"
+                  className="inline-flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-full border border-white/15 hover:border-white/30 hover:text-white/90"
+                  style={{ color: MUTED }}>
+                  <ExternalLink size={11} /> investidor10
+                </a>
               )}
             </div>
             <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>{ativo.nome}</p>

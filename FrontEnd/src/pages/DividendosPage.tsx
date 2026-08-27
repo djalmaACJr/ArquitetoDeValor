@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect, Fragment, type ReactNode } from 'react'
-import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, ChevronDown, ChevronRight, Layers, AlertTriangle, RefreshCw, Stethoscope } from 'lucide-react'
+import { useState, useMemo, useEffect, type ReactNode } from 'react'
+import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, ChevronDown, ChevronRight, Layers, AlertTriangle, RefreshCw, Stethoscope, Calendar, Clock } from 'lucide-react'
 import { Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, type Plugin, type ChartType } from 'chart.js'
 import { Link } from 'react-router-dom'
@@ -13,7 +13,7 @@ import { useContas } from '../hooks/useContas'
 import { apiFetch, extrairLista } from '../lib/api'
 import {
   Drawer, Field, Input, SelectDark, SearchableSelect, BtnSalvar, BtnCancelar,
-  Toast, ModalExcluir, Segmented,
+  Toast, ModalExcluir,
 } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
@@ -23,7 +23,7 @@ import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { MonthPicker } from '../components/ui/MonthPicker'
 import { formatBRL, formatData, hojeLocal, mesAtual, mesLabel, MESES_ABREV } from '../lib/utils'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPO_OBJETIVO_LABEL } from '../lib/constants'
-import type { InvestimentoDividendo, TipoAtivoInvestimento } from '../types'
+import type { InvestimentoDividendo, TipoAtivoInvestimento, PeriodoRanking } from '../types'
 
 ChartJS.register(ArcElement, ChartTooltip)
 
@@ -402,16 +402,45 @@ function ProventosPorCategoria({ dividendos }: { dividendos: InvestimentoDividen
 // e Provisionado (projeções ainda não recebidas). As linhas abaixo trazem
 // os 4 totais por categoria e expandem para o detalhamento por ativo.
 
-type PeriodoGraf = '6m' | '12m' | '24m' | 'todos' | 'prov'
-const PERIODOS_GRAF: { value: PeriodoGraf; label: string }[] = [
-  { value: '6m',    label: 'Últ. 6 meses' },
-  { value: '12m',   label: 'Últ. 12 meses' },
-  { value: '24m',   label: 'Últ. 24 meses' },
-  { value: 'todos', label: 'Todos recebidos' },
-  { value: 'prov',  label: 'Provisionado' },
+// Mesmo modelo de período da página Destaques (PeriodoRanking) — trocado do
+// controle anterior (6/12/24 meses fixos + "Provisionado" misturado junto).
+// "Provisionado" não é bem um período (é status, não tempo), então virou um
+// toggle à parte (`mostrarProvisionado`) em vez de uma opção da lista.
+const ANO_ATUAL_LABEL = new Date().getFullYear()
+const PERIODOS: { value: PeriodoRanking; label: string }[] = [
+  { value: 'SEMANA',    label: 'Semana' },
+  { value: 'MES_ATUAL', label: 'Mês atual' },
+  { value: 'MES',       label: 'Últimos 30 dias' },
+  { value: 'SEMESTRE',  label: 'Semestre' },
+  { value: 'ANO_ATUAL', label: `Ano ${ANO_ATUAL_LABEL}` },
+  { value: 'ANO',       label: 'Últimos 12 meses' },
+  { value: 'DOIS_ANOS',  label: '2 anos' },
+  { value: 'CINCO_ANOS', label: '5 anos' },
+  { value: 'TUDO',      label: 'Desde o início' },
 ]
-const IDX_GRAF: Record<PeriodoGraf, number> = { '6m': 0, '12m': 1, '24m': 2, prov: 3, todos: 4 }
-const COLS_GRAF = ['Total últ. 6 meses', 'Total últ. 12 meses', 'Total últ. 24 meses', 'Provisionado', 'Total recebido']
+// Data de início do período (ou null p/ "Desde o início") — mesma semântica
+// de inicioPeriodoRanking() no backend (shared.ts), calculada aqui porque
+// este quadro filtra os dividendos já carregados no cliente, sem round-trip.
+function inicioPeriodo(periodo: PeriodoRanking): string | null {
+  const hoje = new Date(`${hojeLocal()}T12:00:00`)
+  const recuar = (dias?: number, meses?: number) => {
+    const d = new Date(hoje)
+    if (dias)  d.setDate(d.getDate() - dias)
+    if (meses) d.setMonth(d.getMonth() - meses)
+    return d.toISOString().slice(0, 10)
+  }
+  switch (periodo) {
+    case 'SEMANA':     return recuar(7)
+    case 'MES_ATUAL':  return `${hojeLocal().slice(0, 7)}-01`
+    case 'MES':        return recuar(undefined, 1)
+    case 'SEMESTRE':   return recuar(undefined, 6)
+    case 'ANO_ATUAL':  return `${hojeLocal().slice(0, 4)}-01-01`
+    case 'ANO':        return recuar(undefined, 12)
+    case 'DOIS_ANOS':  return recuar(undefined, 24)
+    case 'CINCO_ANOS': return recuar(undefined, 60)
+    case 'TUDO':       return null
+  }
+}
 // Fatores de brilho (sólidos) que diferenciam os ativos dentro da cor do
 // tipo. Usamos cor sólida — não alpha — porque alpha sobre fundo escuro/claro
 // faz a fatia "sumir" no fundo (some no modo noite e no dia). A faixa é
@@ -446,8 +475,8 @@ const COR_SUAVE: Record<TipoAtivoInvestimento, string> = {
 
 interface LinhaGraf {
   tipo: TipoAtivoInvestimento
-  totais: number[]                                   // [6m, 12m, 24m, prov, todos recebidos]
-  ativos: { ticker: string; totais: number[] }[]
+  total: number
+  ativos: { ticker: string; total: number }[]
 }
 
 // Observa a classe `.dark` no <html> para re-renderizar no toggle de tema.
@@ -467,11 +496,15 @@ function useModoEscuro(): boolean {
 
 function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[] }) {
   const dark = useModoEscuro() // rótulos do canvas precisam contrastar com o fundo
-  const [periodo, setPeriodo] = useState<PeriodoGraf>('12m')
-  // Ordenação do resumo por categoria: 'nome' ou o índice de uma coluna de
-  // total (0..4). Default acompanha o período escolhido (sincronizado abaixo).
-  const [sortResumo, setSortResumo] = useState<{ key: 'nome' | number; dir: 'asc' | 'desc' }>(
-    { key: IDX_GRAF['12m'], dir: 'desc' })
+  const [periodo, setPeriodo] = useState<PeriodoRanking>('ANO')
+  // "Provisionado" (projeções ainda não recebidas) é um STATUS, não um
+  // período — fica de fora da lista acima, num toggle à parte; ligado, o
+  // período fica inerte (provisionado não tem "quando recebi", é sempre
+  // "tudo que ainda está por vir").
+  const [mostrarProvisionado, setMostrarProvisionado] = useState(false)
+  // Ordenação do resumo por categoria: nome ou total do período/status atual.
+  const [sortResumo, setSortResumo] = useState<{ key: 'nome' | 'total'; dir: 'asc' | 'desc' }>(
+    { key: 'total', dir: 'desc' })
   // Drill-down: clicar numa categoria foca o gráfico só nela
   const [tipoFoco, setTipoFoco] = useState<TipoAtivoInvestimento | null>(null)
   const [abertos, setAbertos] = useState<Set<TipoAtivoInvestimento>>(new Set())
@@ -482,56 +515,40 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
   })
 
   const linhas = useMemo<LinhaGraf[]>(() => {
-    const mesA = mesAtual()
-    const ini6  = `${mesMenos(mesA, 5)}-01`
-    const ini12 = `${mesMenos(mesA, 11)}-01`
-    const ini24 = `${mesMenos(mesA, 23)}-01`
-
-    const porTipo = new Map<TipoAtivoInvestimento, Map<string, number[]>>()
+    const desde = inicioPeriodo(periodo)
+    const porTipo = new Map<TipoAtivoInvestimento, Map<string, number>>()
     for (const d of dividendos) {
-      const dt = d.data_pagamento
-      // buckets em que o registro entra (6m ⊂ 12m ⊂ 24m; prov à parte).
-      // Provisionado = projeção (status PROJECAO), independe da data.
-      const idxs: number[] = []
-      if (ehProvisionado(d)) idxs.push(3)
-      else {
-        idxs.push(4) // "Todos recebidos": todo provento recebido, sem corte de data
-        if (dt >= ini6)  idxs.push(0)
-        if (dt >= ini12) idxs.push(1)
-        if (dt >= ini24) idxs.push(2)
-      }
-      if (idxs.length === 0) continue
+      const prov = ehProvisionado(d)
+      if (mostrarProvisionado ? !prov : prov) continue
+      if (!mostrarProvisionado && desde && d.data_pagamento < desde) continue
       const ticker = d.inv_ativos?.ticker ?? '—'
       if (!porTipo.has(d.tipo_ativo)) porTipo.set(d.tipo_ativo, new Map())
       const porAtivo = porTipo.get(d.tipo_ativo)!
-      if (!porAtivo.has(ticker)) porAtivo.set(ticker, [0, 0, 0, 0, 0])
-      const tot = porAtivo.get(ticker)!
-      for (const i of idxs) tot[i] += d.valor
+      porAtivo.set(ticker, (porAtivo.get(ticker) ?? 0) + d.valor)
     }
     return [...porTipo.entries()].map(([tipo, porAtivo]) => {
-      const ativos = [...porAtivo.entries()].map(([ticker, totais]) => ({ ticker, totais }))
-      const totais = [0, 1, 2, 3, 4].map((i) => ativos.reduce((s, a) => s + a.totais[i], 0))
-      return { tipo, totais, ativos }
-    })
-  }, [dividendos])
+      const ativos = [...porAtivo.entries()].map(([ticker, total]) => ({ ticker, total }))
+      const total = ativos.reduce((s, a) => s + a.total, 0)
+      return { tipo, total, ativos }
+    }).filter((l) => l.total > 0)
+  }, [dividendos, periodo, mostrarProvisionado])
 
-  const sel = IDX_GRAF[periodo]
-  // Trocar o período reordena o resumo pela coluna correspondente (mantém o
-  // gráfico e a tabela coerentes); o usuário ainda pode clicar outro cabeçalho.
-  const trocarPeriodo = (v: PeriodoGraf) => {
+  // Trocar o período/toggle reordena o resumo pelo total (mantém gráfico e
+  // tabela coerentes); o usuário ainda pode clicar o cabeçalho pra mudar.
+  const trocarPeriodo = (v: PeriodoRanking) => {
     setPeriodo(v)
-    setSortResumo({ key: IDX_GRAF[v], dir: 'desc' })
+    setSortResumo({ key: 'total', dir: 'desc' })
   }
-  // Tipos/ativos com valor no período escolhido, do maior p/ o menor
+  // Tipos/ativos com valor no período/status escolhido, do maior p/ o menor
   const tipos = useMemo(() =>
-    linhas.filter((l) => l.totais[sel] > 0)
-      .map((l) => ({ ...l, ativos: l.ativos.filter((a) => a.totais[sel] > 0).sort((a, b) => b.totais[sel] - a.totais[sel]) }))
-      .sort((a, b) => b.totais[sel] - a.totais[sel]),
-  [linhas, sel])
+    linhas
+      .map((l) => ({ ...l, ativos: [...l.ativos].filter((a) => a.total > 0).sort((a, b) => b.total - a.total) }))
+      .sort((a, b) => b.total - a.total),
+  [linhas])
   const tiposVis = useMemo(() =>
     (tipoFoco ? tipos.filter((t) => t.tipo === tipoFoco) : tipos), [tipos, tipoFoco])
-  // Total do período exibido — base para os percentuais dos rótulos.
-  const totalSel = useMemo(() => tiposVis.reduce((s, t) => s + t.totais[sel], 0), [tiposVis, sel])
+  // Total do recorte exibido — base para os percentuais dos rótulos.
+  const totalSel = useMemo(() => tiposVis.reduce((s, t) => s + t.total, 0), [tiposVis])
   const pctDe = (v: number) => (totalSel > 0 ? Math.round((v / totalSel) * 100) : 0)
   // No 1º nível, cada categoria exibe os maiores ~60% dos ativos; o restante
   // (a partir de 2 itens) é somado numa fatia "Outros". No drill-down mostra todos.
@@ -540,15 +557,15 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
     const agregar = tipoFoco == null && t.ativos.length - limite >= 2
     const itens = agregar
       ? [
-          ...t.ativos.slice(0, limite).map((a) => ({ label: a.ticker, valor: a.totais[sel] })),
-          { label: 'Outros', valor: t.ativos.slice(limite).reduce((s, a) => s + a.totais[sel], 0) },
+          ...t.ativos.slice(0, limite).map((a) => ({ label: a.ticker, valor: a.total })),
+          { label: 'Outros', valor: t.ativos.slice(limite).reduce((s, a) => s + a.total, 0) },
         ]
-      : t.ativos.map((a) => ({ label: a.ticker, valor: a.totais[sel] }))
+      : t.ativos.map((a) => ({ label: a.ticker, valor: a.total }))
     return itens.map((it, i) => ({
       ...it, tipo: t.tipo, pct: totalSel > 0 ? Math.round((it.valor / totalSel) * 100) : 0,
       cor: escalaTom(COR_SUAVE[t.tipo], FATORES_TOM[i % FATORES_TOM.length]),
     }))
-  }), [tiposVis, sel, tipoFoco, totalSel])
+  }), [tiposVis, tipoFoco, totalSel])
 
   // Plugin: rótulos sempre visíveis apontando para os segmentos (linha-guia
   // com cotovelo, como no app de referência). Tickers fora do anel externo,
@@ -664,19 +681,18 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
   const linhasOrd = [...linhas].sort((a, b) => {
     const c = sortResumo.key === 'nome'
       ? TIPO_ATIVO_LABEL[a.tipo].localeCompare(TIPO_ATIVO_LABEL[b.tipo], 'pt-BR')
-      : a.totais[sortResumo.key] - b.totais[sortResumo.key]
+      : a.total - b.total
     return sortResumo.dir === 'asc' ? c : -c
   })
-  const clickSortResumo = (k: 'nome' | number) =>
+  const clickSortResumo = (k: 'nome' | 'total') =>
     setSortResumo((s) => (s.key === k
       ? { key: k, dir: s.dir === 'asc' ? 'desc' : 'asc' }
       : { key: k, dir: k === 'nome' ? 'asc' : 'desc' }))
-  const setaR = (k: 'nome' | number) =>
+  const setaR = (k: 'nome' | 'total') =>
     sortResumo.key === k ? (sortResumo.dir === 'asc' ? ' ▲' : ' ▼') : ''
-  // Cabeçalho clicável. A coluna do período selecionado aparece também no
-  // mobile; as demais só em telas ≥ sm (como antes). Função helper (não
-  // componente): chamada direto no JSX para não criar componente no render.
-  const thR = (k: 'nome' | number, label: string, cls?: string) => (
+  // Cabeçalho clicável. Função helper (não componente): chamada direto no
+  // JSX para não criar componente no render.
+  const thR = (k: 'nome' | 'total', label: string, cls?: string) => (
     <th onClick={() => clickSortResumo(k)}
       className={`px-3 py-2.5 font-medium cursor-pointer select-none hover:text-white ${cls ?? ''}`}>
       {label}{setaR(k)}
@@ -687,8 +703,26 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
     <div className="rounded-xl border border-white/10 p-4 mb-4">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <h2 className="text-[15px] font-semibold text-white">Ativos por categoria</h2>
-        {/* trocar o período mantém o tipo focado (drill-down) */}
-        <Segmented value={periodo} onChange={(v) => trocarPeriodo(v as PeriodoGraf)} opcoes={PERIODOS_GRAF} />
+        {/* trocar o período mantém o tipo focado (drill-down). Mesmo modelo
+            de período de Destaques (dropdown único) — "Provisionado" é um
+            toggle à parte (status, não período), desativa o dropdown
+            enquanto ligado (o recorte "provisionado" ignora data). */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className={`flex items-center gap-1.5 rounded-lg border border-white/10 px-2 ${mostrarProvisionado ? 'opacity-40 pointer-events-none' : ''}`}>
+            <Calendar size={13} style={{ color: MUTED }} />
+            <SelectDark value={periodo} onChange={(e) => trocarPeriodo(e.target.value as PeriodoRanking)}
+              style={{ width: 'auto', border: 'none', background: 'transparent' }} className="!text-[13px] !py-2">
+              {PERIODOS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </SelectDark>
+          </div>
+          <button onClick={() => setMostrarProvisionado((v) => !v)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] font-medium transition-colors"
+            style={mostrarProvisionado
+              ? { borderColor: 'rgba(240,180,41,.5)', background: 'rgba(240,180,41,.12)', color: '#f0b429' }
+              : { borderColor: 'rgba(255,255,255,.1)', color: MUTED }}>
+            <Clock size={13} /> Provisionado
+          </button>
+        </div>
       </div>
 
       {/* Voltar do drill-down: abaixo do label, em linha própria */}
@@ -717,7 +751,7 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
                   borderWidth: 0, spacing: 2, borderRadius: 5, hoverOffset: 5,
                 },
                 { // anel interno: tipos
-                  data: tiposVis.map((t) => t.totais[sel]),
+                  data: tiposVis.map((t) => t.total),
                   backgroundColor: tiposVis.map((t) => COR_SUAVE[t.tipo]),
                   borderWidth: 0, spacing: 2, borderRadius: 5, hoverOffset: 5,
                 },
@@ -742,7 +776,7 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
                 // dados lidos pelo nosso plugin pluginRotulos (atualizam no drill-down)
                 rotulosDividendos: {
                   externos,
-                  tiposVis: tiposVis.map((t) => ({ tipo: t.tipo, pct: pctDe(t.totais[sel]) })),
+                  tiposVis: tiposVis.map((t) => ({ tipo: t.tipo, pct: pctDe(t.total) })),
                   corTexto: dark ? '#dbe2f0' : '#1f2433',
                   corLinha: dark ? 'rgba(255,255,255,.30)' : 'rgba(0,0,0,.30)',
                 },
@@ -756,7 +790,7 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
                         : TIPO_ATIVO_LABEL[tiposVis[ctx.dataIndex].tipo]
                       const pct = ctx.datasetIndex === 0
                         ? externos[ctx.dataIndex].pct
-                        : pctDe(tiposVis[ctx.dataIndex].totais[sel])
+                        : pctDe(tiposVis[ctx.dataIndex].total)
                       return ` ${nome}: ${formatBRL(ctx.parsed)} (${pct}%)`
                     },
                   },
@@ -774,18 +808,12 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
           <thead>
             <tr style={{ color: MUTED }}>
               {thR('nome', 'Categoria', 'text-left')}
-              {COLS_GRAF.map((c, i) => (
-                <Fragment key={i}>
-                  {thR(i, c, `text-right ${i === sel ? 'table-cell' : 'hidden sm:table-cell'}`)}
-                </Fragment>
-              ))}
+              {thR('total', 'Total', 'text-right')}
               <th className="px-2 py-2.5 w-6"></th>
             </tr>
           </thead>
           {linhasOrd.map((l) => {
             const aberto = abertos.has(l.tipo)
-            // Detalhamento e % usam a coluna ordenada (ou o período, se for por nome)
-            const colAtivo = typeof sortResumo.key === 'number' ? sortResumo.key : sel
             return (
               <tbody key={l.tipo}>
                 <tr onClick={() => toggleAberto(l.tipo)}
@@ -793,36 +821,25 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
                   <td className="px-3 py-3 font-semibold text-[14px]" style={{ color: COR_SUAVE[l.tipo] }}>
                     {TIPO_ATIVO_LABEL[l.tipo]}
                   </td>
-                  {l.totais.map((v, i) => (
-                    <td key={i}
-                      className={`px-3 py-3 text-right font-semibold text-white ${i === sel ? 'table-cell' : 'hidden sm:table-cell'}`}>
-                      {formatBRL(v)}
-                    </td>
-                  ))}
+                  <td className="px-3 py-3 text-right font-semibold text-white">{formatBRL(l.total)}</td>
                   <td className="px-2 py-3 text-right">
                     {aberto ? <ChevronDown size={15} style={{ color: MUTED }} /> : <ChevronRight size={15} style={{ color: MUTED }} />}
                   </td>
                 </tr>
-                {aberto && [...l.ativos]
-                  .sort((a, b) => b.totais[colAtivo] - a.totais[colAtivo])
-                  .map((a) => (
-                    <tr key={a.ticker} className="border-t border-white/5">
-                      <td className="px-3 py-1.5">
-                        <span className="text-[13px] font-medium text-white">{a.ticker}</span>
-                        <span className="text-[11px] ml-2" style={{ color: MUTED }}>
-                          {l.totais[colAtivo] > 0 ? Math.round((a.totais[colAtivo] / l.totais[colAtivo]) * 100) : 0}% da categoria
-                        </span>
-                      </td>
-                      {a.totais.map((v, i) => (
-                        <td key={i}
-                          className={`px-3 py-1.5 text-[12px] text-right ${i === sel ? 'table-cell' : 'hidden sm:table-cell'}`}
-                          style={{ color: v > 0 ? 'rgba(255,255,255,.8)' : MUTED }}>
-                          {formatBRL(v)}
-                        </td>
-                      ))}
-                      <td className="px-2 py-1.5"></td>
-                    </tr>
-                  ))}
+                {aberto && [...l.ativos].sort((a, b) => b.total - a.total).map((a) => (
+                  <tr key={a.ticker} className="border-t border-white/5">
+                    <td className="px-3 py-1.5">
+                      <span className="text-[13px] font-medium text-white">{a.ticker}</span>
+                      <span className="text-[11px] ml-2" style={{ color: MUTED }}>
+                        {l.total > 0 ? Math.round((a.total / l.total) * 100) : 0}% da categoria
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 text-[12px] text-right" style={{ color: 'rgba(255,255,255,.8)' }}>
+                      {formatBRL(a.total)}
+                    </td>
+                    <td className="px-2 py-1.5"></td>
+                  </tr>
+                ))}
               </tbody>
             )
           })}

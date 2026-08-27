@@ -251,6 +251,95 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect(aditivo).toBeGreaterThan(multiplicativo);
   });
 
+  test("CA-INV28 — taxa escalonada por faixa (rf_limite_faixa/rf_percentual_indice_2): validação e cálculo progressivo", async () => {
+    // Só um dos dois campos → 400 (tudo-ou-nada, tanto no POST quanto no PUT parcial)
+    const { status: sErr1 } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVF1", nome: "Jest CDB faixa inválida", tipo_ativo: "RENDA_FIXA", rf_subtipo: "CDB",
+      rf_indexador: "POS_FIXADO", rf_indice: "CDI", rf_percentual_indice: 120, rf_limite_faixa: 10000,
+    });
+    expect(sErr1).toBe(400);
+
+    const { data: dValido } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVF1", nome: "Jest CDB faixa válida", tipo_ativo: "RENDA_FIXA", rf_subtipo: "CDB",
+      rf_indexador: "POS_FIXADO", rf_indice: "CDI", rf_percentual_indice: 120,
+      rf_limite_faixa: 10000, rf_percentual_indice_2: 100,
+    });
+    const idValido = dValido.dados.id as string;
+    const { status: sErr2 } = await api(`/investimentos/ativos/${idValido}`, "PUT", { rf_percentual_indice_2: null });
+    expect(sErr2).toBe(400); // deixaria rf_limite_faixa órfão no estado final
+    await api(`/investimentos/ativos/${idValido}`, "DELETE");
+
+    // Cálculo: CDB "até R$10.000 = 120% CDI, acima = 100% CDI" aportado com
+    // R$14.000 deve render um valor ENTRE o de 100% CDI flat sobre 14.000 e o
+    // de 120% CDI flat sobre 14.000 (progressivo, não tudo-ou-nada) — mesma
+    // técnica comparativa do CA-INV22 (evita depender do valor real do CDI).
+    const compra = `${mesOffset(-3)}-10`;
+    async function valorAtual(ticker: string, campos: Record<string, unknown>): Promise<number> {
+      const { data: dA } = await api("/investimentos/ativos", "POST", {
+        ticker, nome: `Jest ${ticker}`, tipo_ativo: "RENDA_FIXA", rf_subtipo: "CDB",
+      });
+      const id = dA.dados.id as string;
+      await api("/investimentos/posicoes", "POST", {
+        ativo_id: id, conta_id: contaId, quantidade: 14000, preco_custo: 1, data_compra: compra,
+      });
+      await api(`/investimentos/ativos/${id}`, "PUT", {
+        rf_indexador: "POS_FIXADO", rf_indice: "CDI", ...campos,
+      });
+      const { data: hist } = await api(`/investimentos/historico-mensal?ativo_id=${id}`);
+      const serie = (hist?.dados ?? []) as { mes_ano: string; valor_mercado: number; id: string }[];
+      const atual = serie.find((h) => h.mes_ano === mesOffset(0));
+      for (const h of serie) await api(`/investimentos/historico-mensal/${h.id}`, "DELETE");
+      const { data: pos } = await api(`/investimentos/posicoes?ativo_id=${id}`);
+      for (const p of pos?.dados ?? []) await api(`/investimentos/posicoes/${p.id}`, "DELETE");
+      await api(`/investimentos/ativos/${id}`, "DELETE");
+      return Number(atual?.valor_mercado ?? 0);
+    }
+
+    const flat100 = await valorAtual("JESTINVF2", { rf_percentual_indice: 100, rf_taxa: "100% CDI" });
+    const flat120 = await valorAtual("JESTINVF3", { rf_percentual_indice: 120, rf_taxa: "120% CDI" });
+    const faixa    = await valorAtual("JESTINVF4", {
+      rf_percentual_indice: 120, rf_limite_faixa: 10000, rf_percentual_indice_2: 100,
+      rf_taxa: "120% CDI até R$10.000, 100% CDI acima",
+    });
+
+    expect(flat100).toBeGreaterThan(14000);
+    expect(faixa).toBeGreaterThan(flat100);
+    expect(faixa).toBeLessThan(flat120);
+  });
+
+  test("CA-INV29 — rf_indice é obrigatório junto de rf_percentual_indice/rf_taxa_fixa (POS_FIXADO/HIBRIDO)", async () => {
+    // Achado ago/2026: sem essa validação, um CDB podia ser salvo com
+    // rf_percentual_indice preenchido mas rf_indice vazio — o rótulo rf_taxa
+    // (fonte do cálculo em mercado.ts) nunca era gerado e a posição rendia
+    // com o fallback de 100% do índice, ignorando o percentual configurado.
+    const { status: sErr1 } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVIDX", nome: "Jest CDB sem índice", tipo_ativo: "RENDA_FIXA", rf_subtipo: "CDB",
+      rf_indexador: "POS_FIXADO", rf_percentual_indice: 110,
+    });
+    expect(sErr1).toBe(400);
+
+    // rf_taxa livre sem rf_percentual_indice/rf_taxa_fixa continua permitido
+    // sem rf_indice (não é o cenário que dispara o cálculo por índice).
+    const { status: sOk, data: dOk } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVIDX", nome: "Jest CDB taxa livre", tipo_ativo: "RENDA_FIXA", rf_subtipo: "CDB",
+      rf_indexador: "POS_FIXADO", rf_taxa: "110% CDI",
+    });
+    expect(sOk).toBe(201);
+    const idOk = dOk.dados.id as string;
+
+    // PUT parcial que só adiciona rf_percentual_indice, sem rf_indice — checa
+    // o estado FINAL (existente + alteração), mesma regra da faixa acima.
+    const { status: sErr2 } = await api(`/investimentos/ativos/${idOk}`, "PUT", { rf_percentual_indice: 110 });
+    expect(sErr2).toBe(400);
+
+    const { status: sErr3 } = await api(`/investimentos/ativos/${idOk}`, "PUT", {
+      rf_indice: "CDI", rf_percentual_indice: 110,
+    });
+    expect(sErr3).toBe(200);
+
+    await api(`/investimentos/ativos/${idOk}`, "DELETE");
+  });
+
   test("CA-INV24 — vencimento limita a série: passado para no vencimento, futuro volta a render", async () => {
     const { data: dA } = await api("/investimentos/ativos", "POST", {
       ticker: "JESTINVV", nome: "Jest CDB com vencimento", tipo_ativo: "RENDA_FIXA", rf_subtipo: "CDB",
@@ -735,6 +824,67 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     for (const pp of posAll?.dados ?? []) await api(`/investimentos/posicoes/${pp.id}`, "DELETE");
     await api(`/investimentos/ativos/${aId}`, "DELETE");
   }, 45000);
+
+  test("CA-INV30 — ranking: rentabilidade_periodo_pct de categoria/total é composta mês a mês, não a diferença simples início↔fim", async () => {
+    // Achado ago/2026: a agregação por categoria (e o total geral) somava o
+    // "valor no início" já composto de CADA ativo e tirava UMA razão simples
+    // sobre a soma — matematicamente diferente de agregar ganho/início de
+    // TODOS os ativos por MÊS primeiro e só então compor os meses (mesma
+    // técnica do quadro "Rentabilidade", QuadroRentabilidadeIndices.tsx).
+    // As duas formas só coincidem (por telescoping) quando todo ativo do
+    // grupo tem histórico mensal completo, sem lacunas, cobrindo os MESMOS
+    // meses — daí o cenário abaixo usa 2 ativos da mesma categoria com
+    // cobertura de meses DIFERENTE (um com lacuna no meio) pra garantir que
+    // a soma simples e a composição mês a mês DIVIRJAM de verdade.
+    const { data: dP } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVGRPP", nome: "Jest Grupo P", tipo_ativo: "ACOES",
+    });
+    const pId = dP.dados.id as string;
+    await api("/investimentos/posicoes", "POST", {
+      ativo_id: pId, conta_id: contaId, quantidade: 1, preco_custo: 100, data_compra: `${mesOffset(-4)}-05`,
+    });
+    // Histórico completo: -2 (baseline) → -1 (+10%) → 0 (-10%)
+    await api("/investimentos/historico-mensal", "POST", { ativo_id: pId, conta_id: contaId, mes_ano: mesOffset(-2), valor_mercado: 100 });
+    await api("/investimentos/historico-mensal", "POST", { ativo_id: pId, conta_id: contaId, mes_ano: mesOffset(-1), valor_mercado: 110 });
+    await api("/investimentos/historico-mensal", "POST", { ativo_id: pId, conta_id: contaId, mes_ano: mesOffset(0),  valor_mercado: 99 });
+
+    const { data: dQ } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVGRPQ", nome: "Jest Grupo Q", tipo_ativo: "ACOES",
+    });
+    const qId = dQ.dados.id as string;
+    await api("/investimentos/posicoes", "POST", {
+      ativo_id: qId, conta_id: contaId, quantidade: 1, preco_custo: 1000, data_compra: `${mesOffset(-4)}-05`,
+    });
+    // Histórico COM LACUNA: -2 (baseline) → [sem snapshot em -1] → 0 (+50%
+    // vs o último snapshot existente, -2).
+    await api("/investimentos/historico-mensal", "POST", { ativo_id: qId, conta_id: contaId, mes_ano: mesOffset(-2), valor_mercado: 1000 });
+    await api("/investimentos/historico-mensal", "POST", { ativo_id: qId, conta_id: contaId, mes_ano: mesOffset(0),  valor_mercado: 1500 });
+
+    const { status, data } = await api(`/investimentos/ranking?conta_id=${contaId}&periodo=SEMESTRE`);
+    expect(status).toBe(200);
+    expect(typeof data.dados.rentabilidade_periodo_pct_total).toBe("number");
+
+    const catAcoes = data.dados.categorias.find((c: any) => c.tipo_ativo === "ACOES");
+    expect(catAcoes).toBeTruthy();
+    const naiveCat = ((catAcoes.valor_mercado - catAcoes.valor_mercado_inicio_periodo) / catAcoes.valor_mercado_inicio_periodo) * 100;
+    // Composto (nosso cálculo) precisa DIVERGIR visivelmente do simples
+    // início↔fim — se algum dia isso voltar a ser igual, é sinal de que a
+    // agregação regrediu pro cálculo simples (bug original).
+    expect(Math.abs(catAcoes.rentabilidade_periodo_pct - naiveCat)).toBeGreaterThan(1);
+
+    const naiveTotal = ((data.dados.total_mercado - data.dados.categorias.reduce((s: number, c: any) => s + c.valor_mercado_inicio_periodo, 0))
+      / data.dados.categorias.reduce((s: number, c: any) => s + c.valor_mercado_inicio_periodo, 0)) * 100;
+    expect(Math.abs(data.dados.rentabilidade_periodo_pct_total - naiveTotal)).toBeGreaterThan(1);
+
+    // limpeza
+    for (const aid of [pId, qId]) {
+      const { data: hist } = await api(`/investimentos/historico-mensal?ativo_id=${aid}`);
+      for (const h of hist?.dados ?? []) await api(`/investimentos/historico-mensal/${h.id}`, "DELETE");
+      const { data: pos } = await api(`/investimentos/posicoes?ativo_id=${aid}`);
+      for (const p of pos?.dados ?? []) await api(`/investimentos/posicoes/${p.id}`, "DELETE");
+      await api(`/investimentos/ativos/${aid}`, "DELETE");
+    }
+  });
 
   // Limpeza encadeada do que sobrou (projeção confirmada vira PAGO no extrato)
   test("CA-INV — limpeza: excluir dividendo confirmado, snapshots, posição e ativo", async () => {

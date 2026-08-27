@@ -274,6 +274,10 @@ export interface InvestimentoAtivo {
   rf_indice:            IndiceRF | null
   rf_percentual_indice: number | null
   rf_taxa_fixa:         number | null
+  // Taxa escalonada por valor aplicado (ex.: CDB "até R$10.000 = 120% CDI,
+  // acima = 100% CDI") — só no pós-fixado "% do índice". Tudo-ou-nada.
+  rf_limite_faixa:        number | null
+  rf_percentual_indice_2: number | null
   rf_taxa:         string | null
   rf_emissor:      string | null
   rf_vencimento:   string | null
@@ -584,7 +588,8 @@ export interface InvestimentoRankingAtivo {
 // Período do filtro de "Destaques" — ver GET /investimentos/ranking?periodo=
 // 'MES' = últimos 30 dias corridos (rótulo na UI é "Últimos 30 dias", não
 // "mês calendário" — esse é o 'MES_ATUAL').
-export type PeriodoRanking = 'SEMANA' | 'MES_ATUAL' | 'MES' | 'SEMESTRE' | 'ANO_ATUAL' | 'ANO' | 'TUDO'
+export type PeriodoRanking =
+  'SEMANA' | 'MES_ATUAL' | 'MES' | 'SEMESTRE' | 'ANO_ATUAL' | 'ANO' | 'DOIS_ANOS' | 'CINCO_ANOS' | 'TUDO'
 
 // Ranking por categoria (Tipo de Ativo) — topo da página de Destaques
 export interface InvestimentoRankingCategoria {
@@ -602,6 +607,10 @@ export interface InvestimentoRanking {
   periodo?:      PeriodoRanking
   ativos:        InvestimentoRankingAtivo[]
   categorias?:   InvestimentoRankingCategoria[]
+  // % do período composto mês a mês (líquido de fluxo) pro total geral —
+  // null quando indisponível (ex.: periodo=TUDO), aí o frontend cai pro
+  // cálculo simples a partir das categorias (ver RankingCategorias).
+  rentabilidade_periodo_pct_total?: number | null
 }
 
 // Transação candidata para vincular manualmente em importação de fatura

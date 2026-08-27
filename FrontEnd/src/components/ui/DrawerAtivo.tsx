@@ -8,7 +8,7 @@ import { useInvestimentosOperacoes } from '../../hooks/useInvestimentosOperacoes
 import { useBackfillHistorico } from '../../hooks/useInvestimentosHistorico'
 import { useContas } from '../../hooks/useContas'
 import { useCotacoesTesouro } from '../../hooks/useCotacoesTesouro'
-import { Drawer, Field, Input, SelectDark, BtnSalvar, BtnCancelar } from './shared'
+import { Drawer, Field, Input, InputMoeda, SelectDark, BtnSalvar, BtnCancelar } from './shared'
 import { formatBRL } from '../../lib/utils'
 import {
   tickerTesouro, nomeTesouro, tipoTituloTesouro, anoVencimento, ehSemestral,
@@ -36,7 +36,7 @@ type FormAtivo = Omit<CriarAtivoInput, 'tipo_ativo'> & { tipo_ativo: TipoAtivoIn
 const FORM_VAZIO: FormAtivo = {
   ticker: '', nome: '', tipo_ativo: '', moeda: 'BRL', descricao: '', nota_usuario: null,
   rf_subtipo: null, rf_indexador: null, rf_indice: null, rf_percentual_indice: null,
-  rf_taxa_fixa: null, rf_taxa: null, rf_emissor: null,
+  rf_taxa_fixa: null, rf_limite_faixa: null, rf_percentual_indice_2: null, rf_taxa: null, rf_emissor: null,
   rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
   fii_categoria: null, acoes_subtipo: null, cripto_rendimento_aa: null,
   cripto_rendimento_inicio: null, cripto_rendimento_periodicidade: null, cotacao_automatica: true,
@@ -86,7 +86,14 @@ function rotuloTaxaRF(f: FormAtivo): string | null {
   const num = (n: number) => String(n).replace('.', ',')
   if (f.rf_indexador === 'POS_FIXADO' && f.rf_indice) {
     // Multiplicativo ("110% CDI") ou aditivo ("CDI + 2%") — diferentes!
-    if (f.rf_percentual_indice != null) return `${num(f.rf_percentual_indice)}% ${INDICE_RF_LABEL[f.rf_indice]}`
+    if (f.rf_percentual_indice != null) {
+      const base = `${num(f.rf_percentual_indice)}% ${INDICE_RF_LABEL[f.rf_indice]}`
+      // Taxa escalonada: "120% CDI até R$10.000, 100% CDI acima"
+      if (f.rf_limite_faixa != null && f.rf_percentual_indice_2 != null) {
+        return `${base} até ${formatBRL(f.rf_limite_faixa)}, ${num(f.rf_percentual_indice_2)}% ${INDICE_RF_LABEL[f.rf_indice]} acima`
+      }
+      return base
+    }
     if (f.rf_taxa_fixa != null) return `${INDICE_RF_LABEL[f.rf_indice]} + ${num(f.rf_taxa_fixa)}%`
   }
   if (f.rf_indexador === 'HIBRIDO' && f.rf_indice) {
@@ -108,7 +115,9 @@ function formDoAtivo(ativo: InvestimentoAtivo | null): FormAtivo {
     descricao: ativo.descricao ?? '', nota_usuario: ativo.nota_usuario,
     rf_subtipo: ativo.rf_subtipo, rf_indexador: ativo.rf_indexador,
     rf_indice: ativo.rf_indice, rf_percentual_indice: ativo.rf_percentual_indice,
-    rf_taxa_fixa: ativo.rf_taxa_fixa, rf_taxa: ativo.rf_taxa,
+    rf_taxa_fixa: ativo.rf_taxa_fixa,
+    rf_limite_faixa: ativo.rf_limite_faixa, rf_percentual_indice_2: ativo.rf_percentual_indice_2,
+    rf_taxa: ativo.rf_taxa,
     rf_emissor: ativo.rf_emissor, rf_vencimento: ativo.rf_vencimento,
     rf_garantia_fgc: ativo.rf_garantia_fgc, rf_isento_ir: ativo.rf_isento_ir,
     fii_categoria: ativo.fii_categoria, acoes_subtipo: ativo.acoes_subtipo,
@@ -147,6 +156,9 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
   const [posSpread, setPosSpread] = useState(
     () => ativo?.rf_indexador === 'POS_FIXADO' && ativo?.rf_taxa_fixa != null && ativo?.rf_percentual_indice == null,
   )
+  // Taxa escalonada por faixa (ex.: "120% CDI até R$10.000, 100% acima") —
+  // liga/desliga os campos rf_limite_faixa/rf_percentual_indice_2.
+  const [usaFaixaRF, setUsaFaixaRF] = useState(() => ativo?.rf_limite_faixa != null)
   // Tesouro: "com juros semestrais" (NTN-F / NTN-B) — compõe ticker/nome.
   const [tesouroSemestral, setTesouroSemestral] = useState(() => ehSemestral(ativo?.nome))
 
@@ -234,6 +246,9 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
         rf_subtipo: 'TESOURO', rf_emissor: info.emissor,
         rf_garantia_fgc: info.fgc, rf_isento_ir: info.isentoIR })
     } else if (tipo === 'RENDA_FIXA') {
+      // CDB/LCI/LCA/CRI/CRA/Debênture não têm ticker de bolsa — a busca externa
+      // não acha nada pra eles. Pula direto pro cadastro manual (só o nome).
+      if (!editando) setManualLivre(true)
       setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, acoes_subtipo: null, moeda: 'BRL',
         rf_subtipo: form.rf_subtipo === 'TESOURO' ? null : form.rf_subtipo })
     } else {
@@ -256,30 +271,43 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
   }
 
   // Troca a forma de rentabilidade e zera os campos que não se aplicam a ela.
+  // A faixa (rf_limite_faixa/rf_percentual_indice_2) só existe no pós-fixado
+  // "% do índice" — zera nas demais formas.
   function mudarIndexador(idx: IndexadorRF | null) {
     if (idx === 'PREFIXADO') {
-      setForm({ ...form, rf_indexador: idx, rf_indice: null, rf_percentual_indice: null })
+      setUsaFaixaRF(false)
+      setForm({ ...form, rf_indexador: idx, rf_indice: null, rf_percentual_indice: null, rf_limite_faixa: null, rf_percentual_indice_2: null })
     } else if (idx === 'POS_FIXADO') {
       setPosSpread(false)
       setForm({ ...form, rf_indexador: idx, rf_taxa_fixa: null })
     } else if (idx === 'HIBRIDO') {
-      setForm({ ...form, rf_indexador: idx, rf_percentual_indice: null })
+      setUsaFaixaRF(false)
+      setForm({ ...form, rf_indexador: idx, rf_percentual_indice: null, rf_limite_faixa: null, rf_percentual_indice_2: null })
     } else {
-      setForm({ ...form, rf_indexador: null, rf_indice: null, rf_percentual_indice: null, rf_taxa_fixa: null })
+      setUsaFaixaRF(false)
+      setForm({ ...form, rf_indexador: null, rf_indice: null, rf_percentual_indice: null, rf_taxa_fixa: null, rf_limite_faixa: null, rf_percentual_indice_2: null })
     }
   }
 
   // Pós-fixado: troca entre "% do índice" (multiplicativo) e "índice + spread"
-  // (aditivo). Zera os dois campos para não misturar as duas formas.
+  // (aditivo). Zera os dois campos para não misturar as duas formas — a faixa
+  // também só existe no modo "% do índice".
   function mudarModoPos(spread: boolean) {
     setPosSpread(spread)
-    setForm({ ...form, rf_percentual_indice: null, rf_taxa_fixa: null })
+    if (spread) setUsaFaixaRF(false)
+    setForm({ ...form, rf_percentual_indice: null, rf_taxa_fixa: null, rf_limite_faixa: null, rf_percentual_indice_2: null })
   }
 
-  // Campo numérico (% a.a. / % do índice): aceita vírgula, guarda número|null.
-  function setNum(campo: 'rf_percentual_indice' | 'rf_taxa_fixa', valor: string) {
+  // Campo numérico (% a.a. / % do índice / faixa): aceita vírgula, guarda número|null.
+  function setNum(campo: 'rf_percentual_indice' | 'rf_taxa_fixa' | 'rf_limite_faixa' | 'rf_percentual_indice_2', valor: string) {
     const v = valor.replace(',', '.').trim()
     setForm({ ...form, [campo]: v === '' ? null : Number(v) })
+  }
+
+  // Desmarcar a taxa escalonada zera os 2 campos.
+  function alternarFaixaRF(ligar: boolean) {
+    setUsaFaixaRF(ligar)
+    if (!ligar) setForm({ ...form, rf_limite_faixa: null, rf_percentual_indice_2: null })
   }
 
   async function salvar() {
@@ -291,6 +319,10 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
     }
     if (tesouroManual && (!form.rf_indexador || !form.rf_vencimento)) {
       onToast('Escolha o indexador e o vencimento do título')
+      return
+    }
+    if (usaFaixaRF && (!(Number(form.rf_limite_faixa) > 0) || form.rf_percentual_indice_2 == null)) {
+      onToast('Preencha o valor limite e o % do índice acima dele — ou desmarque a taxa escalonada')
       return
     }
     // Identificador: Tesouro manual gera dos campos do título; renda fixa
@@ -322,48 +354,59 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       if (!rfSemQtde && !(Number(compra.preco_unitario) >= 0)) { onToast(`Preço da ${termo} inválido`); return }
     }
 
+    // Tudo daqui pra baixo (montar o payload + chamadas de rede/Supabase) vai
+    // dentro do try/catch/finally: sem isso, qualquer erro fora do {ok:false}
+    // já tratado por criar/editar/criarOperacao (ex.: exceção não prevista,
+    // travamento de sessão) deixava o drawer preso em "salvando..." pra
+    // sempre, sem toast nenhum. O finally garante que "salvando" SEMPRE volta
+    // a false, e o catch garante que TODO erro vira um toast com a mensagem —
+    // nunca fica mudo.
     setSalvando(true)
-    const payload: CriarAtivoInput = {
-      ...form,
-      tipo_ativo: form.tipo_ativo,
-      ticker: tickerFinal,
-      // Nome opcional: se em branco, o backend busca o nome oficial pelo ticker
-      nome: nomeFinal,
-      descricao: form.descricao?.trim() || null,
-      nota_usuario: form.nota_usuario === null || form.nota_usuario === undefined || Number.isNaN(form.nota_usuario)
-        ? null : Number(form.nota_usuario),
-      // rf_taxa (rótulo) é derivado dos campos estruturados — mantém o detalhe
-      // do ativo legível sem depender de texto digitado à mão.
-      ...(ehRF ? { rf_taxa: rotuloTaxaRF(form) } : {}),
-      // Subtipo da ação é inferido do ticker (ON/PN/Unit/BDR) — sem campo manual.
-      ...(form.tipo_ativo === 'ACOES'
-        ? { acoes_subtipo: form.acoes_subtipo ?? subtipoAcaoDoTicker(tickerFinal) }
-        : {}),
-      // Rendimento só faz sentido p/ cripto — zera nos demais tipos.
-      ...(form.tipo_ativo !== 'CRIPTOMOEDAS'
-        ? { cripto_rendimento_aa: null, cripto_rendimento_inicio: null, cripto_rendimento_periodicidade: null }
-        : {}),
-    }
-    const res = editando ? await editar(editando.id, payload) : await criar(payload)
-    if (!res.ok) { setSalvando(false); onToast(res.erro ?? 'Erro ao salvar'); return }
+    try {
+      const payload: CriarAtivoInput = {
+        ...form,
+        tipo_ativo: form.tipo_ativo,
+        ticker: tickerFinal,
+        // Nome opcional: se em branco, o backend busca o nome oficial pelo ticker
+        nome: nomeFinal,
+        descricao: form.descricao?.trim() || null,
+        nota_usuario: form.nota_usuario === null || form.nota_usuario === undefined || Number.isNaN(form.nota_usuario)
+          ? null : Number(form.nota_usuario),
+        // rf_taxa (rótulo) é derivado dos campos estruturados — mantém o detalhe
+        // do ativo legível sem depender de texto digitado à mão.
+        ...(ehRF ? { rf_taxa: rotuloTaxaRF(form) } : {}),
+        // Subtipo da ação é inferido do ticker (ON/PN/Unit/BDR) — sem campo manual.
+        ...(form.tipo_ativo === 'ACOES'
+          ? { acoes_subtipo: form.acoes_subtipo ?? subtipoAcaoDoTicker(tickerFinal) }
+          : {}),
+        // Rendimento só faz sentido p/ cripto — zera nos demais tipos.
+        ...(form.tipo_ativo !== 'CRIPTOMOEDAS'
+          ? { cripto_rendimento_aa: null, cripto_rendimento_inicio: null, cripto_rendimento_periodicidade: null }
+          : {}),
+      }
+      const res = editando ? await editar(editando.id, payload) : await criar(payload)
+      if (!res.ok) { onToast(res.erro ?? 'Erro ao salvar'); return }
 
-    // Registra a movimentação inicial (cria a posição via operação) e reconstrói
-    // o histórico de renda fixa a partir dela.
-    if (querCompra && res.dados?.id) {
-      const q = Number(compra.quantidade), p = rfSemQtde ? 1 : Number(compra.preco_unitario)
-      const opRes = await criarOperacao({
-        ativo_id: res.dados.id, conta_id: compra.conta_id, tipo_operacao: tipoEntradaPara(form.tipo_ativo),
-        quantidade: q, preco_unitario: p, valor_total: q * p, data_operacao: compra.data,
-      })
+      // Registra a movimentação inicial (cria a posição via operação) e reconstrói
+      // o histórico de renda fixa a partir dela.
+      if (querCompra && res.dados?.id) {
+        const q = Number(compra.quantidade), p = rfSemQtde ? 1 : Number(compra.preco_unitario)
+        const opRes = await criarOperacao({
+          ativo_id: res.dados.id, conta_id: compra.conta_id, tipo_operacao: tipoEntradaPara(form.tipo_ativo),
+          quantidade: q, preco_unitario: p, valor_total: q * p, data_operacao: compra.data,
+        })
+        if (!opRes.ok) { onClose(); onToast(`Ativo criado, mas falha ao registrar a ${termo}: ${opRes.erro ?? ''}`); return }
+        preencher({ ativo_id: res.dados.id })
+        onClose(); onToast(`Ativo criado e ${termo} registrada!`)
+        return
+      }
+
+      onClose(); onToast(editando ? 'Ativo atualizado!' : 'Ativo criado!')
+    } catch (e) {
+      onToast(`Erro inesperado ao salvar: ${(e as Error)?.message ?? 'tente novamente'}`)
+    } finally {
       setSalvando(false)
-      if (!opRes.ok) { onClose(); onToast(`Ativo criado, mas falha ao registrar a ${termo}: ${opRes.erro ?? ''}`); return }
-      preencher({ ativo_id: res.dados.id })
-      onClose(); onToast(`Ativo criado e ${termo} registrada!`)
-      return
     }
-
-    setSalvando(false)
-    onClose(); onToast(editando ? 'Ativo atualizado!' : 'Ativo criado!')
   }
 
   return (
@@ -444,8 +487,10 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       )}
       {/* Subtipo da ação (ON/PN/Unit/BDR) é inferido do ticker — sem campo manual. */}
 
-      {/* 3) Busca na internet — ticker, nome e preço vêm da lista */}
-      {!editando && (
+      {/* 3) Busca na internet — ticker, nome e preço vêm da lista. Renda fixa
+          privada (CDB/LCI/...) não tem ticker de bolsa — não aparece na busca,
+          então pula direto pro campo de nome (ver mudarTipo). */}
+      {!editando && form.tipo_ativo !== 'RENDA_FIXA' && (
         <div className="rounded-lg border border-white/10 p-3 space-y-2">
           <Field label="Buscar ativo (ticker ou nome)">
             <div className="relative">
@@ -560,7 +605,8 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
             ? 'Nome do título'
             : 'Nome (opcional — busca automática pelo ticker)'}>
             <Input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })}
-              placeholder="Deixe em branco para buscar pelo ticker" maxLength={120} disabled={!editando && !manualLivre} />
+              placeholder={form.tipo_ativo === 'RENDA_FIXA' ? 'Ex.: CDB Banco XP 120% CDI' : 'Deixe em branco para buscar pelo ticker'}
+              maxLength={120} disabled={!editando && !manualLivre} />
           </Field>
         </>
       )}
@@ -605,8 +651,9 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
           </Field>
           {ehRFSemQtde(form.tipo_ativo) ? (
             <Field label="Valor aplicado">
-              <Input type="number" min={0} step="any" value={compra.quantidade}
-                onChange={(e) => setCompra({ ...compra, quantidade: e.target.value })} placeholder="0,00" />
+              <InputMoeda value={compra.quantidade === '' ? null : Number(compra.quantidade)}
+                onChange={(v) => setCompra({ ...compra, quantidade: v == null ? '' : String(v) })}
+                placeholder="R$ 0,00" />
             </Field>
           ) : (
             <div className="grid grid-cols-2 gap-3">
@@ -623,6 +670,9 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
           <Field label={ehRendaFixa(form.tipo_ativo) ? 'Data da aplicação' : 'Data da compra'}>
             <Input type="date" value={compra.data} onChange={(e) => setCompra({ ...compra, data: e.target.value })} />
           </Field>
+          {/* Quantidade × Preço unitário são inputs number puros (sem máscara) —
+              isto confirma o total em R$. "Valor aplicado" já é formatado no
+              próprio InputMoeda acima, então não repete a prévia aqui. */}
           {!ehRFSemQtde(form.tipo_ativo) && (
             <div className="flex items-center justify-between text-[12px]" style={{ color: MUTED }}>
               <span>Valor total</span>
@@ -739,6 +789,38 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
               </Field>
             )}
           </div>
+
+          {/* Taxa escalonada por faixa de valor (ex.: CDB "até R$10.000 =
+              120% CDI, acima = 100% CDI") — só existe no pós-fixado "% do
+              índice" de renda fixa privada (Tesouro usa marcação a mercado,
+              não % fixo do índice). */}
+          {form.tipo_ativo === 'RENDA_FIXA' && form.rf_indexador === 'POS_FIXADO' && !posSpread && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-[13px] text-white/80 cursor-pointer">
+                <input type="checkbox" checked={usaFaixaRF}
+                  onChange={(e) => alternarFaixaRF(e.target.checked)} />
+                Taxa diferente acima de um valor (ex.: 120% até R$10.000, 100% acima)
+              </label>
+              {usaFaixaRF && (
+                // items-end: o rótulo "% do índice acima de R$X" quebra em 2
+                // linhas (mais longo que "Vale até (R$)") — sem isso o input
+                // dele começa mais baixo que o do campo ao lado.
+                <div className="grid grid-cols-2 gap-3 items-end">
+                  <Field label="Vale até (R$)">
+                    <InputMoeda value={form.rf_limite_faixa ?? null}
+                      onChange={(v) => setForm({ ...form, rf_limite_faixa: v })}
+                      placeholder="R$ 10.000,00" />
+                  </Field>
+                  <Field label={`% do índice acima de ${form.rf_limite_faixa != null ? formatBRL(form.rf_limite_faixa) : 'R$X'}`}>
+                    <Input type="number" step="0.01" inputMode="decimal"
+                      value={form.rf_percentual_indice_2 ?? ''}
+                      onChange={(e) => setNum('rf_percentual_indice_2', e.target.value)}
+                      placeholder="100" />
+                  </Field>
+                </div>
+              )}
+            </div>
+          )}
 
           <Field label="Emissor">
             <Input value={form.rf_emissor ?? ''} maxLength={80}

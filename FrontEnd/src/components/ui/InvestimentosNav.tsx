@@ -6,7 +6,7 @@ import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { escolherDica } from '../../lib/conteudoMascotes'
 
 // Nav compartilhado entre as 6 páginas de nível superior do módulo de
-// Investimentos (Painel, Meus ativos, Destaques, Extrato, Proventos,
+// Investimentos (Painel, Meus ativos, Destaques, Proventos, Extrato,
 // Configurações).
 // A página de detalhe do ativo (drill-down) não usa este componente — mantém
 // seu próprio back-nav contextual. Fica sempre visível (sticky) ao rolar.
@@ -14,8 +14,8 @@ const ITENS = [
   { to: '/investimentos',               label: 'Painel',         icone: LayoutDashboard, end: true },
   { to: '/investimentos/ativos',        label: 'Meus ativos',    icone: Wallet,          end: false },
   { to: '/investimentos/destaques',     label: 'Destaques',      icone: Trophy,          end: false },
-  { to: '/investimentos/extrato',       label: 'Extrato',        icone: ListFilter,      end: false },
   { to: '/investimentos/dividendos',    label: 'Proventos',      icone: Coins,           end: false },
+  { to: '/investimentos/extrato',       label: 'Extrato',        icone: ListFilter,      end: false },
   { to: '/investimentos/configuracoes', label: 'Configurações',  icone: Settings,        end: false },
 ] as const
 
