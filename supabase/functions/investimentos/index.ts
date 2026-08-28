@@ -12,6 +12,10 @@
 //   shared.ts            — tipos/constantes/helpers de data compartilhados
 //   ativos.ts             — /ativos, /alocacoes
 //   avaliacoes.ts         — /questionarios, /avaliacoes (mentores IA)
+//   chatMentor.ts          — /chat-mentor (Conselho: chat livre por ticker
+//                            com TODOS os mentores em paralelo + síntese de
+//                            consenso; 1:1 com um mentor é via ícone do
+//                            mascote, chat_mascote)
 //   posicoes.ts           — /posicoes, /operacoes
 //   mercado.ts            — cotações externas, PTAX, índices, Tesouro Direto,
 //                           cálculo de renda fixa (maior módulo; import
@@ -42,6 +46,7 @@ import {
 import { rotaHistorico, rotaSnapshotAuto, rotaSnapshotBackfill, rotaSnapshotCron } from "./snapshot.ts";
 import { rotaRendimentoCripto, rotaRendimentoCriptoCron } from "./rendimento-cripto.ts";
 import { rotaFatosRelevantesCron } from "./fatosRelevantes.ts";
+import { rotaChatMentor } from "./chatMentor.ts";
 import {
   rotaMigrarConta, rotaImportar, rotaAtualizarAtivos, rotaNormalizarTesouro, rotaRestaurar,
 } from "./import-export.ts";
@@ -120,6 +125,7 @@ Deno.serve(async (req: Request) => {
       case "alocacoes":       return await rotaAlocacoes(c, req, m, userId);
       case "questionarios":   return await rotaQuestionarios(c, req, m, userId);
       case "avaliacoes":      return await rotaAvaliacoes(c, req, m, userId);
+      case "chat-mentor":     return await rotaChatMentor(c, req, m, userId);
       case "posicoes":        return await rotaPosicoes(c, req, m, userId);
       case "operacoes":       return await rotaOperacoes(c, req, m, userId);
       case "dividendos":      return await rotaDividendos(c, req, m, userId);

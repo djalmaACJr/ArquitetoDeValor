@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, Search, RefreshCw, Wallet, Sparkles } from 'lucide-react'
+import { Plus, Trash2, Search, RefreshCw, Wallet, Sparkles, ArrowLeftRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend } from 'chart.js'
@@ -8,7 +8,7 @@ import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useInvestimentosHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
 import { useInvestimentosDashboard, useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
 import {
-  Drawer, Field, Input, SelectDark, Toast,
+  Drawer, Field, Input, SelectDark, SearchableSelect, Toast,
 } from '../components/ui/shared'
 import DrawerAtivo from '../components/ui/DrawerAtivo'
 import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
@@ -200,6 +200,11 @@ export default function AtivosInvestimentosPage() {
   const [toast,      setToast]      = useState<string | null>(null)
   const [posicoesDe, setPosicoesDe] = useState<InvestimentoAtivo | null>(null)
   const [historicoDe, setHistoricoDe] = useState<InvestimentoAtivo | null>(null)
+  const [seletorMov, setSeletorMov] = useState(false)
+  // Diferencia o drawer de movimentações aberto pelo atalho do header (onde,
+  // ao registrar, pergunta se quer lançar outra) do aberto pela ação
+  // "Posições" de uma linha (sem a pergunta — segue como sempre foi).
+  const [movViaAtalho, setMovViaAtalho] = useState(false)
 
   const filtros = tipoFiltro ? { tipo: tipoFiltro } : {}
   const { ativos, loading, error, atualizarAtivos, normalizarTesouro } = useInvestimentosAtivos(filtros)
@@ -404,6 +409,11 @@ export default function AtivosInvestimentosPage() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30">
             <Sparkles size={15} style={{ color: '#8b5cf6' }} /> Avaliações
           </Link>
+          <button onClick={() => setSeletorMov(true)} data-tutorial="ativos-nova-movimentacao"
+            title="Registra compra/venda (ou aporte/resgate) de um ativo já cadastrado, sem entrar na página dele"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30">
+            <ArrowLeftRight size={15} /> Nova movimentação
+          </button>
           <button onClick={abrirNovo} data-tutorial="ativos-novo"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white"
             style={{ background: '#3b82f6' }}>
@@ -464,7 +474,7 @@ export default function AtivosInvestimentosPage() {
                       linhas={g.linhas}
                       focoSinal={foco?.tipo === g.tipo ? foco.n : null}
                       focoGrupo={foco?.tipo === g.tipo ? { dim: foco.dim, chave: foco.chave } : null}
-                      acoes={{ onPosicoes: setPosicoesDe, onHistorico: setHistoricoDe, onEditar: abrirEditar }}
+                      acoes={{ onPosicoes: (a) => { setMovViaAtalho(false); setPosicoesDe(a) }, onHistorico: setHistoricoDe, onEditar: abrirEditar }}
                       alca={<AlcaArrastar {...alcaTipo(tipo)} />}
                       totalCarteira={dashboard?.total_mercado} />
                   </div>
@@ -480,9 +490,20 @@ export default function AtivosInvestimentosPage() {
         <DrawerAtivo ativo={editando} onClose={() => setDrawer(false)} onToast={showToast} />
       )}
 
-      {/* Drawer movimentações (posição = soma das operações) */}
+      {/* Seletor de ativo pro botão "Nova movimentação" do header — escolhido
+          o ativo, reaproveita o mesmo drawer de movimentações das linhas. */}
+      {seletorMov && (
+        <SeletorAtivoMovimentacao ativos={ativos}
+          onSelecionar={(a) => { setSeletorMov(false); setMovViaAtalho(true); setPosicoesDe(a) }}
+          onClose={() => setSeletorMov(false)} />
+      )}
+
+      {/* Drawer movimentações (posição = soma das operações). Vindo do atalho
+          do header, ao registrar pergunta se quer lançar outra — "sim" fecha
+          este drawer e reabre o seletor de ativo ("reinicia a tela"). */}
       {posicoesDe && (
-        <DrawerMovimentacoes ativo={posicoesDe} onClose={() => setPosicoesDe(null)} onToast={showToast} />
+        <DrawerMovimentacoes ativo={posicoesDe} onClose={() => setPosicoesDe(null)} onToast={showToast}
+          onRegistrarNova={movViaAtalho ? () => { setPosicoesDe(null); setSeletorMov(true) } : undefined} />
       )}
 
       {/* Drawer histórico mensal de valor de mercado */}
@@ -492,6 +513,34 @@ export default function AtivosInvestimentosPage() {
 
       <TutorialTour pageKey="investimentos-ativos-v1" passos={TUTORIAL_INVESTIMENTOS_ATIVOS} />
     </div>
+  )
+}
+
+// ── Seletor de ativo (botão "Nova movimentação" do header) ──────
+// Drawer enxuto: só escolhe o ativo (busca por ticker/nome); ao selecionar,
+// a página troca pro DrawerMovimentacoes de sempre — sem passar pela lista.
+function SeletorAtivoMovimentacao({ ativos, onSelecionar, onClose }: {
+  ativos: InvestimentoAtivo[]
+  onSelecionar: (ativo: InvestimentoAtivo) => void
+  onClose: () => void
+}) {
+  const [ativoId, setAtivoId] = useState('')
+  const ordenados = useMemo(() => [...ativos].sort((a, b) => a.ticker.localeCompare(b.ticker)), [ativos])
+
+  function selecionar(id: string) {
+    setAtivoId(id)
+    const ativo = ativos.find((a) => a.id === id)
+    if (ativo) onSelecionar(ativo)
+  }
+
+  return (
+    <Drawer open onClose={onClose} titulo="Nova movimentação"
+      subtitulo="Escolha o ativo para registrar compra, venda, aporte ou resgate">
+      <Field label="Ativo">
+        <SearchableSelect value={ativoId} onChange={selecionar} placeholder="Buscar por ticker ou nome..."
+          opcoes={ordenados.map((a) => ({ id: a.id, label: a.ticker, sublabel: a.nome }))} />
+      </Field>
+    </Drawer>
   )
 }
 

@@ -1,4 +1,5 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
@@ -76,6 +77,43 @@ async function fetchObjetivoDetalhe(id: string): Promise<Objetivo> {
   return res.dados!
 }
 
+// ── Sincronização automática de progresso ───────────────────────
+//
+// valor_atingido/percentual só são recalculados quando o registro do
+// objetivo é salvo (trigger) ou via POST /objetivos/sincronizar-progresso.
+// Novas transações de receita/despesa NÃO disparam recálculo sozinhas, então
+// sem isso o progresso fica parado no último snapshot. Chamamos o mesmo
+// endpoint do botão "Sincronizar" automaticamente em dois gatilhos:
+//   1) sempre que a tela de detalhe de um objetivo é aberta;
+//   2) no máximo 1x por dia em qualquer página logada (AppLayout), pra quem
+//      não visita a tela de detalhe todo dia.
+// Ambos compartilham a mesma marca de "última sincronização" em localStorage
+// pra não duplicar a chamada quando os dois gatilhos caem no mesmo dia.
+
+const LS_ULTIMA_SINCRONIZACAO = 'arqvalor:objetivos-sync-em'
+
+async function sincronizarProgressoSilencioso(uid: string, qc: QueryClient): Promise<void> {
+  const res = await apiMutate('/objetivos/sincronizar-progresso', 'POST')
+  if (res.ok) {
+    localStorage.setItem(LS_ULTIMA_SINCRONIZACAO, new Date().toDateString())
+    await qc.invalidateQueries({ queryKey: ['objetivos', uid] })
+  }
+}
+
+/** Sincroniza o progresso de todos os objetivos ativos no máximo 1x por dia.
+ * Montar uma única vez num componente sempre presente enquanto logado (ex.: AppLayout). */
+export function useSincronizarObjetivosDiario(): void {
+  const qc = useQueryClient()
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
+
+  useEffect(() => {
+    if (!uid) return
+    if (localStorage.getItem(LS_ULTIMA_SINCRONIZACAO) === new Date().toDateString()) return
+    sincronizarProgressoSilencioso(uid, qc)
+  }, [uid, qc])
+}
+
 // ── Hook principal ────────────────────────────────────────────
 
 export function useObjetivos(filtros: FiltrosObjetivos = {}) {
@@ -134,8 +172,17 @@ export function useObjetivos(filtros: FiltrosObjetivos = {}) {
 // ── Hook de detalhe (com snapshots de progresso) ──────────────
 
 export function useObjetivoDetalhe(id: string | null) {
+  const qc = useQueryClient()
   const { session } = useAuth()
   const uid = session?.user?.id ?? null
+
+  // Sincroniza o progresso ao abrir a tela de detalhe, mesmo que já tenha
+  // rodado hoje via useSincronizarObjetivosDiario — o usuário quer ver o
+  // número mais atual justamente quando entra nessa tela.
+  useEffect(() => {
+    if (!uid || !id) return
+    sincronizarProgressoSilencioso(uid, qc)
+  }, [uid, id, qc])
 
   const { data: objetivo, isLoading: loading, error } = useQuery({
     queryKey: qk.objetivoDetalhe(uid ?? '', id ?? ''),

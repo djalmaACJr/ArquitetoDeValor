@@ -423,6 +423,7 @@ export interface ConfigIAAtiva {
   provedor: string;
   modelo:   string | null;
   apiKey:   string;     // já decriptada
+  buscaWeb: boolean;     // opt-in do usuário + suporte do provedor (ver PROVEDORES_BUSCA_WEB)
 }
 
 export type ResultadoConfigIA =
@@ -478,7 +479,15 @@ export async function lerConfigIAAtiva(
     };
   }
 
-  return { ok: true, config: { provedor: alvo.provedor, modelo: alvo.modelo ?? null, apiKey } };
+  return {
+    ok: true,
+    config: {
+      provedor: alvo.provedor,
+      modelo:   alvo.modelo ?? null,
+      apiKey,
+      buscaWeb: !!alvo.busca_web && PROVEDORES_BUSCA_WEB.has(alvo.provedor),
+    },
+  };
 }
 
 // ── Resolução de TODAS as configs de IA do usuário (mentores) ──────────

@@ -30,6 +30,7 @@ const InvestimentosPage      = lazy(() => import('./pages/InvestimentosPage'))
 const ConfiguracoesInvestimentosPage = lazy(() => import('./pages/ConfiguracoesInvestimentosPage'))
 const AtivosInvestimentosPage = lazy(() => import('./pages/AtivosInvestimentosPage'))
 const AvaliacoesInvestimentosPage = lazy(() => import('./pages/AvaliacoesInvestimentosPage'))
+const ConselhoInvestimentosPage = lazy(() => import('./pages/ConselhoInvestimentosPage'))
 const DetalheInvestimentoPage = lazy(() => import('./pages/DetalheInvestimentoPage'))
 const DestaquesInvestimentosPage = lazy(() => import('./pages/DestaquesInvestimentosPage'))
 const ExtratoInvestimentosPage = lazy(() => import('./pages/ExtratoInvestimentosPage'))
@@ -99,6 +100,7 @@ export default function App() {
             <Route path="investimentos/configuracoes" element={<ConfiguracoesInvestimentosPage/>}/>
             <Route path="investimentos/ativos" element={<AtivosInvestimentosPage/>}/>
             <Route path="investimentos/avaliacoes" element={<AvaliacoesInvestimentosPage/>}/>
+            <Route path="investimentos/conselho" element={<ConselhoInvestimentosPage/>}/>
             <Route path="investimentos/ativos/:id" element={<DetalheInvestimentoPage/>}/>
             <Route path="investimentos/dividendos" element={<DividendosPage/>}/>
             <Route path="importar-fatura"      element={<ImportarFaturaPage/>}/>

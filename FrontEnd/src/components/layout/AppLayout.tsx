@@ -9,6 +9,7 @@ import AvisosCronAdmin from '../ui/AvisosCronAdmin'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useAutoLogout } from '../../hooks/useAutoLogout'
+import { useSincronizarObjetivosDiario } from '../../hooks/useObjetivos'
 import { useAuth } from '../../hooks/useAuth'
 import { mesAtual } from '../../lib/utils'
 
@@ -31,6 +32,11 @@ export default function AppLayout() {
   // Auto-logout: 5min no app nativo (segurança) / 15min no desktop (conveniência).
   const timeoutAutoLogout = Capacitor.isNativePlatform() ? 5 : 15
   useAutoLogout(timeoutAutoLogout)
+
+  // Mantém o progresso de Objetivos (Renda Recorrente/Crescimento/Sonho) em
+  // dia mesmo sem o usuário clicar em "Sincronizar" — no máximo 1x/dia aqui;
+  // useObjetivoDetalhe sincroniza de novo sempre que a tela de detalhe abre.
+  useSincronizarObjetivosDiario()
 
   // Fecha o menu mobile ao navegar (UX)
   // eslint-disable-next-line react-hooks/set-state-in-effect

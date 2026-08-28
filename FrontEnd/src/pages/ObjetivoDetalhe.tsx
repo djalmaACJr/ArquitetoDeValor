@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Pencil, Trash2, ChevronDown, ChevronRight, RefreshCw, Trophy, TrendingDown } from 'lucide-react'
 import { Doughnut, Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, ArcElement, Tooltip, Legend,
@@ -18,6 +18,7 @@ import { apiFetch } from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import { qk } from '../lib/queryKeys'
 import { formatBRL, formatData } from '../lib/utils'
+import { avaliarTendencia } from '../lib/objetivosTendencia'
 import type { Objetivo, Transacao } from '../types'
 import type { EditarObjetivoInput } from '../hooks/useObjetivos'
 
@@ -1655,6 +1656,14 @@ function BarraProgresso({ objetivo }: { objetivo: Objetivo }) {
                : objetivo.status === 'CANCELADO' ? '#636e72'
                : tipoCor[objetivo.tipo] ?? '#4da6ff'
 
+  const atingido = objetivo.status === 'ATINGIDO'
+  const { distanciando, motivo } = avaliarTendencia(objetivo)
+  const bordaSecao = atingido
+    ? 'border-[#00c896]/50 shadow-[0_0_16px_-6px_rgba(0,200,150,0.5)]'
+    : distanciando
+    ? 'border-[#f87171]/40'
+    : 'border-white/5'
+
   const crescimentoMeta = objetivo.tipo === 'SONHO'
     ? Math.max(0, objetivo.valor_meta - objetivo.saldo_base)
     : null
@@ -1668,7 +1677,7 @@ function BarraProgresso({ objetivo }: { objetivo: Objetivo }) {
     : `${formatBRL(objetivo.valor_atingido)} de ${formatBRL(objetivo.valor_meta)}`
 
   return (
-    <section className="bg-[#1a1f2e] rounded-xl p-4 border border-white/5">
+    <section className={`bg-[#1a1f2e] rounded-xl p-4 border transition-colors ${bordaSecao}`}>
       <div className="flex items-center justify-between mb-3">
         <span className="text-[13px]" style={{ color: '#8b92a8' }}>{subtitulo}</span>
         <span className="text-[22px] font-bold" style={{ color: baraCor }}>
@@ -1682,12 +1691,20 @@ function BarraProgresso({ objetivo }: { objetivo: Objetivo }) {
       <div className="flex justify-between mt-2 text-[12px]" style={{ color: '#8b92a8' }}>
         <span>{formatData(objetivo.data_inicio)}</span>
         <span
-          className="px-2 py-0.5 rounded-full text-[11px]"
+          className="px-2 py-0.5 rounded-full text-[11px] flex items-center gap-1"
           style={{ background: `${statusCor[objetivo.status]}22`, color: statusCor[objetivo.status] }}>
+          {atingido && <Trophy size={11} />}
           {{EM_PROGRESSO: 'Em progresso', ATINGIDO: 'Atingido', CANCELADO: 'Cancelado'}[objetivo.status]}
         </span>
         <span>{formatData(objetivo.data_fim)}</span>
       </div>
+
+      {distanciando && (
+        <div className="mt-2 flex items-center gap-1.5 text-[12px]" style={{ color: '#f87171' }}>
+          <TrendingDown size={13} className="flex-shrink-0" />
+          <span>{motivo}</span>
+        </div>
+      )}
 
       {/* Estimativa mensal — apenas SONHO em progresso */}
       {objetivo.tipo === 'SONHO' && objetivo.crescimento_mensal_necessario != null &&

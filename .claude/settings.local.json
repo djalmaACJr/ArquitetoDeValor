@@ -83,7 +83,8 @@
       "PowerShell(\"--- log:\")",
       "Bash(node -e ' *)",
       "Bash(npx --yes esbuild supabase/functions/investimentos/posicoes.ts --format=esm --outfile=out.tmp.js)",
-      "Bash(rm -f out.tmp.js)"
+      "Bash(rm -f out.tmp.js)",
+      "Bash(echo \"TSC_EXIT:$?\")"
     ],
     "additionalDirectories": [
       "C:\\Pessoal\\ArquitetoDeValor\\scripts",

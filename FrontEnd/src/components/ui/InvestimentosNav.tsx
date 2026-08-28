@@ -1,13 +1,13 @@
 import { useMemo } from 'react'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Wallet, Coins, Trophy, Settings, ListFilter } from 'lucide-react'
+import { LayoutDashboard, Wallet, Coins, Trophy, Settings, ListFilter, Users } from 'lucide-react'
 import MascoteDica from './MascoteDica'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { escolherDica } from '../../lib/conteudoMascotes'
 
-// Nav compartilhado entre as 6 páginas de nível superior do módulo de
+// Nav compartilhado entre as 7 páginas de nível superior do módulo de
 // Investimentos (Painel, Meus ativos, Destaques, Proventos, Extrato,
-// Configurações).
+// Conselho, Configurações).
 // A página de detalhe do ativo (drill-down) não usa este componente — mantém
 // seu próprio back-nav contextual. Fica sempre visível (sticky) ao rolar.
 const ITENS = [
@@ -16,6 +16,7 @@ const ITENS = [
   { to: '/investimentos/destaques',     label: 'Destaques',      icone: Trophy,          end: false },
   { to: '/investimentos/dividendos',    label: 'Proventos',      icone: Coins,           end: false },
   { to: '/investimentos/extrato',       label: 'Extrato',        icone: ListFilter,      end: false },
+  { to: '/investimentos/conselho',      label: 'Conselho',       icone: Users,           end: false },
   { to: '/investimentos/configuracoes', label: 'Configurações',  icone: Settings,        end: false },
 ] as const
 

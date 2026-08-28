@@ -1,6 +1,7 @@
-import { Pencil, Trash2, BarChart2 } from 'lucide-react'
+import { Pencil, Trash2, BarChart2, Trophy, TrendingDown } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { formatBRL, formatData } from '../../lib/utils'
+import { avaliarTendencia } from '../../lib/objetivosTendencia'
 import type { Objetivo } from '../../types'
 
 const TIPO_LABEL: Record<string, string> = {
@@ -52,9 +53,18 @@ export function CardObjetivo({
     ?? null
   const opacity  = objetivo.status === 'CANCELADO' ? 'opacity-50' : ''
 
+  const atingido = objetivo.status === 'ATINGIDO'
+  const { distanciando, motivo } = avaliarTendencia(objetivo)
+
+  const borda = atingido
+    ? 'border-[#00c896]/50 shadow-[0_0_16px_-6px_rgba(0,200,150,0.5)]'
+    : distanciando
+    ? 'border-[#f87171]/40'
+    : 'border-white/5 hover:border-white/10'
+
   return (
-    <div className={`bg-[#1a1f2e] rounded-xl p-4 flex flex-col gap-3 border border-white/5
-      hover:border-white/10 transition-colors ${opacity}`}>
+    <div className={`bg-[#1a1f2e] rounded-xl p-4 flex flex-col gap-3 border
+      transition-colors ${borda} ${opacity}`}>
 
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
@@ -97,10 +107,18 @@ export function CardObjetivo({
           style={{ background: `${tipoCor}22`, color: tipoCor }}>
           {TIPO_LABEL[objetivo.tipo]}
         </span>
-        <span className="text-[11px] font-medium px-2 py-0.5 rounded-full"
+        <span className="text-[11px] font-medium px-2 py-0.5 rounded-full flex items-center gap-1"
           style={{ background: `${STATUS_COR[objetivo.status]}22`, color: STATUS_COR[objetivo.status] }}>
+          {atingido && <Trophy size={11} />}
           {STATUS_LABEL[objetivo.status]}
         </span>
+        {distanciando && (
+          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full flex items-center gap-1"
+            style={{ background: '#f8717122', color: '#f87171' }}
+            title={motivo ?? undefined}>
+            <TrendingDown size={11} /> Se distanciando
+          </span>
+        )}
       </div>
 
       {/* Barra de progresso */}

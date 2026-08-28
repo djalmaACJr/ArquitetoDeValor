@@ -44,6 +44,7 @@ const LS_KEYS_USER_SCOPED = [
   'av-theme',                      // tema (sync de arqvalor.usuarios.layout)
   'arqvalor:ocultar_valores',      // flag ocultar (sync de arqvalor.usuarios.ocultar_valores)
   'arqvalor:ultima-atividade',     // timestamp de auto-logout (useAutoLogout) — nunca herdar entre usuários
+  'arqvalor:objetivos-sync-em',    // marca de última sincronização diária de progresso (useSincronizarObjetivosDiario)
   'arqvalor:biometria-recusada',   // "não perguntar de novo" sobre login por digital (LoginPage)
   'arqvalor:destaques-ordem-gerais',     // ordem arrastável dos 4 quadros gerais (DestaquesInvestimentosPage)
   'arqvalor:destaques-ordem-categorias', // ordem arrastável dos quadros "Por tipo de ativo" (idem)

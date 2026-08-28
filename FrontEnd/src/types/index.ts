@@ -249,6 +249,9 @@ export interface Objetivo {
   conta_nome:                   string | null
   categoria_descricao:          string | null
   crescimento_mensal_necessario: number | null
+  // valor_atingido do snapshot mais recente com ~25+ dias de idade — usado
+  // pra destacar objetivos com tendência de piora; null sem histórico suficiente
+  valor_atingido_anterior:      number | null
   // campo extra do GET /:id
   progresso?:     SnapshotProgresso[]
 }
