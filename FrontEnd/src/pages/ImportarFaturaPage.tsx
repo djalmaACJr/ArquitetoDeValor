@@ -740,8 +740,23 @@ function Sandbox({ id }: { id: string }) {
   const ignorar = (itemId: string) =>
     editarItem(itemId, { decisao: 'IGNORAR', categoria_escolhida_id: null })
 
+  // "Voltar" desfaz a classificação pra reclassificar do zero. Além da
+  // categoria, precisa limpar TAMBÉM grupo_chave/descricao_override/
+  // transacao_existente_id — resquícios de uma separação/vínculo manual
+  // anterior (modo CATEGORIA). Sem isso, ao reclassificar o item na
+  // categoria certa ele volta pro modo CATEGORIA ainda "preso" ao grupo
+  // customizado antigo (initGrupos reconstrói grupos a partir desses
+  // campos persistidos) — aparecendo separado dos demais itens da mesma
+  // categoria, formando um 2º cabeçalho "📂 <mesma categoria>" duplicado
+  // em vez de se juntar ao grupo compartilhado.
   const voltar = (itemId: string) =>
-    editarItem(itemId, { categoria_escolhida_id: null, decisao: 'PENDENTE' })
+    editarItem(itemId, {
+      categoria_escolhida_id: null,
+      decisao:                'PENDENTE',
+      grupo_chave:            null,
+      descricao_override:     null,
+      transacao_existente_id: null,
+    })
 
   const toggleItem = (itemId: string) =>
     setSelecionados(prev => {
@@ -1310,20 +1325,33 @@ function Sandbox({ id }: { id: string }) {
           </p>
           <ul className="space-y-1 max-h-40 overflow-y-auto pr-1">
             {txNaoVinculadas.map(tx => (
-              <li key={tx.id} className="flex items-center gap-2 text-[12px] py-0.5">
-                <span className="flex-1 truncate" style={{ color: '#e8eaf0' }}>
-                  {tx.descricao}
-                </span>
-                <span style={{ color: '#8b92a8' }}>
-                  {new Date(tx.data + 'T00:00').toLocaleDateString('pt-BR')}
-                </span>
-                <span style={{ color: '#8b92a8' }}>· {tx.status}</span>
-                {tx.categoria?.descricao && (
-                  <span style={{ color: '#8b92a8' }}>· {tx.categoria.descricao}</span>
-                )}
-                <span className="font-mono flex-none" style={{ color: '#e8eaf0' }}>
-                  {formatBRL(Number(tx.valor))}
-                </span>
+              <li key={tx.id}>
+                <button
+                  type="button"
+                  onClick={() => navigate('/lancamentos', {
+                    state: {
+                      editarId:          tx.id,
+                      mes:               tx.data.slice(0, 7),
+                      contaId:           tx.conta_id,
+                      limparOutrosFiltros: true,
+                    },
+                  })}
+                  className="w-full flex items-center gap-2 text-[12px] py-0.5 text-left rounded hover:bg-white/5 transition-colors"
+                  title="Abrir este lançamento no Extrato">
+                  <span className="flex-1 truncate underline decoration-dotted" style={{ color: '#4da6ff' }}>
+                    {tx.descricao}
+                  </span>
+                  <span style={{ color: '#8b92a8' }}>
+                    {new Date(tx.data + 'T00:00').toLocaleDateString('pt-BR')}
+                  </span>
+                  <span style={{ color: '#8b92a8' }}>· {tx.status}</span>
+                  {tx.categoria?.descricao && (
+                    <span style={{ color: '#8b92a8' }}>· {tx.categoria.descricao}</span>
+                  )}
+                  <span className="font-mono flex-none" style={{ color: '#e8eaf0' }}>
+                    {formatBRL(Number(tx.valor))}
+                  </span>
+                </button>
               </li>
             ))}
           </ul>

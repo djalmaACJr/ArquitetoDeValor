@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "6.0.4"
+export const APP_VERSION = "6.1.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -15,8 +15,8 @@ export const getVersionInfo = () => ({
     patch: "Tentativas"
   },
   current: {
-    level: "patch",
-    description: "Cabeçalho do Extrato/Dashboard em uma linha só, filtros ocultos por padrão e calendário do Extrato com zoom automático e aviso ao clicar em dia sem lançamento"
+    level: "minor",
+    description: "Link direto pro lançamento na revisão de fatura, correção de grupo duplicado ao reclassificar item e sincronização da contraparte de transferência ao alterar status no Extrato"
   }
 })
 

@@ -192,13 +192,37 @@ export function useLancamentos(filtros: FiltrosLancamento) {
 
   const carregar = async () => { await invalidarTudo() }
 
+  // Campos que o backend espelha nas DUAS pernas de uma transferência
+  // (fn_atualizar_par_transferencia, PUT /transacoes/:id — ver CLAUDE.md
+  // › Consistência de transferências).
+  const CAMPOS_ESPELHADOS_TRANSF = ['status', 'valor', 'data', 'observacao'] as const
+
   // Atualização otimista do mês exibido + refetch em background: a UI
   // responde na hora e o saldo_acumulado das linhas seguintes (e os outros
   // meses afetados) são corrigidos pelo refetch.
+  //
+  // Se o item editado for perna de transferência (id_par_transferencia),
+  // espelha os mesmos campos na outra perna no cache local também — o
+  // backend já faz isso atomicamente, mas sem espelhar aqui a tela fica
+  // mostrando as duas pernas com status divergente até o refetch do
+  // invalidarTudo() (abaixo) chegar. Ex.: marcar PAGO no Extrato filtrado
+  // por só 1 conta do par mostrava a outra perna ainda como PENDENTE por
+  // um instante (ou indefinidamente se o refetch falhar/demorar).
   const atualizarLocal = (id: string, campos: Partial<Lancamento>) => {
-    qc.setQueryData<Lancamento[]>(qk.transacoesMes(uid, filtros.mes), prev =>
-      prev?.map(l => l.id === id ? { ...l, ...campos } : l) ?? []
+    const espelhado = Object.fromEntries(
+      Object.entries(campos).filter(([k]) => (CAMPOS_ESPELHADOS_TRANSF as readonly string[]).includes(k))
     )
+    qc.setQueryData<Lancamento[]>(qk.transacoesMes(uid, filtros.mes), prev => {
+      if (!prev) return []
+      const idPar = prev.find(l => l.id === id)?.id_par_transferencia
+      return prev.map(l => {
+        if (l.id === id) return { ...l, ...campos }
+        if (idPar && l.id_par_transferencia === idPar && Object.keys(espelhado).length > 0) {
+          return { ...l, ...espelhado }
+        }
+        return l
+      })
+    })
     invalidarTudo()
   }
 

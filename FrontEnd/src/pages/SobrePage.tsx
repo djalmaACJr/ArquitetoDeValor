@@ -186,9 +186,22 @@ export default function SobrePage() {
             {descNivel}
           </span>
         </div>
-        <p className="text-[13px] leading-relaxed" style={{ color: '#8b92a8' }}>
+        <p className="text-[13px] leading-relaxed mb-3" style={{ color: '#8b92a8' }}>
           {info.current.description}
         </p>
+
+        {/* Detalhe das correções desta versão (6.1.0) */}
+        <ul className="flex flex-col gap-2">
+          {[
+            { t: '🔗 Revisão de fatura', d: 'lançamentos sem vínculo com a fatura agora linkam direto pro item correspondente no Extrato, já filtrado no mês/conta certos.' },
+            { t: '🗂️ Revisão de fatura', d: 'corrigido grupo duplicado no modo "Por categoria" ao reclassificar um item que já havia sido classificado/separado antes.' },
+            { t: '🔄 Extrato', d: 'ao alterar o status de uma perna de transferência (ex.: marcar como Pago), a outra perna atualiza junto na hora — sem esperar recarregar a página.' },
+          ].map(x => (
+            <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
+              <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
+            </li>
+          ))}
+        </ul>
 
         {/* Destaque do último módulo: Investimentos */}
         <div className="mt-4 pt-4 border-t border-white/8">
@@ -199,7 +212,7 @@ export default function SobrePage() {
             </div>
             <div>
               <p className="text-[14px] font-semibold text-white/85">Novo módulo: Investimentos</p>
-              <p className="text-[12px]" style={{ color: '#8b92a8' }}>O destaque desta versão</p>
+              <p className="text-[12px]" style={{ color: '#8b92a8' }}>O grande destaque da versão 6</p>
             </div>
           </div>
           <p className="text-[13px] leading-relaxed mb-3" style={{ color: '#8b92a8' }}>

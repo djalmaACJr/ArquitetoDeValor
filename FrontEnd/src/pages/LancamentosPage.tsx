@@ -393,29 +393,33 @@ export default function LancamentosPage() {
 
   // Ler state da navegação (vindo do Dashboard) — só na montagem / mudança de rota
   const stateAplicado = useRef(false)
+  const editarIdPendente = useRef<string | null>(null)
   useEffect(() => {
     const state = location.state as { novoLancamento?: boolean; tipoInicial?: 'DESPESA' | 'RECEITA' | 'TRANSFERENCIA'; [key: string]: unknown } | null
-    if (!state) return
-    if (stateAplicado.current) return
-    stateAplicado.current = true
-    if (state.novoLancamento) {
-      const tipo = state.tipoInicial ?? 'DESPESA'
-      setTipoNovo(tipo); setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
+    if (state && !stateAplicado.current) {
+      stateAplicado.current = true
+      if (state.novoLancamento) {
+        const tipo = state.tipoInicial ?? 'DESPESA'
+        setTipoNovo(tipo); setLancamentoEditando(null); setNovoLancamento(true); setDrawerAberto(true)
+      }
+      if (state.limparOutrosFiltros) {
+        setFiltContas([])
+        setFiltCats([])
+      }
+      if (state.filtroStatus) setFiltStatus(state.filtroStatus as string[])
+      if (state.mes)           setMes(state.mes as string)
+      if (state.contaId)       setFiltContas([state.contaId as string])
+      // editarId: lancamentos pode ainda não ter carregado (mes/conta acabaram
+      // de mudar acima) — guarda pendente e resolve nas próximas rodadas deste
+      // effect, disparadas pela mudança de `lancamentos` abaixo.
+      if (state.editarId) editarIdPendente.current = state.editarId as string
+      // Limpar state para não reabrir ao recarregar
+      window.history.replaceState({}, '')
     }
-    if (state.limparOutrosFiltros) {
-      setFiltContas([])
-      setFiltCats([])
+    if (editarIdPendente.current) {
+      const tx = lancamentos.find(l => l.id === editarIdPendente.current)
+      if (tx) { abrirEditar(tx); editarIdPendente.current = null }
     }
-    if (state.filtroStatus) setFiltStatus(state.filtroStatus as string[])
-    if (state.mes)           setMes(state.mes as string)
-    if (state.contaId)       setFiltContas([state.contaId as string])
-    if (state.editarId) {
-      // editarId: tenta abrir drawer — aguarda lançamentos se ainda não carregaram
-      const tx = lancamentos.find(l => l.id === state.editarId)
-      if (tx) abrirEditar(tx)
-    }
-    // Limpar state para não reabrir ao recarregar
-    window.history.replaceState({}, '')
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, lancamentos])
 
