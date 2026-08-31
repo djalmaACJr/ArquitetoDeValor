@@ -434,8 +434,14 @@ export async function ranking(c: Db, params: URLSearchParams) {
       const pct     = Number(r.variacao_percentual) || 0;
       // pct === 0 → sem "mês anterior" pra comparar (1º snapshot do ativo,
       // mesma guarda de calcularDesempenho — ganhoRS também sai 0 nesse
-      // caso) — sem um "início" confiável pra reconstruir, a linha some
-      // (não soma nada em nenhum dos dois lados, efeito neutro).
+      // caso) — sem um "início" confiável pra RECONSTRUIR o ganho do mês.
+      // Ainda assim, SE esse for o mês nominal de início do período pedido
+      // (ver comporGrupo), é um dado de verdade sobre exatamente o que
+      // queríamos saber — não "sem dado nenhum". Achado real (ago/2026):
+      // tratar todo pct===0 como "sem dado" fazia um ativo com só 1
+      // snapshot no período — bem comum logo no mês em que o cron passou a
+      // rastreá-lo — degradar pra "desde a compra" mesmo tendo um valor de
+      // mercado conhecido justo no início pedido.
       const inicio = pct !== 0 ? ganhoRS / (pct / 100) : 0;
       acumula(mapaDe(porAtivoEMes, aid), r.mes_ano, ganhoRS, inicio);
       const tipo = porAtivo.get(aid)?.tipo_ativo;
@@ -444,16 +450,25 @@ export async function ranking(c: Db, params: URLSearchParams) {
     }
 
     // Compõe (juros compostos) as somas MENSAIS de um grupo — mesma técnica
-    // em qualquer nível (ativo/categoria/total). Meses sem "início" válido
-    // (nenhum ativo do grupo com posição no mês) são ignorados, não zerados.
+    // em qualquer nível (ativo/categoria/total). Um mês sem "início" válido
+    // pra compor (nenhum ativo do grupo tinha mês anterior pra comparar —
+    // ganho também é 0 nesse caso) não multiplica o acumulador, mas só
+    // CONTA como achado se for exatamente o mês nominal de início do
+    // período (`mesInicio`) — aí é, de fato, o dado que o período pedia.
+    // Um 1º snapshot mais RECENTE que isso (ex.: só há 1 mês de histórico
+    // dentro de uma janela de ANO/SEMESTRE inteira) não é uma âncora
+    // confiável pro início pedido — melhor degradar pra "desde a compra"
+    // (abaixo) do que fingir que aquele valor recente representa o início
+    // de um período bem mais longo. Meses sem NENHUMA linha (nenhum ativo
+    // do grupo com posição ali) ficam de fora do mapa desde a origem e por
+    // isso nunca chegam aqui.
     const comporGrupo = (porMes: Map<string, Acc>): { pct: number; ganho: number } | null => {
       let acc = 1, ganhoTotal = 0, achouAlgum = false;
       for (const mes of [...porMes.keys()].sort()) {
         const { ganho, inicio } = porMes.get(mes)!;
-        if (!(inicio > 0)) continue;
-        acc *= 1 + ganho / inicio;
+        if (inicio > 0) { acc *= 1 + ganho / inicio; achouAlgum = true; }
+        else if (mes === mesInicio) achouAlgum = true;
         ganhoTotal += ganho;
-        achouAlgum = true;
       }
       return achouAlgum ? { pct: (acc - 1) * 100, ganho: ganhoTotal } : null;
     };
