@@ -2,7 +2,7 @@
 // /investimentos/dashboard e /investimentos/ranking — extraído de index.ts.
 import { json, erro } from "../_shared/utils.ts";
 import { logError, logRequest } from "../_shared/logger.ts";
-import { Db, hojeISO, PERIODOS_RANKING, inicioPeriodoRanking, type PeriodoRanking } from "./shared.ts";
+import { Db, hojeISO, PERIODOS_RANKING, inicioPeriodoRanking, recuarMeses, type PeriodoRanking } from "./shared.ts";
 import { conversorCustoBRL, PosicaoCusto } from "./mercado.ts";
 
 export function mapaUltimoMercado(
@@ -388,7 +388,20 @@ export async function ranking(c: Db, params: URLSearchParams) {
   let pctPeriodoTotal: number | null = null;
 
   if (dataInicioNominal) {
-    const mesInicio = dataInicioNominal.slice(0, 7);
+    // "Semana"/"Mês atual" pedem um ponto no tempo AINDA em andamento — a
+    // única linha do mês CORRENTE em inv_historico_mensal é reescrita todo
+    // dia com o preço de HOJE (cron diário, ver shared.ts), então usar o
+    // mês corrente como "início" compararia hoje com hoje (~0% falso) ou
+    // nem acharia linha nenhuma ainda (início do mês). Pra essas duas, usa
+    // a MESMA referência de "MES" (1 mês atrás) — é o melhor que dá pra
+    // saber com granularidade mensal, e bem mais fiel que degradar direto
+    // pra "desde a compra" só porque o período pedido é mais curto que 1
+    // mês. Achado real (ago/2026): CA-INV27 flagrou os dois usando o mês
+    // corrente como início e nunca achando o snapshot do mês passado.
+    const ehJanelaCorrente = periodo === "SEMANA" || periodo === "MES_ATUAL";
+    const mesInicio = ehJanelaCorrente
+      ? recuarMeses(hojeRanking, 1).slice(0, 7)
+      : dataInicioNominal.slice(0, 7);
     let qHist = c.from("inv_historico_mensal")
       .select("ativo_id, conta_id, mes_ano, rentabilidade_mes, variacao_percentual")
       .gte("mes_ano", mesInicio)
