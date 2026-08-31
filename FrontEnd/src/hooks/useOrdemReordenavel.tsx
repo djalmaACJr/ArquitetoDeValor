@@ -20,6 +20,7 @@ const MUTED = '#8b92a8'
 // nesta sessão (`tocadoLocal`), senão um fetch tardio "borracharia" um
 // arraste que acabou de acontecer. Toda reordenação de verdade dispara
 // `aoMudar`, pro chamador persistir no banco.
+// eslint-disable-next-line react-refresh/only-export-components -- hook + AlcaArrastar (componente pequeno e acoplado) no mesmo arquivo, mesma convenção de Mascote.tsx
 export function useOrdemReordenavel<T extends string>(
   lsKey: string, chavesAtuais: T[],
   opts?: { valorRemoto?: T[] | null; aoMudar?: (ordem: T[]) => void },

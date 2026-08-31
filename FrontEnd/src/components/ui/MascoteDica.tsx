@@ -10,7 +10,7 @@
 //
 // Clicar no mascote abre o chat com a IA (ChatMascote).
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Mascote, { srcMascote, type MascoteNome, type MascotePose } from './Mascote'
 import ChatMascote from './ChatMascote'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
@@ -40,8 +40,16 @@ export default function MascoteDica({
   // Rede de segurança: se `nome`/`pose` mudar (ex.: nova dica sorteada),
   // tenta carregar de novo em vez de ficar escondido por causa de uma
   // falha antiga de uma pose diferente (achado real: o avatar do mentor
-  // sumia do cabeçalho e só voltava navegando pra outra página).
-  useEffect(() => { setImgFalhou(false) }, [nome, pose])
+  // sumia do cabeçalho e só voltava navegando pra outra página). Ajusta
+  // durante a renderização (padrão recomendado pelo React pra "resetar
+  // estado quando uma prop muda") em vez de um useEffect — evita o
+  // re-render extra que o efeito causaria.
+  const chaveAtual = `${nome}|${pose}`
+  const [chaveAnterior, setChaveAnterior] = useState(chaveAtual)
+  if (chaveAtual !== chaveAnterior) {
+    setChaveAnterior(chaveAtual)
+    setImgFalhou(false)
+  }
   if (imgFalhou) return null
 
   const apelido = apelidoDe(nome)

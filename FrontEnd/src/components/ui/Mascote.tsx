@@ -26,7 +26,7 @@
 // (arquiteta-sentada, raposa-sentada, raposa-espantada). A função
 // `arquivoPara` cuida disso — o consumidor sempre passa a forma canônica.
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 export type MascoteNome  = 'sabio' | 'arquiteta' | 'gato' | 'raposa'
 export type MascotePose  =
@@ -86,8 +86,16 @@ export default function Mascote({
   const [erro, setErro] = useState(false)
   // Rede de segurança adicional: se `nome`/`pose` mudar (ex.: dica nova
   // sorteada na mesma montagem), tenta carregar de novo em vez de continuar
-  // escondido por causa de uma falha antiga de uma pose diferente.
-  useEffect(() => { setErro(false) }, [nome, pose])
+  // escondido por causa de uma falha antiga de uma pose diferente. Ajusta
+  // durante a renderização (padrão recomendado pelo React pra "resetar
+  // estado quando uma prop muda") em vez de um useEffect — evita o
+  // re-render extra que o efeito causaria.
+  const chaveAtual = `${nome}|${pose}`
+  const [chaveAnterior, setChaveAnterior] = useState(chaveAtual)
+  if (chaveAtual !== chaveAnterior) {
+    setChaveAnterior(chaveAtual)
+    setErro(false)
+  }
   if (erro) return null
 
   return (
