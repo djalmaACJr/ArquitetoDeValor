@@ -34,6 +34,14 @@ function dataFutura(dias: number): string {
 
 function mesOffset(offset: number): string {
   const d = new Date();
+  // dia 1 ANTES de aplicar o offset — sem isso, rodar em dia 29/30/31 e
+  // recuar pra um mês mais curto (ex.: hoje 31/ago, offset -2 → cai em
+  // 31/jun, que não existe → JS ROLA pra 01/jul) faz dois offsets
+  // DIFERENTES colidirem no mesmo mês. Achado real (ago/2026): CA-INV30
+  // rodando no dia 31 fazia mesOffset(-2) e mesOffset(-1) caírem os dois em
+  // "2026-07" (um sobrescrevia o histórico do outro via upsert), quebrando
+  // o cenário "histórico completo -2→-1→0" que o teste monta.
+  d.setDate(1);
   d.setMonth(d.getMonth() + offset);
   return d.toISOString().slice(0, 7);
 }
