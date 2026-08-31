@@ -221,10 +221,13 @@ export default function SobrePage() {
           </p>
           <ul className="flex flex-col gap-2 mb-3">
             {[
-              { t: '📊 Ativos e posições',  d: 'ações, FIIs, ETFs, renda fixa, Tesouro Direto e criptomoedas — com preço médio e valor de mercado calculados automaticamente.' },
-              { t: '💵 Dividendos',         d: 'proventos lançados direto no extrato (projeção → pago), com busca automática na B3 e diagnóstico de pendências.' },
-              { t: '🏆 Ranking',            d: 'performance por ativo — em alta, em prejuízo, maior dividend yield e participação na carteira.' },
-              { t: '🤖 Mentores de IA',     d: 'avaliação da carteira por questionário (nota 0–10 por ativo) e recomendação de compra, venda ou manutenção.' },
+              { t: '📊 Ativos e posições',    d: 'ações, FIIs, ETFs, renda fixa, Tesouro Direto e criptomoedas — com preço médio e valor de mercado calculados automaticamente a partir das operações.' },
+              { t: '💵 Dividendos',           d: 'proventos lançados direto no extrato (projeção → pago), com busca automática na B3/exterior e diagnóstico de pendências — e um aviso de "novidades" quando um provento novo é detectado.' },
+              { t: '🏆 Ranking',              d: 'performance por ativo — em alta, em prejuízo, maior dividend yield e participação na carteira.' },
+              { t: '🤖 Mentores de IA',       d: 'avaliação da carteira por questionário (nota 0–10 por ativo), perfil de investidor por suitability e pesos de avaliação configuráveis por critério.' },
+              { t: '🧭 Correlação e sobreposição', d: 'veja o quanto os ativos da carteira se movem juntos (correlação de preço) e onde há concentração/sobreposição por segmento ou área.' },
+              { t: '🏦 Resumo por instituição', d: 'quanto do patrimônio está em cada corretora/banco, num gráfico de rosca.' },
+              { t: '💹 Cotações automáticas', d: 'Tesouro Direto, índices econômicos (CDI/IPCA/Selic) e PTAX atualizados sozinhos — inclusive cupom semestral do Tesouro lançado e o juros-sobre-juros recalculado automaticamente no vencimento.' },
             ].map(x => (
               <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
                 <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
@@ -233,8 +236,8 @@ export default function SobrePage() {
           </ul>
           <p className="text-[13px] leading-relaxed" style={{ color: '#8b92a8' }}>
             Também dá pra definir metas de alocação por tipo de ativo, migrar posições entre
-            contas e simular sua aposentadoria pela regra dos 4% — tudo em Investimentos →
-            Configurações.
+            contas (inteira ou ativo por ativo) e simular sua aposentadoria pela regra dos 4% —
+            tudo em Investimentos → Configurações.
           </p>
         </div>
       </section>
