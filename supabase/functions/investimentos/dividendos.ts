@@ -690,9 +690,9 @@ export async function upsertDividendoProvisionado(admin: Db, p: {
 
   type Cand = { id: string; transacao_extrato_id: string | null; valor: number; data_pagamento: string; valor_por_cota: number | null; transacoes?: { status?: string } | null };
   const lista = (candidatos ?? []) as Cand[];
-  // Entre as projeções do mês, só reaproveita a que já tem a MESMA data do
-  // evento sendo processado. NUNCA cai para "a projeção do mês, seja qual
-  // for" (mesmo havendo só 1 candidata) — essa versão anterior partia do
+  // Entre as projeções do mês, prioriza a que já tem a MESMA data do evento
+  // sendo processado. NUNCA cai para "a projeção do mês, seja qual for"
+  // (mesmo havendo só 1 candidata) — essa versão anterior partia do
   // pressuposto de que uma única projeção diferente no mês só podia ser o
   // MESMO evento com data corrigida pela fonte, e reaproveitava reescrevendo
   // a data. Na prática um ativo pode ter 2+ tranches do mesmo tipo em DATAS
@@ -702,10 +702,23 @@ export async function upsertDividendoProvisionado(admin: Db, p: {
   // "atualizado" e o valor/data oscilando entre os dois
   // eventos a cada dia (achado real: BBDC3/JSCP setembro/2026 — payDate
   // oscilando entre 01/09 e 15/09, cada um com seu próprio valor, porque só
-  // existia 1 registro em inv_dividendos pra representar os dois). Sem data
-  // exata, sempre cria um registro NOVO — nunca corrompe um existente.
+  // existia 1 registro em inv_dividendos pra representar os dois).
   const projecoesDoMes = lista.filter((d) => d.transacoes?.status === "PROJECAO");
-  const existente = projecoesDoMes.find((d) => String(d.data_pagamento).slice(0, 10) === p.payDate);
+  const exata = projecoesDoMes.find((d) => String(d.data_pagamento).slice(0, 10) === p.payDate);
+  // Sem data exata: tolera até TOLERANCIA_DIAS_REVISAO de diferença, mas só
+  // quando existir EXATAMENTE 1 candidata na janela — se houver 2+, não
+  // arrisca mesclar tranches distintas (fica ambíguo qual delas é "a mesma"),
+  // então cria um registro novo, igual ao comportamento sem tolerância.
+  // Sem isso, calendário FII (data anunciada com antecedência, sem
+  // valor_por_cota) seguido da confirmação da B3 alguns dias depois vira 2
+  // linhas permanentes em PROJECAO pro mesmo aluguel (achado real: 8 FIIs
+  // duplicados em 2026-09 — KORE11/KNCR11/VGRI11/MANA11/INLG11/MXRF11/
+  // GARE11/XPLG11, todos com a data nova exatamente 1 dia após a antiga).
+  const TOLERANCIA_DIAS_REVISAO = 5;
+  const diasEntre = (a: string, b: string) => Math.abs((Date.parse(a) - Date.parse(b)) / 86400000);
+  const proximas = projecoesDoMes.filter((d) =>
+    diasEntre(String(d.data_pagamento).slice(0, 10), p.payDate) <= TOLERANCIA_DIAS_REVISAO);
+  const existente = exata ?? (proximas.length === 1 ? proximas[0] : undefined);
 
   // Já existe um registro NÃO-projeção (pago/pendente pelo usuário, ou
   // dividendo sem transação) para esta MESMA data de pagamento: não mexe,

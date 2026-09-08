@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "6.1.0"
+export const APP_VERSION = "6.1.1"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -15,8 +15,8 @@ export const getVersionInfo = () => ({
     patch: "Tentativas"
   },
   current: {
-    level: "minor",
-    description: "Link direto pro lançamento na revisão de fatura, correção de grupo duplicado ao reclassificar item e sincronização da contraparte de transferência ao alterar status no Extrato"
+    level: "patch",
+    description: "Correção de proventos de FII duplicados quando o cron revisava a data de pagamento em poucos dias após a estimativa inicial"
   }
 })
 
