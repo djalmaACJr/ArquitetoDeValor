@@ -92,7 +92,12 @@
       "Bash(curl -s \"https://api.github.com/repos/djalmaACJr/ArquitetoDeValor/check-runs/93477944214/annotations\" -H \"Accept: application/vnd.github+json\")",
       "Bash(sed -i 's/inv_tipos_dividendo_id\\(descricao\\)/inv_tipos_dividendo_id\\(nome\\)/; s/inv_tipos_dividendo?.descricao/inv_tipos_dividendo?.nome/' ./check_dup2_tmp.mjs)",
       "Bash(node ./check_dup2_tmp.mjs)",
-      "Bash(cd \"c:/Pessoal/ArquitetoDeValor\" && rm -f check_dup_tmp.mjs check_dup2_tmp.mjs check_dup3_tmp.mjs /tmp/check_dup.mjs && git status --short)"
+      "Bash(cd \"c:/Pessoal/ArquitetoDeValor\" && rm -f check_dup_tmp.mjs check_dup2_tmp.mjs check_dup3_tmp.mjs /tmp/check_dup.mjs && git status --short)",
+      "Bash(where adb *)",
+      "Bash(adb devices *)",
+      "Bash(\"/c/Users/djalma/AppData/Local/Android/Sdk/platform-tools/adb.exe\" devices *)",
+      "Bash(\"/c/Users/djalma/AppData/Local/Android/Sdk/platform-tools/adb.exe\" uninstall *)",
+      "Bash(\"/c/Users/djalma/AppData/Local/Android/Sdk/platform-tools/adb.exe\" shell *)"
     ],
     "additionalDirectories": [
       "\\tmp"

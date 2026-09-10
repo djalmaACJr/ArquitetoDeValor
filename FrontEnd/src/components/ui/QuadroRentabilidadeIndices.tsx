@@ -28,7 +28,7 @@ import { useIndicesEconomicos, type PontoIndice } from '../../hooks/useIndicesEc
 import { useInvIndicadores } from '../../hooks/useInvIndicadores'
 import { usePreferenciasOrdemQuadros } from '../../hooks/usePreferenciasOrdemQuadros'
 import { acumularGanhoInicioPorMes, retornoPorMes, comporRetornoMensal } from '../../lib/rentabilidadeComposta'
-import { TIPO_ATIVO_LABEL } from '../../lib/constants'
+import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPOS_ATIVO_INV } from '../../lib/constants'
 import type { InvestimentoHistoricoMensal, TipoAtivoInvestimento, PontoIndicador, PeriodoRanking } from '../../types'
 
 // Chave própria dentro do blob compartilhado ordem_quadros — não colide com
@@ -54,6 +54,37 @@ function fmtMesCurto(anoMes: string): string {
 function fmtPct(v: number): string { return `${v >= 0 ? '+' : ''}${v.toFixed(2).replace('.', ',')}%` }
 function corPct(v: number): string { return v > 0 ? VERDE : v < 0 ? VERMELHO : MUTED }
 
+// Cor hex ('#rrggbb') → rgba com a opacidade dada. Usado só pra esmaecer uma
+// linha (cores das linhas do gráfico já são sempre hex sólido).
+function comAlpha(hex: string, alpha: number): string {
+  const h = hex.replace('#', '')
+  if (h.length !== 6) return hex
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+// Realce ao passar o mouse num item da legenda: a linha correspondente fica
+// mais grossa e as demais esmaecem (some o preenchimento delas também) — só
+// mexe direto no dataset do Chart.js (chart.update('none'), sem re-renderizar
+// o React) e restaura tudo quando `indexRealcado` é null (mouse saiu da
+// legenda). As cores/larguras ORIGINAIS ficam guardadas no próprio dataset
+// (`_corBase`/`_fundoBase`/`_larguraBase`) na 1ª chamada, pra sempre voltar a
+// elas — nunca a partir de um estado já esmaecido.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function realcarNaLegenda(chart: any, indexRealcado: number | null) {
+  if (!chart) return
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  chart.data.datasets.forEach((ds: any, i: number) => {
+    if (ds._corBase === undefined) ds._corBase = ds.borderColor
+    if (ds._fundoBase === undefined) ds._fundoBase = ds.backgroundColor
+    if (ds._larguraBase === undefined) ds._larguraBase = ds.borderWidth
+    const emFoco = indexRealcado === null || i === indexRealcado
+    ds.borderColor     = emFoco ? ds._corBase : comAlpha(ds._corBase, 0.12)
+    ds.backgroundColor = emFoco ? ds._fundoBase : 'transparent'
+    ds.borderWidth      = i === indexRealcado ? ds._larguraBase + 1.5 : ds._larguraBase
+  })
+  chart.update('none')
+}
+
 const ANO_ATUAL = new Date().getFullYear()
 
 // PeriodoRanking (do topo da página) → recorte de meses. Granularidade
@@ -75,9 +106,12 @@ function aplicarPeriodo(meses: string[], periodo: PeriodoRanking): string[] {
 // lib/rentabilidadeComposta.ts — ver comentário lá sobre o achado ago/2026
 // que motivou extrair esse cálculo pra um único lugar.
 function retornoMensalCarteira(
-  historico: InvestimentoHistoricoMensal[], tipo: TipoAtivoInvestimento | '',
+  historico: InvestimentoHistoricoMensal[], tipos: TipoAtivoInvestimento[],
 ): Map<string, number> {
-  const filtrado = tipo ? historico.filter((h) => h.inv_ativos?.tipo_ativo === tipo) : historico
+  const set = new Set(tipos)
+  const filtrado = set.size > 0
+    ? historico.filter((h) => h.inv_ativos?.tipo_ativo && set.has(h.inv_ativos.tipo_ativo))
+    : historico
   return retornoPorMes(acumularGanhoInicioPorMes(filtrado))
 }
 
@@ -113,7 +147,7 @@ function retornoPorTipoEMes(historico: InvestimentoHistoricoMensal[]): Map<TipoA
   const tipos = new Set<TipoAtivoInvestimento>()
   for (const h of historico) if (h.inv_ativos?.tipo_ativo) tipos.add(h.inv_ativos.tipo_ativo)
   const out = new Map<TipoAtivoInvestimento, Map<string, number>>()
-  for (const tipo of tipos) out.set(tipo, retornoMensalCarteira(historico, tipo))
+  for (const tipo of tipos) out.set(tipo, retornoMensalCarteira(historico, [tipo]))
   return out
 }
 // Texto do hover de UM mês: retorno de cada tipo NAQUELE mês, do maior pro
@@ -156,6 +190,34 @@ function gapRelativo(minha: number, ref: number, nome: string): string {
 }
 
 interface Referencia { key: string; nome: string; retorno: Map<string, number> }
+
+// ── Linhas da tabela "Rentabilidade" (retorno mensal por ano, mais recente
+// primeiro), a partir de um retorno mensal já resolvido. Extraída à parte
+// pra poder ser chamada UMA VEZ POR CATEGORIA selecionada (ver `gruposTabela`
+// no componente) — sempre o histórico INTEIRO daquele retorno, não recortado
+// pelo período do topo (a tabela é o "extrato completo").
+interface LinhaAno { ano: string; porMes: (number | null)[]; anual: number; acumulado: number }
+function construirLinhasTabela(retorno: Map<string, number>): LinhaAno[] {
+  const meses = [...retorno.keys()].sort()
+  const porAno = new Map<string, Map<number, number>>()
+  for (const m of meses) {
+    const [ano, mesStr] = m.split('-')
+    if (!porAno.has(ano)) porAno.set(ano, new Map())
+    porAno.get(ano)!.set(Number(mesStr), retorno.get(m) ?? 0)
+  }
+  const curvaCompleta = curvaAcumulada(meses, retorno)
+  const acumuladoPorMes = new Map(meses.map((m, i) => [m, curvaCompleta[i]]))
+  return [...porAno.keys()].sort((a, b) => b.localeCompare(a)).map((ano) => {
+    const mesesDoAno = porAno.get(ano)!
+    const ultimoMesDoAno = `${ano}-${String(Math.max(...mesesDoAno.keys())).padStart(2, '0')}`
+    return {
+      ano,
+      porMes: Array.from({ length: 12 }, (_, i) => mesesDoAno.get(i + 1) ?? null),
+      anual: comporValores([...mesesDoAno.values()]),
+      acumulado: acumuladoPorMes.get(ultimoMesDoAno) ?? 0,
+    }
+  })
+}
 
 // ── Card de resumo (rentabilidade no período do filtro do topo) ──────────
 // Compara com QUALQUER NÚMERO de referências ao mesmo tempo (acumulativo —
@@ -221,7 +283,7 @@ function CardResumo({ titulo, janela, retornoCarteira, referencias, refsSelecion
 }
 
 export default function QuadroRentabilidadeIndices({ contaId, periodo, tipoAtivo, periodoLabel }: {
-  contaId: string | null; periodo: PeriodoRanking; tipoAtivo: TipoAtivoInvestimento | ''; periodoLabel: string
+  contaId: string | null; periodo: PeriodoRanking; tipoAtivo: TipoAtivoInvestimento[]; periodoLabel: string
 }) {
   // Referências marcadas no "Comparar rentabilidade com" — persistidas em
   // arqvalor.usuarios.ordem_quadros (ver comentário no topo do arquivo),
@@ -275,29 +337,46 @@ export default function QuadroRentabilidadeIndices({ contaId, periodo, tipoAtivo
     [indicadores, seriesIndicadores, mesesJanela],
   )
 
+  // Retorno mensal de cada categoria selecionada no filtro do topo — vazio
+  // quando nenhuma está marcada (comportamento combinado de sempre).
+  // Calculado uma vez e reusado tanto pelo gráfico (curva acumulada, abaixo)
+  // quanto pela tabela "Rentabilidade" logo depois — um bloco/linha por tipo.
+  const retornosPorCategoria = useMemo(() => {
+    if (tipoAtivo.length === 0) return []
+    return [...tipoAtivo]
+      .sort((a, b) => TIPOS_ATIVO_INV.indexOf(a) - TIPOS_ATIVO_INV.indexOf(b))
+      .map((t) => ({
+        tipo: t, titulo: TIPO_ATIVO_LABEL[t], cor: TIPO_ATIVO_COR[t],
+        retorno: retornoMensalCarteira(historico, [t]),
+      }))
+  }, [tipoAtivo, historico])
+
+  // Curva acumulada de CADA categoria selecionada, na mesma janela do
+  // gráfico — pedido explícito: ver a evolução de cada tipo separado, não só
+  // uma "Rentabilidade" combinada. Sem categoria selecionada, fica vazio e o
+  // gráfico volta a mostrar a única linha "Rentabilidade" (carteira inteira).
+  const curvasCategorias = useMemo(
+    () => retornosPorCategoria.map((c) => ({ ...c, dados: curvaAcumulada(mesesJanela, c.retorno) })),
+    [retornosPorCategoria, mesesJanela],
+  )
+
   // ── Tabela: retorno mensal por ano (mais recente primeiro) — sempre o
   // histórico INTEIRO (a tabela é o "extrato completo"; o período do topo
-  // só recorta o gráfico, senão anos inteiros somem da tabela). ─────────
-  const linhasTabela = useMemo(() => {
-    const porAno = new Map<string, Map<number, number>>()
-    for (const m of mesesOrdenados) {
-      const [ano, mesStr] = m.split('-')
-      if (!porAno.has(ano)) porAno.set(ano, new Map())
-      porAno.get(ano)!.set(Number(mesStr), retornoCarteira.get(m) ?? 0)
+  // só recorta o gráfico, senão anos inteiros somem da tabela).
+  // Sem categoria selecionada: um único bloco, com o retorno COMBINADO
+  // (mesmo comportamento de sempre). Com 1+ categorias selecionadas no
+  // filtro do topo: um bloco separado por categoria (nunca misturadas), na
+  // ordem fixa de TIPOS_ATIVO_INV — pedido explícito, pra comparar a
+  // rentabilidade de cada tipo lado a lado em vez de uma média combinada. ──
+  interface GrupoTabela { chave: string; titulo: string; cor: string | null; linhas: LinhaAno[] }
+  const gruposTabela = useMemo<GrupoTabela[]>(() => {
+    if (retornosPorCategoria.length === 0) {
+      return [{ chave: '__total__', titulo: 'Rentabilidade', cor: null, linhas: construirLinhasTabela(retornoCarteira) }]
     }
-    const curvaCompleta = curvaAcumulada(mesesOrdenados, retornoCarteira)
-    const acumuladoPorMes = new Map(mesesOrdenados.map((m, i) => [m, curvaCompleta[i]]))
-    return [...porAno.keys()].sort((a, b) => b.localeCompare(a)).map((ano) => {
-      const meses = porAno.get(ano)!
-      const ultimoMesDoAno = `${ano}-${String(Math.max(...meses.keys())).padStart(2, '0')}`
-      return {
-        ano,
-        porMes: Array.from({ length: 12 }, (_, i) => meses.get(i + 1) ?? null),
-        anual: comporValores([...meses.values()]),
-        acumulado: acumuladoPorMes.get(ultimoMesDoAno) ?? 0,
-      }
-    })
-  }, [mesesOrdenados, retornoCarteira])
+    return retornosPorCategoria.map((c) => ({
+      chave: c.tipo, titulo: c.titulo, cor: c.cor, linhas: construirLinhasTabela(c.retorno),
+    }))
+  }, [retornosPorCategoria, retornoCarteira])
 
   const carregando = loadingHist || loadingIndices || loadingIndic
   const semDados = !carregando && mesesOrdenados.length === 0
@@ -327,10 +406,20 @@ export default function QuadroRentabilidadeIndices({ contaId, periodo, tipoAtivo
                 data={{
                   labels,
                   datasets: [
-                    {
-                      label: 'Rentabilidade', data: curvaCarteira, borderColor: AZUL, backgroundColor: `${AZUL}22`,
-                      fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 3, borderWidth: 2, order: 0,
-                    },
+                    // Sem categoria selecionada: 1 linha "Rentabilidade" (carteira
+                    // inteira, azul), como sempre foi. Com 1+ categorias marcadas
+                    // no filtro do topo: 1 linha por categoria, cada uma na sua
+                    // cor (mesma de TIPO_ATIVO_COR usada no resto do app) — pedido
+                    // explícito, pra ver a evolução de cada tipo separado.
+                    ...(curvasCategorias.length > 0
+                      ? curvasCategorias.map((c) => ({
+                          label: c.titulo, data: c.dados, borderColor: c.cor, backgroundColor: `${c.cor}22`,
+                          fill: curvasCategorias.length === 1, tension: 0.3, pointRadius: 0, pointHoverRadius: 3, borderWidth: 2, order: 0,
+                        }))
+                      : [{
+                          label: 'Rentabilidade', data: curvaCarteira, borderColor: AZUL, backgroundColor: `${AZUL}22`,
+                          fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 3, borderWidth: 2, order: 0,
+                        }]),
                     {
                       label: 'CDI', data: curvaCDIGrafico, borderColor: AMBAR, backgroundColor: 'transparent',
                       tension: 0.3, pointRadius: 0, pointHoverRadius: 3, borderWidth: 2, spanGaps: true, order: 1,
@@ -358,6 +447,12 @@ export default function QuadroRentabilidadeIndices({ contaId, periodo, tipoAtivo
                     legend: {
                       position: 'top' as const,
                       labels: { color: '#e8eaf0', usePointStyle: true, boxWidth: 8, font: { size: 11 } },
+                      // Passar o mouse numa linha da legenda realça a curva
+                      // correspondente no gráfico (e esmaece as demais) —
+                      // ajuda a achar uma linha específica quando há várias
+                      // sobrepostas (categorias + CDI/IPCA/indicadores).
+                      onHover: (_evt, legendItem, legend) => realcarNaLegenda(legend.chart, legendItem.datasetIndex ?? null),
+                      onLeave: (_evt, _legendItem, legend) => realcarNaLegenda(legend.chart, null),
                     },
                     tooltip: { callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${fmtPct(Number(ctx.parsed.y))}` } },
                   },
@@ -377,7 +472,10 @@ export default function QuadroRentabilidadeIndices({ contaId, periodo, tipoAtivo
         <div className="mt-5 pt-4 border-t border-white/10">
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <h2 className="text-[15px] font-semibold text-white">Rentabilidade</h2>
-            {porTipoEMes.size > 1 && (
+            {/* Hint de contribuição por tipo só faz sentido no bloco COMBINADO
+                (sem categoria selecionada) — com 1+ categorias, cada bloco já
+                É de um único tipo, sem o que "contribuir". */}
+            {gruposTabela.length === 1 && porTipoEMes.size > 1 && (
               <span className="flex items-center gap-1 text-[11px]" style={{ color: MUTED }}>
                 <Info size={12} /> passe o mouse sobre um mês pra ver a contribuição por tipo de ativo
               </span>
@@ -393,27 +491,48 @@ export default function QuadroRentabilidadeIndices({ contaId, periodo, tipoAtivo
                   <th className="font-medium pb-2 text-right">Acumulado</th>
                 </tr>
               </thead>
-              <tbody>
-                {linhasTabela.map((l) => (
-                  <tr key={l.ano} className="border-t border-white/5">
-                    <td className="py-1.5 pr-3 text-white font-medium">{l.ano}</td>
-                    {l.porMes.map((v, i) => {
-                      const mesChave = `${l.ano}-${String(i + 1).padStart(2, '0')}`
-                      const titulo = v != null ? tituloContribuicaoMes(mesChave, porTipoEMes) : ''
-                      return (
-                        <td key={i}
-                          className={`py-1.5 pr-3 text-right whitespace-nowrap ${titulo ? 'cursor-help' : ''}`}
-                          style={{ color: v == null ? MUTED : corPct(v) }}
-                          title={titulo || undefined}>
-                          {v == null ? '-' : fmtPct(v)}
-                        </td>
-                      )
-                    })}
-                    <td className="py-1.5 pr-3 text-right font-semibold whitespace-nowrap" style={{ color: corPct(l.anual) }}>{fmtPct(l.anual)}</td>
-                    <td className="py-1.5 text-right font-semibold whitespace-nowrap text-white">{fmtPct(l.acumulado)}</td>
-                  </tr>
-                ))}
-              </tbody>
+              {gruposTabela.map((g) => (
+                <tbody key={g.chave}>
+                  {/* Subtítulo por categoria — só aparece com 1+ categorias
+                      selecionadas (mais de um bloco); no combinado (1 bloco
+                      só) o h2 "Rentabilidade" acima já basta. */}
+                  {gruposTabela.length > 1 && (
+                    <tr>
+                      <td colSpan={15} className="pt-3 pb-1.5">
+                        <span className="inline-flex items-center gap-2 text-[13px] font-semibold text-white">
+                          {g.cor && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: g.cor }} />}
+                          {g.titulo}
+                        </span>
+                      </td>
+                    </tr>
+                  )}
+                  {g.linhas.length === 0 ? (
+                    <tr>
+                      <td colSpan={15} className="py-1.5 text-[12px]" style={{ color: MUTED }}>
+                        Sem histórico registrado para este tipo.
+                      </td>
+                    </tr>
+                  ) : g.linhas.map((l) => (
+                    <tr key={l.ano} className="border-t border-white/5">
+                      <td className="py-1.5 pr-3 text-white font-medium">{l.ano}</td>
+                      {l.porMes.map((v, i) => {
+                        const mesChave = `${l.ano}-${String(i + 1).padStart(2, '0')}`
+                        const titulo = gruposTabela.length === 1 && v != null ? tituloContribuicaoMes(mesChave, porTipoEMes) : ''
+                        return (
+                          <td key={i}
+                            className={`py-1.5 pr-3 text-right whitespace-nowrap ${titulo ? 'cursor-help' : ''}`}
+                            style={{ color: v == null ? MUTED : corPct(v) }}
+                            title={titulo || undefined}>
+                            {v == null ? '-' : fmtPct(v)}
+                          </td>
+                        )
+                      })}
+                      <td className="py-1.5 pr-3 text-right font-semibold whitespace-nowrap" style={{ color: corPct(l.anual) }}>{fmtPct(l.anual)}</td>
+                      <td className="py-1.5 text-right font-semibold whitespace-nowrap text-white">{fmtPct(l.acumulado)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
             </table>
           </div>
         </div>

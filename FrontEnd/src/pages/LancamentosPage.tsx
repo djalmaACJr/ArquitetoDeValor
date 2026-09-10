@@ -1444,6 +1444,49 @@ export default function LancamentosPage() {
                     }}>
                     <div className="flex items-center gap-2 px-1 mb-2"
                       style={data === diaFocado ? { background: 'rgba(77,166,255,0.1)', borderRadius: '10px 10px 0 0', padding: '6px 4px' } : undefined}>
+                      {/* Check selecionar todos do dia — mesmo controle da tabela desktop, que
+                          faltava por completo na view mobile (só existia em `hidden md:block`).
+                          Sem isso, o usuário só conseguia selecionar lançamentos girando o
+                          celular pra horizontal, onde a largura passa do breakpoint `md` e troca
+                          pra tabela desktop. Alvo de toque 28px (mesmo tamanho do AcaoBtn) em vez
+                          dos 16px do quadradinho visível, que é pequeno demais pro dedo. */}
+                      {(() => {
+                        const idsGrupo = grupo.map(l => l.id)
+                        const todosMarcados = idsGrupo.every(id => selecionados.has(id))
+                        const algumMarcado  = idsGrupo.some(id => selecionados.has(id))
+                        return (
+                          <span
+                            onClick={() => {
+                              setSelecionados(prev => {
+                                const next = new Set(prev)
+                                if (todosMarcados) idsGrupo.forEach(id => next.delete(id))
+                                else idsGrupo.forEach(id => next.add(id))
+                                return next
+                              })
+                            }}
+                            className="w-7 h-7 rounded flex items-center justify-center cursor-pointer flex-shrink-0"
+                          >
+                            <span
+                              className="w-4 h-4 rounded flex items-center justify-center border transition-all"
+                              style={{
+                                background: todosMarcados ? '#00c896' : algumMarcado ? 'rgba(0,200,150,0.3)' : 'transparent',
+                                borderColor: todosMarcados || algumMarcado ? '#00c896' : 'rgba(255,255,255,0.2)',
+                              }}
+                            >
+                              {todosMarcados && (
+                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                  <path d="M1.5 5L4 7.5L8.5 2.5" stroke="#0a0f1a" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                              )}
+                              {!todosMarcados && algumMarcado && (
+                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                  <path d="M2 5h6" stroke="#0a0f1a" strokeWidth="1.8" strokeLinecap="round"/>
+                                </svg>
+                              )}
+                            </span>
+                          </span>
+                        )
+                      })()}
                       <p className="text-[15px] font-semibold" style={{ color: '#8b92a8' }}>
                         {fmtDataLabel(data)}
                       </p>
@@ -1464,6 +1507,7 @@ export default function LancamentosPage() {
                         const isRecorr  = !!l.id_recorrencia && !isTransf
                         const isPago    = l.status === 'PAGO'
                         const isAtrasado = !isPago && l.data <= hoje
+                        const isSelecionado = selecionados.has(l.id)
                         const podeEditar = !(isRecorr && isPago && l.nr_parcela != null && l.total_parcelas != null && l.nr_parcela < l.total_parcelas)
                         return (
                           <div key={l.id}
@@ -1475,9 +1519,33 @@ export default function LancamentosPage() {
                                 boxShadow: 'inset 4px 0 0 rgba(248,113,113,0.9)',
                                 background: 'rgba(248,113,113,0.07)',
                               }),
+                              ...(isSelecionado && {
+                                boxShadow: 'inset 4px 0 0 rgba(0,200,150,0.95)',
+                                background: 'rgba(0,200,150,0.10)',
+                              }),
                             }}>
                             <div className="flex items-start justify-between gap-2 mb-2">
                               <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                {/* Checkbox seleção — mesmo controle da tabela desktop (ver
+                                    comentário no header do dia acima sobre por que faltava aqui). */}
+                                <span
+                                  onClick={e => { e.stopPropagation(); toggleSelecionado(l.id) }}
+                                  className="w-7 h-7 -ml-1.5 rounded flex items-center justify-center cursor-pointer flex-shrink-0"
+                                >
+                                  <span
+                                    className="w-4 h-4 rounded flex items-center justify-center border transition-all"
+                                    style={{
+                                      background: isSelecionado ? '#00c896' : 'transparent',
+                                      borderColor: isSelecionado ? '#00c896' : 'rgba(255,255,255,0.2)',
+                                    }}
+                                  >
+                                    {isSelecionado && (
+                                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                        <path d="M1.5 5L4 7.5L8.5 2.5" stroke="#0a0f1a" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                                      </svg>
+                                    )}
+                                  </span>
+                                </span>
                                 {isTransf ? (
                                   <ArrowLeftRight size={12} style={{ color: '#818cf8', flexShrink: 0 }} />
                                 ) : isRecorr ? (

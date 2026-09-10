@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { X, Check } from 'lucide-react'
 import { formatBRL, parsearValorBR } from '../../lib/utils'
+import type { TipoAtivoInvestimento } from '../../types'
 
 const CORES_SM = [
   '#00c896','#4da6ff','#f0b429','#7F77DD',
@@ -810,9 +811,15 @@ export function Toast({ msg }: { msg: string | null }) {
 // Logo/ícone oficial de um ativo de investimento (URL vinda da brapi).
 // Sem URL ou se a imagem falhar ao carregar → não renderiza nada (só some,
 // mantendo o ticker/nome ao lado). Fundo claro p/ logos com transparência.
-export function LogoAtivo({ url, size = 18 }: { url?: string | null; size?: number }) {
+// FII sempre sem logo: a brapi não mantém logo real pra fundo imobiliário
+// (é 404 pra quase todos) — MAS pra alguns tickers (achado real: MANA11)
+// devolve, em vez de 404, um SVG genérico de placeholder ("esboço" de ícone
+// sem relação com o fundo) que carrega com sucesso e passava a aparecer
+// sozinho, inconsistente com os demais FIIs (que corretamente não mostram
+// nada). Bloqueado aqui, não em cada tela que usa o componente.
+export function LogoAtivo({ url, size = 18, tipoAtivo }: { url?: string | null; size?: number; tipoAtivo?: TipoAtivoInvestimento }) {
   const [erro, setErro] = useState(false)
-  if (!url || erro) return null
+  if (!url || erro || tipoAtivo === 'FII') return null
   return (
     <img src={url} alt="" width={size} height={size} loading="lazy" onError={() => setErro(true)}
       className="rounded-sm bg-white/90 object-contain shrink-0" style={{ width: size, height: size }} />

@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "6.1.1"
+export const APP_VERSION = "6.2.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -15,8 +15,8 @@ export const getVersionInfo = () => ({
     patch: "Tentativas"
   },
   current: {
-    level: "patch",
-    description: "Correção de proventos de FII duplicados quando o cron revisava a data de pagamento em poucos dias após a estimativa inicial"
+    level: "minor",
+    description: "Rosca 'Ativos por tipo' em Meus ativos; filtro de categoria com múltipla seleção e comparação por categoria (linha no gráfico + bloco na tabela) no quadro Rentabilidade dos Destaques, com realce ao passar o mouse na legenda; manutenção de ativos (atualizar tickets/padronizar Tesouro) movida para Configurações e exibida só quando necessário; 'Somente com valor' ativo por padrão em Meus ativos"
   }
 })
 

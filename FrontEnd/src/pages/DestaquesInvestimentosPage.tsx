@@ -10,6 +10,7 @@ import { useContas } from '../hooks/useContas'
 import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
 import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
 import { SelectDark } from '../components/ui/shared'
+import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelect'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import QuadroRentabilidadeIndices from '../components/ui/QuadroRentabilidadeIndices'
@@ -510,7 +511,12 @@ export default function DestaquesInvestimentosPage() {
     const p = new URLSearchParams(location.search).get('periodo')
     return (PERIODOS.some((x) => x.value === p) ? p : 'TUDO') as PeriodoRanking
   })
-  const [categoria, setCategoria] = useState<TipoAtivoInvestimento | ''>('')
+  // Multi-seleção — vazio = todas as categorias (comportamento anterior do
+  // dropdown simples). Afeta as listas de destaque, os quadros "Por tipo de
+  // ativo" e o gráfico de Rentabilidade, todos alimentados por este mesmo
+  // filtro do topo.
+  const [categoria, setCategoria] = useState<TipoAtivoInvestimento[]>([])
+  const categoriaSet = useMemo(() => new Set(categoria), [categoria])
   const { contas } = useContas()
   const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa)
 
@@ -519,16 +525,27 @@ export default function DestaquesInvestimentosPage() {
   const categorias = destaques?.categorias ?? []
   const rentabilidadePeriodoTotal = destaques?.rentabilidade_periodo_pct_total ?? null
 
+  // Só lista, no filtro, os tipos que o usuário de fato tem (aparecem no
+  // "Ranking por categoria", sempre com TODAS as categorias da carteira,
+  // independente do próprio filtro) — nada de oferecer tipos vazios/nunca
+  // usados. Ordem fixa de TIPOS_ATIVO_INV, não a ordem que vieram do backend.
+  const opcoesCategoria = useMemo<MultiSelectOption[]>(
+    () => TIPOS_ATIVO_INV
+      .filter((t) => categorias.some((c) => c.tipo_ativo === t))
+      .map((t) => ({ value: t, label: TIPO_ATIVO_LABEL[t], cor: TIPO_ATIVO_COR[t] })),
+    [categorias],
+  )
+
   // Filtro de categoria é só client-side: o "ranking por categoria" do topo
   // precisa SEMPRE de todas as categorias pra fazer sentido comparativo; só
   // as 4 listas de destaque e os quadros por tipo é que respeitam o recorte.
   const ativosFiltrados = useMemo(
-    () => (categoria ? ativos.filter((a) => a.tipo_ativo === categoria) : ativos),
-    [ativos, categoria],
+    () => (categoriaSet.size > 0 ? ativos.filter((a) => categoriaSet.has(a.tipo_ativo)) : ativos),
+    [ativos, categoriaSet],
   )
   const categoriasFiltradas = useMemo(
-    () => (categoria ? categorias.filter((c) => c.tipo_ativo === categoria) : categorias),
-    [categorias, categoria],
+    () => (categoriaSet.size > 0 ? categorias.filter((c) => categoriaSet.has(c.tipo_ativo)) : categorias),
+    [categorias, categoriaSet],
   )
   const ativosPorTipo = useMemo(() => {
     const m = new Map<TipoAtivoInvestimento, InvestimentoRankingAtivo[]>()
@@ -685,11 +702,11 @@ export default function DestaquesInvestimentosPage() {
                 {PERIODOS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
               </SelectDark>
             </div>
-            <SelectDark value={categoria} onChange={(e) => setCategoria(e.target.value as TipoAtivoInvestimento | '')}
-              style={{ width: 'auto' }} className="!text-[13px] !py-2">
-              <option value="">Todas as categorias</option>
-              {TIPOS_ATIVO_INV.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
-            </SelectDark>
+            <div style={{ width: 210 }}>
+              <MultiSelect options={opcoesCategoria} values={categoria}
+                onChange={(vals) => setCategoria(vals as TipoAtivoInvestimento[])}
+                placeholder="Todas as categorias" selecionarTodos />
+            </div>
             <SelectDark value={contaId} onChange={(e) => setContaId(e.target.value)}
               style={{ width: 'auto' }} className="!text-[13px] !py-2">
               <option value="">Todas as contas</option>

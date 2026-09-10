@@ -2,17 +2,19 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   UserCog, Target, ClipboardList, Sparkles, RotateCcw, Save, Wand2, PiggyBank, Plus, Trash2,
-  SlidersHorizontal, AlertTriangle, Eraser, ArrowRightLeft, Coins,
+  SlidersHorizontal, AlertTriangle, Eraser, ArrowRightLeft, Coins, RefreshCw, Wrench,
 } from 'lucide-react'
 import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvQuestionarios, type QuestionarioEfetivo } from '../hooks/useInvQuestionarios'
 import { useInvestimentosAlocacao, type AlocacaoInput } from '../hooks/useInvestimentosDashboard'
+import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useUsuarioPerfil } from '../hooks/useUsuarioPerfil'
 import { useInvPesos } from '../hooks/useInvPesos'
 import { useResumoAposentadoria } from '../hooks/useResumoAposentadoria'
 import { useTiposDividendo } from '../hooks/useTiposDividendo'
 import { useCategorias } from '../hooks/useCategorias'
 import { estimarIdade, formatData, formatBRL } from '../lib/utils'
+import { tickerTesouro, ehSemestral } from '../lib/tesouro'
 import {
   Input, BtnSalvar, Toast, ModalExcluir, SelectDark, Drawer, Field, SearchableSelect, Segmented,
 } from '../components/ui/shared'
@@ -34,7 +36,7 @@ import {
 import { provedorPorId } from '../lib/iaProvedores'
 import type {
   PerfilInvestidor, PerguntaAvaliacao, PesosCriterio,
-  TipoAtivoInvestimento, CriterioQuestao, InvestimentoTipoDividendo,
+  TipoAtivoInvestimento, CriterioQuestao, InvestimentoTipoDividendo, InvestimentoAtivo,
 } from '../types'
 
 const MUTED = '#8b92a8'
@@ -75,6 +77,7 @@ export default function ConfiguracoesInvestimentosPage() {
       <div data-tutorial="config-pesos"><SecaoPesos onToast={showToast} /></div>
       <div data-tutorial="config-questionarios"><SecaoQuestionarios onToast={showToast} /></div>
       <div data-tutorial="config-tipos-dividendo"><SecaoTiposDividendo onToast={showToast} /></div>
+      <div data-tutorial="config-manutencao"><SecaoManutencaoAtivos onToast={showToast} /></div>
       <div data-tutorial="config-migrar"><SecaoMigrarConta onToast={showToast} /></div>
 
       <Toast msg={toast} />
@@ -984,6 +987,108 @@ function MapRow({ tipo, onToast }: { tipo: InvestimentoTipoDividendo; onToast: (
         </button>
       </div>
     </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════
+// 5b) Manutenção de ativos — atualizar tickets / padronizar Tesouro
+// Movida de Meus ativos: fica escondida do dia a dia e só aparece na aba
+// certa quando há mesmo algo pra corrigir. Cada botão só é exibido quando a
+// detecção local (sem chamar a API) encontra ao menos um ativo candidato —
+// mesmo critério "conservador" que o backend usa para decidir se atualiza.
+// ════════════════════════════════════════════════════════════
+
+// "Tipo Titulo" cru do STN sem o ano (mesmo regex de rotaNormalizarTesouro,
+// supabase/functions/investimentos/import-export.ts) — nome órfão de um bug
+// já corrigido na busca, mas que pode ter ficado gravado em ativos antigos.
+const TESOURO_NOME_SEM_ANO = /^Tesouro (Prefixado|Selic|IPCA\+)(\s+com Juros Semestrais)?$/i
+
+// Ticket "incompleto": nome vazio ou igual ao próprio código — sinal de que a
+// busca externa (brapi) falhou no cadastro/importação. RF privada e Tesouro
+// não têm essa fonte, então nunca entram nesta checagem.
+function ticketIncompleto(a: InvestimentoAtivo): boolean {
+  if (a.tipo_ativo === 'RENDA_FIXA' || a.tipo_ativo === 'TESOURO_DIRETO') return false
+  const tk = a.ticker.trim().toUpperCase()
+  return !a.nome.trim() || a.nome.trim().toUpperCase() === tk
+}
+
+// Título do Tesouro fora do formato padronizado (ticker legível TD-IPCA-2040
+// e nome correspondente) — mesma lógica de rotaNormalizarTesouro, só que aqui
+// apenas para DECIDIR se vale mostrar o botão (o backend refaz o cálculo).
+function tesouroDespadronizado(a: InvestimentoAtivo): boolean {
+  if (!a.rf_indexador || !a.rf_vencimento) return false
+  const novo = tickerTesouro(a.rf_indexador, a.rf_vencimento, ehSemestral(a.nome))
+  if (!novo) return false
+  const atual = a.ticker.trim().toUpperCase()
+  if (novo !== atual) return true
+  const nomeAtual = (a.nome ?? '').trim()
+  return !nomeAtual || nomeAtual.toUpperCase() === atual || nomeAtual.toUpperCase() === novo || TESOURO_NOME_SEM_ANO.test(nomeAtual)
+}
+
+function SecaoManutencaoAtivos({ onToast }: { onToast: (m: string) => void }) {
+  const { ativos, atualizarAtivos, normalizarTesouro } = useInvestimentosAtivos()
+  const [atualizando, setAtualizando] = useState(false)
+  const [normalizando, setNormalizando] = useState(false)
+
+  const precisaAtualizarTickets = useMemo(() => ativos.some(ticketIncompleto), [ativos])
+  const precisaNormalizarTesouro = useMemo(() => ativos.some(tesouroDespadronizado), [ativos])
+
+  async function handleAtualizarAtivos() {
+    if (atualizando) return
+    setAtualizando(true)
+    const res = await atualizarAtivos()
+    setAtualizando(false)
+    if (!res.ok) { onToast(res.erro ?? 'Erro ao atualizar tickets'); return }
+    const d = res.dados
+    onToast(!d || d.atualizados === 0
+      ? 'Nada a atualizar — tickets já estão completos'
+      : `${d.atualizados} ticket(s) atualizado(s) de ${d.processados}`)
+  }
+
+  async function handleNormalizarTesouro() {
+    if (normalizando) return
+    setNormalizando(true)
+    const res = await normalizarTesouro()
+    setNormalizando(false)
+    if (!res.ok) { onToast(res.erro ?? 'Erro ao padronizar os títulos do Tesouro'); return }
+    const d = res.dados
+    const ign = d?.ignorados?.length ? ` · ${d.ignorados.length} ignorado(s)` : ''
+    onToast(!d || d.renomeados === 0
+      ? `Tesouro já está padronizado${ign}`
+      : `${d.renomeados} título(s) padronizado(s)${ign}`)
+  }
+
+  if (!precisaAtualizarTickets && !precisaNormalizarTesouro) {
+    return (
+      <Secao icone={<Wrench size={16} />} titulo="Manutenção de ativos"
+        subtitulo="Correções automáticas de nome/ticker. Só aparecem aqui quando há algo pendente.">
+        <p className="text-[12.5px]" style={{ color: VERDE }}>Tudo em dia — nenhuma correção pendente.</p>
+      </Secao>
+    )
+  }
+
+  return (
+    <Secao icone={<Wrench size={16} />} titulo="Manutenção de ativos"
+      subtitulo="Correções automáticas de nome/ticker, exibidas só quando há algo pendente.">
+      <div className="flex items-center gap-2 flex-wrap">
+        {precisaAtualizarTickets && (
+          <button onClick={handleAtualizarAtivos} disabled={atualizando}
+            title="Re-busca nome e moeda oficiais dos ativos (corrige tickets que ficaram só com o código)"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border border-white/15 text-white/90 hover:border-white/30 disabled:opacity-50">
+            <RefreshCw size={15} className={atualizando ? 'animate-spin' : ''} />
+            {atualizando ? 'Atualizando…' : 'Atualizar tickets'}
+          </button>
+        )}
+        {precisaNormalizarTesouro && (
+          <button onClick={handleNormalizarTesouro} disabled={normalizando}
+            title="Padroniza o código e o nome dos títulos do Tesouro já cadastrados (ex.: TD-IPCA-2040)"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border border-white/15 text-white/90 hover:border-white/30 disabled:opacity-50">
+            <RefreshCw size={15} className={normalizando ? 'animate-spin' : ''} />
+            {normalizando ? 'Padronizando…' : 'Padronizar Tesouro'}
+          </button>
+        )}
+      </div>
+    </Secao>
   )
 }
 

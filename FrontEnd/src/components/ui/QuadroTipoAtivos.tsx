@@ -33,12 +33,20 @@ function SetaVariacao({ v, size = 11 }: { v: number; size?: number }) {
 
 const COR_REC = { COMPRAR: '#00c896', NEUTRO: '#8b92a8', AGUARDAR: '#ffb74d' } as const
 const LABEL_REC = { COMPRAR: 'Comprar', NEUTRO: 'Neutro', AGUARDAR: 'Aguardar' } as const
+// Ordem de prioridade pra ordenar por "Comprar?": Comprar > Neutro > Aguardar
+// > sem nota (não dá pra recomendar sem avaliação, fica sempre por último).
+const ORDEM_REC = { COMPRAR: 2, NEUTRO: 1, AGUARDAR: 0 } as const
 
 // ── Ordenação por coluna ───────────────────────────────────────
-type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'venc' | 'indexador' | 'taxa' | 'instituicao'
+type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'idealPct' | 'comprar' | 'venc' | 'indexador' | 'taxa' | 'instituicao'
 function precoMedio(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_custo / l.quantidade : 0 }
 function precoAtual(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_mercado / l.quantidade : 0 }
-function valorOrdenacao(l: AtivoLinha, k: SortKey): number | string {
+// idealPct/comprar são derivados no nível do QUADRO (rateio da meta do tipo,
+// desvio da meta) — não dá pra calcular só a partir da linha, por isso o
+// contexto extra (mesmo mapa/valor já usados pra renderizar as células).
+function valorOrdenacao(
+  l: AtivoLinha, k: SortKey, ctx: { idealPorAtivo: Map<string, number | null>; idealRef: number | null },
+): number | string {
   switch (k) {
     case 'ticker':     return l.ticker
     case 'nome':       return l.nome ?? ''
@@ -53,6 +61,11 @@ function valorOrdenacao(l: AtivoLinha, k: SortKey): number | string {
     case 'saldo':      return l.valor_mercado
     case 'nota':       return l.nota_usuario ?? -1
     case 'cart':       return l.participacao_pct
+    case 'idealPct':   return ctx.idealPorAtivo.get(l.ativo_id) ?? -1
+    case 'comprar': {
+      const rec = recomendacaoCompra(l.nota_usuario ?? null, ctx.idealRef)
+      return rec ? ORDEM_REC[rec.recomendacao] : -1
+    }
     case 'venc':       return l.meta?.rf_vencimento ?? ''  // ISO yyyy-mm-dd ordena lexicalmente
     case 'indexador':  return rfIndexadorLabel(l) ?? ''
     case 'taxa':       return l.meta?.rf_taxa ?? ''
@@ -109,9 +122,12 @@ export default function QuadroTipoAtivos({
   // (Meus ativos, Investimentos, …) o usuário abriu o ativo.
   const origem = location.pathname + location.search
   const [aberto, setAberto] = useState(defaultAberto)
-  // FII vem por padrão sem agrupamento — os demais tipos agrupam por
-  // categoria por padrão (o usuário ainda pode trocar via o seletor).
-  const [dim, setDim] = useState<Dimensao>(tipo === 'FII' ? 'nenhum' : 'categoria')
+  // FII e Ações vêm por padrão sem agrupamento — os demais tipos (que
+  // oferecem a dimensão, ver dimsDisponiveis) agrupam por categoria por
+  // padrão. RF/Tesouro nem chegam a usar este estado pra valer: não
+  // oferecem a dimensão (sempre "nenhum"), então o valor inicial aqui é
+  // irrelevante pra eles.
+  const [dim, setDim] = useState<Dimensao>(tipo === 'FII' || tipo === 'ACOES' ? 'nenhum' : 'categoria')
   const [catsFechadas, setCatsFechadas] = useState<Set<string>>(new Set())
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'saldo', dir: 'desc' })
   const [destaque, setDestaque] = useState(false)
@@ -168,6 +184,7 @@ export default function QuadroTipoAtivos({
 
   const cor = TIPO_ATIVO_COR[tipo]
   const ehFII = tipo === 'FII'
+  const ehRF  = tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
   // Mesmo critério de DetalheInvestimentoPage (podeDividendos): renda fixa,
   // Tesouro e cripto não pagam dividendo de verdade — o campo sempre vem
   // zerado do backend (inv_dividendos não tem linha pra esses tipos).
@@ -194,13 +211,43 @@ export default function QuadroTipoAtivos({
     }
   }, [ehFII, linhas])
 
+  // % ideal por ativo — distribui a meta do TIPO (dados.percentual_ideal,
+  // ex.: FII = 15% da carteira) entre os ativos deste tipo, proporcional à
+  // nota de avaliação. Um ativo com nota mais alta "merece" uma fatia maior
+  // da meta do que um com nota mais baixa; ativo sem nota fica de fora do
+  // rateio (mesma régua da coluna "Comprar?": sem nota não há como julgar,
+  // então não pode nem herdar uma fatia da meta) — cada linha some com "—".
+  // Somando as % de todas as linhas RATED de um tipo, o total bate
+  // exatamente a meta do tipo. Sem nenhuma nota lançada no tipo inteiro,
+  // divide igualmente entre os ativos (não há outra base pra diferenciar).
+  const idealPorAtivo = useMemo(() => {
+    const map = new Map<string, number | null>()
+    const idealTipo = dados?.percentual_ideal ?? 0
+    if (idealTipo <= 0 || linhas.length === 0) return map
+    const somaNotas = linhas.reduce((s, l) => s + (l.nota_usuario ?? 0), 0)
+    if (somaNotas > 0) {
+      for (const l of linhas) {
+        map.set(l.ativo_id, l.nota_usuario != null ? idealTipo * (l.nota_usuario / somaNotas) : null)
+      }
+    } else {
+      const igual = idealTipo / linhas.length
+      for (const l of linhas) map.set(l.ativo_id, igual)
+    }
+    return map
+  }, [dados, linhas])
+
   // Agrupamentos que fazem sentido para estas linhas: só oferece "Categoria"
   // se algum ativo tiver categoria, e "Segmento" se algum tiver setor — assim
-  // Renda Fixa/Cripto/ETF não exibem dimensões vazias. "Nenhum" sempre vale.
-  const temCategoria = useMemo(() => linhas.some((l) => l.categoria), [linhas])
+  // Cripto/ETF não exibem dimensões vazias. "Nenhum" sempre vale.
+  // RF/Tesouro nunca oferecem agrupamento: já mostram Indexador/Taxa/
+  // Vencimento como colunas (ver `base` mais abaixo) — agrupar por categoria
+  // aqui só rebaixaria a "Categoria" pra virar cabeçalho de grupo em vez de
+  // coluna, escondendo essa informação junto com o resto (o formato de
+  // colunas já é o certo pra este tipo, sem alternativa de agrupamento).
+  const temCategoria = useMemo(() => !ehRF && linhas.some((l) => l.categoria), [linhas, ehRF])
   // FII não oferece "Segmento": o setor dos FIIs vem incorreto (preenchido com
   // a categoria), então agrupar por ele apenas duplicaria o agrupamento por categoria.
-  const temSegmento  = useMemo(() => !ehFII && linhas.some((l) => setorLabel(l.setor)), [linhas, ehFII])
+  const temSegmento  = useMemo(() => !ehFII && !ehRF && linhas.some((l) => setorLabel(l.setor)), [linhas, ehFII, ehRF])
   const dimsDisponiveis = useMemo<Dimensao[]>(() => {
     const arr: Dimensao[] = []
     if (temCategoria) arr.push('categoria')
@@ -214,10 +261,11 @@ export default function QuadroTipoAtivos({
 
   // Agrupa as linhas pela dimensão escolhida (categoria/segmento) e ordena cada grupo
   const grupos = useMemo(() => {
+    const ctx = { idealPorAtivo, idealRef }
     const ordenar = (lista: AtivoLinha[]) => {
       const arr = [...lista]
       arr.sort((x, y) => {
-        const vx = valorOrdenacao(x, sort.key), vy = valorOrdenacao(y, sort.key)
+        const vx = valorOrdenacao(x, sort.key, ctx), vy = valorOrdenacao(y, sort.key, ctx)
         const cmp = typeof vx === 'string' ? vx.localeCompare(String(vy)) : (vx as number) - (vy as number)
         return sort.dir === 'asc' ? cmp : -cmp
       })
@@ -237,13 +285,12 @@ export default function QuadroTipoAtivos({
     return [...map.entries()]
       .map(([chave, lista]) => ({ chave, lista: ordenar(lista), total: lista.reduce((s, l) => s + l.valor_mercado, 0) }))
       .sort((a, b) => b.total - a.total)
-  }, [linhas, dimEf, sort])
+  }, [linhas, dimEf, sort, idealPorAtivo, idealRef])
 
   // Só há subdivisão real se houver mais de um grupo (ou um grupo nomeado)
   const semNome = dimEf === 'segmento' ? 'Sem segmento' : 'Sem categoria'
   const temGrupos = dimEf !== 'nenhum' && (grupos.length > 1 || (grupos.length === 1 && grupos[0].chave !== semNome))
 
-  const ehRF = tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
   const alinhar = (a: 'left' | 'right' | 'center') => a === 'left' ? 'text-left' : a === 'center' ? 'text-center' : 'text-right'
 
   // Coluna como descritor: cabeçalho + célula (render). Permite montar conjuntos
@@ -259,7 +306,7 @@ export default function QuadroTipoAtivos({
   const linkAtivo = (l: AtivoLinha, texto: ReactNode) => (
     <Link to={`/investimentos/ativos/${l.ativo_id}`} state={{ from: origem }}
       className="inline-flex items-center gap-2 text-white font-semibold hover:underline">
-      <LogoAtivo url={l.logo_url} />{texto}
+      <LogoAtivo url={l.logo_url} tipoAtivo={l.tipo_ativo} />{texto}
     </Link>
   )
   const celNome = (l: AtivoLinha): ReactNode => (
@@ -320,13 +367,19 @@ export default function QuadroTipoAtivos({
     nota:   { id: 'nota', label: 'Nota', align: 'center', sortKey: 'nota', cell: (l) => l.nota_usuario != null
       ? <span className="inline-block px-1.5 rounded bg-white/10 text-white text-[11px] font-semibold">{l.nota_usuario}</span> : traco },
     cart:   { id: 'cart', label: '% Cart.', align: 'right', sortKey: 'cart', cell: (l) => <span className="text-white/80">{pct2(l.participacao_pct)}</span> },
+    idealPct: { id: 'idealPct', label: '% Ideal', align: 'right', sortKey: 'idealPct',
+      title: 'Meta de alocação do tipo (ex.: FII 15% da carteira) dividida entre os ativos, proporcional à nota de avaliação — sem nota, o ativo fica de fora do rateio até ser avaliado.',
+      cell: (l) => {
+        const v = idealPorAtivo.get(l.ativo_id)
+        return v != null ? <span className="text-white/80">{pct2(v)}</span> : traco
+      } },
   }
 
   const base: Coluna[] = ehRF
-    ? [C.titulo, C.instituicao, C.indexador, C.taxa, C.venc, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart]
+    ? [C.titulo, C.instituicao, C.indexador, C.taxa, C.venc, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
     : ehFII
-      ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart]
-      : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart]
+      ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart, C.idealPct]
+      : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
   // Quando o quadro NÃO está agrupado por categoria, ela deixa de aparecer como
   // cabeçalho de grupo — então a exibimos como coluna (após Título+Instituição,
   // na RF, ou após Nome, nos demais). Sem dados de categoria, a coluna é omitida.
@@ -338,7 +391,8 @@ export default function QuadroTipoAtivos({
   })()
   // colunas visíveis + "Comprar?" + (Ações, se houver)
   const nCols = visiveis.length + 1 + (acoes ? 1 : 0)
-  const minWidth = ehFII ? 980 : ehRF ? 1040 : 860
+  // +70px pela nova coluna "% Ideal"
+  const minWidth = (ehFII ? 980 : ehRF ? 1040 : 860) + 70
 
   function LinhaAtivo({ l, realce, alvo, primeira, ultima }: {
     l: AtivoLinha; realce: boolean; alvo: boolean; primeira: boolean; ultima: boolean
@@ -508,7 +562,32 @@ export default function QuadroTipoAtivos({
                 </div>
               )}
 
-              <div className="overflow-auto max-h-[72vh]">
+              {/* max-h + overflow-auto (não só overflow-x): `position: sticky`
+                  gruda relativo ao seu ANCESTRAL DE SCROLL MAIS PRÓXIMO —
+                  qualquer div com overflow-x OU overflow-y diferente de
+                  `visible` já conta como esse ancestral pro navegador, MESMO
+                  sem altura limitada e MESMO que o eixo travado nunca
+                  overflow de verdade (regra do spec: overflow-x non-visible
+                  força overflow-y a computar como `auto` também, e vice-
+                  versa). Chegamos a tentar só `overflow-x-auto` sem limite de
+                  altura, na esperança de o thead grudar relativo à PÁGINA de
+                  verdade (`<main>`) — só que essa div, mesmo "vazia" (sem
+                  overflow vertical real), CONTINUA sendo o ancestral de
+                  scroll do thead; um `top` diferente de 0 (ex.: pra ficar
+                  abaixo do nav sticky) passava a medir a distância a partir
+                  do TOPO DESTA DIV, não do topo da página — cabeçalho
+                  "pulando" pra baixo por esse tanto mesmo sem rolar nada
+                  (achado real: cabeçalho aparecendo na 3ª linha da tabela).
+                  A saída é manter o scroll (e o sticky) LOCAL a esta div —
+                  `top: 0`, sem depender de nada lá fora — com altura
+                  limitada o bastante pra listas reais (a carteira típica tem
+                  dezenas de ativos por tipo) precisarem rolar aqui dentro: o
+                  navegador prioriza o scroll aninhado quando o mouse/dedo
+                  está sobre a tabela, então o cabeçalho gruda enquanto as
+                  linhas passam por baixo. Listas curtas (cabem sem rolar) não
+                  perdem o cabeçalho por outro motivo: não há nada pra rolar
+                  por cima dele. */}
+              <div className="overflow-auto max-h-96">
                 <table className="w-full text-[12px]" style={{ minWidth }}>
                   {/* sticky top-0: fica visível rolando a listagem — sem isso
                       as colunas somem de vista e é fácil perder o que cada
@@ -523,7 +602,11 @@ export default function QuadroTipoAtivos({
                           {c.label}{c.sortKey && sort.key === c.sortKey ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
                         </th>
                       ))}
-                      <th className="px-2 font-medium text-center" title="Cruza a nota da avaliação com a alocação do tipo: Comprar = nota boa e tipo abaixo do ideal; Aguardar = nota ruim ou tipo acima do ideal; Neutro = dentro do esperado.">Comprar?</th>
+                      <th onClick={() => clickSort('comprar')}
+                        className="px-2 font-medium text-center cursor-pointer select-none hover:text-white/80"
+                        title="Cruza a nota da avaliação com a alocação do tipo: Comprar = nota boa e tipo abaixo do ideal; Aguardar = nota ruim ou tipo acima do ideal; Neutro = dentro do esperado.">
+                        Comprar?{sort.key === 'comprar' ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                      </th>
                       {acoes && <th className="px-2 font-medium text-right">Ações</th>}
                     </tr>
                   </thead>

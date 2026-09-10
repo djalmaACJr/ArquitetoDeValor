@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, Search, RefreshCw, Wallet, Sparkles, ArrowLeftRight } from 'lucide-react'
+import { Plus, Trash2, Search, Wallet, Sparkles, ArrowLeftRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend } from 'chart.js'
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, type ChartData } from 'chart.js'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useInvestimentosHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
@@ -23,7 +23,7 @@ import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { linhaDeMeta, type AtivoLinha } from '../lib/ativosLinha'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL } from '../lib/utils'
-import { roscaData, rotulosRosca } from '../lib/roscaChart'
+import { roscaData, rotulosRosca, suavizar } from '../lib/roscaChart'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
   setorLabel,
@@ -173,6 +173,80 @@ function RoscaCategoria({ titulo, fatias, centro, onFoco }: {
   )
 }
 
+// ── Rosca de composição por tipo de ativo ───────────────────────
+// Mesma ideia da rosca de instituição, mas fatia = tipo de ativo (Ações,
+// FIIs, Renda Fixa, ...), usando a mesma cor de cada tipo (TIPO_ATIVO_COR)
+// que já aparece nos cabeçalhos dos quadros e no gráfico de evolução — só
+// suavizada, como as demais roscas da página. Clique numa fatia foca o
+// quadro daquele tipo (abre, rola e realça o card inteiro).
+function RoscaTipoAtivo({ fatias, onFoco }: {
+  fatias: { tipo: TipoAtivoInvestimento; label: string; valor: number }[]
+  onFoco: (tipo: TipoAtivoInvestimento) => void
+}) {
+  const total = fatias.reduce((s, f) => s + f.valor, 0)
+  const data = {
+    labels: fatias.map((f) => f.label),
+    datasets: [{
+      data: fatias.map((f) => f.valor),
+      backgroundColor: fatias.map((f) => suavizar(TIPO_ATIVO_COR[f.tipo])),
+      borderColor: 'rgba(14,21,37,0.55)',
+      borderWidth: 2,
+      borderRadius: 8,
+      hoverOffset: 6,
+      centroLabel: 'Patrimônio',
+      centroValor: formatBRL(total),
+    }],
+  } as unknown as ChartData<'doughnut', number[], string>
+
+  return (
+    <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 flex flex-col">
+      <h2 className="text-[15px] font-semibold text-white mb-3">Ativos por tipo</h2>
+      <div className="flex-1 min-h-[300px] flex items-center justify-center">
+        {fatias.length === 0 ? (
+          <p className="text-[13px] text-center py-10 px-4" style={{ color: MUTED }}>
+            Nenhum ativo com valor de mercado ainda.
+          </p>
+        ) : (
+          <Doughnut
+            plugins={[rotulosRosca]}
+            data={data}
+            options={{
+              responsive: true,
+              maintainAspectRatio: false,
+              cutout: '62%',
+              layout: { padding: { top: 16, bottom: 16, left: 64, right: 64 } },
+              onClick: (_evt, elements) => {
+                if (elements.length > 0) onFoco(fatias[elements[0].index].tipo)
+              },
+              onHover: (evt, elements) => {
+                const alvo = evt.native?.target as HTMLElement | null
+                if (alvo) alvo.style.cursor = elements.length ? 'pointer' : 'default'
+              },
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    label: (ctx) => {
+                      const f = fatias[ctx.dataIndex]
+                      const pct = total > 0 ? (Number(ctx.parsed) / total) * 100 : 0
+                      return ` ${formatBRL(f.valor)} · ${pct.toFixed(1).replace('.', ',')}%`
+                    },
+                  },
+                },
+              },
+            }}
+          />
+        )}
+      </div>
+      {fatias.length > 0 && (
+        <p className="text-[11px] text-center mt-2" style={{ color: MUTED }}>
+          Clique num tipo para ver os ativos dessa categoria.
+        </p>
+      )}
+    </section>
+  )
+}
+
 // Agrupa as linhas de um tipo pela chave informada, somando valor de mercado
 // e contando ativos. Ordena pelas fatias maiores primeiro.
 function fatiasPorChave(
@@ -194,7 +268,9 @@ function fatiasPorChave(
 export default function AtivosInvestimentosPage() {
   const [tipoFiltro, setTipoFiltro] = useState<TipoAtivoInvestimento | ''>('')
   const [pesquisa,   setPesquisa]   = useState('')
-  const [soComValor, setSoComValor] = useState(false)
+  // Padrão ligado: a carteira típica acumula ativos zerados/encerrados ao
+  // longo do tempo, e a visão que interessa no dia a dia é a posição atual.
+  const [soComValor, setSoComValor] = useState(true)
   const [drawer,     setDrawer]     = useState(false)
   const [editando,   setEditando]   = useState<InvestimentoAtivo | null>(null)
   const [toast,      setToast]      = useState<string | null>(null)
@@ -207,15 +283,18 @@ export default function AtivosInvestimentosPage() {
   const [movViaAtalho, setMovViaAtalho] = useState(false)
 
   const filtros = tipoFiltro ? { tipo: tipoFiltro } : {}
-  const { ativos, loading, error, atualizarAtivos, normalizarTesouro } = useInvestimentosAtivos(filtros)
-  const [atualizando, setAtualizando] = useState(false)
-  const [normalizando, setNormalizando] = useState(false)
+  const { ativos, loading, error } = useInvestimentosAtivos(filtros)
 
   // Foco vindo do clique numa fatia da rosca: abre o quadro do tipo, rola até
   // ele e realça só o agrupamento (dim + chave) que originou aquela fatia.
   const [foco, setFoco] = useState<{ tipo: TipoAtivoInvestimento; dim: Dimensao; chave: string; n: number } | null>(null)
   const focar = (tipo: TipoAtivoInvestimento, dim: Dimensao, chave: string) =>
     setFoco((f) => ({ tipo, dim, chave, n: (f?.n ?? 0) + 1 }))
+  // Foco vindo do clique numa fatia da rosca "Ativos por tipo": abre e realça
+  // o quadro inteiro (sem sub-agrupamento — por isso não passa focoGrupo).
+  const [focoTipo, setFocoTipo] = useState<{ tipo: TipoAtivoInvestimento; n: number } | null>(null)
+  const focarTipo = (tipo: TipoAtivoInvestimento) =>
+    setFocoTipo((f) => ({ tipo, n: (f?.n ?? 0) + 1 }))
 
   // Agregados financeiros por tipo (valor, variação, dividendos, participação),
   // usados no cabeçalho de cada card — mesma fonte da página de Investimentos.
@@ -224,6 +303,16 @@ export default function AtivosInvestimentosPage() {
     const m = new Map<TipoAtivoInvestimento, InvestimentoDashboardTipo>()
     for (const t of dashboard?.tipos ?? []) m.set(t.tipo_ativo, t)
     return m
+  }, [dashboard])
+
+  // Fatias da rosca "Ativos por tipo" — mesmo total_mercado por tipo já usado
+  // no cabeçalho dos quadros, independente dos filtros locais de busca (igual
+  // ao Resumo por instituição, ao lado do qual este gráfico é exibido).
+  const fatiasTipos = useMemo(() => {
+    return (dashboard?.tipos ?? [])
+      .filter((t) => t.valor_mercado > 0)
+      .map((t) => ({ tipo: t.tipo_ativo, label: TIPO_ATIVO_LABEL[t.tipo_ativo], valor: t.valor_mercado }))
+      .sort((a, b) => b.valor - a.valor)
   }, [dashboard])
 
   // Métricas por ativo (quant., preços, variação, % carteira) — junta-se ao
@@ -296,41 +385,6 @@ export default function AtivosInvestimentosPage() {
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
-  // Re-busca nome/moeda oficiais (brapi) de todos os ativos — útil quando a
-  // busca externa falhou no cadastro/importação e o ativo ficou só com o ticker.
-  async function handleAtualizarAtivos() {
-    if (atualizando) return
-    setAtualizando(true)
-    const res = await atualizarAtivos()
-    setAtualizando(false)
-    if (!res.ok) { showToast(res.erro ?? 'Erro ao atualizar tickets'); return }
-    const d = res.dados
-    showToast(
-      !d || d.atualizados === 0
-        ? 'Nada a atualizar — tickets já estão completos'
-        : `${d.atualizados} ticket(s) atualizado(s) de ${d.processados}`,
-    )
-  }
-
-  // Padroniza o ticker/nome dos títulos do Tesouro já cadastrados para o
-  // formato legível (TD-IPCA-2040…). Idempotente — re-rodar não muda nada.
-  async function handleNormalizarTesouro() {
-    if (normalizando) return
-    const temTesouro = ativos.some((a) => a.tipo_ativo === 'TESOURO_DIRETO')
-    if (!temTesouro) { showToast('Nenhum título do Tesouro cadastrado'); return }
-    setNormalizando(true)
-    const res = await normalizarTesouro()
-    setNormalizando(false)
-    if (!res.ok) { showToast(res.erro ?? 'Erro ao padronizar os títulos do Tesouro'); return }
-    const d = res.dados
-    const ign = d?.ignorados?.length ? ` · ${d.ignorados.length} ignorado(s)` : ''
-    showToast(
-      !d || d.renomeados === 0
-        ? `Tesouro já está padronizado${ign}`
-        : `${d.renomeados} título(s) padronizado(s)${ign}`,
-    )
-  }
-
   function abrirNovo() { setEditando(null); setDrawer(true) }
   function abrirEditar(a: InvestimentoAtivo) { setEditando(a); setDrawer(true) }
 
@@ -392,18 +446,6 @@ export default function AtivosInvestimentosPage() {
             }`}>
             <Wallet size={15} /> Somente com valor
           </button>
-          <button onClick={handleAtualizarAtivos} disabled={atualizando}
-            title="Re-busca nome e moeda oficiais dos ativos (corrige tickets que ficaram só com o código)"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border border-white/15 text-white/90 hover:border-white/30 disabled:opacity-50">
-            <RefreshCw size={15} className={atualizando ? 'animate-spin' : ''} />
-            {atualizando ? 'Atualizando…' : 'Atualizar tickets'}
-          </button>
-          <button onClick={handleNormalizarTesouro} disabled={normalizando}
-            title="Padroniza o código e o nome dos títulos do Tesouro já cadastrados (ex.: TD-IPCA-2040)"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border border-white/15 text-white/90 hover:border-white/30 disabled:opacity-50">
-            <RefreshCw size={15} className={normalizando ? 'animate-spin' : ''} />
-            {normalizando ? 'Padronizando…' : 'Padronizar Tesouro'}
-          </button>
           <Link to="/investimentos/avaliacoes"
             title="Seus mentores (IAs) avaliam cada ativo da carteira"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30">
@@ -436,8 +478,9 @@ export default function AtivosInvestimentosPage() {
           {!pesquisa && (
             <div data-tutorial="ativos-evolucao">
               <EvolucaoPorTipo />
-              <div className="mb-5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
                 <ResumoPorInstituicao />
+                <RoscaTipoAtivo fatias={fatiasTipos} onFoco={focarTipo} />
               </div>
               {(segmentosAcoes.length > 0 || categoriasFII.length > 0) && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
@@ -472,7 +515,7 @@ export default function AtivosInvestimentosPage() {
                     {...alvoTipo(tipo)}>
                     <QuadroTipoAtivos tipo={g.tipo} dados={dadosPorTipo.get(g.tipo) ?? null}
                       linhas={g.linhas}
-                      focoSinal={foco?.tipo === g.tipo ? foco.n : null}
+                      focoSinal={foco?.tipo === g.tipo ? foco.n : focoTipo?.tipo === g.tipo ? focoTipo.n : null}
                       focoGrupo={foco?.tipo === g.tipo ? { dim: foco.dim, chave: foco.chave } : null}
                       acoes={{ onPosicoes: (a) => { setMovViaAtalho(false); setPosicoesDe(a) }, onHistorico: setHistoricoDe, onEditar: abrirEditar }}
                       alca={<AlcaArrastar {...alcaTipo(tipo)} />}

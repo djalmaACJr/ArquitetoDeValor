@@ -431,7 +431,7 @@ export default function DetalheInvestimentoPage() {
           <button onClick={voltar} title="Voltar" className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
             <ArrowLeft size={15} />
           </button>
-          <LogoAtivo url={ativo.logo_url} size={36} />
+          <LogoAtivo url={ativo.logo_url} size={36} tipoAtivo={ativo.tipo_ativo} />
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-[22px] font-bold text-white">{ativo.ticker}</h1>

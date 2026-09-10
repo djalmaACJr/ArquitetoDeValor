@@ -363,10 +363,24 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
           que a nav (com muitos itens/submenu aberto) precisa de mais
           altura que a viewport, empurrando o botão de colapsar (ancorado
           perto do topo do wrapper) pra fora da área visível assim que a
-          nav ganha scroll interno. */}
+          nav ganha scroll interno.
+          `z-[60]` AQUI, não só no botão: `position: sticky` sempre cria seu
+          próprio stacking context (diferente de `relative`/`absolute`, que só
+          criam um se `z-index` for explícito) — o `z-[100]` do botão lá
+          dentro só valia DENTRO do stacking context deste wrapper, nunca
+          competia com o de fora, porque este wrapper (sticky, sem z-index
+          próprio) e o `<main>` são IRMÃOS dentro de `.app-shell`, e um
+          `z-index: auto` sempre perde de qualquer `z-index` numérico do
+          outro lado, não importa o que tenha lá dentro. Páginas com barra de
+          filtro sticky logo no topo com `-mx-5` (que estende a barra até a
+          borda da sidebar) e `z-index` numérico (Lançamentos z-20, Relatórios
+          z-50) cobriam o botão inteiro por causa disso (achado real: botão
+          sumindo em /lancamentos e /relatorios, apesar do z-index alto nele
+          mesmo). z-60 > z-50 (o teto atual de qualquer barra "normal" de
+          página), ainda bem abaixo dos modais do app (z-[150] a z-[300]). */}
       <div
         className={isDesktop
-          ? `relative sticky top-0 h-[100svh] min-h-0 flex-shrink-0 transition-all duration-300 ${colapsado ? 'w-[60px]' : 'w-[216px]'}`
+          ? `relative sticky top-0 z-[60] h-[100svh] min-h-0 flex-shrink-0 transition-all duration-300 ${colapsado ? 'w-[60px]' : 'w-[216px]'}`
           : ''}
       >
       <nav
@@ -463,12 +477,22 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
     </nav>
 
       {/* Colapsar — só no desktop; fora da nav pra não ser cortado pelo
-          overflow-y-auto dela (ver comentário no wrapper acima). */}
+          overflow-y-auto dela (ver comentário no wrapper acima).
+          z-[100]: o botão fica -right-3 (poking 12px pra fora da sidebar,
+          "a cavalo" da borda), invadindo o território do <main> ao lado —
+          páginas com barra de filtro sticky logo no topo (Lançamentos z-20,
+          Relatórios z-50, ambas com -mx-5 que estende a barra até essa
+          borda) pintavam por cima do botão, que só tinha z-10 (achado real:
+          botão sumindo em /lancamentos e /relatorios). z-50 é o teto atual
+          de qualquer barra sticky "normal" de página — z-[100] fica acima
+          de todas com folga, mas ainda bem abaixo dos modais/drawers do
+          app (z-[150] a z-[300]), que devem continuar cobrindo o botão
+          normalmente quando abertos. */}
       {isDesktop && (
         <button
           onClick={() => setCollapsed(v => !v)}
           title={collapsed ? 'Expandir menu' : 'Recolher menu'}
-          className="absolute -right-3 top-6 z-10 w-6 h-6 rounded-full bg-av-dark border border-blue-400/30 flex items-center justify-center text-white/60 hover:text-av-green hover:border-av-green/50 transition-colors shadow-md"
+          className="absolute -right-3 top-6 z-[100] w-6 h-6 rounded-full bg-av-dark border border-blue-400/30 flex items-center justify-center text-white/60 hover:text-av-green hover:border-av-green/50 transition-colors shadow-md"
         >
           {collapsed ? <ChevronRight size={12}/> : <ChevronLeft size={12}/>}
         </button>

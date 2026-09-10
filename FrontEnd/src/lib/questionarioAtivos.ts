@@ -195,8 +195,8 @@ export function recomendacaoCompra(
 
   const notaBoa     = nota >= 7
   const notaRuim    = nota < 5
-  const abaixoMeta  = desvioPct < -2   // mais de 2 p.p. abaixo da alocação ideal
-  const acimaMeta   = desvioPct > 2
+  const abaixoMeta  = desvioPct < -1   // mais de 1 p.p. abaixo da alocação ideal
+  const acimaMeta   = desvioPct > 1
 
   if (notaBoa && abaixoMeta) {
     return { recomendacao: 'COMPRAR', motivo: 'Nota alta e tipo abaixo da alocação ideal' }
