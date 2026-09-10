@@ -1061,7 +1061,14 @@ export default function AvaliacoesInvestimentosPage() {
   // `fresh` força nova pesquisa (limpa o cache dos ativos da lista) — usado em
   // "reavaliar tudo" e "reavaliar 1 ativo". Em "continuar" (fresh=false) o
   // cache é reaproveitado: mentores que já concluíram não pesquisam de novo.
-  async function avaliar(lista: InvestimentoAtivo[], fresh = false) {
+  async function avaliar(listaPedida: InvestimentoAtivo[], fresh = false) {
+    // Guarda central: só ativos com posição válida (saldo > 0) entram na
+    // avaliação, mesmo quando o chamador não filtrou por comSaldo — cobre
+    // "Reavaliar este ativo" (planilha de resultados), que lista qualquer
+    // ativo já avaliado alguma vez, mesmo depois de zerada a posição (ex.:
+    // vendeu tudo). Reavaliar um ativo sem posição não faz sentido: a
+    // pergunta é sobre COMPRAR mais dele, o que não se aplica a quem já saiu.
+    const lista = listaPedida.filter((a) => comSaldo.has(a.id))
     if (rodando || pendenteDecisao || lista.length === 0 || configsAtivos.length === 0) return
     if (fresh) {
       for (const a of lista) for (const c of configs) cacheMentorRef.current.delete(chaveCache(a.id, c.id))
@@ -1603,7 +1610,7 @@ export default function AvaliacoesInvestimentosPage() {
           ) : (
             <div className="space-y-5">
               {gruposAvaliados.map(([tipo, lista]) => (
-                <GrupoTipoAvaliacao key={tipo} tipo={tipo} ativos={lista}
+                <GrupoTipoAvaliacao key={tipo} tipo={tipo} ativos={lista} comSaldo={comSaldo}
                   avalPorAtivo={avalView} detalhePorAtivo={detalheView}
                   ordenar={ordenar} setOrdenar={setOrdenar} modoHistorico={modoHistorico}
                   rodando={rodando} onReavaliar={(id) => avaliar([ativoPorId.get(id)!], true)} />
@@ -1658,9 +1665,14 @@ function ThSort({ col, label, icon: Icon, ordenar, setOrdenar, className }: {
 
 // ── Grupo de um tipo de ativo: lista ordenável (médias por critério + nota
 //    final), com cada ativo expansível para a planilha mentor × pergunta. ──
-function GrupoTipoAvaliacao({ tipo, ativos, avalPorAtivo, detalhePorAtivo, ordenar, setOrdenar, rodando, onReavaliar, modoHistorico }: {
+function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAtivo, ordenar, setOrdenar, rodando, onReavaliar, modoHistorico }: {
   tipo: TipoAtivoInvestimento
   ativos: InvestimentoAtivo[]
+  /** Ativos com posição válida (saldo > 0) — só estes podem ser reavaliados
+      (ver comentário em `avaliar()`). Um ativo já avaliado antes pode
+      continuar listado aqui mesmo depois de zerada a posição — só o botão
+      "Reavaliar" fica desabilitado. */
+  comSaldo: Set<string>
   avalPorAtivo: Map<string, InvAvaliacao>
   detalhePorAtivo: Map<string, DetAtivo>
   ordenar: Ordenacao
@@ -1827,15 +1839,18 @@ function GrupoTipoAvaliacao({ tipo, ativos, avalPorAtivo, detalhePorAtivo, orden
                         })()}
                       </td>
                     )}
-                    {!modoHistorico && (
-                      <td className="py-2 px-2 text-center">
-                        <button onClick={(e) => { e.stopPropagation(); onReavaliar(a.id) }} disabled={rodando}
-                          title="Reavaliar este ativo com os mentores"
-                          className="w-7 h-7 rounded-md border border-white/10 inline-flex items-center justify-center hover:border-white/30 disabled:opacity-50" style={{ color: MUTED }}>
-                          <RefreshCw size={13} className={rodando ? 'animate-spin' : ''} />
-                        </button>
-                      </td>
-                    )}
+                    {!modoHistorico && (() => {
+                      const temPosicao = comSaldo.has(a.id)
+                      return (
+                        <td className="py-2 px-2 text-center">
+                          <button onClick={(e) => { e.stopPropagation(); onReavaliar(a.id) }} disabled={rodando || !temPosicao}
+                            title={temPosicao ? 'Reavaliar este ativo com os mentores' : 'Sem posição na carteira — venda encerrada, não dá pra reavaliar'}
+                            className="w-7 h-7 rounded-md border border-white/10 inline-flex items-center justify-center hover:border-white/30 disabled:opacity-50" style={{ color: MUTED }}>
+                            <RefreshCw size={13} className={rodando ? 'animate-spin' : ''} />
+                          </button>
+                        </td>
+                      )
+                    })()}
                   </tr>
                   {!modoHistorico && estaAberto && det && (
                     <tr className="bg-black/20">

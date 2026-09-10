@@ -1,6 +1,6 @@
 // e2e/tests/02_extrato.spec.ts
 import { test, expect } from '@playwright/test'
-import { abrirNovoLancamento, preencherValor, abrirEdicaoLancamento } from './helpers'
+import { abrirNovoLancamento, preencherValor, abrirEdicaoLancamento, expandirFiltros } from './helpers'
 
 test.describe('Extrato (Lançamentos)', () => {
 
@@ -15,6 +15,9 @@ test.describe('Extrato (Lançamentos)', () => {
   })
 
   test('E2E-EX01 — página carrega com filtros na barra superior', async ({ page }) => {
+    // Filtros vêm recolhidos por padrão (botão "Filtros" na barra superior) —
+    // precisa expandir antes de checar Conta/Categoria/Status.
+    await expandirFiltros(page)
     await expect(page.getByText(/todas as contas/i)).toBeVisible()
     // Usar seletores mais específicos para evitar strict mode violation
     await expect(page.getByRole('button', { name: /categorias/i }).first()).toBeVisible()
@@ -103,6 +106,7 @@ test.describe('Extrato (Lançamentos)', () => {
   })
 
   test('E2E-EX07 — toggle saldo anterior funciona', async ({ page }) => {
+    await expandirFiltros(page)
     const toggle = page.getByRole('button', { name: 'Saldo anterior' })
     await expect(toggle).toBeVisible()
     await toggle.click()
@@ -130,6 +134,7 @@ test.describe('Extrato (Lançamentos)', () => {
 
   // ── E2E-EX14 ─────────────────────────────────────────────────
   test('E2E-EX14 — botão atualizar recarrega lançamentos sem erro', async ({ page }) => {
+    await expandirFiltros(page)
     const btnAtualizar = page.locator('button[title="Atualizar lançamentos"]')
     await expect(btnAtualizar).toBeVisible({ timeout: 8_000 })
     await btnAtualizar.click()

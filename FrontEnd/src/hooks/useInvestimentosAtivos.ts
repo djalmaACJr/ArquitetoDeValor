@@ -84,11 +84,19 @@ export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
     enabled: !!uid,
   })
 
-  const invalidar = () => qc.invalidateQueries({ queryKey: qk.invAtivosPref(uid) })
-
   const criar = async (payload: CriarAtivoInput): Promise<OpResult<InvestimentoAtivo>> => {
     const res = await apiMutate<InvestimentoAtivo>('/investimentos/ativos', 'POST', payload)
-    if (res.ok) await invalidar()
+    if (res.ok) {
+      // Só invalidar 'inv-ativos' deixava ranking/dashboard desatualizados
+      // logo após criar — Meus ativos lê valor_mercado do ranking (não do
+      // metadado do ativo) e cai pra 0 quando a entrada ainda não existe lá,
+      // o que some da lista com "Somente com valor" ligado (achado real: um
+      // ativo recém-criado piscava de existir e sumir). Mesma invalidação
+      // completa de editar/excluir/atualizarAtivos, por consistência.
+      for (const k of ['inv-ativos', 'inv-posicoes', 'inv-dividendos', 'inv-historico', 'inv-dashboard', 'inv-ranking']) {
+        await qc.invalidateQueries({ queryKey: [k, uid] })
+      }
+    }
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 

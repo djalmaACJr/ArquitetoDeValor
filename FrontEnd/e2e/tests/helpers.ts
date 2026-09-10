@@ -24,6 +24,17 @@ export async function abrirNovoLancamento(page: Page, tipo: TipoLancamento = 'De
 }
 
 /**
+ * Expande a barra de filtros do Extrato (Conta/Categoria/Status/Saldo
+ * anterior) — desde a v6.1.0 ela vem RECOLHIDA por padrão (botão "Filtros"
+ * na barra superior), então qualquer teste que precise desses controles tem
+ * que abri-la primeiro. Idempotente: se já estiver aberta, não faz nada.
+ */
+export async function expandirFiltros(page: Page) {
+  const btn = page.getByRole('button', { name: /^filtros$/i })
+  if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click()
+}
+
+/**
  * Preenche o campo Valor do drawer via Calculadora popup.
  *
  * O campo Valor não é um <input> — é um <button aria-label="Valor"> que abre o
@@ -45,10 +56,19 @@ export async function preencherValor(page: Page, drawer: Locator, valor: string)
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
   await page.waitForTimeout(150)
 
-  await drawer.getByRole('button', { name: 'Valor' }).click()
+  // Só clica em "Valor" se a Calculadora ainda não estiver aberta. Achado
+  // real em CI: às vezes ela já está montada/aberta neste ponto (o próprio
+  // teclado numérico, renderizado logo abaixo do botão dentro do mesmo
+  // Field, acaba ficando na posição do botão e intercepta o clique —
+  // `locator.click` nunca completa e o teste estoura os 30s tentando).
+  // Checando antes evita insistir num clique redundante e desnecessário.
+  const btnOk = drawer.getByRole('button', { name: /^OK$/ })
+  if (!(await btnOk.isVisible().catch(() => false))) {
+    await drawer.getByRole('button', { name: 'Valor' }).click()
+  }
   // Aguarda a Calculadora montar e ficar visível antes de digitar (timeout
   // generoso pra tolerar CI lento).
-  await drawer.getByRole('button', { name: /^OK$/ }).waitFor({ state: 'visible', timeout: 10_000 })
+  await btnOk.waitFor({ state: 'visible', timeout: 10_000 })
 
   for (const ch of valor) {
     if (ch >= '0' && ch <= '9') {

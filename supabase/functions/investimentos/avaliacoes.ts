@@ -343,6 +343,23 @@ export function descreverAtivo(a: Record<string, unknown>): string {
   return partes.join(" · ");
 }
 
+// Só ativos com posição ATIVA (quantidade > 0) podem ser avaliados — evita
+// gastar chamada de IA (mentor) ou persistir avaliação (salvar) num ativo
+// que o usuário já encerrou por completo (vendeu/resgatou tudo). Reavaliar
+// nesse caso não faz sentido: a pergunta de fundo é "vale a pena comprar
+// mais?", que não se aplica a quem já saiu do ativo. Mesma regra já aplicada
+// no front (AvaliacoesInvestimentosPage: comSaldo) — reforçada aqui porque
+// nada impede uma chamada direta à API ignorar o filtro da tela. RLS de
+// `c` já restringe a posições do próprio usuário.
+async function temPosicaoAtiva(c: Db, ativoId: string): Promise<boolean> {
+  const { data, error } = await c.from("inv_posicoes")
+    .select("quantidade")
+    .eq("ativo_id", ativoId)
+    .eq("status", "ATIVA");
+  if (error) { logError("Checar posição p/ avaliação", error); return false; }
+  return (data ?? []).some((p) => Number(p.quantidade) > 0);
+}
+
 // Segmento de ação após "avaliacoes" no path (ex.: "mentor" | "salvar").
 export function segmentoAcaoAval(req: Request): string | null {
   const partes = new URL(req.url).pathname.split("/").filter(Boolean);
@@ -470,6 +487,9 @@ export async function rotaAvaliacoes(c: Db, req: Request, m: string, userId: str
     const { data: ativo, error: errAtivo } = await c.from("inv_ativos").select("*").eq("id", ativoId).maybeSingle();
     if (errAtivo) { logError("Buscar ativo p/ avaliação", errAtivo); return erro(errAtivo.message); }
     if (!ativo) return erro("Ativo não encontrado", 404);
+    if (!(await temPosicaoAtiva(c, ativoId))) {
+      return erro("Ativo sem posição ativa na carteira — não pode ser avaliado.", 400);
+    }
 
     const resMentores = await lerMentoresIA(c, userId);
     if (!resMentores.ok) return erro(resMentores.erro, resMentores.status);
@@ -483,6 +503,9 @@ export async function rotaAvaliacoes(c: Db, req: Request, m: string, userId: str
   // ── POST /avaliacoes/salvar — consolida os mentores e persiste ──
   if (acao === "salvar") {
     logRequest("POST", `/investimentos/avaliacoes/salvar (ativo ${ativoId})`);
+    if (!(await temPosicaoAtiva(c, ativoId))) {
+      return erro("Ativo sem posição ativa na carteira — não pode ser avaliado.", 400);
+    }
 
     const recebidos = Array.isArray(body?.mentores) ? (body.mentores as ResMentor[]) : [];
     if (recebidos.length === 0) return erro("Nenhum resultado de mentor informado");
