@@ -19,6 +19,13 @@ dist-ssr
 # A chave de verdade vive só no .env da raiz (CAPGO_UPDATER_PRIVATE_KEY).
 .capgo_key_v2
 
+# Sessão salva pelo Playwright (e2e/tests/auth.setup.ts, storageState do
+# projeto "data"/"firefox" em e2e/playwright.config.ts) — contém um JWT de
+# acesso + refresh_token válidos do usuário de teste. NUNCA versionar: é
+# regenerado sozinho a cada `npm run test:e2e` (auth.setup.ts roda como
+# dependência antes dos demais projetos), não precisa existir no repo.
+fixtures/auth.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

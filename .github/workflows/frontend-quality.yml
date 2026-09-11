@@ -7,7 +7,12 @@ on:
       - 'FrontEnd/**'
       - '.github/workflows/frontend-quality.yml'
   pull_request:
-    branches: [main]
+    # develop (fluxo normal de PR) + main (gate final antes de release) —
+    # unificado aqui: cobre o que antes era feito em dois workflows
+    # separados (este + "Frontend — Análise Estática (ESLint)", removido
+    # por rodar exatamente o mesmo `npm run lint` de novo, à toa, em todo
+    # push pra develop).
+    branches: [develop, main]
     paths:
       - 'FrontEnd/**'
       - '.github/workflows/frontend-quality.yml'

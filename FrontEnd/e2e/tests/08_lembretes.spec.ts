@@ -184,8 +184,18 @@ test.describe('Lembretes', () => {
     amanha.setDate(hoje.getDate() + 1)
     const mudaMes = amanha.getMonth() !== hoje.getMonth()
 
+    // Achado real em CI: `isVisible()` não espera — é uma checagem instantânea,
+    // sem polling. Ela corria contra o auto-open (320ms) e às vezes flagrava
+    // o calendário no meio da transição (ainda "não visível"); o código então
+    // clicava no botão de Data pra "abrir" — só que esse botão é um TOGGLE
+    // (`setOpen(o => !o)`), e clicar nele bem nesse instante FECHAVA de novo
+    // o que estava abrindo, travando o teste nos 3s seguintes esperando por
+    // algo que acabara de ser fechado. `waitFor` (com polling) elimina a
+    // corrida: só cai no fallback de clicar se o auto-open genuinamente não
+    // aconteceu dentro da janela de espera.
     const btnHoje = drawer.getByRole('button', { name: /^hoje —/i })
-    if (!(await btnHoje.isVisible().catch(() => false))) {
+    const jaAberto = await btnHoje.waitFor({ state: 'visible', timeout: 2_000 }).then(() => true).catch(() => false)
+    if (!jaAberto) {
       await drawer.getByRole('button', { name: /^\d{2}\/\d{2}\/\d{4}$|^dd\/mm\/aaaa$/ }).click()
       await btnHoje.waitFor({ state: 'visible', timeout: 3_000 })
     }

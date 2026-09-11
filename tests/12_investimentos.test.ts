@@ -260,6 +260,12 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
   });
 
   test("CA-INV28 — taxa escalonada por faixa (rf_limite_faixa/rf_percentual_indice_2): validação e cálculo progressivo", async () => {
+    // `valorAtual()` (abaixo) faz ~8 chamadas HTTP sequenciais por chamada e
+    // é invocado 3x — quase 30 round-trips no total. Sob o mesmo pico de
+    // carga do Supabase (compute burstable, achado ago/2026 — ver CLAUDE.md
+    // e o timeout de 11_objetivos.test.ts) os 60s padrão às vezes não bastam
+    // (achado real em CI: timeout aos 60000ms exatos). Timeout maior só
+    // aqui, não em todo o arquivo.
     // Só um dos dois campos → 400 (tudo-ou-nada, tanto no POST quanto no PUT parcial)
     const { status: sErr1 } = await api("/investimentos/ativos", "POST", {
       ticker: "JESTINVF1", nome: "Jest CDB faixa inválida", tipo_ativo: "RENDA_FIXA", rf_subtipo: "CDB",
@@ -313,7 +319,7 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect(flat100).toBeGreaterThan(14000);
     expect(faixa).toBeGreaterThan(flat100);
     expect(faixa).toBeLessThan(flat120);
-  });
+  }, 120_000);
 
   test("CA-INV29 — rf_indice é obrigatório junto de rf_percentual_indice/rf_taxa_fixa (POS_FIXADO/HIBRIDO)", async () => {
     // Achado ago/2026: sem essa validação, um CDB podia ser salvo com
