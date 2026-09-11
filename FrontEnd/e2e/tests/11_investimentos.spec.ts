@@ -157,8 +157,13 @@ test.describe('Investimentos (E2E)', () => {
     await drawer.getByPlaceholder('0', { exact: true }).fill('10')
     await drawer.getByPlaceholder('0,00').first().fill('25.5')
 
+    // Salvar aqui dispara DUAS chamadas sequenciais (criar ativo + registrar a
+    // primeira compra) — sob o mesmo pico de carga do Supabase documentado em
+    // CLAUDE.md (compute burstable, achado ago/2026), 10s às vezes não bastam
+    // pras duas completarem (achado real em CI: drawer ainda visível no
+    // timeout). Timeout mais folgado aqui, não em todo teste.
     await drawer.getByRole('button', { name: /^salvar$/i }).click()
-    await expect(drawer).not.toBeVisible({ timeout: 10_000 })
+    await expect(drawer).not.toBeVisible({ timeout: 20_000 })
 
     // Aparece na lista (ticker OU nome, conforme a coluna renderizada)
     await expect(page.getByText(new RegExp(TICKER, 'i')).first()).toBeVisible({ timeout: 10_000 })
