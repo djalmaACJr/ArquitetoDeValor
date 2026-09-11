@@ -42,26 +42,37 @@ export async function expandirFiltros(page: Page) {
  * keydown global do teclado para digitar dígitos/operadores. Por isso, depois de
  * abrir, basta usar `page.keyboard.press(...)` para cada caractere e clicar OK.
  *
- * IMPORTANTE: o input Descrição abre um dropdown "Sugestões do assistente" após
- * 400ms de debounce quando o input está FOCADO e tem 2+ chars. Esse dropdown
- * fica abaixo do input e pode cobrir o botão Valor — causando flakiness em CI
- * (Calculadora não abre porque o click é interceptado). Por isso, tiramos o foco
- * antes de clicar no Valor: o dropdown só abre se o input estiver focado.
+ * IMPORTANTE (achado real em CI): ao abrir um lançamento NOVO, o campo Data
+ * ganha foco automático e o calendário abre sozinho ~320ms depois (ver
+ * DrawerLancamento.tsx — UX pra ajustar a data antes do resto). Um usuário de
+ * verdade fecha isso sem perceber ao clicar em qualquer outro campo (o
+ * calendário escuta `mousedown` fora de si pra se fechar) — mas `.fill()` do
+ * Playwright não dispara esse `mousedown` (foca e seta o valor direto), então
+ * o calendário ficava aberto, flutuando sobre os campos abaixo dele no
+ * formulário (Valor incluso) e interceptando o clique nele — o teste travava
+ * 30s tentando clicar em "Valor" sem nunca conseguir. Um clique de verdade no
+ * título do drawer (área neutra, sem handler) fecha o calendário do mesmo
+ * jeito que fecharia pra um usuário real.
+ *
+ * IMPORTANTE 2: o input Descrição também abre um dropdown "Sugestões do
+ * assistente" após 400ms de debounce quando está FOCADO e tem 2+ chars. Esse
+ * dropdown fica abaixo do input e pode cobrir o botão Valor. Por isso, tiramos
+ * o foco antes de clicar no Valor: o dropdown só abre se o input tiver foco.
  *
  * @param valor formato BR (ex: '99,90', '7500', '12,5'). Aceita ',' ou '.'.
  */
 export async function preencherValor(page: Page, drawer: Locator, valor: string) {
+  // Fecha o calendário de Data, se ele tiver ficado aberto (ver comentário
+  // acima) — clique real, fora de qualquer campo, sem efeito colateral.
+  await drawer.getByText(/^(novo|editar) lançamento$/i).click()
+
   // Tira o foco de qualquer input — fecha o dropdown de Sugestões do Assistente
   // que poderia estar interceptando o click no botão Valor.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
   await page.waitForTimeout(150)
 
-  // Só clica em "Valor" se a Calculadora ainda não estiver aberta. Achado
-  // real em CI: às vezes ela já está montada/aberta neste ponto (o próprio
-  // teclado numérico, renderizado logo abaixo do botão dentro do mesmo
-  // Field, acaba ficando na posição do botão e intercepta o clique —
-  // `locator.click` nunca completa e o teste estoura os 30s tentando).
-  // Checando antes evita insistir num clique redundante e desnecessário.
+  // Só clica em "Valor" se a Calculadora ainda não estiver aberta (idempotente
+  // — evita reabrir/fechar à toa se já estava aberta por algum outro motivo).
   const btnOk = drawer.getByRole('button', { name: /^OK$/ })
   if (!(await btnOk.isVisible().catch(() => false))) {
     await drawer.getByRole('button', { name: 'Valor' }).click()

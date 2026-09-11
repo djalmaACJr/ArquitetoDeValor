@@ -174,23 +174,23 @@ test.describe('Lembretes', () => {
     await expect(drawer).toBeVisible({ timeout: 5_000 })
     await page.waitForTimeout(400)
 
-    // Define data futura no campo de data
+    // Define data futura no campo de Data — CampoData (calendário próprio,
+    // já substituiu o <input type="date"> nativo que este teste mirava antes
+    // — ver CampoData.tsx). Ele já abre sozinho ao criar um lançamento novo
+    // (foco automático ~320ms depois — ver DrawerLancamento.tsx); o wait de
+    // 400ms acima já cobre isso, mas o if abaixo garante mesmo se não abriu.
+    const hoje = new Date()
     const amanha = new Date()
-    amanha.setDate(amanha.getDate() + 1)
-    const dataStr = amanha.toISOString().split('T')[0]
+    amanha.setDate(hoje.getDate() + 1)
+    const mudaMes = amanha.getMonth() !== hoje.getMonth()
 
-    // No Firefox controlado, `.fill()` num <input type="date"> nem sempre
-    // propaga para o estado do React (chega a limpar o valor). Setamos via
-    // setter nativo + dispatch para garantir que o onChange dispare.
-    const inputData = drawer.locator('input[type="date"]').first()
-    await inputData.evaluate((el: HTMLInputElement, value: string) => {
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype, 'value',
-      )?.set
-      setter?.call(el, value)
-      el.dispatchEvent(new Event('input',  { bubbles: true }))
-      el.dispatchEvent(new Event('change', { bubbles: true }))
-    }, dataStr)
+    const btnHoje = drawer.getByRole('button', { name: /^hoje —/i })
+    if (!(await btnHoje.isVisible().catch(() => false))) {
+      await drawer.getByRole('button', { name: /^\d{2}\/\d{2}\/\d{4}$|^dd\/mm\/aaaa$/ }).click()
+      await btnHoje.waitFor({ state: 'visible', timeout: 3_000 })
+    }
+    if (mudaMes) await drawer.getByRole('button', { name: /próximo mês/i }).click()
+    await drawer.getByRole('button', { name: String(amanha.getDate()), exact: true }).click()
     await page.waitForTimeout(300)
 
     // Checkbox "Criar lembrete" deve aparecer

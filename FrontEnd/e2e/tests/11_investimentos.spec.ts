@@ -129,6 +129,15 @@ test.describe('Investimentos (E2E)', () => {
     await page.goto('/investimentos/ativos')
     await expect(page.getByRole('heading', { name: /meus ativos/i })).toBeVisible({ timeout: 10_000 })
 
+    // "Somente com valor" vem ligado por padrão — o ativo recém-criado só
+    // entra no ranking (fonte de valor_mercado) depois de um refetch que pode
+    // atrasar sob carga (achado real em CI: às vezes o ticker some da lista
+    // por ler valor_mercado=0 nesse intervalo). Desliga o filtro aqui porque
+    // o propósito deste teste é validar a criação do ativo/posição, não a
+    // interação com esse filtro — assim o ticker aparece garantido.
+    const btnSoComValor = page.getByRole('button', { name: /somente com valor/i })
+    if (await btnSoComValor.getAttribute('aria-pressed') !== 'false') await btnSoComValor.click()
+
     await page.getByRole('button', { name: /novo ativo/i }).click()
     const drawer = page.getByRole('dialog')
     await expect(drawer).toBeVisible({ timeout: 5_000 })
