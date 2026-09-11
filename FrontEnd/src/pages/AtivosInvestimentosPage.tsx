@@ -514,7 +514,7 @@ export default function AtivosInvestimentosPage() {
                     className={`rounded-xl transition-all duration-150 ${contornoTipo(tipo)}`}
                     {...alvoTipo(tipo)}>
                     <QuadroTipoAtivos tipo={g.tipo} dados={dadosPorTipo.get(g.tipo) ?? null}
-                      linhas={g.linhas}
+                      linhas={g.linhas} defaultAberto
                       focoSinal={foco?.tipo === g.tipo ? foco.n : focoTipo?.tipo === g.tipo ? focoTipo.n : null}
                       focoGrupo={foco?.tipo === g.tipo ? { dim: foco.dim, chave: foco.chave } : null}
                       acoes={{ onPosicoes: (a) => { setMovViaAtalho(false); setPosicoesDe(a) }, onHistorico: setHistoricoDe, onEditar: abrirEditar }}
