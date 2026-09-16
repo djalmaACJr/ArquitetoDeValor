@@ -152,6 +152,34 @@ function aplicarFiltros(
   return filtrarPorContas(filtrarPorTiposMov(filtrarPorAtivos(filtrarPorTiposAtivo(linhas, f.tiposAtivo), f.ativoIds), f.tiposMov), f.contaIds)
 }
 
+interface GrupoDia {
+  data: string
+  itens: LinhaExtrato[]
+  // Líquido do dia por moeda (entradas − saídas + proventos) — mesmo
+  // critério do card "Líquido" do resumo do período, só que por dia em vez
+  // do mês inteiro.
+  liquido: [string, number][]
+}
+
+// Agrupa as linhas (já ordenadas do mais recente pro mais antigo) por dia —
+// cada grupo vira uma linha de subtotal na tabela, entre um dia e outro.
+function agruparPorDia(linhas: LinhaExtrato[]): GrupoDia[] {
+  const porData = new Map<string, LinhaExtrato[]>()
+  for (const l of linhas) {
+    if (!porData.has(l.data)) porData.set(l.data, [])
+    porData.get(l.data)!.push(l)
+  }
+  return [...porData.entries()].map(([data, itens]) => {
+    const liquido = new Map<string, number>()
+    for (const l of itens) {
+      if (l.categoria === 'ENTRADA') liquido.set(l.moeda, (liquido.get(l.moeda) ?? 0) + l.valorTotal)
+      else if (l.categoria === 'SAIDA') liquido.set(l.moeda, (liquido.get(l.moeda) ?? 0) - l.valorTotal)
+      else if (l.categoria === 'PROVENTO') liquido.set('BRL', (liquido.get('BRL') ?? 0) + l.valorTotal)
+    }
+    return { data, itens, liquido: [...liquido.entries()] }
+  })
+}
+
 export default function ExtratoInvestimentosPage() {
   const [tiposAtivo, setTiposAtivo] = useState<TipoAtivoInvestimento[]>([])
   const [ativoIds,   setAtivoIds]   = useState<string[]>([])
@@ -304,6 +332,7 @@ export default function ExtratoInvestimentosPage() {
     ),
     [operacoes, dividendos, contaNomePorId, de, ate, tiposAtivo, ativoIds, tiposMov, contaIds],
   )
+  const gruposPorDia = useMemo(() => agruparPorDia(linhas), [linhas])
 
   // Resumo do período/filtro atual: entradas e saídas somadas por moeda de
   // origem (evita misturar BRL com USD); proventos sempre em BRL.
@@ -315,6 +344,10 @@ export default function ExtratoInvestimentosPage() {
     // Compra R$X, Aplicação R$Y) — mostrado abaixo do total de cada card.
     const entradasPorTipo = new Map<string, Map<string, number>>() // moeda → { tipo → valor }
     const saidasPorTipo   = new Map<string, Map<string, number>>()
+    // Proventos por tipo (Dividendos/JCP/Aluguel de ações/Rendimentos/...) —
+    // o rótulo já vem do tipo de dividendo cadastrado (ver montarLinhas),
+    // sempre em BRL (inv_dividendos.valor já convertido na gravação).
+    const proventosPorTipo = new Map<string, number>()
     const somaPorTipo = (mapa: Map<string, Map<string, number>>, moeda: string, tipo: string, v: number) => {
       const porMoeda = mapa.get(moeda) ?? new Map<string, number>()
       porMoeda.set(tipo, (porMoeda.get(tipo) ?? 0) + v)
@@ -328,7 +361,10 @@ export default function ExtratoInvestimentosPage() {
       } else if (l.categoria === 'SAIDA') {
         saidas.set(l.moeda, (saidas.get(l.moeda) ?? 0) + l.valorTotal)
         somaPorTipo(saidasPorTipo, l.moeda, tipoLabel, l.valorTotal)
-      } else if (l.categoria === 'PROVENTO') proventos += l.valorTotal
+      } else if (l.categoria === 'PROVENTO') {
+        proventos += l.valorTotal
+        proventosPorTipo.set(l.rotulo, (proventosPorTipo.get(l.rotulo) ?? 0) + l.valorTotal)
+      }
     }
     // Líquido = entradas − saídas + proventos, por moeda (proventos sempre
     // somam na cesta BRL — ver nota acima sobre conversão na gravação).
@@ -348,6 +384,7 @@ export default function ExtratoInvestimentosPage() {
       entradas: [...entradas.entries()], saidas: [...saidas.entries()], proventos,
       liquido: [...liquido.entries()],
       porTipo: [...porTipo.entries()].sort((a, b) => b[1] - a[1]),
+      proventosPorTipo: [...proventosPorTipo.entries()].sort((a, b) => b[1] - a[1]),
       entradasPorTipo, saidasPorTipo,
     }
   }, [linhas])
@@ -454,6 +491,11 @@ export default function ExtratoInvestimentosPage() {
                   Proventos
                 </p>
                 <p className="text-[18px] font-bold" style={{ color: COR_PROVENTO }}>{formatMoeda(resumo.proventos, 'BRL')}</p>
+                {resumo.proventosPorTipo.map(([tipo, v]) => (
+                  <p key={tipo} className="text-[11px] flex justify-between gap-2" style={{ color: MUTED }}>
+                    <span>{tipo}</span><span>{formatMoeda(v, 'BRL')}</span>
+                  </p>
+                ))}
               </div>
               <div className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
                 <p className="text-[12px] font-semibold uppercase tracking-wide mb-1" style={{ color: MUTED }}>
@@ -500,50 +542,71 @@ export default function ExtratoInvestimentosPage() {
                       <th className="text-right font-medium px-3 py-2.5">Valor total</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {linhas.map((l) => (
-                      <tr key={l.id} className="border-t border-white/5 hover:bg-white/[0.03] transition-colors">
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {formatData(l.data)}
-                          {l.futuro && (
-                            <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"
-                              style={{ color: '#f0b429', background: 'rgba(240,180,41,0.12)' }}>
-                              {l.rotuloFuturo}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {l.ticker ? (
-                            <>
-                              <Link to={`/investimentos/ativos/${l.ativoId}`} className="text-white font-medium hover:underline">
-                                {l.ticker}
-                              </Link>
-                              <span className="block text-[11px]" style={{ color: MUTED }}>
-                                {l.tipoAtivo ? TIPO_ATIVO_LABEL[l.tipoAtivo] : '—'}
-                                {l.rfTaxa ? ` · ${l.rfTaxa}` : ''}
+                  {gruposPorDia.map((g) => (
+                    <tbody key={g.data}>
+                      {/* Subtotal do dia — líquido (entradas − saídas + proventos) por
+                          moeda, já que um mesmo dia pode ter movimentações em BRL e USD. */}
+                      <tr className="border-t border-white/10" style={{ background: 'rgba(255,255,255,0.035)' }}>
+                        <td colSpan={7} className="px-3 py-1.5">
+                          <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <span className="text-[12px] font-semibold text-white/80">{formatData(g.data)}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-[11px]" style={{ color: MUTED }}>
+                                {g.itens.length} {g.itens.length === 1 ? 'movimentação' : 'movimentações'}
                               </span>
-                            </>
-                          ) : <span style={{ color: MUTED }}>—</span>}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span className="text-[12px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
-                            style={{ background: `${l.cor}22`, color: l.cor }}>
-                            {l.rotulo}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2" style={{ color: MUTED }}>{l.contaNome ?? '—'}</td>
-                        <td className="px-3 py-2 text-right text-white/80">
-                          {l.quantidade != null ? l.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 8 }) : '—'}
-                        </td>
-                        <td className="px-3 py-2 text-right text-white/80">
-                          {l.precoUnitario != null ? formatMoeda(l.precoUnitario, l.moeda) : '—'}
-                        </td>
-                        <td className="px-3 py-2 text-right font-medium text-white">
-                          {formatMoeda(l.valorTotal, l.moeda)}
+                              {g.liquido.map(([moeda, v]) => (
+                                <span key={moeda} className="text-[12px] font-semibold" style={{ color: corValor(v) }}>
+                                  {v >= 0 ? '+' : ''}{formatMoeda(v, moeda)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
+                      {g.itens.map((l) => (
+                        <tr key={l.id} className="border-t border-white/5 hover:bg-white/[0.03] transition-colors">
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {formatData(l.data)}
+                            {l.futuro && (
+                              <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"
+                                style={{ color: '#f0b429', background: 'rgba(240,180,41,0.12)' }}>
+                                {l.rotuloFuturo}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            {l.ticker ? (
+                              <>
+                                <Link to={`/investimentos/ativos/${l.ativoId}`} className="text-white font-medium hover:underline">
+                                  {l.ticker}
+                                </Link>
+                                <span className="block text-[11px]" style={{ color: MUTED }}>
+                                  {l.tipoAtivo ? TIPO_ATIVO_LABEL[l.tipoAtivo] : '—'}
+                                  {l.rfTaxa ? ` · ${l.rfTaxa}` : ''}
+                                </span>
+                              </>
+                            ) : <span style={{ color: MUTED }}>—</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className="text-[12px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
+                              style={{ background: `${l.cor}22`, color: l.cor }}>
+                              {l.rotulo}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2" style={{ color: MUTED }}>{l.contaNome ?? '—'}</td>
+                          <td className="px-3 py-2 text-right text-white/80">
+                            {l.quantidade != null ? l.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 8 }) : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-right text-white/80">
+                            {l.precoUnitario != null ? formatMoeda(l.precoUnitario, l.moeda) : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-right font-medium text-white">
+                            {formatMoeda(l.valorTotal, l.moeda)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  ))}
                 </table>
               </div>
             </div>

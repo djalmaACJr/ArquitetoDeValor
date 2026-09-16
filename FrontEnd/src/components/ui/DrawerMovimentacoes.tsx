@@ -15,13 +15,17 @@ const hoje = () => new Date().toISOString().split('T')[0]
 // Tela única de movimentações de um ativo. Registrar uma movimentação
 // (Compra/Venda/Aporte/Resgate) mantém a posição automaticamente no backend
 // (posição = soma das operações). O saldo atual é exibido no topo, só leitura.
-export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistrarNova }: {
+export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistrarNova, valoresIniciais }: {
   ativo: InvestimentoAtivo; onClose: () => void; onToast: (m: string) => void
   // Presente só quando o drawer foi aberto pelo atalho "Nova movimentação" do
   // header (não pela ação "Posições" de uma linha): ao registrar uma
   // movimentação nova (não edição), pergunta se o usuário quer lançar outra
   // — "sim" reinicia a tela (volta pro seletor de ativo); "não" fecha.
   onRegistrarNova?: () => void
+  // Pré-preenche quantidade/preço unitário do formulário de entrada — usado
+  // pelo "Simular compra" (DetalheInvestimentoPage) para virar a simulação
+  // numa movimentação real sem o usuário ter que redigitar os números.
+  valoresIniciais?: { quantidade: string; preco_unitario: string }
 }) {
   const { posicoes } = useInvestimentosPosicoes({ ativo_id: ativo.id })
   const { operacoes, loading, criar, editar, excluir } = useInvestimentosOperacoes({ ativo_id: ativo.id })
@@ -35,7 +39,7 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
   const rfSemQtde = ativo.tipo_ativo === 'RENDA_FIXA'
   const vazio = () => ({
     conta_id: '', tipo_operacao: tipoEntradaPara(ativo.tipo_ativo),
-    quantidade: '', preco_unitario: '', data_operacao: hoje(),
+    quantidade: valoresIniciais?.quantidade ?? '', preco_unitario: valoresIniciais?.preco_unitario ?? '', data_operacao: hoje(),
   })
   const [form, setForm] = useState(vazio)
   const [editId, setEditId] = useState<string | null>(null)
@@ -215,6 +219,11 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
   return (
     <>
     <Drawer open onClose={onClose} titulo={`Movimentações · ${ativo.ticker}`} subtitulo={ativo.nome}>
+      {valoresIniciais && !editId && (
+        <p className="text-[12px] rounded-lg border border-blue-400/30 bg-blue-400/[0.06] px-3 py-2" style={{ color: '#93c5fd' }}>
+          Quantidade e preço vieram da simulação de compra — confira a conta e a data antes de registrar.
+        </p>
+      )}
       {/* Saldo atual (derivado das operações) */}
       <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
         <p className="text-[12px] mb-2" style={{ color: MUTED }}>Saldo atual</p>

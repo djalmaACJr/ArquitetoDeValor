@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus, Minus, ExternalLink, ChevronLeft, ChevronRight, Calculator } from 'lucide-react'
 import { Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, Tooltip, Legend,
@@ -13,7 +13,7 @@ import { useDividendos } from '../hooks/useDividendos'
 import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
 import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
 import { usePtax } from '../hooks/usePtax'
-import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo, SelectDark } from '../components/ui/shared'
+import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo, SelectDark, Field, Input, InputMoeda } from '../components/ui/shared'
 import DrawerAtivo from '../components/ui/DrawerAtivo'
 import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
 import LoadingMascote from '../components/ui/LoadingMascote'
@@ -40,6 +40,19 @@ const MESES_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set',
 function fmtMes(anoMes: string): string {
   const [ano, m] = anoMes.split('-')
   return `${MESES_PT[parseInt(m) - 1]}/${ano.slice(2)}`
+}
+
+// Helpers de aritmética sobre "YYYY-MM" — usados pela paginação de 6 em 6
+// meses do quadro "Últimos dividendos".
+function mesParaIndice(anoMes: string): number {
+  const [ano, m] = anoMes.split('-').map(Number)
+  return ano * 12 + (m - 1)
+}
+function deslocarMes(anoMes: string, deltaMeses: number): string {
+  const indice = mesParaIndice(anoMes) + deltaMeses
+  const ano = Math.floor(indice / 12)
+  const mes = (indice % 12) + 1
+  return `${ano}-${String(mes).padStart(2, '0')}`
 }
 
 function corValor(v: number): string {
@@ -109,6 +122,10 @@ export default function DetalheInvestimentoPage() {
   const [excluindo, setExcluindo] = useState(false)
   const [salvandoExclusao, setSalvandoExclusao] = useState(false)
   const [gerenciar, setGerenciar] = useState(false)
+  const [simulando, setSimulando] = useState(false)
+  // Preenche "Nova movimentação" com os números da simulação quando o usuário
+  // decide transformá-la numa compra de verdade (ver DrawerSimularCompra).
+  const [prefilCompra, setPrefilCompra] = useState<{ quantidade: string; preco_unitario: string } | null>(null)
   const [provisionando, setProvisionando] = useState(false)
 
   const { ativo, loading, error } = useInvestimentoAtivo(ativoId)
@@ -150,6 +167,13 @@ export default function DetalheInvestimentoPage() {
     return { custo, mercado, ganho: mercado - custo, dividendos: totalDiv }
   }, [posicoes, historico, dividendos])
 
+  // Quantidade atual de cotas/ações (soma das posições ATIVAS) — usada tanto
+  // na estimativa de cotação quanto no cálculo do Magic Number (FIIs).
+  const qtdAtual = useMemo(
+    () => posicoes.filter((p) => p.status === 'ATIVA').reduce((s, p) => s + Number(p.quantidade), 0),
+    [posicoes],
+  )
+
   // Cotação estimada: valor de mercado do último snapshot (resumo.mercado) ÷
   // quantidade ATUAL das posições (posicoes, sempre em dia) — não a quantidade
   // que o snapshot tinha NA DATA dele, que fica desatualizada entre um
@@ -158,12 +182,35 @@ export default function DetalheInvestimentoPage() {
   // seguinte). Mesmo método da coluna "Preço atual" do ranking. Usada só para
   // dar um R$ aproximado ao total de RENDIMENTO, que só registra tokens (sem
   // valor_total, pois é yield em cripto).
-  const precoAtualEstimado = useMemo(() => {
-    const qtdAtual = posicoes
-      .filter((p) => p.status === 'ATIVA')
-      .reduce((s, p) => s + Number(p.quantidade), 0)
-    return qtdAtual > 0 ? resumo.mercado / qtdAtual : null
-  }, [posicoes, resumo.mercado])
+  const precoAtualEstimado = useMemo(
+    () => (qtdAtual > 0 ? resumo.mercado / qtdAtual : null),
+    [qtdAtual, resumo.mercado],
+  )
+
+  // Magic Number (FIIs): quantas cotas seriam necessárias para que o próprio
+  // dividendo mensal já compre 1 cota nova, sem precisar de aporte externo
+  // ("efeito bola de neve"). Usa o dividendo por cota mais recente disponível
+  // (dividendos vem ordenado do mais novo para o mais antigo).
+  const magicNumberFII = useMemo(() => {
+    if (ativo?.tipo_ativo !== 'FII' || !precoAtualEstimado || precoAtualEstimado <= 0) return null
+    const ultimoDiv = dividendos.find((d) => d.valor_por_cota != null && Number(d.valor_por_cota) > 0)
+    const valorPorCota = ultimoDiv ? Number(ultimoDiv.valor_por_cota) : null
+    if (!valorPorCota || valorPorCota <= 0) return null
+    const cotasNecessarias = Math.ceil(precoAtualEstimado / valorPorCota)
+    const diferenca = cotasNecessarias - qtdAtual
+    // Já com o Magic Number atingido: quantas cotas os dividendos das cotas
+    // que o usuário JÁ TEM (não só as "necessárias") compram por período.
+    const cotasCompraveis = diferenca <= 0 ? Math.floor((qtdAtual * valorPorCota) / precoAtualEstimado) : 0
+    return {
+      precoCota: precoAtualEstimado,
+      valorPorCota,
+      cotasNecessarias,
+      totalInvestido: cotasNecessarias * precoAtualEstimado,
+      diferenca,
+      valorFaltante: diferenca > 0 ? diferenca * precoAtualEstimado : 0,
+      cotasCompraveis,
+    }
+  }, [ativo?.tipo_ativo, precoAtualEstimado, dividendos, qtdAtual])
 
   // Janela do período selecionado (6/12 meses ou "tudo") para os gráficos
   // mensais desta página. mesInicio null = sem limite inferior (tudo).
@@ -255,6 +302,31 @@ export default function DetalheInvestimentoPage() {
     [dividendos, janela],
   )
 
+  // Paginação do quadro "Últimos dividendos": blocos de 6 meses (mais recente
+  // primeiro), pra não listar de uma vez todo o período selecionado no topo
+  // (ex.: "Tudo"). Reinicia na página mais recente ao trocar de ativo/período.
+  const [paginaDividendos, setPaginaDividendos] = useState(0)
+  useEffect(() => { setPaginaDividendos(0) }, [ativoId, periodoGraficos])
+  const divPaginacao = useMemo(() => {
+    if (divFiltrados.length === 0) {
+      return { itens: [] as typeof divFiltrados, pagina: 0, totalPaginas: 0, mesInicio: '', mesFim: '' }
+    }
+    const mesMaisAntigo = divFiltrados.reduce(
+      (m, d) => { const mes = d.data_pagamento.slice(0, 7); return mes < m ? mes : m },
+      janela.mesAtual,
+    )
+    const totalMeses = mesParaIndice(janela.mesAtual) - mesParaIndice(mesMaisAntigo) + 1
+    const totalPaginas = Math.max(1, Math.ceil(totalMeses / 6))
+    const pagina = Math.min(paginaDividendos, totalPaginas - 1)
+    const mesFim = deslocarMes(janela.mesAtual, -6 * pagina)
+    const mesInicio = deslocarMes(mesFim, -5)
+    const itens = divFiltrados.filter((d) => {
+      const mes = d.data_pagamento.slice(0, 7)
+      return mes >= mesInicio && mes <= mesFim
+    })
+    return { itens, pagina, totalPaginas, mesInicio, mesFim }
+  }, [divFiltrados, janela, paginaDividendos])
+
   // Dividendos agregados por mês (período selecionado)
   const divPorMes = useMemo(() => {
     const porMes = new Map<string, number>()
@@ -314,30 +386,47 @@ export default function DetalheInvestimentoPage() {
     const doAtivo = operacoes.filter((o) => posIds.has(o.posicao_id))
     const rend = doAtivo.filter((o) => o.tipo_operacao === 'RENDIMENTO')
     return {
-      compras: doAtivo.filter((o) => o.tipo_operacao !== 'RENDIMENTO').slice(0, 8),
+      compras: doAtivo.filter((o) => o.tipo_operacao !== 'RENDIMENTO'),
       rendimentos: rend,
       totalRendimento: rend.reduce((s, o) => s + Number(o.quantidade), 0),
     }
   }, [operacoes, posicoes])
 
-  // Totais por tipo de operação NO PERÍODO selecionado (independe da lista
-  // "recentes" abaixo, que sempre mostra as últimas, sem filtro). RENDIMENTO
-  // só tem quantidade (tokens, valor_total sempre 0); os demais somam R$ E
-  // a quantidade de cotas/ações movimentada.
-  const totaisPorTipo = useMemo(() => {
+  // Paginação do quadro "Operações recentes": 6 por página (operações já vêm
+  // ordenadas da mais recente para a mais antiga). Reinicia ao trocar de ativo.
+  const [paginaOperacoes, setPaginaOperacoes] = useState(0)
+  useEffect(() => { setPaginaOperacoes(0) }, [ativoId])
+  const totalPaginasOperacoes = Math.max(1, Math.ceil(compras.length / 6))
+  const paginaOperacoesEfetiva = Math.min(paginaOperacoes, totalPaginasOperacoes - 1)
+  const comprasPaginadas = useMemo(
+    () => compras.slice(paginaOperacoesEfetiva * 6, paginaOperacoesEfetiva * 6 + 6),
+    [compras, paginaOperacoesEfetiva],
+  )
+
+  // Resumo GERAL de compras × vendas (todo o histórico do ativo, não só o
+  // período selecionado no topo da página) — entrada = COMPRA/APORTE, saída =
+  // VENDA/RESGATE. Resultado = entrada − saída, tanto em quantidade quanto em
+  // R$. RENDIMENTO (yield de cripto) fica à parte, só soma tokens.
+  const resumoComprasVendas = useMemo(() => {
     const posIds = new Set(posicoes.map((p) => p.id))
-    const totais = new Map<string, { valor: number; quantidade: number }>()
+    let qtdEntrada = 0, valorEntrada = 0
+    let qtdSaida = 0, valorSaida = 0
+    let qtdRendimento = 0
     for (const o of operacoes) {
       if (!posIds.has(o.posicao_id)) continue
-      if (!dentroJanela(o.data_operacao.slice(0, 7))) continue
-      const t = totais.get(o.tipo_operacao) ?? { valor: 0, quantidade: 0 }
-      t.valor      += Number(o.valor_total)
-      t.quantidade += Number(o.quantidade)
-      totais.set(o.tipo_operacao, t)
+      if (o.tipo_operacao === 'RENDIMENTO') { qtdRendimento += Number(o.quantidade); continue }
+      const saida = o.tipo_operacao === 'VENDA' || o.tipo_operacao === 'RESGATE'
+      if (saida) { qtdSaida += Number(o.quantidade); valorSaida += Number(o.valor_total) }
+      else       { qtdEntrada += Number(o.quantidade); valorEntrada += Number(o.valor_total) }
     }
-    return [...totais.entries()].filter(([, t]) => t.valor !== 0 || t.quantidade !== 0)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [operacoes, posicoes, janela])
+    return {
+      qtdEntrada, valorEntrada,
+      qtdSaida, valorSaida,
+      qtdLiquida: qtdEntrada - qtdSaida,
+      valorLiquido: valorEntrada - valorSaida,
+      qtdRendimento,
+    }
+  }, [operacoes, posicoes])
   const fmtTokens = (q: number) => Number(q).toLocaleString('pt-BR', { maximumFractionDigits: 8 })
 
   // ── Conversão cambial (ativos em moeda estrangeira) ────────────
@@ -404,6 +493,7 @@ export default function DetalheInvestimentoPage() {
   const cor = TIPO_ATIVO_COR[ativo.tipo_ativo]
   // Renda fixa, Tesouro e cripto não pagam proventos → escondem os quadros de dividendos.
   const podeDividendos = !['RENDA_FIXA', 'TESOURO_DIRETO', 'CRIPTOMOEDAS'].includes(ativo.tipo_ativo)
+  const ehRendaFixaAtivo = ativo.tipo_ativo === 'RENDA_FIXA' || ativo.tipo_ativo === 'TESOURO_DIRETO'
   const urlInvestidor10 = linkInvestidor10(ativo)
 
   async function confirmarExclusao() {
@@ -484,6 +574,12 @@ export default function DetalheInvestimentoPage() {
             style={{ background: '#3b82f6' }}>
             <Plus size={14} /> Nova movimentação
           </button>
+          {!ehRendaFixaAtivo && (
+            <button onClick={() => setSimulando(true)} title="Simular quantas cotas/ações dá para comprar com um valor"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
+              <Calculator size={14} style={{ color: MUTED }} /> Simular compra
+            </button>
+          )}
           <button onClick={() => setEditandoAtivo(true)} title="Editar dados do ativo"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
             <Pencil size={14} style={{ color: MUTED }} /> Editar
@@ -686,12 +782,41 @@ export default function DetalheInvestimentoPage() {
         {/* Últimos dividendos — só para ativos que pagam proventos */}
         {podeDividendos && (
           <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-            <h2 className="text-[14px] font-semibold text-white/80 mb-3">Últimos dividendos</h2>
-            {divFiltrados.length === 0 ? (
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h2 className="text-[14px] font-semibold text-white/80">Últimos dividendos</h2>
+              {divPaginacao.totalPaginas > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setPaginaDividendos((p) => p + 1)}
+                    disabled={divPaginacao.pagina >= divPaginacao.totalPaginas - 1}
+                    title="6 meses mais antigos"
+                    aria-label="6 meses mais antigos"
+                    className="flex items-center justify-center h-6 w-6 rounded-md border border-white/10 text-white/70
+                               hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft size={13} />
+                  </button>
+                  <span className="text-[11px] whitespace-nowrap" style={{ color: MUTED }}>
+                    Página {divPaginacao.pagina + 1}/{divPaginacao.totalPaginas}
+                  </span>
+                  <button
+                    onClick={() => setPaginaDividendos((p) => Math.max(0, p - 1))}
+                    disabled={divPaginacao.pagina <= 0}
+                    title="6 meses mais recentes"
+                    aria-label="6 meses mais recentes"
+                    className="flex items-center justify-center h-6 w-6 rounded-md border border-white/10 text-white/70
+                               hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
+            {divPaginacao.itens.length === 0 ? (
               <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo {labelSemDados}.</p>
             ) : (
               <div className="space-y-2">
-                {divFiltrados.map((d) => (
+                {divPaginacao.itens.map((d) => (
                   <div key={d.id} className="flex items-center justify-between gap-2 text-[13px]">
                     <div>
                       <p className="text-white font-medium">{d.inv_tipos_dividendo?.nome ?? 'Dividendo'}</p>
@@ -707,41 +832,115 @@ export default function DetalheInvestimentoPage() {
           </section>
         )}
 
+        {/* Magic Number — só para FIIs, quando há cotação e último dividendo por cota */}
+        {magicNumberFII && (
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <div className="flex items-start gap-2 mb-3">
+              <span className="flex items-center justify-center w-7 h-7 rounded-full border border-white/15 text-[13px] font-semibold flex-shrink-0" style={{ color: MUTED }}>
+                ƒ
+              </span>
+              <div>
+                <h2 className="text-[14px] font-semibold text-white/80">Magic Number do FII</h2>
+                <p className="text-[12px] mt-0.5" style={{ color: MUTED }}>
+                  O número de cotas que permite comprar novas cotas só com os dividendos pagos por elas, sem precisar de novos aportes — o efeito bola de neve.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-stretch gap-2">
+              <CaixaMagicNumber rotulo="Valor atual da cota" valor={formatBRL(magicNumberFII.precoCota)} />
+              <span className="self-center text-[15px] px-1" style={{ color: MUTED }}>÷</span>
+              <CaixaMagicNumber rotulo="Último dividendo por cota" valor={formatBRL(magicNumberFII.valorPorCota)} />
+              <span className="self-center text-[15px] px-1" style={{ color: MUTED }}>=</span>
+              <CaixaMagicNumber rotulo="Cotas para o efeito bola de neve" valor={`${magicNumberFII.cotasNecessarias} cotas`} destaque />
+            </div>
+
+            <p className="text-center text-[12px] my-2" style={{ color: MUTED }}>Ou</p>
+
+            <div className="flex flex-wrap items-stretch gap-2">
+              <CaixaMagicNumber rotulo="Cotas" valor={String(magicNumberFII.cotasNecessarias)} />
+              <span className="self-center text-[15px] px-1" style={{ color: MUTED }}>×</span>
+              <CaixaMagicNumber rotulo="Valor atual da cota" valor={formatBRL(magicNumberFII.precoCota)} />
+              <span className="self-center text-[15px] px-1" style={{ color: MUTED }}>=</span>
+              <CaixaMagicNumber rotulo="Total investido necessário" valor={formatBRL(magicNumberFII.totalInvestido)} destaque />
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between flex-wrap gap-2">
+              <span className="text-[13px]" style={{ color: MUTED }}>
+                Você tem <span className="text-white font-medium">{qtdAtual} cota{qtdAtual === 1 ? '' : 's'}</span>
+              </span>
+              {magicNumberFII.diferenca > 0 ? (
+                <span className="text-[13px] font-semibold text-right" style={{ color: '#ffb74d' }}>
+                  Faltam {magicNumberFII.diferenca} cota{magicNumberFII.diferenca === 1 ? '' : 's'} para o Magic Number
+                  <span className="block font-normal" style={{ color: MUTED }}>
+                    ≈ {formatBRL(magicNumberFII.valorFaltante)} a mais investidos
+                  </span>
+                </span>
+              ) : (
+                <span className="text-[13px] font-semibold text-right" style={{ color: '#00c896' }}>
+                  Magic Number atingido — sobram {-magicNumberFII.diferenca} cota{-magicNumberFII.diferenca === 1 ? '' : 's'}
+                  <span className="block font-normal" style={{ color: MUTED }}>
+                    Os dividendos já compram {magicNumberFII.cotasCompraveis} cota{magicNumberFII.cotasCompraveis === 1 ? '' : 's'} nova{magicNumberFII.cotasCompraveis === 1 ? '' : 's'} a cada pagamento
+                  </span>
+                </span>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* Operações recentes */}
         <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4" data-tutorial="detalhe-operacoes">
           <h2 className="text-[14px] font-semibold text-white/80 mb-3">Operações recentes</h2>
 
-          {/* Totais por tipo de operação no período selecionado */}
-          {totaisPorTipo.length > 0 && (
+          {/* Resumo GERAL do ativo (todo o histórico, não só o período
+              selecionado no topo da página): compras × vendas × resultado. */}
+          {(resumoComprasVendas.qtdEntrada > 0 || resumoComprasVendas.qtdSaida > 0 || resumoComprasVendas.qtdRendimento > 0) && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
-              {totaisPorTipo.map(([tipo, t]) => (
-                <div key={tipo} className="rounded-lg border border-white/10 px-3 py-2">
+              {resumoComprasVendas.qtdEntrada > 0 && (
+                <div className="rounded-lg border border-white/10 px-3 py-2">
                   <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
-                    {TIPO_OPERACAO_LABEL[tipo as keyof typeof TIPO_OPERACAO_LABEL] ?? tipo}
+                    {ehRendaFixaAtivo ? 'Aportes' : 'Compras'}
                   </p>
-                  {/* RENDIMENTO não tem valor_total (sempre 0, é yield em tokens) —
-                      o R$ é uma ESTIMATIVA pela cotação atual, não o valor real
-                      recebido em cada crédito. Os demais mostram o valor (R$)
-                      real, com a quantidade sempre abaixo, rotulada. */}
-                  {tipo === 'RENDIMENTO' ? (
-                    <>
-                      <p className="text-white font-semibold text-[13px]">
-                        +{fmtTokens(t.quantidade)} {ativo.ticker}
-                      </p>
-                      {precoAtualEstimado != null && (
-                        <p className="text-[11px]" style={{ color: MUTED }}>
-                          ≈ {formatBRL(t.quantidade * precoAtualEstimado)} (preço atual)
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-white font-semibold text-[13px]">{fmtNativo(t.valor)}</p>
-                      <p className="text-[11px]" style={{ color: MUTED }}>Qtd: {fmtTokens(t.quantidade)}</p>
-                    </>
+                  <p className="font-semibold text-[13px]" style={{ color: '#00c896' }}>{fmtNativo(resumoComprasVendas.valorEntrada)}</p>
+                  <p className="text-[11px]" style={{ color: MUTED }}>Qtd: {fmtTokens(resumoComprasVendas.qtdEntrada)}</p>
+                </div>
+              )}
+              {resumoComprasVendas.qtdSaida > 0 && (
+                <div className="rounded-lg border border-white/10 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
+                    {ehRendaFixaAtivo ? 'Resgates' : 'Vendas'}
+                  </p>
+                  <p className="font-semibold text-[13px]" style={{ color: '#ff5c7a' }}>{fmtNativo(resumoComprasVendas.valorSaida)}</p>
+                  <p className="text-[11px]" style={{ color: MUTED }}>Qtd: {fmtTokens(resumoComprasVendas.qtdSaida)}</p>
+                </div>
+              )}
+              {resumoComprasVendas.qtdSaida > 0 && (
+                <div className="rounded-lg border border-white/10 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
+                    Resultado ({ehRendaFixaAtivo ? 'aportes − resgates' : 'compras − vendas'})
+                  </p>
+                  <p className="font-semibold text-[13px]" style={{ color: corValor(resumoComprasVendas.valorLiquido) }}>
+                    {fmtNativo(resumoComprasVendas.valorLiquido)}
+                  </p>
+                  <p className="text-[11px]" style={{ color: MUTED }}>Qtd líquida: {fmtTokens(resumoComprasVendas.qtdLiquida)}</p>
+                </div>
+              )}
+              {/* RENDIMENTO não tem valor_total (sempre 0, é yield em tokens) — o
+                  R$ é uma ESTIMATIVA pela cotação atual, não o valor real
+                  recebido em cada crédito. */}
+              {resumoComprasVendas.qtdRendimento > 0 && (
+                <div className="rounded-lg border border-white/10 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>Rendimento</p>
+                  <p className="text-white font-semibold text-[13px]">
+                    +{fmtTokens(resumoComprasVendas.qtdRendimento)} {ativo.ticker}
+                  </p>
+                  {precoAtualEstimado != null && (
+                    <p className="text-[11px]" style={{ color: MUTED }}>
+                      ≈ {formatBRL(resumoComprasVendas.qtdRendimento * precoAtualEstimado)} (preço atual)
+                    </p>
                   )}
                 </div>
-              ))}
+              )}
             </div>
           )}
 
@@ -751,22 +950,62 @@ export default function DetalheInvestimentoPage() {
             <div className="space-y-4">
               {compras.length > 0 && (
                 <div className="space-y-2">
-                  {rendimentos.length > 0 && (
-                    <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>Compras e aportes</p>
-                  )}
-                  {compras.map((o) => (
-                    <div key={o.id} className="flex items-center justify-between gap-2 text-[13px]">
-                      <div>
-                        <p className="text-white font-medium">{TIPO_OPERACAO_LABEL[o.tipo_operacao]}</p>
-                        <p style={{ color: MUTED }}>
-                          {ativo.tipo_ativo === 'RENDA_FIXA'
-                            ? formatData(o.data_operacao)
-                            : `${o.quantidade} × ${fmtNativo(o.preco_unitario)} · ${formatData(o.data_operacao)}`}
-                        </p>
+                  <div className="flex items-center justify-between gap-2">
+                    {rendimentos.length > 0 ? (
+                      <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>Compras e aportes</p>
+                    ) : <span />}
+                    {totalPaginasOperacoes > 1 && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => setPaginaOperacoes((p) => p + 1)}
+                          disabled={paginaOperacoesEfetiva >= totalPaginasOperacoes - 1}
+                          title="Operações mais antigas"
+                          aria-label="Operações mais antigas"
+                          className="flex items-center justify-center h-6 w-6 rounded-md border border-white/10 text-white/70
+                                     hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <ChevronLeft size={13} />
+                        </button>
+                        <span className="text-[11px] whitespace-nowrap" style={{ color: MUTED }}>
+                          Página {paginaOperacoesEfetiva + 1}/{totalPaginasOperacoes}
+                        </span>
+                        <button
+                          onClick={() => setPaginaOperacoes((p) => Math.max(0, p - 1))}
+                          disabled={paginaOperacoesEfetiva <= 0}
+                          title="Operações mais recentes"
+                          aria-label="Operações mais recentes"
+                          className="flex items-center justify-center h-6 w-6 rounded-md border border-white/10 text-white/70
+                                     hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <ChevronRight size={13} />
+                        </button>
                       </div>
-                      <span className="text-white font-semibold">{fmtNativo(o.valor_total)}</span>
-                    </div>
-                  ))}
+                    )}
+                  </div>
+                  {comprasPaginadas.map((o) => {
+                    // Entrada (compra/aplicação) em verde, saída (venda/resgate) em
+                    // vermelho — mesmo par de cores usado no resto da página.
+                    const saida = o.tipo_operacao === 'VENDA' || o.tipo_operacao === 'RESGATE'
+                    const corOperacao = saida ? '#ff5c7a' : '#00c896'
+                    return (
+                      <div key={o.id} className="flex items-center justify-between gap-2 text-[13px]">
+                        <div className="flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: corOperacao }} />
+                          <div>
+                            <p className="font-medium" style={{ color: corOperacao }}>{TIPO_OPERACAO_LABEL[o.tipo_operacao]}</p>
+                            <p style={{ color: MUTED }}>
+                              {ativo.tipo_ativo === 'RENDA_FIXA'
+                                ? formatData(o.data_operacao)
+                                : `${o.quantidade} × ${fmtNativo(o.preco_unitario)} · ${formatData(o.data_operacao)}`}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="font-semibold" style={{ color: corOperacao }}>
+                          {saida ? '-' : '+'}{fmtNativo(o.valor_total)}
+                        </span>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
               {rendimentos.length > 0 && (
@@ -806,7 +1045,18 @@ export default function DetalheInvestimentoPage() {
       )}
 
       {gerenciar && (
-        <DrawerMovimentacoes ativo={ativo} onClose={() => setGerenciar(false)} onToast={showToast} />
+        <DrawerMovimentacoes ativo={ativo} onClose={() => { setGerenciar(false); setPrefilCompra(null) }}
+          onToast={showToast} valoresIniciais={prefilCompra ?? undefined} />
+      )}
+
+      {simulando && (
+        <DrawerSimularCompra ticker={ativo.ticker} tipoAtivo={ativo.tipo_ativo}
+          precoAtual={precoAtualEstimado} onClose={() => setSimulando(false)}
+          onRegistrar={(quantidade, precoUnitario) => {
+            setPrefilCompra({ quantidade: String(quantidade), preco_unitario: String(precoUnitario) })
+            setSimulando(false)
+            setGerenciar(true)
+          }} />
       )}
 
       {excluindo && (
@@ -828,6 +1078,127 @@ function ItemCaracteristica({ rotulo, valor, cor }: { rotulo: string; valor: str
       <p className="text-[12px]" style={{ color: MUTED }}>{rotulo}</p>
       <p className="text-[13px] font-medium" style={{ color: cor ?? '#fff' }}>{valor}</p>
     </div>
+  )
+}
+
+// Caixa de um termo da "conta" do Magic Number (ex.: "R$ 60,47 ÷ R$ 0,60 = 101 cotas").
+function CaixaMagicNumber({ valor, rotulo, destaque }: { valor: string; rotulo: string; destaque?: boolean }) {
+  return (
+    <div className="flex-1 min-w-[110px] rounded-lg px-3 py-3 text-center border"
+      style={destaque
+        ? { background: 'rgba(0,200,150,0.10)', borderColor: 'rgba(0,200,150,0.35)' }
+        : { background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.1)' }}>
+      <p className="text-[15px] font-bold" style={{ color: destaque ? '#00c896' : '#fff' }}>{valor}</p>
+      <p className="text-[11px] mt-1 leading-tight" style={{ color: MUTED }}>{rotulo}</p>
+    </div>
+  )
+}
+
+// Rótulo da unidade negociada, por tipo de ativo — só cosmético (a conta é a
+// mesma pra todos: valor ÷ preço, arredondado para baixo pois não dá pra
+// comprar fração de cota/ação nem token fracionado por aqui).
+function unidadeLabel(tipo: TipoAtivoInvestimento, plural: boolean): string {
+  const singular = tipo === 'FII' ? 'cota' : tipo === 'CRIPTOMOEDAS' ? 'token' : 'ação'
+  if (!plural) return singular
+  return singular === 'ação' ? 'ações' : `${singular}s`
+}
+
+// Simulação de nova compra: "tenho R$ x, quantas cotas/ações dá pra comprar
+// aproximadamente?" — usa o mesmo preço atual estimado (valor de mercado do
+// último snapshot ÷ quantidade atual) já calculado para o Magic Number e para
+// o card de rendimento de cripto. Não persiste nada — é só uma conta na hora.
+function DrawerSimularCompra({ ticker, tipoAtivo, precoAtual, onClose, onRegistrar }: {
+  ticker: string; tipoAtivo: TipoAtivoInvestimento; precoAtual: number | null; onClose: () => void
+  // Presente: oferece o botão que vira a simulação numa movimentação real,
+  // repassando quantidade/preço já calculados para o formulário de "Nova
+  // movimentação" (ver uso em DetalheInvestimentoPage).
+  onRegistrar: (quantidade: number, precoUnitario: number) => void
+}) {
+  const [valorDisponivel, setValorDisponivel] = useState<number | null>(null)
+  // Quantidade efetivamente simulada — parte da sugestão calculada a partir
+  // do valor disponível, mas o usuário pode ajustá-la livremente (+/- ou
+  // digitando), por exemplo para comprar um pouco mais/menos do que o valor
+  // informado permitiria à risca.
+  const [quantidade, setQuantidade] = useState(0)
+  const unidade = unidadeLabel(tipoAtivo, false)
+  const unidadePlural = unidadeLabel(tipoAtivo, true)
+
+  // Só resincroniza a quantidade quando o VALOR muda (não a cada render) —
+  // depois disso o usuário é livre para ajustar sem o campo "voltar sozinho"
+  // ao valor sugerido a cada re-render.
+  useEffect(() => {
+    if (precoAtual && precoAtual > 0 && valorDisponivel && valorDisponivel > 0) {
+      setQuantidade(Math.floor(valorDisponivel / precoAtual))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valorDisponivel])
+
+  const ajustarQtd = (delta: number) => setQuantidade((q) => Math.max(0, q + delta))
+
+  const gasto = quantidade * (precoAtual ?? 0)
+  // Só compara com "sobra/falta" quando o usuário informou um valor de
+  // referência — sem ele, a quantidade é livre e não há o que comparar.
+  const diferenca = valorDisponivel != null ? valorDisponivel - gasto : null
+
+  return (
+    <Drawer open onClose={onClose} titulo={`Simular compra · ${ticker}`}
+      subtitulo={precoAtual ? `Preço atual estimado: ${formatBRL(precoAtual)} por ${unidade}` : undefined}>
+      {!precoAtual || precoAtual <= 0 ? (
+        <p className="text-[13px]" style={{ color: MUTED }}>
+          Sem cotação atual disponível para este ativo — não é possível simular.
+        </p>
+      ) : (
+        <>
+          <Field label="Quanto você tem disponível para investir? (opcional)">
+            <InputMoeda value={valorDisponivel} onChange={setValorDisponivel} placeholder="R$ 0,00" autoFocus />
+          </Field>
+
+          <Field label={`Quantidade de ${unidadePlural}`}>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => ajustarQtd(-1)} disabled={quantidade <= 0}
+                title={`Remover 1 ${unidade}`}
+                className="w-9 h-9 shrink-0 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>
+                <Minus size={14} />
+              </button>
+              <Input type="number" min={0} step={1} value={quantidade} className="text-center"
+                onChange={(e) => setQuantidade(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+              <button type="button" onClick={() => ajustarQtd(1)} title={`Adicionar 1 ${unidade}`}
+                className="w-9 h-9 shrink-0 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
+                <Plus size={14} />
+              </button>
+            </div>
+          </Field>
+
+          {quantidade > 0 && (
+            <>
+              <div className="flex flex-wrap items-stretch gap-2">
+                <CaixaMagicNumber destaque rotulo="Total gasto" valor={formatBRL(gasto)} />
+                {diferenca != null && (
+                  <CaixaMagicNumber
+                    rotulo={diferenca >= 0 ? 'Sobra estimada' : 'Falta'}
+                    valor={formatBRL(Math.abs(diferenca))} />
+                )}
+              </div>
+              <button onClick={() => onRegistrar(quantidade, precoAtual)}
+                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-semibold text-white"
+                style={{ background: '#3b82f6' }}>
+                <Plus size={14} /> Registrar esta compra
+              </button>
+            </>
+          )}
+
+          {valorDisponivel != null && valorDisponivel > 0 && quantidade === 0 && (
+            <p className="text-[13px]" style={{ color: '#ffb74d' }}>
+              Valor insuficiente para 1 {unidade} inteira ao preço atual — ajuste a quantidade acima se quiser simular mesmo assim.
+            </p>
+          )}
+
+          <p className="text-[11px]" style={{ color: MUTED }}>
+            Estimativa com base no preço atual — não considera corretagem, emolumentos nem a variação da cotação até a compra de verdade.
+          </p>
+        </>
+      )}
+    </Drawer>
   )
 }
 

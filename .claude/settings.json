@@ -97,7 +97,9 @@
       "Bash(adb devices *)",
       "Bash(\"/c/Users/djalma/AppData/Local/Android/Sdk/platform-tools/adb.exe\" devices *)",
       "Bash(\"/c/Users/djalma/AppData/Local/Android/Sdk/platform-tools/adb.exe\" uninstall *)",
-      "Bash(\"/c/Users/djalma/AppData/Local/Android/Sdk/platform-tools/adb.exe\" shell *)"
+      "Bash(\"/c/Users/djalma/AppData/Local/Android/Sdk/platform-tools/adb.exe\" shell *)",
+      "Bash(grep -n \"setEditandoAtivo\\(true\\)\\\\|setExcluindo\\(true\\)\\\\|setGerenciar\\(true\\)\\\\|Gerenciar\\\\|onClick={\\(\\) => setEditandoNota\\\\|Editar</\\\\|Pencil\\\\|Nova posição\\\\|Movimenta\\\\|flex items-center gap-2\" C:/Pessoal/ArquitetoDeValor/FrontEnd/src/pages/DetalheInvestimentoPage.tsx)",
+      "Bash(grep -n \"InputMoeda\\\\|CampoValor\\\\|valor.*input\\\\|type=\\\\\"number\\\\\"\\\\|inputMode\\\\|R\\\\\\\\$ \\\\|onChange.*parseFloat\\\\|onChange.*Number\\(\" C:/Pessoal/ArquitetoDeValor/FrontEnd/src/components/ui/DrawerMovimentacoes.tsx)"
     ],
     "additionalDirectories": [
       "\\tmp"

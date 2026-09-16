@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
-import { ChevronDown, ChevronUp, ChevronRight, TrendingUp, TrendingDown, Layers, LineChart, Pencil } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronRight, TrendingUp, TrendingDown, Layers, LineChart, Pencil, CheckCircle2 } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { LogoAtivo, SelectDark } from './shared'
 import { formatBRL, formatData } from '../../lib/utils'
@@ -38,9 +38,26 @@ const LABEL_REC = { COMPRAR: 'Comprar', NEUTRO: 'Neutro', AGUARDAR: 'Aguardar' }
 const ORDEM_REC = { COMPRAR: 2, NEUTRO: 1, AGUARDAR: 0 } as const
 
 // ── Ordenação por coluna ───────────────────────────────────────
-type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'idealPct' | 'comprar' | 'venc' | 'indexador' | 'taxa' | 'instituicao'
+type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'idealPct' | 'comprar' | 'venc' | 'indexador' | 'taxa' | 'instituicao' | 'magic'
 function precoMedio(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_custo / l.quantidade : 0 }
 function precoAtual(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_mercado / l.quantidade : 0 }
+
+// Magic Number (FIIs): quantas cotas seriam necessárias para que o próprio
+// dividendo mensal já compre 1 cota nova ("efeito bola de neve"), estimado a
+// partir do DY (12m) já disponível na linha — sem precisar buscar o histórico
+// de dividendos de cada ativo (inviável linha a linha num quadro com dezenas
+// de FIIs). Dividendo mensal médio por cota = preço atual × DY12m/100 ÷ 12;
+// Número Mágico = preço atual ÷ dividendo mensal — o preço atual se cancela
+// algebricamente, sobrando 1200 ÷ DY12m%. Mesma aproximação usada pela
+// comunidade de FIIs ("100 ÷ DY mensal médio"); o cálculo exato (último
+// dividendo por cota realmente pago) só é viável na página de detalhe do
+// ativo, que já carrega o histórico de dividendos daquele único ativo.
+function magicNumberInfo(l: AtivoLinha): { necessarias: number; atingiu: boolean; pct: number } | null {
+  if (l.dividend_yield_pct <= 0 || l.quantidade <= 0) return null
+  const necessarias = Math.ceil(1200 / l.dividend_yield_pct)
+  if (!Number.isFinite(necessarias) || necessarias <= 0) return null
+  return { necessarias, atingiu: l.quantidade >= necessarias, pct: Math.min(100, (l.quantidade / necessarias) * 100) }
+}
 // idealPct/comprar são derivados no nível do QUADRO (rateio da meta do tipo,
 // desvio da meta) — não dá pra calcular só a partir da linha, por isso o
 // contexto extra (mesmo mapa/valor já usados pra renderizar as células).
@@ -70,6 +87,7 @@ function valorOrdenacao(
     case 'indexador':  return rfIndexadorLabel(l) ?? ''
     case 'taxa':       return l.meta?.rf_taxa ?? ''
     case 'instituicao': return l.contas.join(', ')
+    case 'magic':      return magicNumberInfo(l)?.pct ?? -1
   }
 }
 
@@ -197,19 +215,21 @@ export default function QuadroTipoAtivos({
   const variacaoPct = dados?.rentabilidade_pct ?? 0
   const idealRef = dados && dados.percentual_ideal > 0 ? dados.desvio_pct : null
 
-  // DY/YoC médios do quadro (só FII) — ponderados por valor de mercado/custo,
-  // não é a média simples dos %: um FII pequeno com DY alto não pode pesar
-  // igual a um FII grande. Equivale a Σdividendos_12m ÷ Σvalor, sem precisar
-  // do valor bruto do dividendo (só temos o % pronto em cada linha).
+  // DY/YoC médios do quadro (FII, Ações, ETF e ETF Internacional) —
+  // ponderados por valor de mercado/custo, não é a média simples dos %: um
+  // ativo pequeno com DY alto não pode pesar igual a um grande. Equivale a
+  // Σdividendos_12m ÷ Σvalor, sem precisar do valor bruto do dividendo (só
+  // temos o % pronto em cada linha).
+  const mostraDyYocMedio = ehFII || tipo === 'ACOES' || tipo === 'ETF' || tipo === 'ETF_INTERNACIONAL'
   const dyYocMedio = useMemo(() => {
-    if (!ehFII) return null
+    if (!mostraDyYocMedio) return null
     const somaMercado = linhas.reduce((s, l) => s + l.valor_mercado, 0)
     const somaCusto   = linhas.reduce((s, l) => s + l.valor_custo, 0)
     return {
       dy:  somaMercado > 0 ? linhas.reduce((s, l) => s + l.dividend_yield_pct * l.valor_mercado, 0) / somaMercado : 0,
       yoc: somaCusto   > 0 ? linhas.reduce((s, l) => s + l.yield_on_cost_pct  * l.valor_custo,   0) / somaCusto   : 0,
     }
-  }, [ehFII, linhas])
+  }, [mostraDyYocMedio, linhas])
 
   // % ideal por ativo — distribui a meta do TIPO (dados.percentual_ideal,
   // ex.: FII = 15% da carteira) entre os ativos deste tipo, proporcional à
@@ -373,13 +393,33 @@ export default function QuadroTipoAtivos({
         const v = idealPorAtivo.get(l.ativo_id)
         return v != null ? <span className="text-white/80">{pct2(v)}</span> : traco
       } },
+    magic: { id: 'magic', label: 'Magic Number', align: 'center', sortKey: 'magic',
+      title: 'Estimativa (via DY 12m) de quantas cotas seriam necessárias para os próprios dividendos mensais comprarem 1 cota nova — o "efeito bola de neve".',
+      cell: (l) => {
+        const info = magicNumberInfo(l)
+        if (!info) return traco
+        return info.atingiu ? (
+          <div className="flex justify-center" title={`Magic Number atingido — necessárias ~${info.necessarias} cotas, você tem ${l.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}`}>
+            <CheckCircle2 size={16} style={{ color: VERDE }} />
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-0.5" title={`Faltam ~${Math.max(0, info.necessarias - l.quantidade).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} cotas para o Magic Number (~${info.necessarias} necessárias)`}>
+            <div className="w-10 h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${info.pct}%`, background: '#ffb74d' }} />
+            </div>
+            <span className="text-[10px]" style={{ color: MUTED }}>{info.pct.toFixed(0)}%</span>
+          </div>
+        )
+      } },
   }
 
   const base: Coluna[] = ehRF
     ? [C.titulo, C.instituicao, C.indexador, C.taxa, C.venc, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
     : ehFII
-      ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart, C.idealPct]
-      : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
+      ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.magic, C.saldo, C.nota, C.cart, C.idealPct]
+      : mostraDyYocMedio
+        ? [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart, C.idealPct]
+        : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
   // Quando o quadro NÃO está agrupado por categoria, ela deixa de aparecer como
   // cabeçalho de grupo — então a exibimos como coluna (após Título+Instituição,
   // na RF, ou após Nome, nos demais). Sem dados de categoria, a coluna é omitida.
@@ -391,8 +431,8 @@ export default function QuadroTipoAtivos({
   })()
   // colunas visíveis + "Comprar?" + (Ações, se houver)
   const nCols = visiveis.length + 1 + (acoes ? 1 : 0)
-  // +70px pela nova coluna "% Ideal"
-  const minWidth = (ehFII ? 980 : ehRF ? 1040 : 860) + 70
+  // +70px pela coluna "% Ideal"; FII soma +90px pela coluna "Magic Number"
+  const minWidth = (ehFII ? 980 + 90 : ehRF ? 1040 : mostraDyYocMedio ? 1000 : 860) + 70
 
   function LinhaAtivo({ l, realce, alvo, primeira, ultima }: {
     l: AtivoLinha; realce: boolean; alvo: boolean; primeira: boolean; ultima: boolean

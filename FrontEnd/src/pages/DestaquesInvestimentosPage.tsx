@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect } from 'react'
 import { useLocation, Link } from 'react-router-dom'
-import { TrendingUp, TrendingDown, Percent, Trophy, Calendar, Layers, Zap, ChevronDown, ChevronUp, Loader2, ArrowUp } from 'lucide-react'
+import { TrendingUp, TrendingDown, Percent, Trophy, Calendar, Layers, Zap, ChevronDown, ChevronUp, Loader2, ArrowUp, Coins } from 'lucide-react'
 import { Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend,
@@ -42,10 +42,10 @@ const PERIODOS: { value: PeriodoRanking; label: string }[] = [
   { value: 'TUDO',      label: 'Desde o início' },
 ]
 
-// Chaves dos 5 quadros gerais — ordem PADRÃO (usada quando o usuário nunca
+// Chaves dos 6 quadros gerais — ordem PADRÃO (usada quando o usuário nunca
 // reordenou nada); a ordem de fato é definida por useOrdemReordenavel.
-type ChaveGeral = 'contribuintes' | 'em_alta' | 'em_baixa' | 'maior_dy' | 'maior_peso'
-const CHAVES_GERAIS: ChaveGeral[] = ['contribuintes', 'em_alta', 'em_baixa', 'maior_dy', 'maior_peso']
+type ChaveGeral = 'contribuintes' | 'em_alta' | 'em_baixa' | 'maior_dy' | 'maior_div_recebido' | 'maior_peso'
+const CHAVES_GERAIS: ChaveGeral[] = ['contribuintes', 'em_alta', 'em_baixa', 'maior_dy', 'maior_div_recebido', 'maior_peso']
 
 function corPct(v: number): string { return v > 0 ? VERDE : v < 0 ? VERMELHO : MUTED }
 function fmtPct(v: number): string { return `${v > 0 ? '+' : ''}${v}%` }
@@ -579,9 +579,20 @@ export default function DestaquesInvestimentosPage() {
       .sort((x, y) => x.rentabilidade_periodo_pct - y.rentabilidade_periodo_pct),
     [ativosFiltrados],
   )
+  // Maior DY% (relação dividendos ÷ valor de mercado) — não é o mesmo ranking
+  // que "maiorDivRecebido" abaixo: um ativo pequeno pode ter DY% alto com
+  // pouco dinheiro em jogo, e um ativo grande pode receber mais em R$ com
+  // DY% menor. São dois quadros deliberadamente separados.
   const maiorDY = useMemo(
     () => [...ativosFiltrados].filter((a) => a.dy_periodo_pct > 0)
       .sort((x, y) => y.dy_periodo_pct - x.dy_periodo_pct),
+    [ativosFiltrados],
+  )
+  // Maior valor de dividendos recebidos em R$ no período — ordena pelo
+  // dinheiro efetivamente recebido, não pela relação percentual.
+  const maiorDivRecebido = useMemo(
+    () => [...ativosFiltrados].filter((a) => a.dividendos_periodo > 0)
+      .sort((x, y) => y.dividendos_periodo - x.dividendos_periodo),
     [ativosFiltrados],
   )
   const maiorPeso = useMemo(
@@ -593,6 +604,7 @@ export default function DestaquesInvestimentosPage() {
   const totalEmAlta  = useMemo(() => totalRetorno(emAlta), [emAlta])
   const totalEmBaixa = useMemo(() => totalRetorno(emBaixa), [emBaixa])
   const totalDYLista = useMemo(() => totalDY(maiorDY), [maiorDY])
+  const totalDivRecebidoLista = useMemo(() => totalDY(maiorDivRecebido), [maiorDivRecebido])
   const totalPeso    = useMemo(() => ({
     pct: maiorPeso.reduce((s, a) => s + a.participacao_pct, 0),
     valor: maiorPeso.reduce((s, a) => s + a.valor_mercado, 0),
@@ -658,6 +670,13 @@ export default function DestaquesInvestimentosPage() {
         metrica={(a) => ({ texto: `${a.dy_periodo_pct}%`, cor: VERDE, valorTexto: formatBRL(a.dividendos_periodo) })}
         total={{ pctTexto: `${totalDYLista.pct.toFixed(2)}%`, valorTexto: formatBRL(totalDYLista.dividendos), cor: VERDE }}
         dragHandleProps={alcaGeral('maior_dy')} dropTargetProps={alvoGeral('maior_dy')} bordaClasse={bordaGeral('maior_dy')} />
+    ),
+    maior_div_recebido: (
+      <ListaDestaque titulo="Maiores dividendos recebidos" icone={<Coins size={14} />} itens={maiorDivRecebido} periodo={periodo} origem={origem}
+        colunaLabel="Dividendos recebidos"
+        metrica={(a) => ({ texto: formatBRL(a.dividendos_periodo), cor: VERDE, valorTexto: `${a.dy_periodo_pct}%` })}
+        total={{ pctTexto: formatBRL(totalDivRecebidoLista.dividendos), valorTexto: `${totalDivRecebidoLista.pct.toFixed(2)}%`, cor: VERDE }}
+        dragHandleProps={alcaGeral('maior_div_recebido')} dropTargetProps={alvoGeral('maior_div_recebido')} bordaClasse={bordaGeral('maior_div_recebido')} />
     ),
     maior_peso: (
       <ListaDestaque titulo="Maior participação" icone={<Trophy size={14} />} itens={maiorPeso} periodo={periodo} origem={origem}

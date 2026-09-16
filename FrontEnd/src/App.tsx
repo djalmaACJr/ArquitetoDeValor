@@ -28,6 +28,7 @@ const ObjetivosPage          = lazy(() => import('./pages/ObjetivosPage'))
 const ObjetivoDetalhe        = lazy(() => import('./pages/ObjetivoDetalhe'))
 const InvestimentosPage      = lazy(() => import('./pages/InvestimentosPage'))
 const ConfiguracoesInvestimentosPage = lazy(() => import('./pages/ConfiguracoesInvestimentosPage'))
+const QuestionariosInvestimentosPage = lazy(() => import('./pages/QuestionariosInvestimentosPage'))
 const AtivosInvestimentosPage = lazy(() => import('./pages/AtivosInvestimentosPage'))
 const AvaliacoesInvestimentosPage = lazy(() => import('./pages/AvaliacoesInvestimentosPage'))
 const ConselhoInvestimentosPage = lazy(() => import('./pages/ConselhoInvestimentosPage'))
@@ -98,6 +99,7 @@ export default function App() {
             <Route path="investimentos/destaques" element={<DestaquesInvestimentosPage/>}/>
             <Route path="investimentos/extrato" element={<ExtratoInvestimentosPage/>}/>
             <Route path="investimentos/configuracoes" element={<ConfiguracoesInvestimentosPage/>}/>
+            <Route path="investimentos/questionarios" element={<QuestionariosInvestimentosPage/>}/>
             <Route path="investimentos/ativos" element={<AtivosInvestimentosPage/>}/>
             <Route path="investimentos/avaliacoes" element={<AvaliacoesInvestimentosPage/>}/>
             <Route path="investimentos/conselho" element={<ConselhoInvestimentosPage/>}/>

@@ -876,7 +876,7 @@ export const TUTORIAL_INVESTIMENTOS_CONFIG: PassoTutorial[] = [
   },
   {
     titulo: 'Questionários de avaliação',
-    texto: 'Cada tipo de ativo com meta de alocação definida tem seu próprio questionário, separado por critério. Edite as perguntas à mão ou peça a um Mentor de IA para gerar um conjunto novo.',
+    texto: 'Cada tipo de ativo com meta de alocação definida tem seu próprio questionário, separado por critério. Clique em "Abrir questionários" para editar as perguntas à mão ou pedir a um Mentor de IA para gerar um conjunto novo.',
     seletor: '[data-tutorial="config-questionarios"]',
     posicao: 'acima',
   },
