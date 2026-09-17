@@ -33,6 +33,8 @@ export interface CriarAtivoInput {
   rf_isento_ir?:    boolean | null
   // FII
   fii_categoria?:   CategoriaFII | null
+  // Valor patrimonial por cota, informado manualmente — usado no indicador P/VP
+  fii_vp?:          number | null
   // Ações
   acoes_subtipo?:   AcoesSubtipo | null
   // Cripto — rendimento (yield) anual em % a.a. (gera operações RENDIMENTO)

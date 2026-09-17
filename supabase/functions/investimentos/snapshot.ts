@@ -205,7 +205,57 @@ export interface GrupoPosicao {
   ativoId: string; contaId: string; ticker: string; nome: string; tipo: string; moeda: string;
   indexador: string | null; taxa: string | null; vencimento: string | null;
   faixa: FaixaRF | null;
-  posicoes: { quantidade: number; valor_custo: number; data_compra: string }[];
+  // `id` só é preenchido pelo backfill (rotaSnapshotBackfill) — usado pra
+  // buscar as OPERAÇÕES da posição e reconstruir qtd/mês certo (ver
+  // reconstruirQtdPorOperacoes). Os demais chamadores (executarSnapshotMes)
+  // não precisam disso — só cuidam do mês CORRENTE, sempre "quantidade atual".
+  posicoes: { id?: string; quantidade: number; valor_custo: number; data_compra: string }[];
+}
+
+// Reconstrói quantidade/custo ACUMULADO até o FIM de cada mês em `meses`,
+// repetindo as OPERAÇÕES de compra/venda na ordem real (não a posição já
+// agregada — que funde todas as compras numa linha só, com `data_compra` da
+// 1ª e `quantidade` do total ATUAL). Sem isso, um aporte posterior à 1ª
+// compra nunca aparecia como um degrau no histórico: o backfill achava que a
+// quantidade final já existia desde a 1ª compra (achado real, set/2026 —
+// gráfico "Evolução da quantidade de cotas" saindo como reta, mesmo com mais
+// de uma compra em datas diferentes). Mesma lógica de soma de
+// `recomputarPosicao` (posicoes.ts), só que parando no fim de CADA mês em vez
+// de ir até hoje. Só usado para COTADO/CRIPTO — RF mantém o cálculo por LOTE
+// (cada lote tem sua própria taxa/data, o que essa função não modela).
+async function reconstruirQtdPorOperacoes(
+  c: Db, posicaoIds: string[], meses: string[],
+): Promise<Map<string, { qtd: number; custo: number }>> {
+  const porMes = new Map<string, { qtd: number; custo: number }>();
+  if (posicaoIds.length === 0) return porMes;
+  const { data: ops, error } = await c.from("inv_operacoes")
+    .select("tipo_operacao, quantidade, preco_unitario, data_operacao")
+    .in("posicao_id", posicaoIds)
+    .order("data_operacao", { ascending: true });
+  if (error) { logError("Reconstruir qtd por operações", error); return porMes; }
+
+  let qtd = 0, custo = 0, idxOp = 0;
+  const ordenadas = ops ?? [];
+  for (const me of meses) {
+    while (idxOp < ordenadas.length && String(ordenadas[idxOp].data_operacao).slice(0, 7) <= me) {
+      const o = ordenadas[idxOp];
+      const q = Number(o.quantidade) || 0;
+      const p = Number(o.preco_unitario) || 0;
+      const tipo = String(o.tipo_operacao);
+      if (tipo === "COMPRA" || tipo === "APORTE") { qtd += q; custo += q * p; }
+      else if (tipo === "VENDA" || tipo === "RESGATE") {
+        const media = qtd > 0 ? custo / qtd : 0;
+        const remover = qtd > 0 ? Math.min(q, qtd) : 0;
+        custo -= remover * media; qtd -= remover;
+        if (qtd < 0) qtd = 0;
+      } else if (tipo === "RENDIMENTO") {
+        qtd += q; // yield em tokens: aumenta a quantidade sem custo (token grátis)
+      }
+      idxOp++;
+    }
+    porMes.set(me, { qtd, custo });
+  }
+  return porMes;
 }
 
 // Taxa escalonada (rf_limite_faixa/rf_percentual_indice_2) do registro cru de
@@ -440,7 +490,7 @@ export async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userI
   logRequest("POST", "/investimentos/snapshot-backfill", { conta_id: body.conta_id ?? null, ativo_id: body.ativo_id ?? null, ate: mesFim });
 
   let q = c.from("inv_posicoes")
-    .select("ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, moeda, rf_indexador, rf_taxa, rf_vencimento, rf_limite_faixa, rf_percentual_indice_2, cotacao_automatica)")
+    .select("id, ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, moeda, rf_indexador, rf_taxa, rf_vencimento, rf_limite_faixa, rf_percentual_indice_2, cotacao_automatica)")
     .eq("status", "ATIVA");
   if (body.conta_id) q = q.eq("conta_id", body.conta_id);
   if (body.ativo_id) q = q.eq("ativo_id", body.ativo_id);
@@ -472,6 +522,7 @@ export async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userI
     }
     const g = grupos.get(key)!;
     g.posicoes.push({
+      id: String(p.id),
       quantidade: Number(p.quantidade) || 0, valor_custo: custoBRL(p as PosicaoCusto),
       data_compra: String(p.data_compra),
     });
@@ -542,12 +593,32 @@ export async function rotaSnapshotBackfill(c: Db, req: Request, m: string, userI
     // RF não gera histórico depois do vencimento.
     const fimGrupo = ehRF(g.tipo) ? fimSerieRF(g.vencimento, mesFim) : mesFim;
     const EPS = 1e-6;
-    const candidatos = mesesEntre(g.inicio, fimGrupo).map((me) => {
-      const posMes = g.posicoes.filter((p) => p.data_compra.slice(0, 7) <= me);
-      const qtdMes = posMes.reduce((s, p) => s + p.quantidade, 0);
-      const precoMedio = qtdMes > 0 ? posMes.reduce((s, p) => s + p.valor_custo, 0) / qtdMes : 0;
-      return { me, posMes, qtdMes, precoMedio };
-    }).filter((x) => x.qtdMes > 0);
+    const mesesRange = mesesEntre(g.inicio, fimGrupo);
+    let candidatos: { me: string; posMes: typeof g.posicoes; qtdMes: number; precoMedio: number }[];
+    if (ehRF(g.tipo)) {
+      // RF: mantém o cálculo por LOTE (cada posição pode ter taxa/data
+      // própria — ver DrawerMovimentacoes "novo lote"). Reconstruir por
+      // operação individual mudaria a semântica do juros composto por lote,
+      // fora de escopo aqui.
+      candidatos = mesesRange.map((me) => {
+        const posMes = g.posicoes.filter((p) => p.data_compra.slice(0, 7) <= me);
+        const qtdMes = posMes.reduce((s, p) => s + p.quantidade, 0);
+        const precoMedio = qtdMes > 0 ? posMes.reduce((s, p) => s + p.valor_custo, 0) / qtdMes : 0;
+        return { me, posMes, qtdMes, precoMedio };
+      }).filter((x) => x.qtdMes > 0);
+    } else {
+      // Cotado/Cripto: reconstrói qtd/custo pelas OPERAÇÕES reais (não pela
+      // posição já agregada, que funde todas as compras numa linha só —
+      // `quantidade` = total ATUAL, `data_compra` = 1ª compra). Sem isso, um
+      // aporte posterior à 1ª compra nunca aparecia como degrau no histórico
+      // (achado real, set/2026 — ver reconstruirQtdPorOperacoes).
+      const posicaoIds = g.posicoes.map((p) => p.id).filter((id): id is string => !!id);
+      const porMes = await reconstruirQtdPorOperacoes(c, posicaoIds, mesesRange);
+      candidatos = mesesRange.map((me) => {
+        const r = porMes.get(me) ?? { qtd: 0, custo: 0 };
+        return { me, posMes: g.posicoes, qtdMes: r.qtd, precoMedio: r.qtd > 0 ? r.custo / r.qtd : 0 };
+      }).filter((x) => x.qtdMes > 0);
+    }
     const faltantes = candidatos.filter((x) => {
       const base = baseExistente.get(x.me);
       return !base || Math.abs(base.qtd - x.qtdMes) > EPS || Math.abs(base.preco - x.precoMedio) > EPS;

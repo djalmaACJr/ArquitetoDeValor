@@ -707,7 +707,11 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
         cripto_rendimento_inicio: a.cripto_rendimento_inicio ?? null,
         cripto_rendimento_periodicidade: a.cripto_rendimento_periodicidade ?? null,
         rf_garantia_fgc: a.rf_garantia_fgc ?? null, rf_isento_ir: a.rf_isento_ir ?? null,
-        fii_categoria: a.fii_categoria ?? null, acoes_subtipo: a.acoes_subtipo ?? null,
+        fii_categoria: a.fii_categoria ?? null, fii_vp: a.fii_vp ?? null,
+        fii_vp_origem: a.fii_vp_origem ?? null, fii_vp_atualizado_em: a.fii_vp_atualizado_em ?? null,
+        fii_segmento: a.fii_segmento ?? null, fii_mandato: a.fii_mandato ?? null,
+        fii_num_cotistas: a.fii_num_cotistas ?? null, fii_dy_mes_cvm: a.fii_dy_mes_cvm ?? null,
+        acoes_subtipo: a.acoes_subtipo ?? null,
         cotacao_automatica: a.cotacao_automatica ?? true,
         logo_url: a.logo_url ?? null, setor: a.setor ?? null,
       });

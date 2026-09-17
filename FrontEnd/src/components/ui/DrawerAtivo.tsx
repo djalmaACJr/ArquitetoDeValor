@@ -38,7 +38,7 @@ const FORM_VAZIO: FormAtivo = {
   rf_subtipo: null, rf_indexador: null, rf_indice: null, rf_percentual_indice: null,
   rf_taxa_fixa: null, rf_limite_faixa: null, rf_percentual_indice_2: null, rf_taxa: null, rf_emissor: null,
   rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
-  fii_categoria: null, acoes_subtipo: null, cripto_rendimento_aa: null,
+  fii_categoria: null, fii_vp: null, acoes_subtipo: null, cripto_rendimento_aa: null,
   cripto_rendimento_inicio: null, cripto_rendimento_periodicidade: null, cotacao_automatica: true,
 }
 
@@ -120,7 +120,7 @@ function formDoAtivo(ativo: InvestimentoAtivo | null): FormAtivo {
     rf_taxa: ativo.rf_taxa,
     rf_emissor: ativo.rf_emissor, rf_vencimento: ativo.rf_vencimento,
     rf_garantia_fgc: ativo.rf_garantia_fgc, rf_isento_ir: ativo.rf_isento_ir,
-    fii_categoria: ativo.fii_categoria, acoes_subtipo: ativo.acoes_subtipo,
+    fii_categoria: ativo.fii_categoria, fii_vp: ativo.fii_vp, acoes_subtipo: ativo.acoes_subtipo,
     cripto_rendimento_aa: ativo.cripto_rendimento_aa,
     cripto_rendimento_inicio: ativo.cripto_rendimento_inicio,
     cripto_rendimento_periodicidade: ativo.cripto_rendimento_periodicidade,
@@ -242,14 +242,14 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
     const moedaPadrao = tipo === 'STOCKS' || tipo === 'REIT' ? 'USD' : 'BRL'
     if (tipo === 'TESOURO_DIRETO') {
       const info = SUBTIPO_RF_INFO.TESOURO
-      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, acoes_subtipo: null, moeda: 'BRL',
+      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, fii_vp: null, acoes_subtipo: null, moeda: 'BRL',
         rf_subtipo: 'TESOURO', rf_emissor: info.emissor,
         rf_garantia_fgc: info.fgc, rf_isento_ir: info.isentoIR })
     } else if (tipo === 'RENDA_FIXA') {
       // CDB/LCI/LCA/CRI/CRA/Debênture não têm ticker de bolsa — a busca externa
       // não acha nada pra eles. Pula direto pro cadastro manual (só o nome).
       if (!editando) setManualLivre(true)
-      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, acoes_subtipo: null, moeda: 'BRL',
+      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, fii_vp: null, acoes_subtipo: null, moeda: 'BRL',
         rf_subtipo: form.rf_subtipo === 'TESOURO' ? null : form.rf_subtipo })
     } else {
       setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, moeda: moedaPadrao,
@@ -257,6 +257,7 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
         rf_taxa_fixa: null, rf_taxa: null, rf_emissor: null,
         rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
         fii_categoria: tipo === 'FII' ? form.fii_categoria : null,
+        fii_vp: tipo === 'FII' ? form.fii_vp : null,
         acoes_subtipo: tipo === 'ACOES' ? form.acoes_subtipo : null })
     }
   }
@@ -454,6 +455,16 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
                 <span className="text-white/70">Vantagem:</span> {FII_CATEGORIA_INFO[form.fii_categoria].vantagem}</p>
             </div>
           )}
+        </Field>
+      )}
+      {form.tipo_ativo === 'FII' && (
+        <Field label="Valor patrimonial por cota — VP (opcional)">
+          <InputMoeda value={form.fii_vp} onChange={(v) => setForm({ ...form, fii_vp: v })} placeholder="R$ 0,00" />
+          <p className="text-[11.5px] mt-1" style={{ color: MUTED }}>
+            {editando?.fii_vp_origem === 'CVM' && editando.fii_vp_atualizado_em
+              ? `Atualizado automaticamente pela CVM (referência ${editando.fii_vp_atualizado_em.slice(5, 7)}/${editando.fii_vp_atualizado_em.slice(0, 4)}). Editar aqui vale só até a próxima atualização semanal, que sobrescreve com o dado oficial quando encontra o fundo.`
+              : 'Buscado automaticamente na CVM ao salvar (fundos novos podem levar até 7 dias, no cron semanal). Preencha manualmente enquanto isso, se quiser — a CVM sobrescreve assim que achar o fundo.'}
+          </p>
         </Field>
       )}
       {form.tipo_ativo === 'CRIPTOMOEDAS' && (

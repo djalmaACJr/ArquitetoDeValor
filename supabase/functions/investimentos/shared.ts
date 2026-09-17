@@ -33,7 +33,7 @@ export const SUBTIPOS_RF    = ["TESOURO", "CDB", "LCI", "LCA", "CRI", "CRA", "DE
 export const INDEXADORES_RF = ["PREFIXADO", "POS_FIXADO", "HIBRIDO"];
 export const INDICES_RF     = ["CDI", "SELIC", "IPCA", "IGPM"];
 // Fundos imobiliários
-export const CATEGORIAS_FII = ["TIJOLO", "PAPEL", "FOF", "DESENVOLVIMENTO", "OUTRO"];
+export const CATEGORIAS_FII = ["TIJOLO", "PAPEL", "FOF", "DESENVOLVIMENTO", "AGRO", "OUTRO"];
 // Ações
 export const SUBTIPOS_ACOES = ["ON", "PN", "UNIT", "BDR"];
 

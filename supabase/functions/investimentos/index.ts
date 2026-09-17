@@ -46,6 +46,7 @@ import {
 import { rotaHistorico, rotaSnapshotAuto, rotaSnapshotBackfill, rotaSnapshotCron } from "./snapshot.ts";
 import { rotaRendimentoCripto, rotaRendimentoCriptoCron } from "./rendimento-cripto.ts";
 import { rotaFatosRelevantesCron } from "./fatosRelevantes.ts";
+import { rotaCvmFiiCron } from "./cvm.ts";
 import { rotaChatMentor } from "./chatMentor.ts";
 import {
   rotaMigrarConta, rotaImportar, rotaAtualizarAtivos, rotaNormalizarTesouro, rotaRestaurar,
@@ -67,7 +68,7 @@ Deno.serve(async (req: Request) => {
   // Job do servidor: autentica por secret (header x-cron-secret), sem JWT
   // de usuário. Tratado ANTES de autenticar() por isso.
   //
-  // Todos os 5 crons abaixo passam por executarComLogDeCron(), que grava
+  // Todos os crons abaixo passam por executarComLogDeCron(), que grava
   // sucesso/erro + duração em arqvalor.cron_execucoes (tela /admin/crons).
   // Nasceu da auditoria 2026-08-06: dividendos-diario ficou 19 dias
   // falhando sem NENHUM sinal visível — ver comentário na migration
@@ -112,6 +113,14 @@ Deno.serve(async (req: Request) => {
   if (recurso === "fatos-relevantes-cron") {
     try { return await executarComLogDeCron("fatos-relevantes-diario", () => rotaFatosRelevantesCron(req, m)); }
     catch (e) { logError("Handler fatos-relevantes-cron", e); return erro("Erro interno", 500); }
+  }
+
+  // Job do servidor: Valor Patrimonial por cota (VP) de FIIs a partir do
+  // Informe Mensal da CVM (dado público oficial, sem chave) — alimenta o
+  // indicador P/VP. Sem JWT — x-cron-secret. Ver cvm.ts.
+  if (recurso === "cvm-fii-cron") {
+    try { return await executarComLogDeCron("cvm-fii-semanal", () => rotaCvmFiiCron(req, m)); }
+    catch (e) { logError("Handler cvm-fii-cron", e); return erro("Erro interno", 500); }
   }
 
   const auth = await autenticar(req);

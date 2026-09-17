@@ -288,6 +288,20 @@ export interface InvestimentoAtivo {
   rf_isento_ir:    boolean | null
   // Categoria do FII (só tipo_ativo = FII)
   fii_categoria:   CategoriaFII | null
+  // Valor patrimonial por cota do FII — usado para calcular o indicador P/VP
+  // (preço atual ÷ VP). Preenchido pelo cron semanal da CVM quando encontra o
+  // fundo (fii_vp_origem='CVM', sempre tem prioridade) ou digitado manualmente
+  // como fallback (fii_vp_origem='MANUAL') — ver BUSINESS_RULES.md.
+  fii_vp:                number | null
+  fii_vp_origem:          'MANUAL' | 'CVM' | null
+  // Mês de referência do dado da CVM (sempre dia 1); null quando manual
+  fii_vp_atualizado_em:   string | null
+  // Demais indicadores do mesmo Informe Mensal da CVM — só leitura, sem
+  // campo de formulário (preenchidos junto com fii_vp pelo cron/cadastro)
+  fii_segmento:           string | null
+  fii_mandato:            string | null
+  fii_num_cotistas:       number | null
+  fii_dy_mes_cvm:         number | null
   // Subtipo da ação (só tipo_ativo = ACOES)
   acoes_subtipo:   AcoesSubtipo | null
   // Rendimento anual em % a.a. (só CRIPTOMOEDAS) — gera operações RENDIMENTO

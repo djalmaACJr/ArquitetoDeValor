@@ -209,7 +209,7 @@ export function subtiposParaTipo(tipo: TipoAtivoInvestimento): SubtipoRF[] {
 
 // ── Fundos Imobiliários (FII) ─────────────────────────────────
 
-export const CATEGORIAS_FII = ['TIJOLO', 'PAPEL', 'FOF', 'DESENVOLVIMENTO', 'OUTRO'] as const
+export const CATEGORIAS_FII = ['TIJOLO', 'PAPEL', 'FOF', 'DESENVOLVIMENTO', 'AGRO', 'OUTRO'] as const
 export type CategoriaFII = typeof CATEGORIAS_FII[number]
 
 export interface CategoriaFIIInfo {
@@ -248,6 +248,13 @@ export const FII_CATEGORIA_INFO: Record<CategoriaFII, CategoriaFIIInfo> = {
     fonteLucro: 'Venda ou aluguel do imóvel após concluído',
     risco:      'Alto',
     vantagem:   'Potencial de ganho financeiro muito acima da média',
+  },
+  AGRO: {
+    label:      'FIAGRO',
+    compra:     'Ativos do agronegócio (CRA, imóveis rurais, participações em cadeias produtivas)',
+    fonteLucro: 'Juros/aluguéis agrícolas e valorização dos ativos rurais',
+    risco:      'Moderado a Alto',
+    vantagem:   'Exposição ao agronegócio sem comprar terra diretamente',
   },
   OUTRO: {
     label:      'Outro / Misto',

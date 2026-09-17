@@ -1,0 +1,11 @@
+-- Categoria AGRO (FIAGRO) para arqvalor.categoria_fii — antes esses fundos
+-- caíam em OUTRO ("Outro / Misto"), rótulo enganoso pra um FIAGRO de verdade
+-- (achado real: SNAG11/Suno Agro caindo em "Outro / Misto" depois de a CVM
+-- confirmar tratar-se de FIAGRO, ver cvm.ts).
+--
+-- ALTER TYPE ... ADD VALUE não pode rodar dentro de bloco de transação nem
+-- ser seguido de uso do valor novo na MESMA transação implícita do arquivo —
+-- por isso fica em statement solto (idempotente via IF NOT EXISTS, suportado
+-- desde PG 12) e sem nenhum outro comando depois que dependa do valor novo
+-- nesta mesma migration.
+ALTER TYPE arqvalor.categoria_fii ADD VALUE IF NOT EXISTS 'AGRO';

@@ -38,9 +38,17 @@ const LABEL_REC = { COMPRAR: 'Comprar', NEUTRO: 'Neutro', AGUARDAR: 'Aguardar' }
 const ORDEM_REC = { COMPRAR: 2, NEUTRO: 1, AGUARDAR: 0 } as const
 
 // ── Ordenação por coluna ───────────────────────────────────────
-type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'idealPct' | 'comprar' | 'venc' | 'indexador' | 'taxa' | 'instituicao' | 'magic'
+type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'pvp' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'idealPct' | 'comprar' | 'venc' | 'indexador' | 'taxa' | 'instituicao' | 'magic'
 function precoMedio(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_custo / l.quantidade : 0 }
 function precoAtual(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_mercado / l.quantidade : 0 }
+// P/VP (FIIs): preço atual ÷ valor patrimonial por cota — VP é informado
+// manualmente no cadastro do ativo (não há fonte gratuita/sem-chave
+// confiável para isso, ao contrário da cotação). null sem VP cadastrado.
+function pvp(l: AtivoLinha): number | null {
+  const vp = l.meta?.fii_vp
+  if (!vp || vp <= 0) return null
+  return precoAtual(l) / vp
+}
 
 // Magic Number (FIIs): quantas cotas seriam necessárias para que o próprio
 // dividendo mensal já compre 1 cota nova ("efeito bola de neve"), estimado a
@@ -72,6 +80,7 @@ function valorOrdenacao(
     case 'quantidade': return l.quantidade
     case 'pm':         return precoMedio(l)
     case 'pa':         return precoAtual(l)
+    case 'pvp':        return pvp(l) ?? -1
     case 'rent':       return l.rentabilidade_pct
     case 'dy':         return Number(l.dividend_yield_pct) || 0
     case 'yoc':        return Number(l.yield_on_cost_pct) || 0
@@ -360,6 +369,13 @@ export default function QuadroTipoAtivos({
     quant:  { id: 'quant', label: 'Quant.', align: 'right', sortKey: 'quantidade', cell: (l) => <span className="text-white/80">{l.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</span> },
     pm:     { id: 'pm', label: 'Preço médio', align: 'right', sortKey: 'pm', cell: (l) => <span className="text-white/80">{formatBRL(precoMedio(l))}</span> },
     pa:     { id: 'pa', label: 'Preço atual', align: 'right', sortKey: 'pa', cell: (l) => <span className="text-white/80">{formatBRL(precoAtual(l))}</span> },
+    pvp:    { id: 'pvp', label: 'P/VP', align: 'right', sortKey: 'pvp',
+      title: 'Preço ÷ Valor Patrimonial por cota — abaixo de 1 pode indicar fundo descontado, acima de 1 negociado com ágio. Depende do VP informado manualmente no cadastro do ativo.',
+      cell: (l) => {
+        const v = pvp(l)
+        if (v == null) return traco
+        return <span style={{ color: v < 1 ? VERDE : v > 1 ? VERMELHO : MUTED }}>{v.toFixed(2).replace('.', ',')}</span>
+      } },
     rent:   { id: 'rent', label: 'Variação', align: 'right', sortKey: 'rent', cell: (l) => <span style={{ color: corValor(l.rentabilidade_pct) }}>{fmtPct(l.rentabilidade_pct)}</span> },
     // Posse < 12 meses: o projetado (ritmo do fundo, padrão investidor10) e o
     // real (efetivamente recebido) divergem — mostra os dois.
@@ -416,7 +432,7 @@ export default function QuadroTipoAtivos({
   const base: Coluna[] = ehRF
     ? [C.titulo, C.instituicao, C.indexador, C.taxa, C.venc, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
     : ehFII
-      ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.magic, C.saldo, C.nota, C.cart, C.idealPct]
+      ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.pvp, C.rent, C.dy, C.yoc, C.magic, C.saldo, C.nota, C.cart, C.idealPct]
       : mostraDyYocMedio
         ? [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart, C.idealPct]
         : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
@@ -429,13 +445,14 @@ export default function QuadroTipoAtivos({
     arr.splice(2, 0, C.categoria)
     return arr
   })()
-  // colunas visíveis + "Comprar?" + (Ações, se houver)
-  const nCols = visiveis.length + 1 + (acoes ? 1 : 0)
-  // +70px pela coluna "% Ideal"; FII soma +90px pela coluna "Magic Number"
-  const minWidth = (ehFII ? 980 + 90 : ehRF ? 1040 : mostraDyYocMedio ? 1000 : 860) + 70
+  // "Posição" (fixa à esquerda) + colunas visíveis + "Comprar?" + (Ações, se houver)
+  const nCols = visiveis.length + 2 + (acoes ? 1 : 0)
+  // +70px pela coluna "% Ideal"; FII soma +90px pela "Magic Number" e +60px pela "P/VP"; +40px pela "Posição"
+  const minWidth = (ehFII ? 980 + 90 + 60 : ehRF ? 1040 : mostraDyYocMedio ? 1000 : 860) + 70 + 40
 
-  function LinhaAtivo({ l, realce, alvo, primeira, ultima }: {
-    l: AtivoLinha; realce: boolean; alvo: boolean; primeira: boolean; ultima: boolean
+
+  function LinhaAtivo({ l, posicao, realce, alvo, primeira, ultima }: {
+    l: AtivoLinha; posicao: number; realce: boolean; alvo: boolean; primeira: boolean; ultima: boolean
   }) {
     const rec = recomendacaoCompra(l.nota_usuario ?? null, idealRef)
     const estilo: CSSProperties = realce ? { background: `${cor}1f` } : {}
@@ -448,6 +465,10 @@ export default function QuadroTipoAtivos({
     return (
       <tr className="border-t border-white/5 hover:bg-white/[0.03] transition-colors duration-700"
         style={Object.keys(estilo).length ? estilo : undefined}>
+        <td className="px-2 py-1.5 text-center sticky left-0 z-[5] border-r border-white/10"
+          style={{ color: MUTED, background: HEADER_BG }}>
+          {posicao}
+        </td>
         {visiveis.map((c) => (
           <td key={c.id} className={`px-2 py-1.5 ${alinhar(c.align)}`}>{c.cell(l)}</td>
         ))}
@@ -636,6 +657,12 @@ export default function QuadroTipoAtivos({
                       linha) — nunca os dois sticky disputam o mesmo lugar. */}
                   <thead className="sticky top-0 z-20" style={{ background: HEADER_BG }}>
                     <tr className="h-8" style={{ color: MUTED }}>
+                      {/* Canto fixo (sticky top + left) — z acima das demais células
+                          fixas (z-[5]) e do cabeçalho de grupo (z-10), pra nunca ficar
+                          por baixo ao rolar nas duas direções ao mesmo tempo. */}
+                      <th className="px-2 font-medium text-center sticky left-0 z-30 border-r border-white/10" style={{ background: HEADER_BG }}>
+                        #
+                      </th>
                       {visiveis.map((c) => (
                         <th key={c.id} title={c.title} onClick={c.sortKey ? () => clickSort(c.sortKey!) : undefined}
                           className={`px-2 font-medium ${alinhar(c.align)} ${c.sortKey ? 'cursor-pointer select-none hover:text-white/80' : ''}`}>
@@ -682,8 +709,13 @@ export default function QuadroTipoAtivos({
                             </td>
                           </tr>
                         )}
+                        {/* Posição reinicia a cada grupo quando há agrupamento por
+                            categoria/segmento (1, 2, 3... dentro de cada categoria) —
+                            sem agrupamento, `grupos` tem um único item e o índice já
+                            equivale ao ranking contínuo da lista inteira. */}
                         {catAberta && g.lista.map((l, idx) => (
-                          <LinhaAtivo key={l.ativo_id} l={l} realce={realce} alvo={ehAlvo}
+                          <LinhaAtivo key={l.ativo_id} l={l} posicao={idx + 1}
+                            realce={realce} alvo={ehAlvo}
                             primeira={!temGrupos && idx === 0} ultima={idx === g.lista.length - 1} />
                         ))}
                       </tbody>

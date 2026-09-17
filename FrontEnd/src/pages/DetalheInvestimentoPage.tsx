@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus, Minus, ExternalLink, ChevronLeft, ChevronRight, Calculator } from 'lucide-react'
+import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus, Minus, ExternalLink, ChevronLeft, ChevronRight, Calculator, Maximize2, Minimize2 } from 'lucide-react'
 import { Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, Tooltip, Legend,
@@ -22,7 +22,7 @@ import { TUTORIAL_INVESTIMENTOS_DETALHE } from '../lib/tutoriaisPaginas'
 import { formatBRL, formatData, formatUSD as fmtUSD } from '../lib/utils'
 import {
   TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPO_OPERACAO_LABEL,
-  INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO, SUBTIPO_RF_INFO, FII_CATEGORIA_INFO,
+  INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO, SUBTIPO_RF_INFO, FII_CATEGORIA_INFO, CATEGORIAS_FII,
   setorLabel,
 } from '../lib/constants'
 import { calcularNota, recomendacaoCompra } from '../lib/questionarioAtivos'
@@ -30,12 +30,30 @@ import { CRITERIOS_QUESTAO, CRITERIO_LABEL } from '../lib/constants'
 import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
 import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvPesos } from '../hooks/useInvPesos'
+import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
+import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
 import type { InvestimentoAtivo, QuestionarioRespostas, PerguntaAvaliacao, CriterioQuestao, TipoAtivoInvestimento } from '../types'
+import type { CategoriaFII } from '../lib/constants'
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler, BarElement)
 
 const MUTED = '#8b92a8'
 const MESES_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+
+// Quadros da página, arrastáveis (useOrdemReordenavel) — a ordem é persistida
+// por TIPO de ativo (não por ativo individual): reordenar na página do MXRF11
+// também reordena a página de qualquer outro FII.
+type QuadroDetalheKey =
+  | 'resumo' | 'caracteristicas'
+  | 'grafico_evolucao' | 'grafico_cotas' | 'grafico_rent_mes' | 'grafico_rent_acum'
+  | 'grafico_dividendos_mes' | 'grafico_dy_mes' | 'grafico_ultimos_dividendos'
+  | 'magic_number' | 'dy_yoc' | 'operacoes'
+// Gráficos vêm em meia largura por padrão (lado a lado, como antes de virarem
+// quadros independentes) — os demais em largura total, como sempre foram.
+const QUADROS_GRAFICO: QuadroDetalheKey[] = [
+  'grafico_evolucao', 'grafico_cotas', 'grafico_rent_mes', 'grafico_rent_acum',
+  'grafico_dividendos_mes', 'grafico_dy_mes', 'grafico_ultimos_dividendos',
+]
 
 function fmtMes(anoMes: string): string {
   const [ano, m] = anoMes.split('-')
@@ -127,9 +145,14 @@ export default function DetalheInvestimentoPage() {
   // decide transformá-la numa compra de verdade (ver DrawerSimularCompra).
   const [prefilCompra, setPrefilCompra] = useState<{ quantidade: string; preco_unitario: string } | null>(null)
   const [provisionando, setProvisionando] = useState(false)
+  // Simulação "comprando/vendendo N cotas" dentro do quadro de DY/YoC —
+  // sempre ao preço ATUAL (não um preço hipotético digitado à parte).
+  const [qtdSimulada, setQtdSimulada] = useState(0)
+  const [direcaoSimulada, setDirecaoSimulada] = useState<'compra' | 'venda'>('compra')
+  const [salvandoCategoria, setSalvandoCategoria] = useState(false)
 
   const { ativo, loading, error } = useInvestimentoAtivo(ativoId)
-  const { excluir, provisionarRendimentoCripto } = useInvestimentosAtivos()
+  const { excluir, editar, provisionarRendimentoCripto } = useInvestimentosAtivos()
   const { posicoes }  = useInvestimentosPosicoes(ativoId ? { ativo_id: ativoId } : {})
   const { historico } = useInvestimentosHistorico(ativoId ? { ativo_id: ativoId } : {})
   const { dividendos } = useDividendos(ativoId ? { ativo_id: ativoId } : {})
@@ -137,6 +160,18 @@ export default function DetalheInvestimentoPage() {
   const { dashboard } = useInvestimentosDashboard()
 
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 3000) }
+
+  // Categoria do FII pode vir errada (digitada à mão antes, ou sem fonte
+  // automática confiável — só FIAGRO tem categoria garantida pela CVM, ver
+  // BUSINESS_RULES.md) — editável direto aqui, sem precisar abrir "Editar ativo".
+  async function salvarCategoria(categoria: CategoriaFII) {
+    if (!ativo) return
+    setSalvandoCategoria(true)
+    const res = await editar(ativo.id, { fii_categoria: categoria })
+    setSalvandoCategoria(false)
+    if (!res.ok) showToast(res.erro ?? 'Erro ao salvar categoria')
+    else showToast('Categoria atualizada!')
+  }
 
   async function provisionarRendimento() {
     setProvisionando(true)
@@ -187,6 +222,15 @@ export default function DetalheInvestimentoPage() {
     [qtdAtual, resumo.mercado],
   )
 
+  // P/VP (FIIs): preço atual ÷ valor patrimonial por cota (fii_vp, informado
+  // manualmente no cadastro — não há fonte gratuita/sem-chave confiável para
+  // isso, ao contrário da cotação). null sem VP cadastrado ou sem cotação.
+  const pvpFII = useMemo(() => {
+    if (ativo?.tipo_ativo !== 'FII' || !ativo.fii_vp || ativo.fii_vp <= 0) return null
+    if (!precoAtualEstimado || precoAtualEstimado <= 0) return null
+    return precoAtualEstimado / ativo.fii_vp
+  }, [ativo?.tipo_ativo, ativo?.fii_vp, precoAtualEstimado])
+
   // Magic Number (FIIs): quantas cotas seriam necessárias para que o próprio
   // dividendo mensal já compre 1 cota nova, sem precisar de aporte externo
   // ("efeito bola de neve"). Usa o dividendo por cota mais recente disponível
@@ -212,6 +256,76 @@ export default function DetalheInvestimentoPage() {
     }
   }, [ativo?.tipo_ativo, precoAtualEstimado, dividendos, qtdAtual])
 
+  // DY simulado (FIIs): "e se a cota fosse negociada exatamente pelo valor
+  // patrimonial (P/VP = 1)?" — remove o efeito de ágio/desconto do preço de
+  // mercado sobre o yield, útil pra comparar fundos com P/VP diferentes numa
+  // régua só. Anualiza o ÚLTIMO dividendo mensal por cota (mesma base de
+  // "run-rate" já usada no Magic Number acima) — não é o DY trailing-12m
+  // "padrão investidor10" (esse soma os 12 meses de verdade com fallback do
+  // histórico do fundo inteiro via inv_proventos_fundo, que esta página não
+  // carrega); é só uma simulação simplificada com o dado já disponível aqui.
+  const dySimuladoPvp1 = useMemo(() => {
+    if (!magicNumberFII || !ativo?.fii_vp || ativo.fii_vp <= 0) return null
+    const anualizado = magicNumberFII.valorPorCota * 12
+    return {
+      valorPorCota: magicNumberFII.valorPorCota,
+      dyAtual: (anualizado / magicNumberFII.precoCota) * 100,
+      dyPvp1:  (anualizado / ativo.fii_vp) * 100,
+    }
+  }, [magicNumberFII, ativo?.fii_vp])
+
+  // YoC atual (dividendo anualizado ÷ preço médio que o usuário PAGOU, não o
+  // preço de mercado) e YoC se a cota tivesse custado exatamente o VP
+  // (P/VP = 1) — mesmo run-rate do DY simulado acima, contra o custo em vez
+  // do preço atual. Mostra se o usuário comprou com desconto ou ágio sobre o
+  // valor patrimonial de então.
+  const yocSimuladoPvp1 = useMemo(() => {
+    if (!dySimuladoPvp1 || qtdAtual <= 0) return null
+    const custoMedio = resumo.custo / qtdAtual
+    if (!(custoMedio > 0)) return null
+    const anualizado = dySimuladoPvp1.valorPorCota * 12
+    return {
+      custoMedio,
+      yocAtual: (anualizado / custoMedio) * 100,
+      yocPvp1:  dySimuladoPvp1.dyPvp1, // mesma conta (anualizado ÷ VP) — só reapresentada como YoC
+    }
+  }, [dySimuladoPvp1, resumo.custo, qtdAtual])
+
+  // Simulação "comprando/vendendo N cotas, ao preço ATUAL" (não um preço à
+  // parte digitado pelo usuário — sempre o mesmo `precoCota` do Magic
+  // Number/DY acima). Compra: preço médio (PM) muda pela média ponderada com
+  // a compra nova. Venda: PM NÃO muda — uma venda parcial reduz a
+  // quantidade na média atual, sem alterar o custo médio de quem fica (mesma
+  // regra de `recomputarPosicao`/VENDA no backend) — por isso "Novo PM" e
+  // "Novo YoC" saem iguais aos atuais numa venda pura, só a quantidade e o
+  // dividendo mensal projetado caem.
+  const simulacaoFII = useMemo(() => {
+    if (!magicNumberFII || qtdSimulada <= 0) return null
+    const preco = magicNumberFII.precoCota
+    if (direcaoSimulada === 'venda') {
+      const qtdVendida = Math.min(qtdSimulada, qtdAtual)
+      if (qtdVendida <= 0) return null
+      const novaQtd = qtdAtual - qtdVendida
+      const novoPM = yocSimuladoPvp1?.custoMedio ?? 0
+      const novoDividendoMensal = magicNumberFII.valorPorCota * novaQtd
+      return {
+        novaQtd, valorOperacao: qtdVendida * preco, novoPM,
+        novoDividendoMensal,
+        novoYoc: novoPM > 0 ? (magicNumberFII.valorPorCota * 12 / novoPM) * 100 : 0,
+      }
+    }
+    const novaQtd = qtdAtual + qtdSimulada
+    const valorOperacao = qtdSimulada * preco
+    const novoCusto = resumo.custo + valorOperacao
+    const novoPM = novaQtd > 0 ? novoCusto / novaQtd : 0
+    const novoDividendoMensal = magicNumberFII.valorPorCota * novaQtd
+    return {
+      novaQtd, valorOperacao, novoPM,
+      novoDividendoMensal,
+      novoYoc: novoPM > 0 ? (magicNumberFII.valorPorCota * 12 / novoPM) * 100 : 0,
+    }
+  }, [magicNumberFII, qtdSimulada, direcaoSimulada, qtdAtual, resumo.custo, yocSimuladoPvp1])
+
   // Janela do período selecionado (6/12 meses ou "tudo") para os gráficos
   // mensais desta página. mesInicio null = sem limite inferior (tudo).
   const janela = useMemo(() => {
@@ -236,6 +350,20 @@ export default function DetalheInvestimentoPage() {
     for (const h of historico) {
       if (!dentroJanela(h.mes_ano)) continue
       porMes.set(h.mes_ano, (porMes.get(h.mes_ano) ?? 0) + Number(h.valor_mercado))
+    }
+    return [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historico, janela])
+
+  // Evolução da quantidade de cotas/ações (soma de todas as contas por mês) —
+  // mesmo padrão de `evolucao` (valor de mercado), só que a série é a
+  // quantidade do snapshot mensal em vez do valor. Usado no quadro "DY e YoC
+  // simulados" (FII), pra visualizar aportes/resgates ao longo do tempo.
+  const evolucaoCotas = useMemo(() => {
+    const porMes = new Map<string, number>()
+    for (const h of historico) {
+      if (!dentroJanela(h.mes_ano)) continue
+      porMes.set(h.mes_ano, (porMes.get(h.mes_ano) ?? 0) + (Number(h.quantidade) || 0))
     }
     return [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -377,6 +505,57 @@ export default function DetalheInvestimentoPage() {
     }
     return out
   }, [divFiltrados, historico])
+
+  // Ordem dos quadros da página — arrastável, persistida por TIPO de ativo em
+  // arqvalor.usuarios.ordem_quadros (mesma infra de InvestimentosPage/
+  // DestaquesInvestimentosPage). Precisa ficar ANTES do `if (loading) return`
+  // abaixo — hooks não podem ser condicionais — por isso usa `ativo?.` em
+  // tudo aqui: no 1º render (ainda carregando) as chaves ficam vazias e o
+  // hook usa uma chave de armazenamento genérica; assim que `ativo` chega, a
+  // ordem salva de verdade (vinda do banco) se aplica sozinha (useOrdemReordenavel
+  // já reconcilia isso — ver comentário no hook). Cada gráfico é seu PRÓPRIO
+  // quadro (não um grupo só) — podem ser reordenados/redimensionados
+  // independentemente uns dos outros.
+  const chavesQuadros = useMemo<QuadroDetalheKey[]>(() => {
+    if (!ativo) return []
+    const ehRFAtivo = ativo.tipo_ativo === 'RENDA_FIXA' || ativo.tipo_ativo === 'TESOURO_DIRETO'
+    const ehFIIAtivo = ativo.tipo_ativo === 'FII'
+    const podeDividendosAtivo = !['RENDA_FIXA', 'TESOURO_DIRETO', 'CRIPTOMOEDAS'].includes(ativo.tipo_ativo)
+    const temCaracteristicas = ehFIIAtivo ||
+      (ehRFAtivo && !!(ativo.rf_subtipo || ativo.rf_indexador || ativo.rf_taxa || ativo.rf_vencimento || ativo.rf_emissor))
+    const ks: QuadroDetalheKey[] = ['resumo']
+    if (temCaracteristicas) ks.push('caracteristicas')
+    ks.push('grafico_evolucao', 'grafico_cotas', 'grafico_rent_mes', 'grafico_rent_acum')
+    if (podeDividendosAtivo) ks.push('grafico_dividendos_mes')
+    if (podeDividendosAtivo && dyPorMes.length > 0) ks.push('grafico_dy_mes')
+    if (podeDividendosAtivo) ks.push('grafico_ultimos_dividendos')
+    if (magicNumberFII) ks.push('magic_number')
+    if (dySimuladoPvp1) ks.push('dy_yoc')
+    ks.push('operacoes')
+    return ks
+  }, [ativo, magicNumberFII, dySimuladoPvp1, dyPorMes])
+  const { blob: ordemQuadrosDb, salvar: salvarOrdemQuadrosDb } = usePreferenciasOrdemQuadros()
+  const chaveOrdemQuadros = `detalhe-${ativo?.tipo_ativo ?? 'generico'}`
+  const {
+    ordem: ordemQuadros, dragHandleProps: alcaQuadro, dropTargetProps: alvoQuadro, dropTargetOutlineClass: contornoQuadro,
+  } = useOrdemReordenavel<QuadroDetalheKey>(`arqvalor:${chaveOrdemQuadros}`, chavesQuadros, {
+    valorRemoto: (ordemQuadrosDb[chaveOrdemQuadros] as QuadroDetalheKey[] | undefined) ?? null,
+    aoMudar: (nova) => salvarOrdemQuadrosDb(chaveOrdemQuadros, nova),
+  })
+  // Largura de cada quadro: lista de chaves em MEIA largura (1 coluna da grid
+  // lg:grid-cols-2); quem não está na lista ocupa largura total (2 colunas).
+  // Default: gráficos nascem em meia largura (lado a lado, como sempre
+  // foram); os demais nascem em largura total, como sempre foram. Guarda só
+  // "quem é meia" (não "quem é total") pra um quadro novo que apareça depois
+  // (ex.: tipo de ativo que ganhou um quadro condicional a mais) já nascer
+  // com o default certo sem precisar reconciliar contra `chavesQuadros`.
+  const chaveMetadeQuadros = `${chaveOrdemQuadros}-metade`
+  const quadrosMetade = (ordemQuadrosDb[chaveMetadeQuadros] as QuadroDetalheKey[] | undefined) ?? QUADROS_GRAFICO
+  function toggleLarguraQuadro(chave: QuadroDetalheKey) {
+    const emMetade = quadrosMetade.includes(chave)
+    const nova = emMetade ? quadrosMetade.filter((k) => k !== chave) : [...quadrosMetade, chave]
+    salvarOrdemQuadrosDb(chaveMetadeQuadros, nova)
+  }
 
   // Operações do ativo separadas: compras/aportes × rendimentos (yield).
   // Rendimentos (RENDIMENTO) têm valor_total 0 e podem ser muitos (semanais),
@@ -535,6 +714,27 @@ export default function DetalheInvestimentoPage() {
                   {setorLabel(ativo.setor)}
                 </span>
               )}
+              {pvpFII != null && (
+                <span title="Preço ÷ Valor Patrimonial por cota — abaixo de 1 pode indicar fundo descontado, acima de 1 negociado com ágio"
+                  className="inline-flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-full border border-white/15">
+                  <span style={{ color: MUTED }}>P/VP</span>
+                  <span className="font-semibold" style={{ color: pvpFII < 1 ? '#00c896' : pvpFII > 1 ? '#ff5c7a' : MUTED }}>
+                    {pvpFII.toFixed(2).replace('.', ',')}
+                  </span>
+                </span>
+              )}
+              {ativo.tipo_ativo === 'FII' && ativo.fii_segmento && (
+                <span title="Segmento de atuação — Informe Mensal de FII, CVM"
+                  className="inline-flex items-center text-[12px] px-2 py-0.5 rounded-full border border-white/15" style={{ color: MUTED }}>
+                  {ativo.fii_segmento}
+                </span>
+              )}
+              {ativo.tipo_ativo === 'FII' && ativo.fii_mandato && (
+                <span title="Mandato do fundo — Informe Mensal de FII, CVM"
+                  className="inline-flex items-center text-[12px] px-2 py-0.5 rounded-full border border-white/15" style={{ color: MUTED }}>
+                  {ativo.fii_mandato}
+                </span>
+              )}
               {urlInvestidor10 && (
                 <a href={urlInvestidor10} target="_blank" rel="noopener noreferrer"
                   title="Abrir página do ativo no investidor10"
@@ -611,26 +811,29 @@ export default function DetalheInvestimentoPage() {
         </div>
       )}
 
-      {/* Cards de resumo — em BRL (com o valor original em USD quando estrangeiro) */}
-      {(() => {
-        const r = resumoConvertido ?? resumo
-        const usd = resumoConvertido?.usd
-        const sub = (v?: number) => (v != null ? fmtUSD(v) : undefined)
-        return (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5" data-tutorial="detalhe-cards">
-            <CardMini icone={<Wallet size={14} />} titulo="Valor de mercado" valor={formatBRL(r.mercado)} sub={sub(usd?.mercado)} />
-            <CardMini icone={<Coins size={14} />} titulo="Custo" valor={formatBRL(r.custo)} sub={sub(usd?.custo)} />
-            <CardMini icone={r.ganho >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-              titulo="Ganho / Prejuízo"
-              valor={`${r.ganho >= 0 ? '+' : ''}${formatBRL(r.ganho)}`} cor={corValor(r.ganho)} sub={sub(usd?.ganho)} />
-            <CardMini icone={<Coins size={14} />} titulo="Dividendos" valor={formatBRL(r.dividendos)} cor="#00c896" sub={sub(usd?.dividendos)} />
-          </div>
-        )
-      })()}
+      {/* Indicadores oficiais do Informe Mensal de FII da CVM (dados.cvm.gov.br) —
+          mesma fonte do VP usado no P/VP acima, aproveitando os demais campos
+          da mesma passada de download (ver cvm.ts). Só quando o cron/cadastro
+          já encontrou o fundo lá (fii_vp_origem='CVM'). */}
+      {ativo.tipo_ativo === 'FII' && ativo.fii_vp_origem === 'CVM' && (ativo.fii_num_cotistas != null || ativo.fii_dy_mes_cvm != null) && (
+        <div className="mb-4 flex items-center gap-2 flex-wrap text-[13px] rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2" style={{ color: MUTED }}>
+          <span className="font-medium text-white/80">Dados CVM</span>
+          {ativo.fii_vp_atualizado_em && (
+            <span>· referência {ativo.fii_vp_atualizado_em.slice(5, 7)}/{ativo.fii_vp_atualizado_em.slice(0, 4)}</span>
+          )}
+          {ativo.fii_num_cotistas != null && (
+            <span>· Cotistas: <span className="text-white/90 font-medium">{ativo.fii_num_cotistas.toLocaleString('pt-BR')}</span></span>
+          )}
+          {ativo.fii_dy_mes_cvm != null && (
+            <span title="Dividend Yield do mês, declarado pelo próprio fundo à CVM">
+              · DY do mês (CVM): <span className="text-white/90 font-medium">{ativo.fii_dy_mes_cvm.toFixed(2).replace('.', ',')}%</span>
+            </span>
+          )}
+        </div>
+      )}
 
-      {/* Características do título (renda fixa / Tesouro) e do FII */}
-      <CaracteristicasAtivo ativo={ativo} valorInvestido={resumo.custo} />
-
+      {/* Controle fixo (não é um quadro, não é arrastável) — vale pra todos
+          os quadros de gráfico, onde quer que tenham sido movidos. */}
       <div className="flex items-center justify-end gap-2 mb-3">
         <span className="text-[12px]" style={{ color: MUTED }}>Período dos gráficos:</span>
         <SelectDark value={periodoGraficos} onChange={(e) => setPeriodoGraficos(e.target.value)}
@@ -639,201 +842,290 @@ export default function DetalheInvestimentoPage() {
         </SelectDark>
       </div>
 
+      {/* Quadros da página — ordem arrastável (ver useOrdemReordenavel acima),
+          persistida por tipo de ativo. Cada `if` devolve UM quadro; a ordem
+          de exibição vem de `ordemQuadros`, não da ordem destes `if`s. Grid de
+          2 colunas: um quadro em largura total ocupa as duas (lg:col-span-2,
+          ver Quadro), em meia largura ocupa só uma célula. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" data-tutorial="detalhe-graficos">
-        {/* Evolução do valor de mercado */}
-        <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <h2 className="text-[14px] font-semibold text-white/80 mb-3">Evolução mensal</h2>
-          {evolucao.length < 2 ? (
-            <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>
-              Registre o valor de mercado de pelo menos 2 meses para ver o gráfico.
-            </p>
-          ) : (
-            <Line
-              data={{
-                labels: evolucao.map(([mes]) => fmtMes(mes)),
-                datasets: [{
-                  label: 'Valor de mercado',
-                  data: evolucao.map(([, v]) => v),
-                  borderColor: cor,
-                  backgroundColor: `${cor}22`,
-                  fill: true,
-                  tension: 0.3,
-                  pointRadius: evolucao.length <= 12 ? 4 : 2,
-                  pointBackgroundColor: cor,
-                }],
-              }}
-              options={OPCOES_GRAFICO}
-            />
-          )}
-        </section>
+      {ordemQuadros.map((chave) => {
+        if (chave === 'resumo') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            {(() => {
+              const r = resumoConvertido ?? resumo
+              const usd = resumoConvertido?.usd
+              const sub = (v?: number) => (v != null ? fmtUSD(v) : undefined)
+              return (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-tutorial="detalhe-cards">
+                  <CardMini icone={<Wallet size={14} />} titulo="Valor de mercado" valor={formatBRL(r.mercado)} sub={sub(usd?.mercado)} />
+                  <CardMini icone={<Coins size={14} />} titulo="Custo" valor={formatBRL(r.custo)} sub={sub(usd?.custo)} />
+                  <CardMini icone={r.ganho >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                    titulo="Ganho / Prejuízo"
+                    valor={`${r.ganho >= 0 ? '+' : ''}${formatBRL(r.ganho)}`} cor={corValor(r.ganho)} sub={sub(usd?.ganho)} />
+                  <CardMini icone={<Coins size={14} />} titulo="Dividendos" valor={formatBRL(r.dividendos)} cor="#00c896" sub={sub(usd?.dividendos)} />
+                </div>
+              )
+            })()}
+          </Quadro>
+        )
 
-        {/* Rentabilidade mensal */}
-        <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <h2 className="text-[14px] font-semibold text-white/80">Rentabilidade do mês (%)</h2>
-            {podeDividendos && (
-              <button onClick={() => setRentComDividendos((v) => !v)}
-                aria-pressed={rentComDividendos}
-                title="Soma os proventos recebidos no mês à variação de preço (total return)"
-                className={`px-2.5 py-1 rounded-lg text-[12px] font-medium border ${
-                  rentComDividendos
-                    ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200'
-                    : 'border-white/15 text-white/70 hover:border-white/30'
-                }`}>
-                + dividendos
-              </button>
-            )}
-          </div>
-          {rentPorMesJanela.length === 0 ? (
-            <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>
-              Sem dados suficientes de variação mensal.
-            </p>
-          ) : (
-            <Bar
-              data={{
-                labels: rentPorMesJanela.map(([mes]) => fmtMes(mes)),
-                datasets: [{
-                  label: rentComDividendos ? 'Variação + dividendos %' : 'Variação %',
-                  data: rentPorMesJanela.map(([, v]) => Number(v.toFixed(2))),
-                  backgroundColor: rentPorMesJanela.map(([, v]) => v >= 0 ? '#00c896aa' : '#ff5c7aaa'),
-                  borderRadius: 4,
-                }],
-              }}
-              options={OPCOES_GRAFICO}
-            />
-          )}
-        </section>
+        if (chave === 'caracteristicas') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <CaracteristicasAtivo ativo={ativo} valorInvestido={resumo.custo}
+              onSalvarCategoria={salvarCategoria} salvandoCategoria={salvandoCategoria} />
+          </Quadro>
+        )
 
-        {/* Rentabilidade acumulada no período (compõe os % mensais) */}
-        <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <h2 className="text-[14px] font-semibold text-white/80 mb-3"
-            title="Composição da variação mensal desde o início do período selecionado">
-            Rentabilidade acumulada (%){rentComDividendos ? ' — com dividendos' : ''}
-          </h2>
-          {rentAcumulada.length === 0 ? (
-            <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>
-              Sem dados suficientes de variação mensal.
-            </p>
-          ) : (
-            <Line
-              data={{
-                labels: rentAcumulada.map(([mes]) => fmtMes(mes)),
-                datasets: [{
-                  label: 'Acumulado %',
-                  data: rentAcumulada.map(([, v]) => Number(v.toFixed(2))),
-                  borderColor: cor,
-                  backgroundColor: `${cor}22`,
-                  fill: true,
-                  tension: 0.3,
-                  pointRadius: rentAcumulada.length <= 12 ? 4 : 2,
-                  pointBackgroundColor: cor,
-                }],
-              }}
-              options={OPCOES_GRAFICO}
-            />
-          )}
-        </section>
+        if (chave === 'grafico_evolucao') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+              <h2 className="text-[14px] font-semibold text-white/80 mb-3">Evolução mensal</h2>
+              {evolucao.length < 2 ? (
+                <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>
+                  Registre o valor de mercado de pelo menos 2 meses para ver o gráfico.
+                </p>
+              ) : (
+                <Line
+                  data={{
+                    labels: evolucao.map(([mes]) => fmtMes(mes)),
+                    datasets: [{
+                      label: 'Valor de mercado',
+                      data: evolucao.map(([, v]) => v),
+                      borderColor: cor,
+                      backgroundColor: `${cor}22`,
+                      fill: true,
+                      tension: 0.3,
+                      pointRadius: evolucao.length <= 12 ? 4 : 2,
+                      pointBackgroundColor: cor,
+                    }],
+                  }}
+                  options={OPCOES_GRAFICO}
+                />
+              )}
+            </section>
+          </Quadro>
+        )
 
-        {/* Dividendos mensais — só para ativos que pagam proventos */}
-        {podeDividendos && (
-          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-            <h2 className="text-[14px] font-semibold text-white/80 mb-3">Dividendos por mês</h2>
-            {divPorMes.length === 0 ? (
-              <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo {labelSemDados}.</p>
-            ) : (
+        if (chave === 'grafico_cotas') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+              <h2 className="text-[14px] font-semibold text-white/80 mb-3">Evolução da quantidade de cotas</h2>
+              {evolucaoCotas.length < 2 ? (
+                <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>
+                  Registre o valor de mercado de pelo menos 2 meses para ver o gráfico.
+                </p>
+              ) : (
+                <Line
+                  data={{
+                    labels: evolucaoCotas.map(([mes]) => fmtMes(mes)),
+                    datasets: [{
+                      label: 'Cotas',
+                      data: evolucaoCotas.map(([, v]) => v),
+                      borderColor: cor,
+                      backgroundColor: `${cor}22`,
+                      fill: true,
+                      stepped: true,
+                      pointRadius: evolucaoCotas.length <= 12 ? 4 : 2,
+                      pointBackgroundColor: cor,
+                    }],
+                  }}
+                  options={OPCOES_GRAFICO}
+                />
+              )}
+            </section>
+          </Quadro>
+        )
+
+        if (chave === 'grafico_rent_mes') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <h2 className="text-[14px] font-semibold text-white/80">Rentabilidade do mês (%)</h2>
+                {podeDividendos && (
+                  <button onClick={() => setRentComDividendos((v) => !v)}
+                    aria-pressed={rentComDividendos}
+                    title="Soma os proventos recebidos no mês à variação de preço (total return)"
+                    className={`px-2.5 py-1 rounded-lg text-[12px] font-medium border ${
+                      rentComDividendos
+                        ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200'
+                        : 'border-white/15 text-white/70 hover:border-white/30'
+                    }`}>
+                    + dividendos
+                  </button>
+                )}
+              </div>
+              {rentPorMesJanela.length === 0 ? (
+                <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>
+                  Sem dados suficientes de variação mensal.
+                </p>
+              ) : (
+                <Bar
+                  data={{
+                    labels: rentPorMesJanela.map(([mes]) => fmtMes(mes)),
+                    datasets: [{
+                      label: rentComDividendos ? 'Variação + dividendos %' : 'Variação %',
+                      data: rentPorMesJanela.map(([, v]) => Number(v.toFixed(2))),
+                      backgroundColor: rentPorMesJanela.map(([, v]) => v >= 0 ? '#00c896aa' : '#ff5c7aaa'),
+                      borderRadius: 4,
+                    }],
+                  }}
+                  options={OPCOES_GRAFICO}
+                />
+              )}
+            </section>
+          </Quadro>
+        )
+
+        if (chave === 'grafico_rent_acum') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+              <h2 className="text-[14px] font-semibold text-white/80 mb-3"
+                title="Composição da variação mensal desde o início do período selecionado">
+                Rentabilidade acumulada (%){rentComDividendos ? ' — com dividendos' : ''}
+              </h2>
+              {rentAcumulada.length === 0 ? (
+                <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>
+                  Sem dados suficientes de variação mensal.
+                </p>
+              ) : (
+                <Line
+                  data={{
+                    labels: rentAcumulada.map(([mes]) => fmtMes(mes)),
+                    datasets: [{
+                      label: 'Acumulado %',
+                      data: rentAcumulada.map(([, v]) => Number(v.toFixed(2))),
+                      borderColor: cor,
+                      backgroundColor: `${cor}22`,
+                      fill: true,
+                      tension: 0.3,
+                      pointRadius: rentAcumulada.length <= 12 ? 4 : 2,
+                      pointBackgroundColor: cor,
+                    }],
+                  }}
+                  options={OPCOES_GRAFICO}
+                />
+              )}
+            </section>
+          </Quadro>
+        )
+
+        // Dividendos mensais — só para ativos que pagam proventos
+        if (chave === 'grafico_dividendos_mes') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+              <h2 className="text-[14px] font-semibold text-white/80 mb-3">Dividendos por mês</h2>
+              {divPorMes.length === 0 ? (
+                <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo {labelSemDados}.</p>
+              ) : (
+                <Bar
+                  data={{
+                    labels: divPorMes.map(([mes]) => fmtMes(mes)),
+                    datasets: [{
+                      label: 'Dividendos',
+                      data: divPorMes.map(([, v]) => v),
+                      backgroundColor: '#00c896aa',
+                      borderRadius: 4,
+                    }],
+                  }}
+                  options={OPCOES_GRAFICO}
+                />
+              )}
+            </section>
+          </Quadro>
+        )
+
+        // Dividend Yield mensal — só quando há provento E snapshot de mercado
+        if (chave === 'grafico_dy_mes') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+              <h2 className="text-[14px] font-semibold text-white/80 mb-3"
+                title="Dividendos recebidos no mês ÷ valor de mercado da posição no mês">
+                Dividend Yield por mês (%)
+              </h2>
               <Bar
                 data={{
-                  labels: divPorMes.map(([mes]) => fmtMes(mes)),
+                  labels: dyPorMes.map(([mes]) => fmtMes(mes)),
                   datasets: [{
-                    label: 'Dividendos',
-                    data: divPorMes.map(([, v]) => v),
-                    backgroundColor: '#00c896aa',
+                    label: 'DY %',
+                    data: dyPorMes.map(([, v]) => Number(v.toFixed(2))),
+                    backgroundColor: `${cor}aa`,
                     borderRadius: 4,
                   }],
                 }}
                 options={OPCOES_GRAFICO}
               />
-            )}
-          </section>
-        )}
+            </section>
+          </Quadro>
+        )
 
-        {/* Dividend Yield mensal — só quando há provento E snapshot de mercado */}
-        {podeDividendos && dyPorMes.length > 0 && (
-          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-            <h2 className="text-[14px] font-semibold text-white/80 mb-3"
-              title="Dividendos recebidos no mês ÷ valor de mercado da posição no mês">
-              Dividend Yield por mês (%)
-            </h2>
-            <Bar
-              data={{
-                labels: dyPorMes.map(([mes]) => fmtMes(mes)),
-                datasets: [{
-                  label: 'DY %',
-                  data: dyPorMes.map(([, v]) => Number(v.toFixed(2))),
-                  backgroundColor: `${cor}aa`,
-                  borderRadius: 4,
-                }],
-              }}
-              options={OPCOES_GRAFICO}
-            />
-          </section>
-        )}
-
-        {/* Últimos dividendos — só para ativos que pagam proventos */}
-        {podeDividendos && (
-          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <h2 className="text-[14px] font-semibold text-white/80">Últimos dividendos</h2>
-              {divPaginacao.totalPaginas > 1 && (
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setPaginaDividendos((p) => p + 1)}
-                    disabled={divPaginacao.pagina >= divPaginacao.totalPaginas - 1}
-                    title="6 meses mais antigos"
-                    aria-label="6 meses mais antigos"
-                    className="flex items-center justify-center h-6 w-6 rounded-md border border-white/10 text-white/70
-                               hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    <ChevronLeft size={13} />
-                  </button>
-                  <span className="text-[11px] whitespace-nowrap" style={{ color: MUTED }}>
-                    Página {divPaginacao.pagina + 1}/{divPaginacao.totalPaginas}
-                  </span>
-                  <button
-                    onClick={() => setPaginaDividendos((p) => Math.max(0, p - 1))}
-                    disabled={divPaginacao.pagina <= 0}
-                    title="6 meses mais recentes"
-                    aria-label="6 meses mais recentes"
-                    className="flex items-center justify-center h-6 w-6 rounded-md border border-white/10 text-white/70
-                               hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    <ChevronRight size={13} />
-                  </button>
+        // Últimos dividendos — só para ativos que pagam proventos
+        if (chave === 'grafico_ultimos_dividendos') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <h2 className="text-[14px] font-semibold text-white/80">Últimos dividendos</h2>
+                {divPaginacao.totalPaginas > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setPaginaDividendos((p) => p + 1)}
+                      disabled={divPaginacao.pagina >= divPaginacao.totalPaginas - 1}
+                      title="6 meses mais antigos"
+                      aria-label="6 meses mais antigos"
+                      className="flex items-center justify-center h-6 w-6 rounded-md border border-white/10 text-white/70
+                                 hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <ChevronLeft size={13} />
+                    </button>
+                    <span className="text-[11px] whitespace-nowrap" style={{ color: MUTED }}>
+                      Página {divPaginacao.pagina + 1}/{divPaginacao.totalPaginas}
+                    </span>
+                    <button
+                      onClick={() => setPaginaDividendos((p) => Math.max(0, p - 1))}
+                      disabled={divPaginacao.pagina <= 0}
+                      title="6 meses mais recentes"
+                      aria-label="6 meses mais recentes"
+                      className="flex items-center justify-center h-6 w-6 rounded-md border border-white/10 text-white/70
+                                 hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <ChevronRight size={13} />
+                    </button>
+                  </div>
+                )}
+              </div>
+              {divPaginacao.itens.length === 0 ? (
+                <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo {labelSemDados}.</p>
+              ) : (
+                <div className="space-y-2">
+                  {divPaginacao.itens.map((d) => (
+                    <div key={d.id} className="flex items-center justify-between gap-2 text-[13px]">
+                      <div>
+                        <p className="text-white font-medium">{d.inv_tipos_dividendo?.nome ?? 'Dividendo'}</p>
+                        <p style={{ color: MUTED }}>{formatData(d.data_pagamento)}
+                          {d.transacoes?.status === 'PROJECAO' && <span className="ml-1.5" style={{ color: '#ffb74d' }}>· projetado</span>}
+                        </p>
+                      </div>
+                      <span className="font-semibold" style={{ color: '#00c896' }}>{formatBRL(d.valor)}</span>
+                    </div>
+                  ))}
                 </div>
               )}
-            </div>
-            {divPaginacao.itens.length === 0 ? (
-              <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo {labelSemDados}.</p>
-            ) : (
-              <div className="space-y-2">
-                {divPaginacao.itens.map((d) => (
-                  <div key={d.id} className="flex items-center justify-between gap-2 text-[13px]">
-                    <div>
-                      <p className="text-white font-medium">{d.inv_tipos_dividendo?.nome ?? 'Dividendo'}</p>
-                      <p style={{ color: MUTED }}>{formatData(d.data_pagamento)}
-                        {d.transacoes?.status === 'PROJECAO' && <span className="ml-1.5" style={{ color: '#ffb74d' }}>· projetado</span>}
-                      </p>
-                    </div>
-                    <span className="font-semibold" style={{ color: '#00c896' }}>{formatBRL(d.valor)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
+            </section>
+          </Quadro>
+        )
 
-        {/* Magic Number — só para FIIs, quando há cotação e último dividendo por cota */}
-        {magicNumberFII && (
+        // Magic Number — só para FIIs, quando há cotação e último dividendo por cota
+        if (chave === 'magic_number') return magicNumberFII && (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
           <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
             <div className="flex items-start gap-2 mb-3">
               <span className="flex items-center justify-center w-7 h-7 rounded-full border border-white/15 text-[13px] font-semibold flex-shrink-0" style={{ color: MUTED }}>
@@ -886,9 +1178,122 @@ export default function DetalheInvestimentoPage() {
               )}
             </div>
           </section>
-        )}
+          </Quadro>
+        )
 
-        {/* Operações recentes */}
+        // DY simulado se P/VP = 1 — só para FIIs com VP cadastrado e algum
+        // dividendo por cota disponível.
+        if (chave === 'dy_yoc') return dySimuladoPvp1 && (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <div className="flex items-start gap-2 mb-3">
+              <span className="flex items-center justify-center w-7 h-7 rounded-full border border-white/15 text-[13px] font-semibold flex-shrink-0" style={{ color: MUTED }}>
+                %
+              </span>
+              <div>
+                <h2 className="text-[14px] font-semibold text-white/80">DY e YoC simulados (P/VP = 1)</h2>
+                <p className="text-[12px] mt-0.5" style={{ color: MUTED }}>
+                  Quanto renderia se a cota fosse negociada exatamente pelo valor patrimonial, sem ágio nem desconto — remove o efeito do preço (de mercado ou pago na compra) do yield, útil pra comparar fundos ou compras na mesma régua.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-stretch gap-2">
+              <CaixaMagicNumber rotulo="Último dividendo mensal por cota" valor={formatBRL(dySimuladoPvp1.valorPorCota)} />
+              <span className="self-center text-[15px] px-1" style={{ color: MUTED }}>× 12 ÷ VP =</span>
+              <CaixaMagicNumber destaque rotulo="DY/YoC anualizado se P/VP = 1" valor={`${dySimuladoPvp1.dyPvp1.toFixed(2).replace('.', ',')}%`} />
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-white/10 flex flex-wrap items-stretch gap-2">
+              <CaixaMagicNumber rotulo="Cotas que você tem" valor={String(qtdAtual)} />
+              {yocSimuladoPvp1 && <CaixaMagicNumber rotulo="Preço médio (PM)" valor={formatBRL(yocSimuladoPvp1.custoMedio)} />}
+              <CaixaMagicNumber rotulo="Valor total" valor={formatBRL(resumo.mercado)} />
+            </div>
+
+            <div className="pt-3 flex items-center justify-between flex-wrap gap-2">
+              <span className="text-[13px]" style={{ color: MUTED }}>
+                DY anualizado ao preço atual{pvpFII != null ? ` (P/VP ${pvpFII.toFixed(2).replace('.', ',')})` : ''}
+              </span>
+              <span className="text-[13px] font-semibold" style={{ color: dySimuladoPvp1.dyAtual >= dySimuladoPvp1.dyPvp1 ? '#00c896' : '#ff5c7a' }}>
+                {dySimuladoPvp1.dyAtual.toFixed(2).replace('.', ',')}%
+              </span>
+            </div>
+
+            {yocSimuladoPvp1 && (
+              <div className="pt-2 flex items-center justify-between flex-wrap gap-2">
+                <span className="text-[13px]" style={{ color: MUTED }}>
+                  YoC anualizado ao custo médio pago (PM {formatBRL(yocSimuladoPvp1.custoMedio)})
+                </span>
+                <span className="text-[13px] font-semibold" style={{ color: yocSimuladoPvp1.yocAtual >= yocSimuladoPvp1.yocPvp1 ? '#00c896' : '#ff5c7a' }}>
+                  {yocSimuladoPvp1.yocAtual.toFixed(2).replace('.', ',')}%
+                </span>
+              </div>
+            )}
+
+            {/* Simular nova compra OU venda — sempre ao preço ATUAL da cota,
+                não um preço à parte digitado pelo usuário. */}
+            <div className="mt-4 pt-3 border-t border-white/10">
+              <p className="text-[13px] font-medium text-white/80 mb-2">Simular comprando ou vendendo cotas</p>
+              <div className="flex items-center gap-2 flex-wrap mb-3">
+                <div className="flex rounded-lg border border-white/10 overflow-hidden">
+                  <button type="button" onClick={() => setDirecaoSimulada('compra')}
+                    className={`px-2.5 py-1.5 text-[12px] font-medium ${direcaoSimulada === 'compra' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5'}`}>
+                    Comprar
+                  </button>
+                  <button type="button" onClick={() => { setDirecaoSimulada('venda'); setQtdSimulada((q) => Math.min(q, qtdAtual)) }}
+                    className={`px-2.5 py-1.5 text-[12px] font-medium ${direcaoSimulada === 'venda' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5'}`}>
+                    Vender
+                  </button>
+                </div>
+                <button type="button" onClick={() => setQtdSimulada((q) => Math.max(0, q - 1))} disabled={qtdSimulada <= 0}
+                  className="w-8 h-8 shrink-0 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>
+                  <Minus size={13} />
+                </button>
+                <Input type="number" min={0} max={direcaoSimulada === 'venda' ? qtdAtual : undefined} step={1}
+                  value={qtdSimulada} className="!w-20 text-center"
+                  onChange={(e) => {
+                    const n = Math.max(0, Math.floor(Number(e.target.value) || 0))
+                    setQtdSimulada(direcaoSimulada === 'venda' ? Math.min(n, qtdAtual) : n)
+                  }} />
+                <button type="button"
+                  onClick={() => setQtdSimulada((q) => direcaoSimulada === 'venda' ? Math.min(qtdAtual, q + 1) : q + 1)}
+                  disabled={direcaoSimulada === 'venda' && qtdSimulada >= qtdAtual}
+                  className="w-8 h-8 shrink-0 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>
+                  <Plus size={13} />
+                </button>
+                <span className="text-[12px]" style={{ color: MUTED }}>
+                  cota{qtdSimulada === 1 ? '' : 's'} ao preço atual ({formatBRL(magicNumberFII.precoCota)})
+                  {direcaoSimulada === 'venda' ? ` — você tem ${qtdAtual}` : ''}
+                </span>
+              </div>
+              {simulacaoFII && (
+                <div className="flex flex-wrap items-stretch gap-2">
+                  <CaixaMagicNumber rotulo={direcaoSimulada === 'venda' ? 'Valor recebido nesta venda' : 'Custo desta compra'}
+                    valor={formatBRL(simulacaoFII.valorOperacao)} />
+                  <CaixaMagicNumber rotulo="Novo total de cotas" valor={String(simulacaoFII.novaQtd)} />
+                  <CaixaMagicNumber rotulo="Novo PM" valor={formatBRL(simulacaoFII.novoPM)}
+                    delta={yocSimuladoPvp1 && yocSimuladoPvp1.custoMedio > 0 ? {
+                      // PM subir é RUIM (pagando mais em média) — inverte a cor padrão.
+                      // Numa venda pura o PM não muda (0%) — só uma compra desloca a média.
+                      pct: ((simulacaoFII.novoPM - yocSimuladoPvp1.custoMedio) / yocSimuladoPvp1.custoMedio) * 100,
+                      inverso: true,
+                    } : undefined} />
+                  <CaixaMagicNumber destaque rotulo="Novo dividendo mensal projetado" valor={formatBRL(simulacaoFII.novoDividendoMensal)} />
+                  <CaixaMagicNumber destaque rotulo="Novo YoC anualizado" valor={`${simulacaoFII.novoYoc.toFixed(2).replace('.', ',')}%`}
+                    delta={yocSimuladoPvp1 && yocSimuladoPvp1.yocAtual !== 0 ? {
+                      pct: ((simulacaoFII.novoYoc - yocSimuladoPvp1.yocAtual) / Math.abs(yocSimuladoPvp1.yocAtual)) * 100,
+                    } : undefined} />
+                </div>
+              )}
+            </div>
+          </section>
+          </Quadro>
+        )
+
+        if (chave === 'operacoes') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
         <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4" data-tutorial="detalhe-operacoes">
           <h2 className="text-[14px] font-semibold text-white/80 mb-3">Operações recentes</h2>
 
@@ -1032,6 +1437,11 @@ export default function DetalheInvestimentoPage() {
             </div>
           )}
         </section>
+          </Quadro>
+        )
+
+        return null
+      })}
       </div>
 
       {editandoNota && (
@@ -1082,7 +1492,16 @@ function ItemCaracteristica({ rotulo, valor, cor }: { rotulo: string; valor: str
 }
 
 // Caixa de um termo da "conta" do Magic Number (ex.: "R$ 60,47 ÷ R$ 0,60 = 101 cotas").
-function CaixaMagicNumber({ valor, rotulo, destaque }: { valor: string; rotulo: string; destaque?: boolean }) {
+function CaixaMagicNumber({ valor, rotulo, destaque, delta }: {
+  valor: string; rotulo: string; destaque?: boolean
+  // Variação % em relação ao valor atual (antes da simulação) — mostra seta
+  // pra cima/baixo + o %. Por padrão subir = bom (verde), descer = ruim
+  // (vermelho); `inverso` troca isso (ex.: PM subir é ruim, não bom).
+  delta?: { pct: number; inverso?: boolean }
+}) {
+  const corDelta = !delta || delta.pct === 0
+    ? MUTED
+    : (delta.inverso ? delta.pct < 0 : delta.pct > 0) ? '#00c896' : '#ff5c7a'
   return (
     <div className="flex-1 min-w-[110px] rounded-lg px-3 py-3 text-center border"
       style={destaque
@@ -1090,6 +1509,12 @@ function CaixaMagicNumber({ valor, rotulo, destaque }: { valor: string; rotulo: 
         : { background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.1)' }}>
       <p className="text-[15px] font-bold" style={{ color: destaque ? '#00c896' : '#fff' }}>{valor}</p>
       <p className="text-[11px] mt-1 leading-tight" style={{ color: MUTED }}>{rotulo}</p>
+      {delta && (
+        <p className="text-[11px] mt-1 flex items-center justify-center gap-0.5 font-semibold" style={{ color: corDelta }}>
+          {delta.pct > 0 ? <TrendingUp size={11} /> : delta.pct < 0 ? <TrendingDown size={11} /> : <Minus size={11} />}
+          {Math.abs(delta.pct).toFixed(2).replace('.', ',')}%
+        </p>
+      )}
     </div>
   )
 }
@@ -1223,26 +1648,45 @@ function projecaoVencimento(
   return { valor: valorInvestido * Math.pow(1 + taxaAnual, anos) }
 }
 
-function CaracteristicasAtivo({ ativo, valorInvestido }: { ativo: InvestimentoAtivo; valorInvestido: number }) {
+function CaracteristicasAtivo({ ativo, valorInvestido, onSalvarCategoria, salvandoCategoria }: {
+  ativo: InvestimentoAtivo; valorInvestido: number
+  onSalvarCategoria: (categoria: CategoriaFII) => void
+  salvandoCategoria: boolean
+}) {
   const ehRF  = ativo.tipo_ativo === 'RENDA_FIXA' || ativo.tipo_ativo === 'TESOURO_DIRETO'
   const ehFII = ativo.tipo_ativo === 'FII'
   if (!ehRF && !ehFII) return null
 
   if (ehFII) {
-    if (!ativo.fii_categoria) return null
-    const info = FII_CATEGORIA_INFO[ativo.fii_categoria]
+    const info = ativo.fii_categoria ? FII_CATEGORIA_INFO[ativo.fii_categoria] : null
     return (
-      <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-4">
-        <h2 className="text-[14px] font-semibold text-white/80 mb-3">
-          Categoria do fundo: <span style={{ color: TIPO_ATIVO_COR.FII }}>{info.label}</span>
-        </h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <ItemCaracteristica rotulo="O que compra" valor={info.compra} />
-          <ItemCaracteristica rotulo="Fonte de lucro" valor={info.fonteLucro} />
-          <ItemCaracteristica rotulo="Nível de risco" valor={info.risco}
-            cor={info.risco.startsWith('Alto') ? '#ff5c7a' : info.risco.startsWith('Baixo') ? '#00c896' : '#f0b429'} />
-          <ItemCaracteristica rotulo="Principal vantagem" valor={info.vantagem} />
+      <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+          <h2 className="text-[14px] font-semibold text-white/80">
+            Categoria do fundo{info && <>: <span style={{ color: TIPO_ATIVO_COR.FII }}>{info.label}</span></>}
+          </h2>
+          {/* Sem fonte automática confiável pra a maioria das categorias (só
+              FIAGRO→AGRO é garantido pela CVM, ver BUSINESS_RULES.md) — pode
+              vir errada (digitada à mão) ou vazia, então fica editável aqui
+              em vez de só no formulário "Editar ativo". */}
+          <SelectDark value={ativo.fii_categoria ?? ''} disabled={salvandoCategoria}
+            onChange={(e) => e.target.value && onSalvarCategoria(e.target.value as CategoriaFII)}
+            style={{ width: 'auto' }} className="!text-[12px] !py-1">
+            <option value="" disabled>Selecione a categoria...</option>
+            {CATEGORIAS_FII.map((c) => <option key={c} value={c}>{FII_CATEGORIA_INFO[c].label}</option>)}
+          </SelectDark>
         </div>
+        {info ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <ItemCaracteristica rotulo="O que compra" valor={info.compra} />
+            <ItemCaracteristica rotulo="Fonte de lucro" valor={info.fonteLucro} />
+            <ItemCaracteristica rotulo="Nível de risco" valor={info.risco}
+              cor={info.risco.startsWith('Alto') ? '#ff5c7a' : info.risco.startsWith('Baixo') ? '#00c896' : '#f0b429'} />
+            <ItemCaracteristica rotulo="Principal vantagem" valor={info.vantagem} />
+          </div>
+        ) : (
+          <p className="text-[12px]" style={{ color: MUTED }}>Selecione a categoria do fundo acima para ver as características.</p>
+        )}
       </section>
     )
   }
@@ -1251,7 +1695,7 @@ function CaracteristicasAtivo({ ativo, valorInvestido }: { ativo: InvestimentoAt
   if (!temAlgo) return null
   const proj = projecaoVencimento(ativo, valorInvestido)
   return (
-    <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-4">
+    <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
       <h2 className="text-[14px] font-semibold text-white/80 mb-3">Características do título</h2>
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         {ativo.rf_subtipo && (
@@ -1296,6 +1740,40 @@ function CardMini({ icone, titulo, valor, cor, sub }: {
       <div className="flex items-center gap-2 text-[13px]" style={{ color: MUTED }}>{icone}{titulo}</div>
       <p className="mt-1.5 text-[18px] font-bold" style={{ color: cor ?? '#fff' }}>{valor}</p>
       {sub && <p className="text-[12px] mt-0.5" style={{ color: MUTED }}>{sub}</p>}
+    </div>
+  )
+}
+
+// Envelope arrastável de um quadro da página (ver useOrdemReordenavel) — usa
+// a variante "outline" porque o conteúdo de cada quadro já tem sua própria
+// borda (`section`/`div` com `border border-white/10`); um contorno por fora
+// realça o arraste sem competir com essa borda interna.
+function Quadro({ dragHandleProps, dropTargetProps, contorno, largura, onToggleLargura, children }: {
+  dragHandleProps: React.HTMLAttributes<HTMLSpanElement>
+  dropTargetProps: React.HTMLAttributes<HTMLDivElement>
+  contorno: string
+  // 'total' ocupa as 2 colunas da grid (lg:col-span-2); 'metade' ocupa 1 só,
+  // ficando lado a lado com outro quadro em telas largas.
+  largura: 'total' | 'metade'
+  onToggleLargura: () => void
+  children: ReactNode
+}) {
+  return (
+    <div data-quadro-arrastavel {...dropTargetProps}
+      className={`relative rounded-xl transition-shadow duration-150 ${largura === 'total' ? 'lg:col-span-2' : ''} ${contorno}`}>
+      {/* Canto superior ESQUERDO, sobre a borda do quadro (não dentro do
+          padding) — fica antes/acima do título, à esquerda, e não compete com
+          botões que alguns quadros já têm no canto direito do próprio
+          cabeçalho (ex.: "+ dividendos", paginação de "Últimos dividendos"). */}
+      <span className="absolute -top-2 -left-2 z-10 flex items-center gap-0.5 rounded-full border border-white/10 bg-[#141a2c] p-1 shadow-sm">
+        <AlcaArrastar {...dragHandleProps} />
+        <button type="button" onClick={onToggleLargura}
+          title={largura === 'total' ? 'Usar meia largura (lado a lado com outro quadro)' : 'Usar largura total'}
+          className="flex items-center justify-center text-white/50 hover:text-white/90">
+          {largura === 'total' ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
+        </button>
+      </span>
+      {children}
     </div>
   )
 }

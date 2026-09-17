@@ -9,6 +9,7 @@ import {
   ativoExiste,
 } from "./shared.ts";
 import { resolverNomes, rebuildHistoricoRF } from "./mercado.ts";
+import { buscarDadosCvmPorTicker } from "./cvm.ts";
 
 export async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
   const id = extrairId(req, "ativos");
@@ -93,6 +94,8 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
       rf_garantia_fgc: body.rf_garantia_fgc ?? null,
       rf_isento_ir:    body.rf_isento_ir ?? null,
       fii_categoria:   body.fii_categoria ?? null,
+      fii_vp:          body.fii_vp ?? null,
+      fii_vp_origem:   body.fii_vp != null ? "MANUAL" : null,
       acoes_subtipo:   body.acoes_subtipo ?? null,
       cripto_rendimento_aa: body.cripto_rendimento_aa ?? null,
       cripto_rendimento_inicio: body.cripto_rendimento_inicio ?? null,
@@ -107,7 +110,29 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
       logError("Criar ativo", error); return erro(error.message);
     }
     logSuccess("Ativo criado", { id: data.id });
-    return json({ dados: data }, 201);
+
+    // FII novo: busca o VP (+segmento/mandato/cotistas/DY do mês) na CVM já
+    // no cadastro, best-effort — sem isso o usuário só veria o P/VP depois do
+    // cron semanal. Nunca falha o cadastro: erro de rede/parse fica só logado
+    // (buscarDadosCvmPorTicker já engole a exceção). A CVM tem prioridade
+    // sobre um VP manual informado no mesmo cadastro (mesma regra do cron).
+    let ativoFinal = data;
+    if (data.tipo_ativo === "FII") {
+      const achado = await buscarDadosCvmPorTicker(data.ticker);
+      if (achado) {
+        const { data: atualizado } = await c.from("inv_ativos").update({
+          fii_vp: achado.vp, fii_vp_origem: "CVM", fii_vp_atualizado_em: achado.mesReferencia,
+          fii_segmento: achado.segmento, fii_mandato: achado.mandato,
+          fii_num_cotistas: achado.numCotistas, fii_dy_mes_cvm: achado.dyMesPct,
+          // Achado via FIAGRO: categoria é AGRO por definição do dataset —
+          // sobrescreve o que veio no body (provavelmente vazio/OUTRO, já
+          // que o enum não tinha AGRO até agora).
+          ...(achado.fonte === "FIAGRO" ? { fii_categoria: "AGRO" } : {}),
+        }).eq("id", data.id).select().single();
+        if (atualizado) ativoFinal = atualizado;
+      }
+    }
+    return json({ dados: ativoFinal }, 201);
   }
 
   if (m === "PUT" && id) {
@@ -140,11 +165,21 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
       "questionario_respostas", "ativo_pai",
       "rf_subtipo", "rf_indexador", "rf_indice", "rf_percentual_indice",
       "rf_taxa_fixa", "rf_limite_faixa", "rf_percentual_indice_2", "rf_taxa", "rf_emissor",
-      "rf_vencimento", "rf_garantia_fgc", "rf_isento_ir", "fii_categoria",
+      "rf_vencimento", "rf_garantia_fgc", "rf_isento_ir", "fii_categoria", "fii_vp",
       "acoes_subtipo", "cripto_rendimento_aa", "cripto_rendimento_inicio",
       "cripto_rendimento_periodicidade", "cotacao_automatica",
     ]);
     if (typeof campos.ticker === "string") campos.ticker = campos.ticker.trim().toUpperCase();
+    // Usuário editando o VP à mão (campo "Valor patrimonial por cota" do
+    // DrawerAtivo) — marca a origem como MANUAL. O cron semanal da CVM
+    // (cvm.ts) sobrescreve para "CVM" assim que achar o fundo lá; PUT não
+    // dispara busca síncrona (só o cadastro faz isso — ver POST acima),
+    // pra não pagar o custo de baixar/parsear o ZIP da CVM numa edição
+    // qualquer (ex.: só mudar a nota) de um FII já cadastrado.
+    if ("fii_vp" in campos) {
+      campos.fii_vp_origem = campos.fii_vp != null ? "MANUAL" : null;
+      campos.fii_vp_atualizado_em = null;
+    }
 
     // Checa o par faixa/percentual2 no estado FINAL (existente + alterações),
     // não só no body — um PUT parcial que só mexe num dos dois campos ainda
@@ -331,6 +366,9 @@ export function validarCamposRF(body: Record<string, unknown>): string | null {
   }
   if (body.fii_categoria != null && !CATEGORIAS_FII.includes(String(body.fii_categoria))) {
     return `fii_categoria inválida: ${CATEGORIAS_FII.join(" | ")}`;
+  }
+  if (body.fii_vp != null && (typeof body.fii_vp !== "number" || !Number.isFinite(body.fii_vp) || body.fii_vp <= 0)) {
+    return "fii_vp deve ser um número > 0";
   }
   if (body.acoes_subtipo != null && !SUBTIPOS_ACOES.includes(String(body.acoes_subtipo))) {
     return `acoes_subtipo inválido: ${SUBTIPOS_ACOES.join(" | ")}`;

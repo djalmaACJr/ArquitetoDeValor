@@ -8,6 +8,7 @@ import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
 import { useInvestimentosAlocacao, type AlocacaoInput } from '../hooks/useInvestimentosDashboard'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
+import { useBackfillHistorico } from '../hooks/useInvestimentosHistorico'
 import { useUsuarioPerfil } from '../hooks/useUsuarioPerfil'
 import { useInvPesos } from '../hooks/useInvPesos'
 import { useResumoAposentadoria } from '../hooks/useResumoAposentadoria'
@@ -730,8 +731,11 @@ function tesouroDespadronizado(a: InvestimentoAtivo): boolean {
 
 function SecaoManutencaoAtivos({ onToast }: { onToast: (m: string) => void }) {
   const { ativos, atualizarAtivos, normalizarTesouro } = useInvestimentosAtivos()
+  const { preencherTodos } = useBackfillHistorico()
   const [atualizando, setAtualizando] = useState(false)
   const [normalizando, setNormalizando] = useState(false)
+  const [recalculando, setRecalculando] = useState(false)
+  const [progressoRecalculo, setProgressoRecalculo] = useState<{ feito: number; total: number } | null>(null)
 
   const precisaAtualizarTickets = useMemo(() => ativos.some(ticketIncompleto), [ativos])
   const precisaNormalizarTesouro = useMemo(() => ativos.some(tesouroDespadronizado), [ativos])
@@ -761,18 +765,33 @@ function SecaoManutencaoAtivos({ onToast }: { onToast: (m: string) => void }) {
       : `${d.renomeados} título(s) padronizado(s)${ign}`)
   }
 
-  if (!precisaAtualizarTickets && !precisaNormalizarTesouro) {
-    return (
-      <Secao icone={<Wrench size={16} />} titulo="Manutenção de ativos"
-        subtitulo="Correções automáticas de nome/ticker. Só aparecem aqui quando há algo pendente.">
-        <p className="text-[12.5px]" style={{ color: VERDE }}>Tudo em dia — nenhuma correção pendente.</p>
-      </Secao>
-    )
+  // Reconstrói os snapshots mensais de TODOS os ativos válidos (mesma
+  // restrição de `preencherTodos`: pula quem tem cotacao_automatica=false).
+  // Diferente dos outros dois botões, não tem detecção local de "precisa
+  // rodar" — sobrescreve qualquer mês cujo valor recalculado hoje difira do
+  // já gravado, então fica sempre visível (não só quando algo é detectado).
+  async function handleRecalcularHistorico() {
+    if (recalculando) return
+    setRecalculando(true)
+    setProgressoRecalculo(null)
+    const res = await preencherTodos({
+      onProgress: (feito, total) => setProgressoRecalculo({ feito, total }),
+    })
+    setRecalculando(false)
+    setProgressoRecalculo(null)
+    if (!res.ok) { onToast(res.erro ?? 'Erro ao recalcular histórico'); return }
+    const n = res.dados?.meses_gravados ?? 0
+    onToast(n === 0
+      ? 'Histórico já estava em dia — nada mudou.'
+      : `Histórico recalculado — ${n} mês(es) atualizado(s) em ${res.dados?.ativos_processados ?? 0} ativo(s).`)
   }
 
   return (
     <Secao icone={<Wrench size={16} />} titulo="Manutenção de ativos"
-      subtitulo="Correções automáticas de nome/ticker, exibidas só quando há algo pendente.">
+      subtitulo="Correções automáticas de nome/ticker/histórico. As 2 primeiras só aparecem quando há algo pendente; a de histórico fica sempre disponível.">
+      {!precisaAtualizarTickets && !precisaNormalizarTesouro && (
+        <p className="text-[12.5px] mb-2" style={{ color: VERDE }}>Tudo em dia — nenhuma correção de nome/ticket pendente.</p>
+      )}
       <div className="flex items-center gap-2 flex-wrap">
         {precisaAtualizarTickets && (
           <button onClick={handleAtualizarAtivos} disabled={atualizando}
@@ -790,6 +809,14 @@ function SecaoManutencaoAtivos({ onToast }: { onToast: (m: string) => void }) {
             {normalizando ? 'Padronizando…' : 'Padronizar Tesouro'}
           </button>
         )}
+        <button onClick={handleRecalcularHistorico} disabled={recalculando}
+          title="Reconstrói os snapshots mensais (valor de mercado e quantidade) de todos os ativos — use se algum gráfico de evolução parecer errado"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium border border-white/15 text-white/90 hover:border-white/30 disabled:opacity-50">
+          <RefreshCw size={15} className={recalculando ? 'animate-spin' : ''} />
+          {recalculando
+            ? `Recalculando…${progressoRecalculo ? ` (${progressoRecalculo.feito}/${progressoRecalculo.total})` : ''}`
+            : 'Recalcular histórico'}
+        </button>
       </div>
     </Secao>
   )
