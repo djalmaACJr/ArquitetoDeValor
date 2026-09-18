@@ -589,11 +589,7 @@ export default function AssinaturasPage() {
   }
 
   // ── Render: loading ──────────────────────────────────────────
-  if (loading) return (
-    <div className="flex items-center justify-center py-24">
-      <LoadingMascote texto="Analisando histórico de transações…" size={150} />
-    </div>
-  )
+  if (loading) return <LoadingMascote texto="Analisando histórico de transações…" size={150} fullPage />
 
   const { totalMensal, totalAnual, ativas, novas, inativos, reajustadas, maior, porCat } = kpis
 

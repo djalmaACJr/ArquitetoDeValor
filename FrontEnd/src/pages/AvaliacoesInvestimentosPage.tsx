@@ -1263,7 +1263,7 @@ export default function AvaliacoesInvestimentosPage() {
     }
   }, [carregandoIA, loadingAtivos, loadingAval, avaliacoes, ativos, configs.length, ranking]))
 
-  if (carregandoIA || loadingAtivos || loadingAval || loadingRanking) return <LoadingMascote />
+  if (carregandoIA || loadingAtivos || loadingAval || loadingRanking) return <LoadingMascote fullPage />
 
   // Gating: precisa de ≥1 mentor configurado.
   const semMentor = configs.length === 0

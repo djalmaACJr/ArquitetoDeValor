@@ -1864,11 +1864,7 @@ export default function ObjetivoDetalhe() {
     }
   }
 
-  if (loading) return (
-    <div className="flex justify-center py-20">
-      <LoadingMascote texto="Carregando objetivo…" size={120} />
-    </div>
-  )
+  if (loading) return <LoadingMascote texto="Carregando objetivo…" size={120} fullPage />
 
   if (error || !objetivo) return (
     <div className="p-6 text-center">

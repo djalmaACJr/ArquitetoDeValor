@@ -264,11 +264,7 @@ export default function ProjecaoEconomiaPage() {
   }
 
   // ── Loading ───────────────────────────────────────────────────
-  if (loading) return (
-    <div className="py-12">
-      <LoadingMascote texto="Analisando histórico financeiro…" size={150} />
-    </div>
-  )
+  if (loading) return <LoadingMascote texto="Analisando histórico financeiro…" size={150} fullPage />
 
   return (
     <div className="p-5 space-y-6">

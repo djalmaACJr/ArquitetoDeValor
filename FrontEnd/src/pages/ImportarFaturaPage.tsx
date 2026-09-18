@@ -1154,7 +1154,7 @@ function Sandbox({ id }: { id: string }) {
   })()
 
   // ── Early returns ─────────────────────────────────────────────
-  if (loading) return <div className="py-8"><LoadingMascote texto="Carregando sessão…" size={130} /></div>
+  if (loading) return <LoadingMascote texto="Carregando sessão…" size={130} fullPage />
   if (error || !sessao) return (
     <div className="p-5">
       <p className="text-[15px]" style={{ color: '#f87171' }}>{error ?? 'Sessão não encontrada.'}</p>

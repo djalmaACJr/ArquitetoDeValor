@@ -459,7 +459,7 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       )}
       {form.tipo_ativo === 'FII' && (
         <Field label="Valor patrimonial por cota — VP (opcional)">
-          <InputMoeda value={form.fii_vp} onChange={(v) => setForm({ ...form, fii_vp: v })} placeholder="R$ 0,00" />
+          <InputMoeda value={form.fii_vp ?? null} onChange={(v) => setForm({ ...form, fii_vp: v })} placeholder="R$ 0,00" />
           <p className="text-[11.5px] mt-1" style={{ color: MUTED }}>
             {editando?.fii_vp_origem === 'CVM' && editando.fii_vp_atualizado_em
               ? `Atualizado automaticamente pela CVM (referência ${editando.fii_vp_atualizado_em.slice(5, 7)}/${editando.fii_vp_atualizado_em.slice(0, 4)}). Editar aqui vale só até a próxima atualização semanal, que sobrescreve com o dado oficial quando encontra o fundo.`

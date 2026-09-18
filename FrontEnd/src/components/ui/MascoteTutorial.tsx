@@ -14,9 +14,12 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Shuffle } from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
 import MascoteDica from './MascoteDica'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useTutoriaisVistos } from '../../hooks/useTutoriaisVistos'
+import { useOcultarValores } from '../../hooks/useOcultarValores'
+import { useEscondeMascotePorScroll } from '../../hooks/useEscondeMascotePorScroll'
 import {
   falaTutorial,
   DICAS,
@@ -31,6 +34,8 @@ export default function MascoteTutorial({
   className?: string
 }) {
   const { mascote, semMascote } = useMascotePreferido()
+  const { oculto } = useOcultarValores()
+  const escondidoPorScroll = useEscondeMascotePorScroll()
   const { loading: tutoriaisLoading, foiVisto, marcarVisto } = useTutoriaisVistos()
   const chaveVisto = `tutorial-${pagina}-${mascote}`
 
@@ -68,6 +73,12 @@ export default function MascoteTutorial({
   // Modo "Nenhum mentor" — esconde balão/banner completamente.
   if (semMascote) return null
   if (estado === null) return null  // 1º paint / carregando — evita flash
+  // No Android, com valores ocultos, o mascote some de toda tela onde
+  // aparece — recupera espaço vertical numa tela pequena.
+  if (oculto && Capacitor.isNativePlatform()) return null
+  // No Android, também some assim que a página rola um pouco (volta a
+  // aparecer perto do topo) — ver useEscondeMascotePorScroll.
+  if (escondidoPorScroll) return null
 
   const exibindoTutorial = estado === 'tutorial'
   const dica = exibindoTutorial ? null : pool[estado]

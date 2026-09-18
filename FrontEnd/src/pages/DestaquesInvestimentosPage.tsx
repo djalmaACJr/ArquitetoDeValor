@@ -748,7 +748,7 @@ export default function DestaquesInvestimentosPage() {
             mantém a tela anterior visível durante trocas de filtro — ver
             useInvestimentosDestaques) — então esse spinner de página cheia só
             aparece uma vez, não a cada troca de período/categoria/conta. */}
-        {loading ? <LoadingMascote /> : ativos.length === 0 ? (
+        {loading ? <LoadingMascote fullPage /> : ativos.length === 0 ? (
           <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
             <p className="text-white font-medium">Sem ativos pra rankear</p>
             <p className="text-[13px] mt-1" style={{ color: MUTED }}>

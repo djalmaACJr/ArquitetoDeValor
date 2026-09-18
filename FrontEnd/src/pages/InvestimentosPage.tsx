@@ -841,7 +841,7 @@ export default function InvestimentosPage() {
     }
   }, [loading, dashboard, ranking, proventos12m, contaId, escopoIA, escoposIA]))
 
-  if (loading) return <LoadingMascote />
+  if (loading) return <LoadingMascote fullPage />
 
   const tipos = dashboard?.tipos ?? []
   const tiposPorChave = new Map(tipos.map((t) => [t.tipo_ativo, t]))

@@ -434,11 +434,7 @@ export default function CategoriasPage() {
           text-[17px] outline-none focus:border-av-green transition-colors placeholder:text-white/30"
         style={{ color: '#e8eaf0' }} />
 
-      {loading && (
-        <div className="py-8">
-          <LoadingMascote texto="Carregando categorias…" size={130} />
-        </div>
-      )}
+      {loading && <LoadingMascote texto="Carregando categorias…" size={130} fullPage />}
       {error   && <p className="text-[17px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
 
       {/* Lista hierárquica */}

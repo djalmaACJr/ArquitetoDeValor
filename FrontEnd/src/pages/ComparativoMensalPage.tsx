@@ -971,11 +971,7 @@ export default function ComparativoMensalPage() {
       </div>
 
       {/* Loading enquanto busca */}
-      {loading && (
-        <div className="py-12">
-          <LoadingMascote texto="Comparando períodos…" size={150} />
-        </div>
-      )}
+      {loading && <LoadingMascote texto="Comparando períodos…" size={150} fullPage />}
 
       {/* Empty state */}
       {!buscado && !loading && (

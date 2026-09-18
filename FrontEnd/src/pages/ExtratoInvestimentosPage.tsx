@@ -445,7 +445,7 @@ export default function ExtratoInvestimentosPage() {
         )}
       </div>
 
-      {loading ? <LoadingMascote /> : error ? (
+      {loading ? <LoadingMascote fullPage /> : error ? (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-[13px] text-red-300">{error}</div>
       ) : (
         <>

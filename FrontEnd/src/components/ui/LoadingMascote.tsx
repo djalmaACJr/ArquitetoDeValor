@@ -20,6 +20,12 @@ interface PropsBase {
   texto?:     string
   size?:      number
   className?: string
+  /** Centraliza verticalmente no espaço disponível (min-h-[60vh]) — usar
+   *  quando o loading substitui a página inteira. Sem isso, o mascote fica
+   *  colado no topo (só o `w-full` centraliza na horizontal). Não usar
+   *  quando o chamador já controla a altura da própria caixa (ex.: um
+   *  `h-64` fixo), senão o mascote estoura essa altura. */
+  fullPage?:  boolean
 }
 
 // Mascotes que já têm WebM de loading gerado em /public/mascotes/.
@@ -66,10 +72,15 @@ function Conteudo({
   texto = 'Carregando…',
   size = 120,
   className = '',
+  fullPage = false,
 }: PropsBase & { nome: MascoteNome }) {
   const temWebM = COM_WEBM.includes(nome)
   return (
-    <div className={`flex flex-col items-center justify-center gap-3 py-6 ${className}`}>
+    // `w-full` — centraliza sozinho na página, mesmo quando o chamador só
+    // envolve isso num <div> comum (block, largura cheia) em vez de um
+    // wrapper com `flex justify-center` próprio. `fullPage` soma altura
+    // mínima (min-h-[60vh]) pra centralizar verticalmente também.
+    <div className={`flex flex-col items-center justify-center gap-3 py-6 w-full ${fullPage ? 'min-h-[60vh]' : ''} ${className}`}>
       {temWebM ? (
         <CenaWebM nome={nome} size={size} />
       ) : (

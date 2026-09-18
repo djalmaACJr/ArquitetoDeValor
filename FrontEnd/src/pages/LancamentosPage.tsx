@@ -1098,11 +1098,7 @@ export default function LancamentosPage() {
         ))}
       </div>
 
-      {loading && !buscaMultiMes && (
-        <div className="py-8">
-          <LoadingMascote texto="Carregando lançamentos…" size={130} />
-        </div>
-      )}
+      {loading && !buscaMultiMes && <LoadingMascote texto="Carregando lançamentos…" size={130} fullPage />}
       {carregandoBusca && (
         <div className="flex items-center justify-center gap-3 py-4">
           <span className="text-[17px]" style={{ color: '#8b92a8' }}>

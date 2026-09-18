@@ -115,9 +115,7 @@ export default function ObjetivosPage() {
       {/* Conteúdo */}
       <div data-tutorial="objetivos-lista">
       {loading ? (
-        <div className="flex justify-center py-20">
-          <LoadingMascote texto="Carregando objetivos…" size={120} />
-        </div>
+        <LoadingMascote texto="Carregando objetivos…" size={120} fullPage />
       ) : error ? (
         <p className="text-center py-16 text-red-400 text-[14px]">{error}</p>
       ) : objetivos.length === 0 ? (

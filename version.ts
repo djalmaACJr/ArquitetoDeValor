@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "6.2.0"
+export const APP_VERSION = "6.3.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -16,7 +16,7 @@ export const getVersionInfo = () => ({
   },
   current: {
     level: "minor",
-    description: "Rosca 'Ativos por tipo' em Meus ativos; filtro de categoria com múltipla seleção e comparação por categoria (linha no gráfico + bloco na tabela) no quadro Rentabilidade dos Destaques, com realce ao passar o mouse na legenda; manutenção de ativos (atualizar tickets/padronizar Tesouro) movida para Configurações e exibida só quando necessário; 'Somente com valor' ativo por padrão em Meus ativos"
+    description: "Valor patrimonial por cota (VP) de FIIs/FIAGROs atualizado automaticamente via CVM, com categoria 'Agro'; Magic Number do FII e simulação de compra/venda de cotas na página do ativo; questionário de perfil de investidor revisado"
   }
 })
 

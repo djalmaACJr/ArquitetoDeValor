@@ -655,7 +655,7 @@ export default function DetalheInvestimentoPage() {
     return { custo, mercado, ganho: mercado - custo, dividendos: divs, usd }
   }, [ehMoedaEstrangeira, posicoes, historico, dividendos, taxaEm, ptaxAtual])
 
-  if (loading) return <LoadingMascote />
+  if (loading) return <LoadingMascote fullPage />
   if (error || !ativo) {
     return (
       <div className="p-6 max-w-4xl mx-auto">
@@ -1182,8 +1182,11 @@ export default function DetalheInvestimentoPage() {
         )
 
         // DY simulado se P/VP = 1 — só para FIIs com VP cadastrado e algum
-        // dividendo por cota disponível.
-        if (chave === 'dy_yoc') return dySimuladoPvp1 && (
+        // dividendo por cota disponível. `dySimuladoPvp1` só existe quando
+        // `magicNumberFII` também existe (mesmo pré-requisito de FII com
+        // cotação); repetir a checagem aqui só ajuda o TS a propagar o
+        // non-null pro bloco de simulação de compra/venda mais abaixo.
+        if (chave === 'dy_yoc') return dySimuladoPvp1 && magicNumberFII && (
           <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
             largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
           <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">

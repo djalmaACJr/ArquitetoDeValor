@@ -270,11 +270,7 @@ export default function ContasPage() {
         <MascoteTutorial pagina="contas" />
       </div>
 
-      {loading && (
-        <div className="py-8">
-          <LoadingMascote texto="Carregando contas…" size={130} />
-        </div>
-      )}
+      {loading && <LoadingMascote texto="Carregando contas…" size={130} fullPage />}
       {error   && <p className="text-[17px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}
 
       {!loading && !error && contas.length > 0 && (

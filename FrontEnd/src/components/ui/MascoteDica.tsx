@@ -11,9 +11,12 @@
 // Clicar no mascote abre o chat com a IA (ChatMascote).
 
 import { useState } from 'react'
+import { Capacitor } from '@capacitor/core'
 import Mascote, { srcMascote, type MascoteNome, type MascotePose } from './Mascote'
 import ChatMascote from './ChatMascote'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
+import { useOcultarValores } from '../../hooks/useOcultarValores'
+import { useEscondeMascotePorScroll } from '../../hooks/useEscondeMascotePorScroll'
 
 export default function MascoteDica({
   nome,
@@ -37,6 +40,8 @@ export default function MascoteDica({
   const [imgFalhou, setImgFalhou] = useState(false)
   const [chatAberto, setChatAberto] = useState(false)
   const { apelidoDe, semMascote } = useMascotePreferido()
+  const { oculto } = useOcultarValores()
+  const escondidoPorScroll = useEscondeMascotePorScroll()
   // Rede de segurança: se `nome`/`pose` mudar (ex.: nova dica sorteada),
   // tenta carregar de novo em vez de ficar escondido por causa de uma
   // falha antiga de uma pose diferente (achado real: o avatar do mentor
@@ -51,6 +56,14 @@ export default function MascoteDica({
     setImgFalhou(false)
   }
   if (imgFalhou) return null
+
+  // No Android, com valores ocultos, o mascote some de toda tela onde
+  // aparece — recupera espaço vertical numa tela pequena (o header ali
+  // não colapsa mais sozinho nessa plataforma, ver RelatoriosPage).
+  if (oculto && Capacitor.isNativePlatform()) return null
+  // No Android, também some assim que a página rola um pouco (volta a
+  // aparecer perto do topo) — ver useEscondeMascotePorScroll.
+  if (escondidoPorScroll) return null
 
   const apelido = apelidoDe(nome)
 

@@ -1,5 +1,6 @@
 // src/pages/RelatoriosPage.tsx
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { ChevronDown, ChevronRight, ChevronUp, Download, RefreshCw, Filter, Pencil } from 'lucide-react'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import LoadingMascote from '../components/ui/LoadingMascote'
@@ -88,7 +89,7 @@ function gerarMeses(inicio: string, fim: string): string[] {
 // -- Linha expansivel -------------------------------------------
 function LinhaGrupo({
   grupo, meses, oculto, onCelulaClick,
-  aberto, onToggleAberto, expandidosSubs, onToggleSub,
+  aberto, onToggleAberto, expandidosSubs, onToggleSub, larguraCategoria,
 }: {
   grupo: GrupoPai
   meses: string[]
@@ -98,6 +99,7 @@ function LinhaGrupo({
   onToggleAberto: () => void
   expandidosSubs: Set<string>
   onToggleSub: (key: string) => void
+  larguraCategoria: number
 }) {
   const cor = grupo.tipo === 'RECEITA' ? '#00c896' : '#f87171'
   const toggleSub = onToggleSub
@@ -110,12 +112,15 @@ function LinhaGrupo({
         className="border-b border-white/5 hover:bg-white/[0.03] transition-colors cursor-pointer"
         style={{ background: 'rgba(255,255,255,0.02)' }}
       >
-        <td className="px-4 py-2.5 sticky left-0 z-10" style={{ background: 'inherit', minWidth: 220 }}>
-          <div className="flex items-center gap-2">
+        {/* Sólido, não `inherit` — a coluna fica `sticky` sobre as colunas de
+            mês que passam por baixo dela ao rolar a página pro lado (mobile);
+            um fundo transparente deixa os valores por baixo transparecerem. */}
+        <td className="px-4 py-2.5 sticky left-0 z-10" style={{ background: '#1a1f2e', width: larguraCategoria, minWidth: larguraCategoria }}>
+          <div className="flex items-center gap-2 min-w-0">
             <span className="w-4 h-4 flex items-center justify-center flex-shrink-0" style={{ color: '#8b92a8' }}>
               {aberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
             </span>
-            <span className="text-[15px] font-bold uppercase tracking-wider" style={{ color: cor }}>
+            <span className="text-[15px] font-bold uppercase tracking-wider truncate" style={{ color: cor }}>
               {grupo.nome}
             </span>
           </div>
@@ -155,8 +160,8 @@ function LinhaGrupo({
         return (
           <Fragment key={subKey}>
             <tr className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
-              <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', minWidth: 220 }}>
-                <div className="flex items-center gap-2 pl-3">
+              <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', width: larguraCategoria, minWidth: larguraCategoria }}>
+                <div className="flex items-center gap-2 pl-3 min-w-0">
                   <span
                     className="w-4 h-4 flex items-center justify-center flex-shrink-0 cursor-pointer"
                     style={{ color: '#4a5168' }}
@@ -169,7 +174,7 @@ function LinhaGrupo({
                   </span>
                   <span
                     onClick={temDescricoes ? () => toggleSub(subKey) : undefined}
-                    className={`text-[15px] ${temDescricoes ? 'cursor-pointer hover:underline' : ''}`}
+                    className={`text-[15px] truncate ${temDescricoes ? 'cursor-pointer hover:underline' : ''}`}
                     style={{ color: '#c5cad8' }}
                   >
                     {sub.categoria_nome}
@@ -211,8 +216,9 @@ function LinhaGrupo({
                   className="border-b border-white/[0.02] transition-colors"
                   style={{ background: 'rgba(255,255,255,0.008)' }}
                 >
-                  <td className="px-4 py-1.5 sticky left-0 z-10" style={{ background: 'inherit', minWidth: 220 }}>
-                    <div className="flex items-center gap-2 pl-10">
+                  {/* Sólido — mesma razão da linha pai acima (coluna sticky). */}
+                  <td className="px-4 py-1.5 sticky left-0 z-10" style={{ background: '#1a1f2e', width: larguraCategoria, minWidth: larguraCategoria }}>
+                    <div className="flex items-center gap-2 pl-10 min-w-0">
                       <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: '#4a5168' }}/>
                       <span className="text-[14px] truncate" style={{ color: '#8b92a8' }}>{d.descricao}</span>
                     </div>
@@ -243,8 +249,8 @@ function LinhaGrupo({
 
       {aberto && (
         <tr className="border-b border-white/10">
-          <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', minWidth: 220 }}>
-            <span className="text-[14px] font-bold uppercase tracking-widest pl-6" style={{ color: cor, opacity: 0.7 }}>
+          <td className="px-4 py-2 sticky left-0 z-10" style={{ background: '#0e1320', width: larguraCategoria, minWidth: larguraCategoria }}>
+            <span className="text-[14px] font-bold uppercase tracking-widest pl-6 truncate block" style={{ color: cor, opacity: 0.7 }}>
               Total - {grupo.nome}
             </span>
           </td>
@@ -328,6 +334,9 @@ export default function RelatoriosPage() {
   }, [])
 
   useEffect(() => {
+    // No app Android o header sticky não colapsa sozinho ao rolar (some
+    // espaço demais numa tela pequena e sem aviso) — só via botão manual.
+    if (Capacitor.isNativePlatform()) return
     const sentinel = sentinelRef.current
     if (!sentinel) return
     let scrollRoot: Element | null = sentinel.parentElement
@@ -382,6 +391,31 @@ export default function RelatoriosPage() {
   const toggleSub = useCallback((key: string) => setSubsExpandidos(prev => {
     const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n
   }), [])
+
+  // ── Largura da coluna Categoria — redimensionável arrastando a borda
+  // direita do cabeçalho; persistida em localStorage entre sessões. ──
+  const [larguraCategoria, setLarguraCategoria] = useState(() => {
+    const salvo = Number(localStorage.getItem('arqvalor:relatorios_largura_categoria'))
+    return salvo >= 160 && salvo <= 480 ? salvo : 220
+  })
+  const iniciarRedimensionarCategoria = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = larguraCategoria
+    let atual = startWidth
+    const onMove = (ev: PointerEvent) => {
+      atual = Math.min(480, Math.max(160, startWidth + (ev.clientX - startX)))
+      setLarguraCategoria(atual)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      localStorage.setItem('arqvalor:relatorios_largura_categoria', String(atual))
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [larguraCategoria])
+
   const [drillDown,   setDrillDown]   = useState<{
     titulo: string
     categoria_id: string | null
@@ -803,7 +837,7 @@ export default function RelatoriosPage() {
         ...linhaMes(Object.fromEntries(meses.map(m => [m, (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0)]))), _style: 'total' })
     } else {
       for (const grupo of grupos) {
-        const grupoAberto = gruposAbertos.has(grupo.nome)
+        const grupoAberto = gruposAbertos.has(`${grupo.tipo}:${grupo.nome}`)
         rows.push({ cat: grupo.nome, total: grupo.total, media: media(grupo.total),
           ...linhaMes(grupo.totalPorMes), _style: 'group' })
 
@@ -812,7 +846,7 @@ export default function RelatoriosPage() {
             rows.push({ cat: `  ${sub.categoria_nome}`, total: sub.total, media: media(sub.total),
               ...linhaMes(sub.porMes) })
 
-            const subKey = sub.categoria_id ?? sub.categoria_nome
+            const subKey = `${grupo.tipo}:${sub.categoria_id ?? sub.categoria_nome}`
             if (subsExpandidos.has(subKey)) {
               for (const d of [...sub.porDescricao].sort((a, b) => b.total - a.total)) {
                 rows.push({ cat: `    ${d.descricao}`, total: d.total, media: media(d.total),
@@ -1286,26 +1320,40 @@ export default function RelatoriosPage() {
               quebra o sticky vertical. Em viewports estreitas, a página
               inteira (<main>) rola horizontalmente — não a tabela. */}
           {!vistaPareto && <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl" data-tutorial="relatorios-tabela">
-              <table className="w-full border-collapse" style={{ minWidth: 600 }}>
+              {/* table-layout: fixed — com `auto` (padrão), o navegador ignora a
+                  largura definida da coluna Categoria sempre que o texto de
+                  alguma célula (nome de categoria/subcategoria) "pede" mais
+                  espaço, mesmo com truncate; com `fixed`, as larguras do
+                  cabeçalho é que mandam, o que o redimensionamento
+                  (larguraCategoria) exige pra funcionar de verdade. */}
+              <table className="w-full border-collapse" style={{ minWidth: 600, tableLayout: 'fixed' }}>
                 {/* Cabecalho — sticky logo abaixo da barra de filtros
                     (altura medida via ResizeObserver, ver alturaBarraFiltros). */}
                 <thead className="sticky z-30" style={{ top: alturaBarraFiltros }}>
                   <tr style={{ background: '#1a1f2e' }}>
                     <th className="px-4 py-3 text-left sticky left-0 z-40 border-b border-white/10"
-                      style={{ background: '#1a1f2e', minWidth: 220 }}>
+                      style={{ background: '#1a1f2e', width: larguraCategoria, minWidth: larguraCategoria }}>
                       <span className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Categoria</span>
+                      {/* Alça de redimensionamento — arrasta pra ajustar a largura
+                          da coluna Categoria em toda a tabela (ver larguraCategoria). */}
+                      <div
+                        onPointerDown={iniciarRedimensionarCategoria}
+                        title="Arraste para redimensionar"
+                        className="absolute top-0 right-0 bottom-0 w-2 cursor-col-resize hover:bg-white/15 active:bg-white/25 transition-colors"
+                        style={{ touchAction: 'none' }}
+                      />
                     </th>
                     <th className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
-                      style={{ background: '#1a1f2e' }}>
+                      style={{ background: '#1a1f2e', width: 130 }}>
                       <span className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Total</span>
                     </th>
                     <th className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
-                      style={{ background: '#1a1f2e', minWidth: 96 }}>
+                      style={{ background: '#1a1f2e', width: 125 }}>
                       <span className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>Média/mês</span>
                     </th>
                     {meses.map(m => (
                       <th key={m} className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
-                        style={{ minWidth: 100, background: '#1a1f2e' }}>
+                        style={{ width: 100, background: '#1a1f2e' }}>
                         <span className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>
                           {mesLabel(m)}
                         </span>
@@ -1320,7 +1368,7 @@ export default function RelatoriosPage() {
                     className="cursor-pointer hover:bg-white/[0.02] transition-colors"
                     onClick={() => setCredAberto(a => !a)}
                   >
-                    <td colSpan={3 + meses.length} className="px-4 pt-4 pb-2 sticky left-0">
+                    <td colSpan={3 + meses.length} className="px-4 pt-4 pb-2">
                       <div className="flex items-center gap-2">
                         <span style={{ color: '#00c896' }}>
                           {credAberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
@@ -1333,7 +1381,7 @@ export default function RelatoriosPage() {
                   {credAberto && grupos.filter(g => g.tipo === 'RECEITA').map((g, i) => (
                     <LinhaGrupo
                       key={`${i}-${nivel}`}
-                      grupo={g} meses={meses} oculto={oculto}
+                      grupo={g} meses={meses} oculto={oculto} larguraCategoria={larguraCategoria}
                       aberto={gruposAbertos.has(`${g.tipo}:${g.nome}`)}
                       onToggleAberto={() => toggleGrupo(`${g.tipo}:${g.nome}`)}
                       expandidosSubs={subsExpandidos}
@@ -1342,10 +1390,12 @@ export default function RelatoriosPage() {
                   ))}
                   {/* Total Créditos — sempre visível */}
                   <tr style={{ background: nivel === 1 ? 'rgba(0,200,150,0.1)' : 'rgba(0,200,150,0.06)' }}>
+                    {/* Sólido (mesma cor, já misturada com o fundo do card) —
+                        coluna sticky, ver comentário na linha pai acima. */}
                     <td className="px-4 sticky left-0 z-10"
-                      style={{ background: nivel === 1 ? 'rgba(0,200,150,0.1)' : 'rgba(0,200,150,0.06)', minWidth: 220,
+                      style={{ background: nivel === 1 ? '#173038' : '#182934', width: larguraCategoria, minWidth: larguraCategoria,
                                paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
-                      <span className={`font-bold uppercase tracking-widest pl-1 ${nivel === 1 ? 'text-[16px]' : 'text-[14px]'}`}
+                      <span className={`font-bold uppercase tracking-widest pl-1 truncate block ${nivel === 1 ? 'text-[16px]' : 'text-[14px]'}`}
                         style={{ color: '#00c896' }}>
                         {nivel === 1 ? 'Créditos' : 'Total Créditos'}
                       </span>
@@ -1378,7 +1428,7 @@ export default function RelatoriosPage() {
                     className="cursor-pointer hover:bg-white/[0.02] transition-colors"
                     onClick={() => setDebAberto(a => !a)}
                   >
-                    <td colSpan={3 + meses.length} className="px-4 pt-5 pb-2 sticky left-0">
+                    <td colSpan={3 + meses.length} className="px-4 pt-5 pb-2">
                       <div className="flex items-center gap-2">
                         <span style={{ color: '#f87171' }}>
                           {debAberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
@@ -1391,7 +1441,7 @@ export default function RelatoriosPage() {
                   {debAberto && grupos.filter(g => g.tipo === 'DESPESA').map((g, i) => (
                     <LinhaGrupo
                       key={`${i}-${nivel}`}
-                      grupo={g} meses={meses} oculto={oculto}
+                      grupo={g} meses={meses} oculto={oculto} larguraCategoria={larguraCategoria}
                       aberto={gruposAbertos.has(`${g.tipo}:${g.nome}`)}
                       onToggleAberto={() => toggleGrupo(`${g.tipo}:${g.nome}`)}
                       expandidosSubs={subsExpandidos}
@@ -1400,10 +1450,11 @@ export default function RelatoriosPage() {
                   ))}
                   {/* Total Débitos — sempre visível */}
                   <tr style={{ background: nivel === 1 ? 'rgba(248,113,113,0.1)' : 'rgba(248,113,113,0.06)' }}>
+                    {/* Sólido — coluna sticky, ver comentário na linha pai acima. */}
                     <td className="px-4 sticky left-0 z-10"
-                      style={{ background: nivel === 1 ? 'rgba(248,113,113,0.1)' : 'rgba(248,113,113,0.06)', minWidth: 220,
+                      style={{ background: nivel === 1 ? '#302735' : '#272432', width: larguraCategoria, minWidth: larguraCategoria,
                                paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
-                      <span className={`font-bold uppercase tracking-widest pl-1 ${nivel === 1 ? 'text-[16px]' : 'text-[14px]'}`}
+                      <span className={`font-bold uppercase tracking-widest pl-1 truncate block ${nivel === 1 ? 'text-[16px]' : 'text-[14px]'}`}
                         style={{ color: '#f87171' }}>
                         {nivel === 1 ? 'Débitos' : 'Total Débitos'}
                       </span>
@@ -1433,9 +1484,10 @@ export default function RelatoriosPage() {
 
                   {/* -- RESULTADO -- */}
                   <tr style={{ background: 'rgba(0,200,150,0.04)' }}>
+                    {/* Sólido — coluna sticky, ver comentário na linha pai acima. */}
                     <td className="px-4 py-3 sticky left-0 z-10 border-t-2"
-                      style={{ background: 'rgba(0,200,150,0.04)', borderColor: 'rgba(0,200,150,0.2)', minWidth: 220 }}>
-                      <span className="text-[15px] font-bold uppercase tracking-widest" style={{ color: '#00c896' }}>Resultado</span>
+                      style={{ background: '#192632', borderColor: 'rgba(0,200,150,0.2)', width: larguraCategoria, minWidth: larguraCategoria }}>
+                      <span className="text-[15px] font-bold uppercase tracking-widest truncate block" style={{ color: '#00c896' }}>Resultado</span>
                     </td>
                     <td className="px-3 py-3 text-right border-t-2" style={{ borderColor: 'rgba(0,200,150,0.2)' }}>
                       <span className="text-[17px] font-bold" style={{ color: resultado >= 0 ? '#00c896' : '#f87171' }}>
@@ -1634,11 +1686,7 @@ export default function RelatoriosPage() {
       )}
 
       {/* Loading enquanto busca */}
-      {loading && (
-        <div className="py-12">
-          <LoadingMascote texto="Gerando relatório…" size={150} />
-        </div>
-      )}
+      {loading && <LoadingMascote texto="Gerando relatório…" size={150} fullPage />}
 
       {/* Estado vazio */}
       {!buscado && !loading && (

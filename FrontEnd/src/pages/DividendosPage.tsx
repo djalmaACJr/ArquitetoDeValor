@@ -184,7 +184,7 @@ export default function DividendosPage() {
     }
   }, [loading, dividendos]))
 
-  if (loading) return <LoadingMascote />
+  if (loading) return <LoadingMascote fullPage />
 
   return (
     <div className="p-5">

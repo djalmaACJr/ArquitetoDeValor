@@ -12,6 +12,7 @@ import { useAutoLogout } from '../../hooks/useAutoLogout'
 import { useSincronizarObjetivosDiario } from '../../hooks/useObjetivos'
 import { useAuth } from '../../hooks/useAuth'
 import { mesAtual } from '../../lib/utils'
+import { setEscondeMascotePorScroll } from '../../lib/scrollMascote'
 
 export default function AppLayout() {
   const qc = useQueryClient()
@@ -61,7 +62,15 @@ export default function AppLayout() {
   useEffect(() => {
     const main = mainRef.current
     if (!main) return
-    const onScroll = () => { scrollPos.current.set(chaveAtual.current, main.scrollTop) }
+    const onScroll = () => {
+      scrollPos.current.set(chaveAtual.current, main.scrollTop)
+      // No Android, some com o mascote (dica/tutorial) assim que a página
+      // rola um pouco — ele ocupa espaço demais numa tela pequena. Volta a
+      // aparecer só perto do topo.
+      if (Capacitor.isNativePlatform()) {
+        setEscondeMascotePorScroll(main.scrollTop > 24)
+      }
+    }
     main.addEventListener('scroll', onScroll, { passive: true })
     return () => main.removeEventListener('scroll', onScroll)
   }, [])

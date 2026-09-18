@@ -409,7 +409,7 @@ export default function AtivosInvestimentosPage() {
     }
   }, [loading, ativos.length, grupos, tipoFiltro, pesquisa, soComValor]))
 
-  if (loading) return <LoadingMascote />
+  if (loading) return <LoadingMascote fullPage />
 
   return (
     <div className="p-5">
