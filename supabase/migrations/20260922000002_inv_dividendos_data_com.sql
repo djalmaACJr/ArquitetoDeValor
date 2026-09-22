@@ -1,0 +1,23 @@
+-- ============================================================
+-- Data COM de proventos: última data em que o investidor precisa ter o
+-- ativo em carteira pra ter direito ao provento anunciado (depois dela o
+-- papel negocia "ex"). Capturada junto com o resto do provento no cron
+-- `dividendos-cron-br` (fonte B3, campo bruto assumido `lastDatePrior` —
+-- ver comentário em `B3CashDividend` em dividendos.ts), nullable porque
+-- proventos antigos/lançados manualmente não têm essa data. Mesmo
+-- precedente de coluna opcional preenchida só daqui pra frente já usado
+-- por `valor_por_cota` (20260625000003_inv_dividendos_valor_por_cota.sql).
+--
+-- `usuarios.datacom_avisos_vistos`: array JSONB de chaves "ticker|data_com"
+-- já dispensadas pelo usuário no aviso de login "Data COM próxima" — não é
+-- um timestamp único (como `cron_avisos_vistos_em`) porque o CONJUNTO de
+-- ativos na janela "próximos dias" muda dia a dia (itens saem quando a
+-- data passa, outros entram); um corte único esconderia um ativo novo que
+-- entrasse na janela antes do próximo "visto". Podado no cliente a cada
+-- dispensa (remove chaves cuja data_com já passou) pra não crescer
+-- indefinidamente. Não entra em backup/restore — é housekeeping de
+-- notificação, não dado financeiro (mesmo tratamento implícito de
+-- `cron_avisos_vistos_em`/`inv_dividendos_novidades`).
+-- ============================================================
+ALTER TABLE arqvalor.inv_dividendos ADD COLUMN IF NOT EXISTS data_com DATE;
+ALTER TABLE arqvalor.usuarios ADD COLUMN IF NOT EXISTS datacom_avisos_vistos JSONB;

@@ -12,9 +12,15 @@ import { Input, ModalExcluir, Toast } from '../components/ui/shared'
 import Mascote from '../components/ui/Mascote'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, CRITERIOS_QUESTAO, CRITERIO_LABEL, CRITERIO_DESCRICAO,
+  CATEGORIAS_FII, FII_CATEGORIA_INFO,
 } from '../lib/constants'
 import { provedorPorId } from '../lib/iaProvedores'
-import type { PerguntaAvaliacao, PesosCriterio, TipoAtivoInvestimento, CriterioQuestao } from '../types'
+import type { PerguntaAvaliacao, PesosCriterio, TipoAtivoInvestimento, CriterioQuestao, CategoriaFII } from '../types'
+
+// '' representa o questionário GENÉRICO de FII (vale p/ qualquer categoria
+// sem override específico) — mostrado como uma "categoria" a mais na aba.
+const CATEGORIA_FII_GENERICA = '' as const
+type CategoriaFIISel = CategoriaFII | typeof CATEGORIA_FII_GENERICA
 
 const MUTED = '#8b92a8'
 const VERDE = '#00c896'
@@ -84,6 +90,11 @@ export default function QuestionariosInvestimentosPage() {
     setTiposSig(sigTipos)
     if (tiposAlocados.length > 0 && !tiposAlocados.includes(tipoSel)) setTipoSel(tiposAlocados[0])
   }
+  // Sub-aba de categoria — só existe/importa quando tipoSel === 'FII' (um FII
+  // de Papel e um de Tijolo têm riscos opostos, então cada categoria tem seu
+  // próprio questionário). '' = genérico (vale p/ categoria sem override).
+  const [categoriaSel, setCategoriaSel] = useState<CategoriaFIISel>(CATEGORIA_FII_GENERICA)
+  const categoriaEfetiva: CategoriaFIISel = tipoSel === 'FII' ? categoriaSel : CATEGORIA_FII_GENERICA
   const [perguntas, setPerguntas] = useState<PerguntaAvaliacao[]>([])
   const [info, setInfo] = useState<{ origem: QuestionarioEfetivo['origem']; provedor: string | null; modelo: string | null; custom: boolean }>(
     { origem: 'PADRAO', provedor: null, modelo: null, custom: false })
@@ -96,16 +107,17 @@ export default function QuestionariosInvestimentosPage() {
   const [confirmarLimpar, setConfirmarLimpar] = useState(false)
   const [criterioSel, setCriterioSel] = useState<CriterioQuestao>('FUNDAMENTOS')
 
-  const custom = questionarios.find((q) => q.tipo_ativo === tipoSel)
+  const custom = questionarios.find((q) => q.tipo_ativo === tipoSel && q.fii_categoria === categoriaEfetiva)
 
-  // (Re)carrega apenas as PERGUNTAS quando troca o tipo ou quando o custom
-  // daquele tipo muda (derived-state-on-change, sync no render). Os pesos são
-  // globais e não dependem da aba. Resetar `loadedSig` para '' força recarga.
+  // (Re)carrega apenas as PERGUNTAS quando troca o tipo/categoria ou quando o
+  // custom daquela combinação muda (derived-state-on-change, sync no render).
+  // Os pesos são globais e não dependem da aba. Resetar `loadedSig` para ''
+  // força recarga.
   const [loadedSig, setLoadedSig] = useState('')
-  const sigCarga = `${tipoSel}:${custom?.updated_at ?? 'default'}:${perfil?.perfil ?? 'sem'}`
+  const sigCarga = `${tipoSel}:${categoriaEfetiva}:${custom?.updated_at ?? 'default'}:${perfil?.perfil ?? 'sem'}`
   if (sigCarga !== loadedSig) {
     setLoadedSig(sigCarga)
-    const ef = questionarioEfetivo(tipoSel, perfil?.perfil ?? null)
+    const ef = questionarioEfetivo(tipoSel, perfil?.perfil ?? null, undefined, categoriaEfetiva || null)
     setPerguntas(comIdsUnicos(ef.perguntas))
     setInfo({ origem: ef.origem, provedor: ef.ia_provedor, modelo: ef.ia_modelo, custom: ef.custom })
     setPendenteIA(null)
@@ -128,7 +140,7 @@ export default function QuestionariosInvestimentosPage() {
     setGerando(true)
     setErroIA(null)
     try {
-      const res = await gerarPorIA(tipoSel)
+      const res = await gerarPorIA(tipoSel, categoriaEfetiva)
       if (!res.ok || !res.dados) {
         const msg = res.erro ?? 'Falha ao gerar pelo Mentor. Tente novamente.'
         setErroIA(msg); onToast(msg); return
@@ -162,7 +174,7 @@ export default function QuestionariosInvestimentosPage() {
       origem: ehIA ? 'IA' : 'MANUAL',
       ia_provedor: ehIA ? pendenteIA!.provedor : null,
       ia_modelo: ehIA ? pendenteIA!.modelo : null,
-    })
+    }, categoriaEfetiva)
     setSalvando(false)
     if (res.ok) { setPendenteIA(null); setErroSalvar(null); setLoadedSig(''); onToast('Questionário salvo!') }
     else { const m = res.erro ?? 'Erro ao salvar questionário'; setErroSalvar(m); onToast(m) }
@@ -170,7 +182,7 @@ export default function QuestionariosInvestimentosPage() {
 
   async function restaurarPadrao() {
     if (!info.custom) { onToast('Este tipo já usa o questionário padrão.'); return }
-    const res = await excluir(tipoSel)
+    const res = await excluir(tipoSel, categoriaEfetiva)
     if (res.ok) { setLoadedSig(''); onToast('Restaurado para o padrão.') }
     else onToast(res.erro ?? 'Erro ao restaurar')
   }
@@ -225,7 +237,7 @@ export default function QuestionariosInvestimentosPage() {
       ) : (
         <div className="rounded-xl border border-white/10 p-4">
           <p className="text-[12.5px] mb-3" style={{ color: MUTED }}>
-            Cada tipo de ativo tem o SEU próprio questionário. As perguntas são separadas por critério (em abas) e cada resposta vale de 0 (pior) a 4 (melhor); a nota final do ativo é a média ponderada pelos “Pesos por critério” definidos em Configurações. Edite/crie as perguntas à mão ou peça ao Mentor (IA) gerar 40 questões (10 por critério).
+            Cada tipo de ativo tem o SEU próprio questionário — e para FII, cada CATEGORIA também (um fundo de Papel não tem os mesmos riscos de um de Tijolo). As perguntas são separadas por critério (em abas) e cada resposta vale de 0 (pior) a 4 (melhor); a nota final do ativo é a média ponderada pelos “Pesos por critério” definidos em Configurações. Edite/crie as perguntas à mão ou peça ao Mentor (IA) gerar 40 questões (10 por critério).
           </p>
           {/* Cabeçalho fixo (sticky): tipo, ações (Salvar no topo) e critérios — sempre visível ao rolar */}
           <div className="sticky top-0 z-10 -mx-4 px-4 pt-1 pb-2 border-b border-white/10" style={{ background: 'var(--bg-page, #0d1220)' }}>
@@ -244,10 +256,39 @@ export default function QuestionariosInvestimentosPage() {
               })}
             </div>
 
+            {/* Sub-abas de CATEGORIA — só para FII, que tem riscos bem diferentes
+                entre Tijolo/Papel/FoF/Desenvolvimento/FIAGRO. "Genérico" vale para
+                qualquer categoria sem um questionário mais específico salvo. */}
+            {tipoSel === 'FII' && (
+              <div className="mb-2">
+                <p className="text-[11.5px] mb-1.5" style={{ color: MUTED }}>
+                  Categoria do FII (cada uma pode ter o seu questionário; sem uma específica, usa o Genérico):
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {([CATEGORIA_FII_GENERICA, ...CATEGORIAS_FII] as CategoriaFIISel[]).map((cat) => {
+                    const ativo = cat === categoriaSel
+                    const label = cat === CATEGORIA_FII_GENERICA ? 'Genérico (todas)' : FII_CATEGORIA_INFO[cat].label
+                    const temCustom = questionarios.some((q) => q.tipo_ativo === 'FII' && q.fii_categoria === cat)
+                    return (
+                      <button key={cat || 'generico'} type="button" onClick={() => setCategoriaSel(cat)}
+                        className={`px-2.5 py-1 rounded-md text-[12px] font-medium border transition-colors ${
+                          ativo ? 'border-purple-400/60 bg-purple-500/15 text-white' : 'border-white/10 text-white/70 hover:border-white/25'
+                        }`}>
+                        {label}{temCustom && <span className="ml-1" style={{ color: '#b9a7ff' }} title="Tem questionário personalizado">●</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Título do questionário visível */}
             <div className="flex items-center gap-2 flex-wrap mb-2">
               <h3 className="text-[15px] font-semibold text-white">
                 Questionário de <span style={{ color: '#7da9ff' }}>{TIPO_ATIVO_LABEL[tipoSel]}</span>
+                {tipoSel === 'FII' && (
+                  <span style={{ color: MUTED }}> — {categoriaSel === CATEGORIA_FII_GENERICA ? 'Genérico' : FII_CATEGORIA_INFO[categoriaSel].label}</span>
+                )}
               </h3>
               <SeloOrigem origem={info.origem} provedor={info.provedor} modelo={info.modelo} />
               <span className="text-[12px]" style={{ color: MUTED }}>{perguntas.length} questões</span>
@@ -260,7 +301,7 @@ export default function QuestionariosInvestimentosPage() {
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#7c5cff,#5b8cff)' }}>
                 <Sparkles size={15} className={gerando ? 'animate-pulse' : ''} />
-                {gerando ? 'Gerando…' : `Pedir ao Mentor (${TIPO_ATIVO_LABEL[tipoSel]})`}
+                {gerando ? 'Gerando…' : `Pedir ao Mentor (${TIPO_ATIVO_LABEL[tipoSel]}${tipoSel === 'FII' && categoriaSel ? ` — ${FII_CATEGORIA_INFO[categoriaSel].label}` : ''})`}
               </button>
               {gerando && <span className="text-[11.5px]" style={{ color: MUTED }}>Gerando 40 questões — pode levar alguns segundos…</span>}
             </div>

@@ -383,6 +383,17 @@ export async function recomputarPosicao(c: Db, posicaoId: string): Promise<void>
     ultimaDataAplicada = String(o.data_operacao);
   }
 
+  // Arredonda pra mesma precisão da coluna (NUMERIC(20,8)) antes de comparar
+  // com zero — uma venda TOTAL (ex.: vender em 2+ lotes que somam exatamente
+  // a quantidade comprada) pode deixar um resíduo de ponto flutuante puro
+  // (ex.: 0.00000000000003 em vez de 0 exato), que sobrevive ao guard
+  // `if (qtd < 0) qtd = 0` acima (ele só zera negativo) e mantém a posição
+  // "ATIVA" com saldo praticamente zero pro resto do app (achado real: a
+  // tela de Avaliações usa `quantidade > 0` pra decidir o que é avaliável —
+  // um ativo já vendido por completo continuava aparecendo como pendente).
+  qtd = Number(qtd.toFixed(8));
+  if (qtd <= 0) { qtd = 0; custo = 0; }
+
   const { data: pos } = await c.from("inv_posicoes").select("data_compra, ativo_id, conta_id").eq("id", posicaoId).maybeSingle();
   const campos = {
     quantidade:  qtd,

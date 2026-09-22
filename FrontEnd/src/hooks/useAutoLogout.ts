@@ -7,6 +7,15 @@
 //     touchstart, scroll, click. `mousemove` foi removido de propósito
 //     (ver EVENTOS_INTERACAO) — em multi-monitor o cursor só passando
 //     por cima da janela resetava o timer e o logout nunca disparava.
+//   - No desktop, a sessão fica em localStorage COMPARTILHADO entre abas
+//     (ver "Sessão + biometria" no CLAUDE.md). Por isso um signOut() nunca é
+//     decidido por uma aba ESCONDIDA sozinha (derrubaria abas ativas em
+//     outras janelas sem ninguém pra decidir nada): ela só tenta se fechar
+//     silenciosamente (se foi aberta via window.open()) e, senão, apenas
+//     espera. Só quando o timer expira numa aba em PRIMEIRO PLANO (ou o
+//     usuário volta a olhar pra uma que expirou escondida) o hook mostra o
+//     modal "Aba inativa" (avisoFecharAba.ts / AvisoFecharAba.tsx) — aí sim,
+//     se ele não responder a tempo, cai no signOut() global (todas as abas).
 //
 // Uso: montar dentro do AppLayout (só rotas autenticadas).
 //
@@ -42,6 +51,7 @@ import { usePageState } from '../context/PageStateContext'
 import { salvarRetornoPosExpiracao } from '../lib/retornoPosExpiracao'
 import { temOperacaoLongaAtiva } from '../lib/operacaoLonga'
 import { setAviso, registrarResetInatividade } from '../lib/autoLogoutAviso'
+import { setAvisoFecharAba, registrarAcoesFecharAba } from '../lib/avisoFecharAba'
 
 // IMPORTANTE: `mousemove` foi DELIBERADAMENTE removido. Em setups
 // multi-monitor, o cursor apenas CRUZANDO a janela visível (no outro
@@ -76,6 +86,14 @@ const AVISO_MS = 60_000
 // e deslogamos na hora se o limite já passou enquanto o app estava fechado.
 const LS_ULTIMA_ATIVIDADE = 'arqvalor:ultima-atividade'
 
+// Janela de decisão do modal "Aba inativa" (ver avisoFecharAba.ts) antes de
+// cair no signOut() global. Tempo suficiente pra notar o alerta sem
+// prolongar demais uma sessão já ociosa.
+const JANELA_DECISAO_FECHAR_S = 20
+// Após clicar "Fechar esta aba": se o navegador não deixar fechar (aba não
+// aberta via window.open — caso comum), desiste e cai no signOut normal.
+const FALLBACK_FECHAR_MS = 2_500
+
 export function useAutoLogout(timeoutMinutos: number = 15): void {
   const navigate = useNavigate()
   const location = useLocation()
@@ -94,6 +112,12 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
   // ociosa em segundo plano — ver comentário em checarExpiracao(). 0 = nenhuma
   // tentativa em andamento.
   const tentandoFecharDesdeRef = useRef<number>(0)
+  // true enquanto o modal "Aba inativa" está aguardando decisão do usuário
+  // (ou o fallback de fechamento) — ver iniciarAvisoFecharAba() abaixo.
+  // Enquanto true, o tick() não deve re-disparar checarExpiracao().
+  const aguardandoDecisaoRef = useRef<boolean>(false)
+  const intervalDecisaoRef = useRef<number | null>(null)
+  const timeoutFallbackFecharRef = useRef<number | null>(null)
 
   // Snapshot "sempre atual" de rota/filtros/usuário em ref — o timer lê
   // daqui na hora da expiração sem precisar reiniciar o efeito a cada
@@ -164,36 +188,20 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       document.addEventListener(ev, marcarAtividade, { passive: true })
     }
 
-    // Executa a expiração (signOut + redireciona). `forcar` ignora o cálculo
-    // de ociosidade (usado quando a aba já passou do limite escondida).
-    async function checarExpiracao(forcar = false) {
+    // Limpa os timers do modal de decisão (chamado ao concluir/cancelar a
+    // decisão e no cleanup do efeito).
+    function pararDecisaoFecharAba() {
+      aguardandoDecisaoRef.current = false
+      if (intervalDecisaoRef.current !== null) { window.clearInterval(intervalDecisaoRef.current); intervalDecisaoRef.current = null }
+      if (timeoutFallbackFecharRef.current !== null) { window.clearTimeout(timeoutFallbackFecharRef.current); timeoutFallbackFecharRef.current = null }
+      setAvisoFecharAba({ mostrando: false, segundos: 0, fechando: false })
+    }
+
+    // Efetua a expiração de verdade: signOut global (derruba TODAS as abas,
+    // já que a sessão desktop compartilha localStorage) + redireciona.
+    async function efetuarLogoutReal() {
       if (expiradoRef.current) return
-      // Operação longa em andamento (backup/restore/import/sincronização):
-      // suspende o logout e empurra o relógio de atividade, para a contagem
-      // de inatividade recomeçar só quando a operação terminar.
-      if (temOperacaoLongaAtiva()) { lastActivityRef.current = Date.now(); persistirAtividade(); return }
-      if (!forcar && Date.now() - lastActivityRef.current < limiteMs) return
-
-      // Aba secundária ociosa em segundo plano (ex.: a página de um ativo
-      // aberta numa nova aba a partir do gráfico de Proventos, ver
-      // AtivosPorCategoria em DividendosPage.tsx) — no desktop a sessão fica
-      // em localStorage COMPARTILHADO entre abas (ver "Sessão + biometria"
-      // no CLAUDE.md), então um signOut() aqui apagaria o token das OUTRAS
-      // abas também, mesmo com o usuário ativamente usando uma delas. Em vez
-      // de deslogar todo mundo, fecha só esta aba (só é permitido pelo
-      // navegador porque ela foi aberta via window.open()/`window.opener`).
-      // Se o navegador não deixar fechar, desiste depois de alguns segundos
-      // e cai no comportamento normal — senão a aba ficaria presa, sem
-      // deslogar nem fechar, e o auto-logout de segurança nunca aconteceria
-      // nela.
-      if (!Capacitor.isNativePlatform() && document.visibilityState === 'hidden' && window.opener) {
-        if (!tentandoFecharDesdeRef.current) tentandoFecharDesdeRef.current = Date.now()
-        if (Date.now() - tentandoFecharDesdeRef.current < 5_000) {
-          window.close()
-          return
-        }
-      }
-
+      pararDecisaoFecharAba()
       expiradoRef.current = true
       setAviso(false, 0) // some com a contagem ao deslogar
       localStorage.removeItem(LS_ULTIMA_ATIVIDADE) // não herdar pro próximo login
@@ -209,6 +217,100 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
         /* mesmo se signOut falhar, redireciona pra forçar reauth */
       }
       navigateRef.current('/login?expirado=1', { replace: true })
+    }
+
+    // Aba em primeiro plano cujo timer de inatividade expirou. Como a sessão
+    // desktop fica em localStorage COMPARTILHADO entre abas (ver "Sessão +
+    // biometria" no CLAUDE.md), um signOut() direto aqui derrubaria TODAS as
+    // abas — mesmo as que o usuário está usando ativamente em outra janela.
+    // Em vez de deslogar na hora, mostra o modal "Aba inativa" (ver
+    // avisoFecharAba.ts / AvisoFecharAba.tsx) oferecendo fechar só esta aba;
+    // sem resposta em JANELA_DECISAO_FECHAR_S, ou se o navegador não deixar
+    // fechar (aba não aberta via window.open — caso comum), cai no signOut
+    // normal mesmo assim (defesa de segurança: não dá pra deixar a aba
+    // pendurada pra sempre esperando alguém decidir).
+    function iniciarAvisoFecharAba() {
+      if (aguardandoDecisaoRef.current) return
+      aguardandoDecisaoRef.current = true
+
+      let restante = JANELA_DECISAO_FECHAR_S
+      setAvisoFecharAba({ mostrando: true, segundos: restante, fechando: false })
+
+      intervalDecisaoRef.current = window.setInterval(() => {
+        restante -= 1
+        if (restante <= 0) {
+          efetuarLogoutReal()
+          return
+        }
+        setAvisoFecharAba({ mostrando: true, segundos: restante, fechando: false })
+      }, 1_000)
+
+      registrarAcoesFecharAba({
+        fechar() {
+          if (intervalDecisaoRef.current !== null) { window.clearInterval(intervalDecisaoRef.current); intervalDecisaoRef.current = null }
+          setAvisoFecharAba({ mostrando: true, segundos: 0, fechando: true })
+          window.close()
+          // Se a aba realmente fechou, nenhum código abaixo roda — o
+          // processo/tab morreu. Se continuar rodando após o prazo, o
+          // navegador recusou fechar (não foi aberta via script): cai no
+          // signOut normal, agora com uma explicação prévia em vez de ser
+          // instantâneo e sem aviso.
+          timeoutFallbackFecharRef.current = window.setTimeout(() => { efetuarLogoutReal() }, FALLBACK_FECHAR_MS)
+        },
+        continuar() {
+          pararDecisaoFecharAba()
+          lastActivityRef.current = Date.now()
+          persistirAtividade()
+        },
+      })
+    }
+
+    // Executa a expiração. `forcar` só ignora o cálculo de ociosidade (usado
+    // quando o tick de 1s pode ter ficado estrangulado/congelado numa aba em
+    // segundo plano — ao voltar a ela já sabemos que passou do limite, sem
+    // esperar o próximo tick).
+    async function checarExpiracao(forcar = false) {
+      if (expiradoRef.current || aguardandoDecisaoRef.current) return
+      // Operação longa em andamento (backup/restore/import/sincronização):
+      // suspende o logout e empurra o relógio de atividade, para a contagem
+      // de inatividade recomeçar só quando a operação terminar.
+      if (temOperacaoLongaAtiva()) { lastActivityRef.current = Date.now(); persistirAtividade(); return }
+      if (!forcar && Date.now() - lastActivityRef.current < limiteMs) return
+
+      // App nativo (Android/iOS): não existe conceito de "outras abas" pra
+      // proteger — direto pro signOut real, como sempre foi.
+      if (Capacitor.isNativePlatform()) {
+        await efetuarLogoutReal()
+        return
+      }
+
+      // Aba ESCONDIDA (o usuário não está olhando pra ela agora — pode ser
+      // uma 2ª aba parada em segundo plano enquanto ele trabalha em outra, ou
+      // a página de um ativo aberta numa nova aba a partir do gráfico de
+      // Proventos, ver AtivosPorCategoria em DividendosPage.tsx): NUNCA
+      // decide um signOut global sozinha — ninguém está presente pra
+      // escolher "fechar só esta aba" no modal, e um signOut aqui derrubaria
+      // abas ativas em outras janelas (bug relatado: 2 abas, mexendo só numa,
+      // a outra ficou ociosa em 2º plano e deslogou as duas). No máximo tenta
+      // fechar A SI MESMA silenciosamente por alguns segundos (só funciona
+      // se foi aberta via window.open(), que é quando `window.opener`
+      // existe); se não conseguir, apenas espera — a decisão de verdade só
+      // acontece em onVisibilidade() quando (e se) o usuário voltar a olhar
+      // pra esta aba (aí `forcar` chega aqui com a aba já visível, cai no
+      // branch abaixo e mostra o modal).
+      if (document.visibilityState === 'hidden') {
+        if (window.opener) {
+          if (!tentandoFecharDesdeRef.current) tentandoFecharDesdeRef.current = Date.now()
+          if (Date.now() - tentandoFecharDesdeRef.current < 5_000) window.close()
+        }
+        return
+      }
+
+      // Aba em primeiro plano (timer normal expirou, ou ela acabou de voltar
+      // a ficar visível depois de estourar o limite escondida — `forcar`):
+      // o usuário está presente agora. Dá a chance de fechar só esta aba
+      // antes de derrubar as outras.
+      iniciarAvisoFecharAba()
     }
 
     // Se o valor persistido (de antes do app ser pausado/morto pelo SO) já
@@ -329,6 +431,8 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       window.removeEventListener('focus', onFoco)
       registrarResetInatividade(() => {}) // evita reset apontando p/ hook desmontado
       setAviso(false, 0)
+      pararDecisaoFecharAba()
+      registrarAcoesFecharAba(null) // evita ações apontando p/ hook desmontado
     }
   }, [timeoutMinutos])
 }

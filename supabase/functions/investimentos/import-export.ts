@@ -5,7 +5,7 @@ import { json, erro, extrairId, buscarTodasLinhas } from "../_shared/utils.ts";
 import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
 import {
   Db, TIPOS_ATIVO, SUBTIPOS_ACOES, STATUS_POSICAO, TIPOS_OPERACAO, RE_MES_ANO,
-  hojeISO, dataPagamentoPlausivel, contaExiste, ativoExiste, inserirEmLote,
+  hojeISO, dataPagamentoPlausivel, contaExiste, ativoExiste, inserirEmLote, CATEGORIAS_FII,
 } from "./shared.ts";
 import {
   resolverNomes, resolverPrecosAtuais, precosBrapi, precosCripto, resolverMeta,
@@ -712,6 +712,10 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
         fii_segmento: a.fii_segmento ?? null, fii_mandato: a.fii_mandato ?? null,
         fii_num_cotistas: a.fii_num_cotistas ?? null, fii_dy_mes_cvm: a.fii_dy_mes_cvm ?? null,
         acoes_subtipo: a.acoes_subtipo ?? null,
+        acao_lpa: a.acao_lpa ?? null, acao_vpa: a.acao_vpa ?? null,
+        acao_valor_justo: a.acao_valor_justo ?? null,
+        acao_fundamentos_origem: a.acao_fundamentos_origem ?? null,
+        acao_fundamentos_referencia: a.acao_fundamentos_referencia ?? null,
         cotacao_automatica: a.cotacao_automatica ?? true,
         logo_url: a.logo_url ?? null, setor: a.setor ?? null,
       });
@@ -806,6 +810,7 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
         tipo_ativo: d.tipo_ativo, descricao: d.descricao ?? null,
         tipo_dividendo_id: d.tipo_dividendo_id ? (tipoMap[String(d.tipo_dividendo_id)] ?? null) : null,
         valor_por_cota: d.valor_por_cota != null ? Number(d.valor_por_cota) : null,
+        data_com: d.data_com ?? null,
         // O lançamento do extrato é restaurado em separado (não relinkamos).
       });
     }
@@ -848,17 +853,18 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
       TIPOS_ATIVO.includes(String(q.tipo_ativo)) && !validarQuestionario(q.perguntas, q.pesos));
     if (questIn.length) {
       const linhas = questIn.map((q) => ({
-        user_id:     userId,
-        tipo_ativo:  q.tipo_ativo,
-        perguntas:   q.perguntas,
-        pesos:       q.pesos,
+        user_id:       userId,
+        tipo_ativo:    q.tipo_ativo,
+        fii_categoria: q.tipo_ativo === "FII" && CATEGORIAS_FII.includes(String(q.fii_categoria)) ? q.fii_categoria : "",
+        perguntas:     q.perguntas,
+        pesos:         q.pesos,
         origem:      q.origem === "IA" ? "IA" : "MANUAL",
         ia_provedor: q.origem === "IA" ? (q.ia_provedor ?? null) : null,
         ia_modelo:   q.origem === "IA" ? (q.ia_modelo ?? null) : null,
         ia_gerou_em: q.origem === "IA" ? (q.ia_gerou_em ?? new Date().toISOString()) : null,
         updated_at:  new Date().toISOString(),
       }));
-      const { error } = await c.from("inv_questionarios").upsert(linhas, { onConflict: "user_id,tipo_ativo" });
+      const { error } = await c.from("inv_questionarios").upsert(linhas, { onConflict: "user_id,tipo_ativo,fii_categoria" });
       if (error) avisos.push(`Questionários: ${error.message}`); else out.questionarios = linhas.length;
     }
 

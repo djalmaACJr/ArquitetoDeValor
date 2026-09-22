@@ -117,55 +117,90 @@ function detalheProvedor(corpo: string): string {
 }
 
 /**
+ * Alguns provedores escondem "sem saldo/crédito" atrás de um status que
+ * normalmente significa outra coisa: a Anthropic manda 400 (não 402) para
+ * "credit balance is too low", e a OpenAI reaproveita o MESMO 429 do rate
+ * limit de verdade para "insufficient_quota" (cota/crédito zerado). Detecta
+ * pelo corpo antes de decidir a mensagem pelo status — esperar e tentar de
+ * novo nunca resolve falta de crédito, então tratar como rate limit
+ * transitório confundiria o usuário.
+ */
+function ehSemSaldo(corpo: string): boolean {
+  const s = corpo.toLowerCase();
+  return s.includes("insufficient_quota")
+    || s.includes("credit balance is too low")
+    || s.includes("exceeded your current quota")
+    || s.includes("insufficient credit")
+    || s.includes("insufficient balance");
+}
+
+function msgSemSaldo(nome: string): string {
+  return `Sua conta no ${nome} está sem saldo/créditos para esta chamada. Adicione saldo ou troque para um ` +
+    `modelo gratuito em Perfil → Integração com IA.`;
+}
+
+/**
  * Converte uma resposta HTTP de erro de um provedor numa `ErroIA` com
  * texto claro e acionável. Centraliza o tratamento para todos os
  * adaptadores (chat do mascote e geração de questionário de investimento).
  */
 export function erroHttpIA(provedor: string, status: number, corpo: string): ErroIA {
   const nome = LABEL_PROVEDOR[provedor] ?? provedor;
+  // Detalhe cru do provedor (se houver) — anexado em TODOS os branches, não
+  // só no genérico. Sem isso, o texto real do provedor (que costuma dizer
+  // exatamente qual é o problema — cota, plano, limite específico) era
+  // descartado e trocado por um "chute" genérico por status.
+  const detalhe = detalheProvedor(corpo);
+  const comDetalhe = (msg: string) => msg + (detalhe ? ` Detalhe: ${detalhe.slice(0, 160)}` : "");
 
+  if (status !== 402 && ehSemSaldo(corpo)) {
+    return new ErroIA(msgSemSaldo(nome), 402);
+  }
   if (status === 429) {
+    // ":free" só existe como convenção de nome de modelo no OpenRouter —
+    // citar isso para os demais provedores é irrelevante e confunde.
+    const dicaFree = provedor === "openrouter"
+      ? ` — modelos gratuitos (":free") costumam atingir esse limite com frequência`
+      : "";
     return new ErroIA(
-      `O ${nome} está sobrecarregado e limitou as requisições no momento (erro 429). ` +
-      `Aguarde alguns segundos e tente de novo. Se continuar, abra Perfil → Integração com IA e ` +
-      `troque o modelo ou o provedor — modelos gratuitos (":free") costumam atingir esse limite com frequência.`,
+      comDetalhe(
+        `O ${nome} está sobrecarregado e limitou as requisições no momento (erro 429). ` +
+        `Aguarde alguns segundos e tente de novo. Se continuar, abra Perfil → Integração com IA e ` +
+        `troque o modelo ou o provedor${dicaFree}.`,
+      ),
       429,
     );
   }
   if (status === 401 || status === 403) {
     return new ErroIA(
-      `A chave da API do ${nome} foi recusada (não autorizada). Confira em Perfil → Integração com IA se ` +
-      `ela está correta, ativa e com permissão para o modelo escolhido.`,
+      comDetalhe(
+        `A chave da API do ${nome} foi recusada (não autorizada). Confira em Perfil → Integração com IA se ` +
+        `ela está correta, ativa e com permissão para o modelo escolhido.`,
+      ),
       400,
     );
   }
   if (status === 402) {
-    return new ErroIA(
-      `Sua conta no ${nome} está sem saldo/créditos para esta chamada. Adicione saldo ou troque para um ` +
-      `modelo gratuito em Perfil → Integração com IA.`,
-      402,
-    );
+    return new ErroIA(msgSemSaldo(nome), 402);
   }
   if (status === 404) {
     return new ErroIA(
-      `O modelo selecionado não foi encontrado no ${nome}. Edite a configuração em Perfil → Integração com IA ` +
-      `e escolha outro modelo.`,
+      comDetalhe(
+        `O modelo selecionado não foi encontrado no ${nome}. Edite a configuração em Perfil → Integração com IA ` +
+        `e escolha outro modelo.`,
+      ),
       400,
     );
   }
   if (status === 408 || status === 504) {
-    return new ErroIA(`O ${nome} demorou demais para responder. Tente novamente em instantes.`, 504);
+    return new ErroIA(comDetalhe(`O ${nome} demorou demais para responder. Tente novamente em instantes.`), 504);
   }
   if (status >= 500) {
-    return new ErroIA(`O ${nome} está instável no momento (erro ${status}). Tente novamente em alguns instantes.`, 502);
+    return new ErroIA(comDetalhe(`O ${nome} está instável no momento (erro ${status}). Tente novamente em alguns instantes.`), 502);
   }
 
   // Demais casos: mensagem genérica + detalhe curto do provedor, se houver.
-  const detalhe = detalheProvedor(corpo);
-  return new ErroIA(
-    `O ${nome} recusou a requisição (erro ${status}).` + (detalhe ? ` Detalhe: ${detalhe.slice(0, 160)}` : ""),
-    502,
-  );
+  return new ErroIA(comDetalhe(`O ${nome} recusou a requisição (erro ${status}).`), 502);
 }
 
 // ── Adaptadores por provedor ──────────────────────────────────────────

@@ -43,6 +43,14 @@ ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, Line
 const MUTED = '#8b92a8'
 const MESES_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
+// Quanto falta subir (ou já passou) do preço atual até um valor-alvo (Preço
+// Teto ou Valor Justo), em %. Positivo = ainda tem espaço pra subir até lá
+// (potencial de valorização); negativo = o preço já ultrapassou o alvo
+// (potencial de queda, se ele "corrigir" de volta pro alvo).
+function potencialAte(precoAtual: number, alvo: number): number {
+  return ((alvo - precoAtual) / precoAtual) * 100
+}
+
 // Quadros da página, arrastáveis (useOrdemReordenavel) — a ordem é persistida
 // por TIPO de ativo (não por ativo individual): reordenar na página do MXRF11
 // também reordena a página de qualquer outro FII.
@@ -50,7 +58,7 @@ type QuadroDetalheKey =
   | 'resumo' | 'caracteristicas'
   | 'grafico_evolucao' | 'grafico_cotas' | 'grafico_rent_mes' | 'grafico_rent_acum'
   | 'grafico_dividendos_mes' | 'grafico_dy_mes' | 'grafico_ultimos_dividendos'
-  | 'magic_number' | 'dy_yoc' | 'protecao_poder_compra' | 'operacoes'
+  | 'magic_number' | 'dy_yoc' | 'valuation_acoes' | 'protecao_poder_compra' | 'operacoes'
 // Gráficos vêm em meia largura por padrão (lado a lado, como antes de virarem
 // quadros independentes) — os demais em largura total, como sempre foram.
 const QUADROS_GRAFICO: QuadroDetalheKey[] = [
@@ -294,40 +302,94 @@ export default function DetalheInvestimentoPage() {
     }
   }, [dySimuladoPvp1, resumo.custo, qtdAtual])
 
-  // Simulação "comprando/vendendo N cotas, ao preço ATUAL" (não um preço à
-  // parte digitado pelo usuário — sempre o mesmo `precoCota` do Magic
-  // Number/DY acima). Compra: preço médio (PM) muda pela média ponderada com
-  // a compra nova. Venda: PM NÃO muda — uma venda parcial reduz a
-  // quantidade na média atual, sem alterar o custo médio de quem fica (mesma
-  // regra de `recomputarPosicao`/VENDA no backend) — por isso "Novo PM" e
-  // "Novo YoC" saem iguais aos atuais numa venda pura, só a quantidade e o
-  // dividendo mensal projetado caem.
-  const simulacaoFII = useMemo(() => {
-    if (!magicNumberFII || qtdSimulada <= 0) return null
-    const preco = magicNumberFII.precoCota
+  // Último dividendo por cota, generalizado para QUALQUER tipo de ativo que
+  // pague proventos (mesma exclusão de `podeDividendos` mais abaixo:
+  // RENDA_FIXA/TESOURO_DIRETO/CRIPTOMOEDAS não pagam dividendo — cripto tem
+  // seu próprio conceito de rendimento, ver BUSINESS_RULES.md). Mesma base
+  // "run-rate" do Magic Number/DY simulado (FII, acima), mas sem exigir FII
+  // nem VP cadastrado — alimenta o simulador de compra/venda genérico
+  // (PM sempre; DY/YoC só quando o ativo paga dividendo, "se aplicável").
+  const ultimoDivPorCota = useMemo(() => {
+    if (!ativo || !precoAtualEstimado || precoAtualEstimado <= 0) return null
+    if (['RENDA_FIXA', 'TESOURO_DIRETO', 'CRIPTOMOEDAS'].includes(ativo.tipo_ativo)) return null
+    const ultimoDiv = dividendos.find((d) => d.valor_por_cota != null && Number(d.valor_por_cota) > 0)
+    return ultimoDiv ? Number(ultimoDiv.valor_por_cota) : null
+  }, [ativo, precoAtualEstimado, dividendos])
+
+  // Preço médio (PM) atualmente pago pelo usuário — genérico para qualquer tipo.
+  const custoMedioAtual = useMemo(
+    () => (qtdAtual > 0 && resumo.custo > 0 ? resumo.custo / qtdAtual : null),
+    [qtdAtual, resumo.custo],
+  )
+
+  // DY/YoC "atuais" genéricos (run-rate simplificado: último dividendo × 12),
+  // sem a comparação com P/VP (exclusiva de FII, ver `dySimuladoPvp1` acima)
+  // — usados no quadro de simulação de compra/venda dos demais tipos de ativo.
+  const dyYocAtualGenerico = useMemo(() => {
+    if (!ultimoDivPorCota || !precoAtualEstimado) return null
+    const anualizado = ultimoDivPorCota * 12
+    return {
+      valorPorCota: ultimoDivPorCota,
+      dyAtual: (anualizado / precoAtualEstimado) * 100,
+      yocAtual: custoMedioAtual ? (anualizado / custoMedioAtual) * 100 : null,
+    }
+  }, [ultimoDivPorCota, precoAtualEstimado, custoMedioAtual])
+
+  // Preço Teto (método Bazin, só Ações): dividendo pago nos últimos 12 meses
+  // por ação ÷ yield mínimo exigido (6% fixo, padrão clássico de Décio
+  // Bazin) — teto de quanto vale a pena pagar pela ação sem abrir mão desse
+  // yield mínimo. Usa dividendo REAL pago (não o run-rate do último mês ×12
+  // usado acima) para não distorcer com um mês atípico (ex.: JCP concentrado
+  // num trimestre). null sem posição ou sem dividendo pago no período.
+  const PRECO_TETO_BAZIN_YIELD_MINIMO = 0.06
+  const precoTetoBazin = useMemo(() => {
+    if (ativo?.tipo_ativo !== 'ACOES' || qtdAtual <= 0) return null
+    const hoje = new Date()
+    const corte12m = new Date(hoje.getFullYear(), hoje.getMonth() - 12, hoje.getDate())
+    const dividendo12m = dividendos
+      .filter((d) => new Date(d.data_pagamento) >= corte12m)
+      .reduce((s, d) => s + Number(d.valor), 0)
+    if (dividendo12m <= 0) return null
+    const dividendoPorAcao = dividendo12m / qtdAtual
+    return dividendoPorAcao / PRECO_TETO_BAZIN_YIELD_MINIMO
+  }, [ativo?.tipo_ativo, dividendos, qtdAtual])
+
+  // Simulação "comprando/vendendo N cotas/ações, ao preço ATUAL" (não um
+  // preço à parte digitado pelo usuário — sempre `precoAtualEstimado`).
+  // Genérica para qualquer tipo de ativo (inclusive FII, ver quadro
+  // `dy_yoc` abaixo). Compra: preço médio (PM) muda pela média ponderada
+  // com a compra nova. Venda: PM NÃO muda — uma venda parcial reduz a
+  // quantidade na média atual, sem alterar o custo médio de quem fica
+  // (mesma regra de `recomputarPosicao`/VENDA no backend) — por isso "Novo
+  // PM" e "Novo YoC" saem iguais aos atuais numa venda pura, só a
+  // quantidade e o dividendo mensal projetado caem. `novoDividendoMensal`/
+  // `novoYoc` só saem preenchidos quando há dado de dividendo disponível
+  // (`ultimoDivPorCota`) — "se aplicável".
+  const simulacaoCompraVenda = useMemo(() => {
+    if (!precoAtualEstimado || precoAtualEstimado <= 0 || qtdSimulada <= 0) return null
+    const preco = precoAtualEstimado
+    const valorPorCota = ultimoDivPorCota
     if (direcaoSimulada === 'venda') {
       const qtdVendida = Math.min(qtdSimulada, qtdAtual)
       if (qtdVendida <= 0) return null
       const novaQtd = qtdAtual - qtdVendida
-      const novoPM = yocSimuladoPvp1?.custoMedio ?? 0
-      const novoDividendoMensal = magicNumberFII.valorPorCota * novaQtd
+      const novoPM = custoMedioAtual ?? 0
       return {
         novaQtd, valorOperacao: qtdVendida * preco, novoPM,
-        novoDividendoMensal,
-        novoYoc: novoPM > 0 ? (magicNumberFII.valorPorCota * 12 / novoPM) * 100 : 0,
+        novoDividendoMensal: valorPorCota != null ? valorPorCota * novaQtd : null,
+        novoYoc: valorPorCota != null && novoPM > 0 ? (valorPorCota * 12 / novoPM) * 100 : null,
       }
     }
     const novaQtd = qtdAtual + qtdSimulada
     const valorOperacao = qtdSimulada * preco
     const novoCusto = resumo.custo + valorOperacao
     const novoPM = novaQtd > 0 ? novoCusto / novaQtd : 0
-    const novoDividendoMensal = magicNumberFII.valorPorCota * novaQtd
     return {
       novaQtd, valorOperacao, novoPM,
-      novoDividendoMensal,
-      novoYoc: novoPM > 0 ? (magicNumberFII.valorPorCota * 12 / novoPM) * 100 : 0,
+      novoDividendoMensal: valorPorCota != null ? valorPorCota * novaQtd : null,
+      novoYoc: valorPorCota != null && novoPM > 0 ? (valorPorCota * 12 / novoPM) * 100 : null,
     }
-  }, [magicNumberFII, qtdSimulada, direcaoSimulada, qtdAtual, resumo.custo, yocSimuladoPvp1])
+  }, [precoAtualEstimado, qtdSimulada, direcaoSimulada, qtdAtual, resumo.custo, ultimoDivPorCota, custoMedioAtual])
 
   // Janela do período selecionado (6/12 meses ou "tudo") para os gráficos
   // mensais desta página. mesInicio null = sem limite inferior (tudo).
@@ -533,11 +595,18 @@ export default function DetalheInvestimentoPage() {
     if (podeDividendosAtivo && dyPorMes.length > 0) ks.push('grafico_dy_mes')
     if (podeDividendosAtivo) ks.push('grafico_ultimos_dividendos')
     if (magicNumberFII) ks.push('magic_number')
-    if (dySimuladoPvp1) ks.push('dy_yoc')
+    if (ativo.tipo_ativo === 'ACOES' && (precoTetoBazin != null || ativo.acao_valor_justo != null)) ks.push('valuation_acoes')
+    // Quadro de simulação de compra/venda: para FII com VP cadastrado, a
+    // versão completa (P/VP) do bloco abaixo; para os demais tipos (exceto
+    // Renda Fixa/Tesouro, sem "quantidade" no mesmo sentido — mesma exclusão
+    // do botão "Simular compra"), a versão genérica (PM + DY/YoC quando
+    // aplicável), desde que haja cotação atual pra simular.
+    const podeSimularCompraVenda = !ehRFAtivo && !!precoAtualEstimado && precoAtualEstimado > 0
+    if (dySimuladoPvp1 || podeSimularCompraVenda) ks.push('dy_yoc')
     if (ehFIIAtivo && magicNumberFII) ks.push('protecao_poder_compra')
     ks.push('operacoes')
     return ks
-  }, [ativo, magicNumberFII, dySimuladoPvp1, dyPorMes])
+  }, [ativo, magicNumberFII, dySimuladoPvp1, dyPorMes, precoAtualEstimado, precoTetoBazin])
   const { blob: ordemQuadrosDb, salvar: salvarOrdemQuadrosDb } = usePreferenciasOrdemQuadros()
   const chaveOrdemQuadros = `detalhe-${ativo?.tipo_ativo ?? 'generico'}`
   const {
@@ -1206,12 +1275,101 @@ export default function DetalheInvestimentoPage() {
           </Quadro>
         )
 
-        // DY simulado se P/VP = 1 — só para FIIs com VP cadastrado e algum
-        // dividendo por cota disponível. `dySimuladoPvp1` só existe quando
-        // `magicNumberFII` também existe (mesmo pré-requisito de FII com
-        // cotação); repetir a checagem aqui só ajuda o TS a propagar o
-        // non-null pro bloco de simulação de compra/venda mais abaixo.
-        if (chave === 'dy_yoc') return dySimuladoPvp1 && magicNumberFII && (
+        // Preço Teto (Bazin) e Valor Justo (Graham) — só Ações. Preço Teto é
+        // 100% derivado dos dividendos já carregados nesta página (sem fonte
+        // nova). Valor Justo depende de LPA/VPA vindos da CVM (DFP/FCA, ver
+        // cvmAcoes.ts) — pode faltar se a empresa não constar no dataset ou
+        // tiver LPA/VPA negativo (Graham não se aplica a empresa no prejuízo).
+        if (chave === 'valuation_acoes') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <div className="flex items-start gap-2 mb-3">
+              <span className="flex items-center justify-center w-7 h-7 rounded-full border border-white/15 text-[13px] font-semibold flex-shrink-0" style={{ color: MUTED }}>
+                $
+              </span>
+              <div>
+                <h2 className="text-[14px] font-semibold text-white/80">Preço Teto e Valor Justo</h2>
+                <p className="text-[12px] mt-0.5" style={{ color: MUTED }}>
+                  Duas formas de estimar até quanto valeria a pena pagar por essa ação hoje — quanto menor o preço atual em relação a elas, mais "barata" a ação parece.
+                </p>
+              </div>
+            </div>
+
+            {precoTetoBazin != null && (() => {
+              const potencial = precoAtualEstimado != null ? potencialAte(precoAtualEstimado, precoTetoBazin) : null
+              return (
+              <div>
+                <p className="text-[13px] font-medium text-white/80 mb-0.5">Preço Teto</p>
+                <p className="text-[12px] mb-2" style={{ color: MUTED }}>
+                  É o preço mais alto que valeria a pena pagar hoje, olhando só pra quanto essa ação costuma pagar de dividendo — a conta é o dividendo recebido no último ano dividido por 6% (o mínimo que se espera ganhar só de dividendo). Se o preço de hoje é menor que esse teto, a ação está "barata" nesse sentido; se é maior, está "cara". Isso olha só o passado — não é garantia de que a empresa vai continuar pagando o mesmo no futuro.
+                </p>
+                <div className="flex flex-wrap items-stretch gap-2">
+                  <CaixaMagicNumber rotulo="Preço Teto" valor={formatBRL(precoTetoBazin)} destaque />
+                  {precoAtualEstimado != null && (
+                    <CaixaMagicNumber rotulo="Preço atual" valor={formatBRL(precoAtualEstimado)}
+                      delta={{ pct: ((precoAtualEstimado - precoTetoBazin) / precoTetoBazin) * 100, inverso: true }} />
+                  )}
+                  {potencial != null && (
+                    <CaixaMagicNumber
+                      rotulo={potencial >= 0 ? 'Espaço até o teto' : 'Já passou do teto'}
+                      valor={`${potencial >= 0 ? '+' : ''}${potencial.toFixed(1).replace('.', ',')}%`}
+                      corValor={potencial >= 0 ? '#00c896' : '#ff5c7a'} />
+                  )}
+                </div>
+              </div>
+              )
+            })()}
+
+            {ativo.acao_valor_justo != null && (() => {
+              const potencial = precoAtualEstimado != null ? potencialAte(precoAtualEstimado, ativo.acao_valor_justo) : null
+              return (
+              <div className={precoTetoBazin != null ? 'mt-4 pt-3 border-t border-white/10' : ''}>
+                <p className="text-[13px] font-medium text-white/80 mb-0.5">Valor Justo</p>
+                <p className="text-[12px] mb-2" style={{ color: MUTED }}>
+                  É uma estimativa de quanto essa ação deveria valer, olhando dois números do balanço da empresa: quanto ela lucra por ação (LPA) e quanto ela tem de patrimônio por ação — bens e dinheiro, descontadas as dívidas (VPA). Se o preço de hoje é menor que esse valor, a ação pode estar "barata"; se é maior, pode estar "cara". Usa o último balanço anual entregue à CVM (pode ter até 1 ano) e não funciona para empresa que está no prejuízo.
+                </p>
+                <div className="flex flex-wrap items-stretch gap-2">
+                  <CaixaMagicNumber rotulo="LPA (lucro por ação)" valor={formatBRL(ativo.acao_lpa ?? 0)} />
+                  <span className="self-center text-[15px] px-1" style={{ color: MUTED }}>×</span>
+                  <CaixaMagicNumber rotulo="VPA (patrimônio por ação)" valor={formatBRL(ativo.acao_vpa ?? 0)} />
+                  <span className="self-center text-[15px] px-1" style={{ color: MUTED }}>× 22,5, raiz =</span>
+                  <CaixaMagicNumber rotulo="Valor Justo" valor={formatBRL(ativo.acao_valor_justo)} destaque />
+                  {precoAtualEstimado != null && (
+                    <CaixaMagicNumber rotulo="Preço atual" valor={formatBRL(precoAtualEstimado)}
+                      delta={{ pct: ((precoAtualEstimado - ativo.acao_valor_justo) / ativo.acao_valor_justo) * 100, inverso: true }} />
+                  )}
+                  {potencial != null && (
+                    <CaixaMagicNumber
+                      rotulo={potencial >= 0 ? 'Espaço até o Valor Justo' : 'Já passou do Valor Justo'}
+                      valor={`${potencial >= 0 ? '+' : ''}${potencial.toFixed(1).replace('.', ',')}%`}
+                      corValor={potencial >= 0 ? '#00c896' : '#ff5c7a'} />
+                  )}
+                </div>
+                {ativo.acao_fundamentos_referencia && (
+                  <p className="text-[12px] mt-2" style={{ color: MUTED }}>
+                    Fundamentos do exercício encerrado em {ativo.acao_fundamentos_referencia.slice(0, 4)}
+                    {ativo.acao_fundamentos_origem === 'CVM' ? ' (CVM)' : ' (manual)'}.
+                  </p>
+                )}
+              </div>
+              )
+            })()}
+          </section>
+          </Quadro>
+        )
+
+        // Quadro de simulação de compra/venda. Duas versões:
+        // - FII com VP cadastrado e algum dividendo por cota disponível:
+        //   versão completa, com DY/YoC simulados a P/VP = 1 (só faz
+        //   sentido pra FII, que tem valor patrimonial por cota). `dySimuladoPvp1`
+        //   só existe quando `magicNumberFII` também existe (mesmo
+        //   pré-requisito de FII com cotação); repetir a checagem aqui só
+        //   ajuda o TS a propagar o non-null pro bloco abaixo.
+        // - Demais tipos (e FII sem VP cadastrado): versão genérica, com
+        //   preço médio (PM) sempre e DY/YoC só quando o ativo paga
+        //   dividendo (`dyYocAtualGenerico` — "se aplicável").
+        if (chave === 'dy_yoc' && dySimuladoPvp1 && magicNumberFII) return (
           <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
             largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
           <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
@@ -1263,55 +1421,109 @@ export default function DetalheInvestimentoPage() {
                 não um preço à parte digitado pelo usuário. */}
             <div className="mt-4 pt-3 border-t border-white/10">
               <p className="text-[13px] font-medium text-white/80 mb-2">Simular comprando ou vendendo cotas</p>
-              <div className="flex items-center gap-2 flex-wrap mb-3">
-                <div className="flex rounded-lg border border-white/10 overflow-hidden">
-                  <button type="button" onClick={() => setDirecaoSimulada('compra')}
-                    className={`px-2.5 py-1.5 text-[12px] font-medium ${direcaoSimulada === 'compra' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5'}`}>
-                    Comprar
-                  </button>
-                  <button type="button" onClick={() => { setDirecaoSimulada('venda'); setQtdSimulada((q) => Math.min(q, qtdAtual)) }}
-                    className={`px-2.5 py-1.5 text-[12px] font-medium ${direcaoSimulada === 'venda' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5'}`}>
-                    Vender
-                  </button>
-                </div>
-                <button type="button" onClick={() => setQtdSimulada((q) => Math.max(0, q - 1))} disabled={qtdSimulada <= 0}
-                  className="w-8 h-8 shrink-0 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>
-                  <Minus size={13} />
-                </button>
-                <Input type="number" min={0} max={direcaoSimulada === 'venda' ? qtdAtual : undefined} step={1}
-                  value={qtdSimulada} className="!w-20 text-center"
-                  onChange={(e) => {
-                    const n = Math.max(0, Math.floor(Number(e.target.value) || 0))
-                    setQtdSimulada(direcaoSimulada === 'venda' ? Math.min(n, qtdAtual) : n)
-                  }} />
-                <button type="button"
-                  onClick={() => setQtdSimulada((q) => direcaoSimulada === 'venda' ? Math.min(qtdAtual, q + 1) : q + 1)}
-                  disabled={direcaoSimulada === 'venda' && qtdSimulada >= qtdAtual}
-                  className="w-8 h-8 shrink-0 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>
-                  <Plus size={13} />
-                </button>
-                <span className="text-[12px]" style={{ color: MUTED }}>
-                  cota{qtdSimulada === 1 ? '' : 's'} ao preço atual ({formatBRL(magicNumberFII.precoCota)})
-                  {direcaoSimulada === 'venda' ? ` — você tem ${qtdAtual}` : ''}
-                </span>
-              </div>
-              {simulacaoFII && (
+              <ControlesSimulacao tipoAtivo={ativo.tipo_ativo} direcao={direcaoSimulada} setDirecao={setDirecaoSimulada}
+                qtd={qtdSimulada} setQtd={setQtdSimulada} qtdAtual={qtdAtual} preco={magicNumberFII.precoCota} />
+              {simulacaoCompraVenda && (
                 <div className="flex flex-wrap items-stretch gap-2">
                   <CaixaMagicNumber rotulo={direcaoSimulada === 'venda' ? 'Valor recebido nesta venda' : 'Custo desta compra'}
-                    valor={formatBRL(simulacaoFII.valorOperacao)} />
-                  <CaixaMagicNumber rotulo="Novo total de cotas" valor={String(simulacaoFII.novaQtd)} />
-                  <CaixaMagicNumber rotulo="Novo PM" valor={formatBRL(simulacaoFII.novoPM)}
+                    valor={formatBRL(simulacaoCompraVenda.valorOperacao)} />
+                  <CaixaMagicNumber rotulo="Novo total de cotas" valor={String(simulacaoCompraVenda.novaQtd)} valorAnterior={String(qtdAtual)}
+                    delta={qtdAtual > 0 ? { pct: ((simulacaoCompraVenda.novaQtd - qtdAtual) / qtdAtual) * 100 } : undefined} />
+                  <CaixaMagicNumber rotulo="Novo PM" valor={formatBRL(simulacaoCompraVenda.novoPM)}
+                    valorAnterior={yocSimuladoPvp1 ? formatBRL(yocSimuladoPvp1.custoMedio) : undefined}
                     delta={yocSimuladoPvp1 && yocSimuladoPvp1.custoMedio > 0 ? {
                       // PM subir é RUIM (pagando mais em média) — inverte a cor padrão.
                       // Numa venda pura o PM não muda (0%) — só uma compra desloca a média.
-                      pct: ((simulacaoFII.novoPM - yocSimuladoPvp1.custoMedio) / yocSimuladoPvp1.custoMedio) * 100,
+                      pct: ((simulacaoCompraVenda.novoPM - yocSimuladoPvp1.custoMedio) / yocSimuladoPvp1.custoMedio) * 100,
                       inverso: true,
                     } : undefined} />
-                  <CaixaMagicNumber destaque rotulo="Novo dividendo mensal projetado" valor={formatBRL(simulacaoFII.novoDividendoMensal)} />
-                  <CaixaMagicNumber destaque rotulo="Novo YoC anualizado" valor={`${simulacaoFII.novoYoc.toFixed(2).replace('.', ',')}%`}
+                  <CaixaMagicNumber destaque rotulo="Novo dividendo mensal projetado" valor={formatBRL(simulacaoCompraVenda.novoDividendoMensal ?? 0)}
+                    valorAnterior={formatBRL(magicNumberFII.valorPorCota * qtdAtual)} />
+                  <CaixaMagicNumber destaque rotulo="Novo YoC anualizado" valor={`${(simulacaoCompraVenda.novoYoc ?? 0).toFixed(2).replace('.', ',')}%`}
+                    valorAnterior={yocSimuladoPvp1 ? `${yocSimuladoPvp1.yocAtual.toFixed(2).replace('.', ',')}%` : undefined}
                     delta={yocSimuladoPvp1 && yocSimuladoPvp1.yocAtual !== 0 ? {
-                      pct: ((simulacaoFII.novoYoc - yocSimuladoPvp1.yocAtual) / Math.abs(yocSimuladoPvp1.yocAtual)) * 100,
+                      pct: (((simulacaoCompraVenda.novoYoc ?? 0) - yocSimuladoPvp1.yocAtual) / Math.abs(yocSimuladoPvp1.yocAtual)) * 100,
                     } : undefined} />
+                </div>
+              )}
+            </div>
+          </section>
+          </Quadro>
+        )
+
+        // Versão genérica (demais tipos, exceto Renda Fixa/Tesouro — sem
+        // "quantidade" no mesmo sentido, mesma exclusão do botão "Simular
+        // compra" — e FII sem VP cadastrado, que cai aqui também).
+        if (chave === 'dy_yoc') return precoAtualEstimado && precoAtualEstimado > 0 && (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+          <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <div className="flex items-start gap-2 mb-3">
+              <span className="flex items-center justify-center w-7 h-7 rounded-full border border-white/15 text-[13px] font-semibold flex-shrink-0" style={{ color: MUTED }}>
+                %
+              </span>
+              <div>
+                <h2 className="text-[14px] font-semibold text-white/80">Simular compra/venda</h2>
+                <p className="text-[12px] mt-0.5" style={{ color: MUTED }}>
+                  Veja como uma nova compra ou venda muda o preço médio{dyYocAtualGenerico ? ' e o yield sobre o custo (YoC)' : ''} — sempre ao preço atual estimado ({formatBRL(precoAtualEstimado)}).
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-stretch gap-2">
+              <CaixaMagicNumber rotulo={`${unidadeLabel(ativo.tipo_ativo, true)} que você tem`} valor={String(qtdAtual)} />
+              {custoMedioAtual != null && <CaixaMagicNumber rotulo="Preço médio (PM)" valor={formatBRL(custoMedioAtual)} />}
+              <CaixaMagicNumber rotulo="Valor total" valor={formatBRL(resumo.mercado)} />
+            </div>
+
+            {dyYocAtualGenerico && (
+              <div className="pt-3 flex items-center justify-between flex-wrap gap-2">
+                <span className="text-[13px]" style={{ color: MUTED }}>DY anualizado ao preço atual</span>
+                <span className="text-[13px] font-semibold text-white">{dyYocAtualGenerico.dyAtual.toFixed(2).replace('.', ',')}%</span>
+              </div>
+            )}
+            {dyYocAtualGenerico?.yocAtual != null && (
+              <div className="pt-2 flex items-center justify-between flex-wrap gap-2">
+                <span className="text-[13px]" style={{ color: MUTED }}>
+                  YoC anualizado ao custo médio pago{custoMedioAtual != null ? ` (PM ${formatBRL(custoMedioAtual)})` : ''}
+                </span>
+                <span className="text-[13px] font-semibold text-white">{dyYocAtualGenerico.yocAtual.toFixed(2).replace('.', ',')}%</span>
+              </div>
+            )}
+
+            {/* Simular nova compra OU venda — sempre ao preço ATUAL estimado,
+                não um preço à parte digitado pelo usuário. */}
+            <div className="mt-4 pt-3 border-t border-white/10">
+              <p className="text-[13px] font-medium text-white/80 mb-2">
+                Simular comprando ou vendendo {unidadeLabel(ativo.tipo_ativo, true)}
+              </p>
+              <ControlesSimulacao tipoAtivo={ativo.tipo_ativo} direcao={direcaoSimulada} setDirecao={setDirecaoSimulada}
+                qtd={qtdSimulada} setQtd={setQtdSimulada} qtdAtual={qtdAtual} preco={precoAtualEstimado} />
+              {simulacaoCompraVenda && (
+                <div className="flex flex-wrap items-stretch gap-2">
+                  <CaixaMagicNumber rotulo={direcaoSimulada === 'venda' ? 'Valor recebido nesta venda' : 'Custo desta compra'}
+                    valor={formatBRL(simulacaoCompraVenda.valorOperacao)} />
+                  <CaixaMagicNumber rotulo="Novo total" valor={String(simulacaoCompraVenda.novaQtd)} valorAnterior={String(qtdAtual)}
+                    delta={qtdAtual > 0 ? { pct: ((simulacaoCompraVenda.novaQtd - qtdAtual) / qtdAtual) * 100 } : undefined} />
+                  <CaixaMagicNumber rotulo="Novo PM" valor={formatBRL(simulacaoCompraVenda.novoPM)}
+                    valorAnterior={custoMedioAtual != null ? formatBRL(custoMedioAtual) : undefined}
+                    delta={custoMedioAtual != null && custoMedioAtual > 0 ? {
+                      // PM subir é RUIM (pagando mais em média) — inverte a cor padrão.
+                      // Numa venda pura o PM não muda (0%) — só uma compra desloca a média.
+                      pct: ((simulacaoCompraVenda.novoPM - custoMedioAtual) / custoMedioAtual) * 100,
+                      inverso: true,
+                    } : undefined} />
+                  {simulacaoCompraVenda.novoDividendoMensal != null && (
+                    <CaixaMagicNumber destaque rotulo="Novo dividendo mensal projetado" valor={formatBRL(simulacaoCompraVenda.novoDividendoMensal)}
+                      valorAnterior={ultimoDivPorCota != null ? formatBRL(ultimoDivPorCota * qtdAtual) : undefined} />
+                  )}
+                  {simulacaoCompraVenda.novoYoc != null && (
+                    <CaixaMagicNumber destaque rotulo="Novo YoC anualizado" valor={`${simulacaoCompraVenda.novoYoc.toFixed(2).replace('.', ',')}%`}
+                      valorAnterior={dyYocAtualGenerico?.yocAtual != null ? `${dyYocAtualGenerico.yocAtual.toFixed(2).replace('.', ',')}%` : undefined}
+                      delta={dyYocAtualGenerico?.yocAtual != null && dyYocAtualGenerico.yocAtual !== 0 ? {
+                        pct: ((simulacaoCompraVenda.novoYoc - dyYocAtualGenerico.yocAtual) / Math.abs(dyYocAtualGenerico.yocAtual)) * 100,
+                      } : undefined} />
+                  )}
                 </div>
               )}
             </div>
@@ -1325,6 +1537,7 @@ export default function DetalheInvestimentoPage() {
             <ProtecaoPoderCompra
               valorPatrimonio={entradaProtecao.valorPatrimonio}
               rendimentoTotal={entradaProtecao.rendimentoTotal}
+              precoCota={entradaProtecao.precoCota}
               ipcaSugerido={ipcaSugerido}
               ipcaCompetencia={ipcaAcumulado12m?.competencia}
               historicoCompras={entradaProtecao.historicoCompras} />
@@ -1532,12 +1745,22 @@ function ItemCaracteristica({ rotulo, valor, cor }: { rotulo: string; valor: str
 }
 
 // Caixa de um termo da "conta" do Magic Number (ex.: "R$ 60,47 ÷ R$ 0,60 = 101 cotas").
-function CaixaMagicNumber({ valor, rotulo, destaque, delta }: {
+function CaixaMagicNumber({ valor, rotulo, destaque, delta, valorAnterior, corValor }: {
   valor: string; rotulo: string; destaque?: boolean
   // Variação % em relação ao valor atual (antes da simulação) — mostra seta
   // pra cima/baixo + o %. Por padrão subir = bom (verde), descer = ruim
   // (vermelho); `inverso` troca isso (ex.: PM subir é ruim, não bom).
   delta?: { pct: number; inverso?: boolean }
+  // Valor ANTES da simulação, formatado igual a `valor` — exibido como
+  // "valor atual → novo valor" nas caixas de resultado da simulação de
+  // compra/venda, pra comparação explícita sem precisar decorar o número
+  // anterior. Omitido quando não há um "antes" que faça sentido comparar
+  // (ex.: custo da operação em si, que não substitui nada).
+  valorAnterior?: string
+  // Cor do VALOR principal (não da linha de delta abaixo dele) — usada
+  // quando a própria caixa É um percentual de variação (ex.: "Potencial"),
+  // sobrepõe `destaque`.
+  corValor?: string
 }) {
   const corDelta = !delta || delta.pct === 0
     ? MUTED
@@ -1547,7 +1770,10 @@ function CaixaMagicNumber({ valor, rotulo, destaque, delta }: {
       style={destaque
         ? { background: 'rgba(0,200,150,0.10)', borderColor: 'rgba(0,200,150,0.35)' }
         : { background: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.1)' }}>
-      <p className="text-[15px] font-bold" style={{ color: destaque ? '#00c896' : '#fff' }}>{valor}</p>
+      <p className={valorAnterior ? 'text-[13px] font-bold' : 'text-[15px] font-bold'} style={{ color: corValor ?? (destaque ? '#00c896' : '#fff') }}>
+        {valorAnterior && <span className="font-normal" style={{ color: MUTED }}>{valorAnterior} → </span>}
+        {valor}
+      </p>
       <p className="text-[11px] mt-1 leading-tight" style={{ color: MUTED }}>{rotulo}</p>
       {delta && (
         <p className="text-[11px] mt-1 flex items-center justify-center gap-0.5 font-semibold" style={{ color: corDelta }}>
@@ -1566,6 +1792,53 @@ function unidadeLabel(tipo: TipoAtivoInvestimento, plural: boolean): string {
   const singular = tipo === 'FII' ? 'cota' : tipo === 'CRIPTOMOEDAS' ? 'token' : 'ação'
   if (!plural) return singular
   return singular === 'ação' ? 'ações' : `${singular}s`
+}
+
+// Controles +/- de "comprar N" / "vender N" do quadro de simulação de
+// compra/venda — compartilhados entre a versão completa (FII com P/VP) e a
+// genérica dos demais tipos (ver chave `dy_yoc`), só variando o rótulo da
+// unidade negociada (cota/ação/token) por tipo de ativo.
+function ControlesSimulacao({ tipoAtivo, direcao, setDirecao, qtd, setQtd, qtdAtual, preco }: {
+  tipoAtivo: TipoAtivoInvestimento
+  direcao: 'compra' | 'venda'; setDirecao: (d: 'compra' | 'venda') => void
+  qtd: number; setQtd: (fn: (q: number) => number) => void
+  qtdAtual: number; preco: number
+}) {
+  const unidade = qtd === 1 ? unidadeLabel(tipoAtivo, false) : unidadeLabel(tipoAtivo, true)
+  return (
+    <div className="flex items-center gap-2 flex-wrap mb-3">
+      <div className="flex rounded-lg border border-white/10 overflow-hidden">
+        <button type="button" onClick={() => setDirecao('compra')}
+          className={`px-2.5 py-1.5 text-[12px] font-medium ${direcao === 'compra' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5'}`}>
+          Comprar
+        </button>
+        <button type="button" onClick={() => { setDirecao('venda'); setQtd((q) => Math.min(q, qtdAtual)) }}
+          className={`px-2.5 py-1.5 text-[12px] font-medium ${direcao === 'venda' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5'}`}>
+          Vender
+        </button>
+      </div>
+      <button type="button" onClick={() => setQtd((q) => Math.max(0, q - 1))} disabled={qtd <= 0}
+        className="w-8 h-8 shrink-0 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>
+        <Minus size={13} />
+      </button>
+      <Input type="number" min={0} max={direcao === 'venda' ? qtdAtual : undefined} step={1}
+        value={qtd} className="!w-20 text-center"
+        onChange={(e) => {
+          const n = Math.max(0, Math.floor(Number(e.target.value) || 0))
+          setQtd(() => direcao === 'venda' ? Math.min(n, qtdAtual) : n)
+        }} />
+      <button type="button"
+        onClick={() => setQtd((q) => direcao === 'venda' ? Math.min(qtdAtual, q + 1) : q + 1)}
+        disabled={direcao === 'venda' && qtd >= qtdAtual}
+        className="w-8 h-8 shrink-0 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>
+        <Plus size={13} />
+      </button>
+      <span className="text-[12px]" style={{ color: MUTED }}>
+        {unidade} ao preço atual ({formatBRL(preco)})
+        {direcao === 'venda' ? ` — você tem ${qtdAtual}` : ''}
+      </span>
+    </div>
+  )
 }
 
 // Simulação de nova compra: "tenho R$ x, quantas cotas/ações dá pra comprar
@@ -1828,7 +2101,7 @@ function DrawerQuestionario({ ativo, onClose, onToast }: {
   const { pesos: pesosGlobais } = useInvPesos()
   const { questionarioEfetivo } = useInvQuestionarios()
   // Questionário efetivo (perguntas custom/padrão do tipo) + pesos GLOBAIS.
-  const ef = questionarioEfetivo(ativo.tipo_ativo, perfil?.perfil ?? null, pesosGlobais)
+  const ef = questionarioEfetivo(ativo.tipo_ativo, perfil?.perfil ?? null, pesosGlobais, ativo.fii_categoria)
   const perguntas = ef.perguntas
   const [respostas, setRespostas] = useState<QuestionarioRespostas>(ativo.questionario_respostas ?? {})
   const [salvando, setSalvando] = useState(false)

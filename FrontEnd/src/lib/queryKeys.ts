@@ -65,6 +65,7 @@ export const qk = {
   invTiposDividendo: (uid: Uid)          => ['inv-tipos-dividendo', uid]       as const,
   invAvisosDividendos: (uid: Uid)        => ['inv-avisos-dividendos', uid]     as const,
   invNovidadesProventos: (uid: Uid)      => ['inv-novidades-proventos', uid]   as const,
+  invDataComVistos: (uid: Uid)           => ['inv-datacom-vistos', uid]        as const,
   invAlocacoes:  (uid: Uid)              => ['inv-alocacoes', uid]             as const,
   invQuestionarios: (uid: Uid)           => ['inv-questionarios', uid]         as const,
   invAvaliacoes: (uid: Uid)              => ['inv-avaliacoes', uid]            as const,

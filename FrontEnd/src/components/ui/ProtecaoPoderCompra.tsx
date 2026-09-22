@@ -28,6 +28,9 @@ export interface ProtecaoPoderCompraProps {
   valorPatrimonio: number
   /** Provento total recebido no período, na MESMA base de `valorPatrimonio` (posição inteira, não por cota). */
   rendimentoTotal: number
+  /** Preço de UMA cota — traduz o reinvestimento necessário em nº de cotas
+   *  (não dá pra comprar cota fracionada, ver `cotasNecessarias`). */
+  precoCota: number
   /** IPCA acumulado 12 meses (%) sugerido pra começar a simulação — o
    *  usuário pode ajustar pra simular outro cenário (ex.: só o último mês). */
   ipcaSugerido: number
@@ -44,7 +47,7 @@ export interface ProtecaoPoderCompraProps {
 }
 
 export default function ProtecaoPoderCompra({
-  valorPatrimonio, rendimentoTotal, ipcaSugerido, ipcaCompetencia, historicoCompras, onIpcaChange,
+  valorPatrimonio, rendimentoTotal, precoCota, ipcaSugerido, ipcaCompetencia, historicoCompras, onIpcaChange,
 }: ProtecaoPoderCompraProps) {
   const [ipcaTexto, setIpcaTexto] = useState(() => String(ipcaSugerido).replace('.', ','))
   // `ipcaSugerido` normalmente chega como um fallback (0,4%) e é substituído
@@ -67,8 +70,8 @@ export default function ProtecaoPoderCompra({
   }, [ipcaTexto])
 
   const r = useMemo(
-    () => calcularProtecaoPoderCompraCompleta(valorPatrimonio, rendimentoTotal, taxaIpca, historicoCompras),
-    [valorPatrimonio, rendimentoTotal, taxaIpca, historicoCompras],
+    () => calcularProtecaoPoderCompraCompleta(valorPatrimonio, rendimentoTotal, taxaIpca, historicoCompras, precoCota),
+    [valorPatrimonio, rendimentoTotal, taxaIpca, historicoCompras, precoCota],
   )
 
   const alterarIpca = (v: string) => {
@@ -173,6 +176,15 @@ export default function ProtecaoPoderCompra({
           {r.deflacao && (
             <p className="text-[11px] mt-0.5" style={{ color: MUTED }}>
               Taxa mensal de {fmtPct(r.taxaMensalAplicadaPct)} (deflação) — nada a repor neste mês
+            </p>
+          )}
+          {/* Não dá pra comprar cota fracionada — o valor "exato" acima é só
+              referência; na prática o usuário compra um nº inteiro de cotas,
+              arredondado pra cima (cobre um pouco A MAIS que o mínimo). */}
+          {!!r.cotasNecessarias && (
+            <p className="text-[11px] mt-0.5" style={{ color: MUTED }}>
+              ≈ {r.cotasNecessarias} cota{r.cotasNecessarias === 1 ? '' : 's'} nova{r.cotasNecessarias === 1 ? '' : 's'}
+              {' '}({formatBRL(r.cotasNecessarias * precoCota)})
             </p>
           )}
         </div>

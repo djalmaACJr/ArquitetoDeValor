@@ -23,6 +23,11 @@ export interface ResultadoProtecaoPoderCompra {
    *  (ver `calcularProtecaoPoderCompra`), útil pra exibir de volta pro
    *  usuário qual % ao mês está por trás do reinvestimento calculado. */
   taxaMensalAplicadaPct: number
+  /** Cotas INTEIRAS necessárias pra cobrir `valorReinvestimento` — não dá pra
+   *  comprar cota fracionada, então arredonda pra cima (quem compra menos
+   *  que isso ainda perde poder de compra no mês). `null` quando não há
+   *  preço de cota informado; `0` quando não há reinvestimento a cobrir. */
+  cotasNecessarias: number | null
 }
 
 // IPCA acumulado nos últimos 12 meses disponíveis — composição das taxas
@@ -48,6 +53,10 @@ export function calcularProtecaoPoderCompra(
   // (comportamento de antes, sem histórico de compras); 0 = totalmente
   // coberto (nada a reinvestir neste mês).
   fatorCobertura: number = 1,
+  // Preço de UMA cota — só pra traduzir `valorReinvestimento` (R$) em
+  // `cotasNecessarias` (nº inteiro de cotas). Opcional: sem ele, essa
+  // tradução simplesmente não é calculada (fica null).
+  precoCota: number | null = null,
 ): ResultadoProtecaoPoderCompra {
   // `ipca12mPct` chega como IPCA ACUMULADO de 12 meses (ver
   // calcularIpcaAcumulado12m). Aplicar essa taxa ANUAL direto sobre o
@@ -74,6 +83,9 @@ export function calcularProtecaoPoderCompra(
   // cenários extremos) — os percentuais "crus" acima continuam disponíveis
   // pro texto, sem esconder um eventual >100%/negativo de verdade.
   const reinvestimentoClampado = Math.min(100, Math.max(0, percentualReinvestimento))
+  const cotasNecessarias = valorReinvestimento <= 0
+    ? 0
+    : (precoCota && precoCota > 0 ? Math.ceil(valorReinvestimento / precoCota) : null)
   return {
     valorReinvestimento,
     rendaRealLivre,
@@ -85,6 +97,7 @@ export function calcularProtecaoPoderCompra(
     semRendimento,
     deflacao: taxaMensalPct < 0,
     taxaMensalAplicadaPct: taxaMensalPct,
+    cotasNecessarias,
   }
 }
 
@@ -154,13 +167,14 @@ export interface ResultadoProtecaoPoderCompraCompleto extends ResultadoProtecaoP
 // muda); com a defasagem 100% coberta, o fator é 0 (nada a reinvestir).
 export function calcularProtecaoPoderCompraCompleta(
   valorPatrimonio: number, rendimentoTotal: number, ipca12mPct: number,
-  historicoCompras: OperacaoCompraSimples[], agora: Date = new Date(),
+  historicoCompras: OperacaoCompraSimples[], precoCota: number | null = null,
+  agora: Date = new Date(),
 ): ResultadoProtecaoPoderCompraCompleto {
   const cobertura = calcularCoberturaAportes12m(historicoCompras, ipca12mPct, agora)
   const fatorCobertura = cobertura.perdaInflacaoAnual > 0
     ? Math.min(1, Math.max(0, cobertura.defasagemPendente / cobertura.perdaInflacaoAnual))
     : 1
-  const base = calcularProtecaoPoderCompra(valorPatrimonio, rendimentoTotal, ipca12mPct, fatorCobertura)
+  const base = calcularProtecaoPoderCompra(valorPatrimonio, rendimentoTotal, ipca12mPct, fatorCobertura, precoCota)
   return { ...base, cobertura }
 }
 
@@ -168,6 +182,9 @@ export interface EntradaProtecaoPoderCompra {
   valorPatrimonio: number
   rendimentoTotal: number
   historicoCompras: OperacaoCompraSimples[]
+  /** Preço de UMA cota — repassado pra calcularProtecaoPoderCompra(Completa)
+   *  traduzir o reinvestimento em nº de cotas (ver cotasNecessarias). */
+  precoCota: number
 }
 
 // FONTE ÚNICA dos 3 inputs de calcularProtecaoPoderCompraCompleta a partir
@@ -203,5 +220,6 @@ export function montarEntradaProtecaoPoderCompra(
     valorPatrimonio: precoCotaAtual * quantidadeAtual,
     rendimentoTotal: valorPorCota * quantidadeAtual,
     historicoCompras,
+    precoCota: precoCotaAtual,
   }
 }

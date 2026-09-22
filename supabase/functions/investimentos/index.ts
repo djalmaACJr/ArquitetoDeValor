@@ -47,6 +47,7 @@ import { rotaHistorico, rotaSnapshotAuto, rotaSnapshotBackfill, rotaSnapshotCron
 import { rotaRendimentoCripto, rotaRendimentoCriptoCron } from "./rendimento-cripto.ts";
 import { rotaFatosRelevantesCron } from "./fatosRelevantes.ts";
 import { rotaCvmFiiCron } from "./cvm.ts";
+import { rotaCvmAcoesCron } from "./cvmAcoes.ts";
 import { rotaChatMentor } from "./chatMentor.ts";
 import {
   rotaMigrarConta, rotaImportar, rotaAtualizarAtivos, rotaNormalizarTesouro, rotaRestaurar,
@@ -121,6 +122,16 @@ Deno.serve(async (req: Request) => {
   if (recurso === "cvm-fii-cron") {
     try { return await executarComLogDeCron("cvm-fii-semanal", () => rotaCvmFiiCron(req, m)); }
     catch (e) { logError("Handler cvm-fii-cron", e); return erro("Erro interno", 500); }
+  }
+
+  // Job do servidor: LPA/VPA de Ações a partir da DFP (Patrimônio Líquido +
+  // Lucro Líquido do último exercício anual) e da FCA (nº de ações — ponte
+  // ticker→CNPJ) da CVM — alimenta o Valor Justo (Graham). Sem JWT —
+  // x-cron-secret. Mensal (não semanal): dataset maior e fundamentos mudam
+  // no máximo por trimestre/ano. Ver cvmAcoes.ts.
+  if (recurso === "cvm-acoes-cron") {
+    try { return await executarComLogDeCron("cvm-acoes-mensal", () => rotaCvmAcoesCron(req, m)); }
+    catch (e) { logError("Handler cvm-acoes-cron", e); return erro("Erro interno", 500); }
   }
 
   const auth = await autenticar(req);

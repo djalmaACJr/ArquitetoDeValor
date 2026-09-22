@@ -10,6 +10,7 @@ import {
 } from "./shared.ts";
 import { resolverNomes, rebuildHistoricoRF } from "./mercado.ts";
 import { buscarDadosCvmPorTicker } from "./cvm.ts";
+import { buscarFundamentosPorTicker, calcularValorJustoGraham } from "./cvmAcoes.ts";
 
 export async function rotaAtivos(c: Db, req: Request, m: string, userId: string) {
   const id = extrairId(req, "ativos");
@@ -97,6 +98,10 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
       fii_vp:          body.fii_vp ?? null,
       fii_vp_origem:   body.fii_vp != null ? "MANUAL" : null,
       acoes_subtipo:   body.acoes_subtipo ?? null,
+      acao_lpa:        body.acao_lpa ?? null,
+      acao_vpa:        body.acao_vpa ?? null,
+      acao_valor_justo: calcularValorJustoGraham(body.acao_lpa, body.acao_vpa),
+      acao_fundamentos_origem: (body.acao_lpa != null || body.acao_vpa != null) ? "MANUAL" : null,
       cripto_rendimento_aa: body.cripto_rendimento_aa ?? null,
       cripto_rendimento_inicio: body.cripto_rendimento_inicio ?? null,
       cripto_rendimento_periodicidade: body.cripto_rendimento_periodicidade ?? null,
@@ -132,6 +137,20 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
         if (atualizado) ativoFinal = atualizado;
       }
     }
+
+    // Ação nova: busca LPA/VPA (fundamentos DFP/FCA) na CVM já no cadastro,
+    // best-effort — mesma regra do FII acima (CVM tem prioridade sobre valor
+    // manual informado no mesmo cadastro; nunca falha o cadastro).
+    if (data.tipo_ativo === "ACOES") {
+      const achado = await buscarFundamentosPorTicker(data.ticker);
+      if (achado) {
+        const { data: atualizado } = await c.from("inv_ativos").update({
+          acao_lpa: achado.lpa, acao_vpa: achado.vpa, acao_valor_justo: achado.valorJusto,
+          acao_fundamentos_origem: "CVM", acao_fundamentos_referencia: achado.exercicio,
+        }).eq("id", data.id).select().single();
+        if (atualizado) ativoFinal = atualizado;
+      }
+    }
     return json({ dados: ativoFinal }, 201);
   }
 
@@ -145,7 +164,7 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
     // Estado dos campos que DEFINEM o valor de mercado da renda fixa, antes do
     // update — para detectar, depois, se a forma de rentabilidade mudou.
     const { data: antesRF } = await c.from("inv_ativos")
-      .select("tipo_ativo, rf_indexador, rf_taxa, rf_vencimento, rf_limite_faixa, rf_percentual_indice_2, rf_indice, rf_percentual_indice, rf_taxa_fixa")
+      .select("tipo_ativo, rf_indexador, rf_taxa, rf_vencimento, rf_limite_faixa, rf_percentual_indice_2, rf_indice, rf_percentual_indice, rf_taxa_fixa, acao_lpa, acao_vpa")
       .eq("id", id).maybeSingle();
 
     if (body.tipo_ativo !== undefined && !TIPOS_ATIVO.includes(String(body.tipo_ativo))) {
@@ -166,7 +185,7 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
       "rf_subtipo", "rf_indexador", "rf_indice", "rf_percentual_indice",
       "rf_taxa_fixa", "rf_limite_faixa", "rf_percentual_indice_2", "rf_taxa", "rf_emissor",
       "rf_vencimento", "rf_garantia_fgc", "rf_isento_ir", "fii_categoria", "fii_vp",
-      "acoes_subtipo", "cripto_rendimento_aa", "cripto_rendimento_inicio",
+      "acoes_subtipo", "acao_lpa", "acao_vpa", "cripto_rendimento_aa", "cripto_rendimento_inicio",
       "cripto_rendimento_periodicidade", "cotacao_automatica",
     ]);
     if (typeof campos.ticker === "string") campos.ticker = campos.ticker.trim().toUpperCase();
@@ -179,6 +198,16 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
     if ("fii_vp" in campos) {
       campos.fii_vp_origem = campos.fii_vp != null ? "MANUAL" : null;
       campos.fii_vp_atualizado_em = null;
+    }
+    // Mesma regra acima, para LPA/VPA de Ações (Valor Justo/Graham). Estado
+    // FINAL (existente + alterações) — um PUT que só mexe no LPA ainda
+    // precisa recalcular o Valor Justo usando o VPA já salvo, e vice-versa.
+    if ("acao_lpa" in campos || "acao_vpa" in campos) {
+      const lpaFinal = "acao_lpa" in campos ? campos.acao_lpa : antesRF?.acao_lpa;
+      const vpaFinal = "acao_vpa" in campos ? campos.acao_vpa : antesRF?.acao_vpa;
+      campos.acao_valor_justo = calcularValorJustoGraham(lpaFinal as number | null, vpaFinal as number | null);
+      campos.acao_fundamentos_origem = (lpaFinal != null || vpaFinal != null) ? "MANUAL" : null;
+      campos.acao_fundamentos_referencia = null;
     }
 
     // Checa o par faixa/percentual2 no estado FINAL (existente + alterações),
@@ -372,6 +401,13 @@ export function validarCamposRF(body: Record<string, unknown>): string | null {
   }
   if (body.acoes_subtipo != null && !SUBTIPOS_ACOES.includes(String(body.acoes_subtipo))) {
     return `acoes_subtipo inválido: ${SUBTIPOS_ACOES.join(" | ")}`;
+  }
+  // LPA pode ser negativo (empresa no prejuízo) — só valida que é número finito.
+  if (body.acao_lpa != null && (typeof body.acao_lpa !== "number" || !Number.isFinite(body.acao_lpa))) {
+    return "acao_lpa deve ser um número";
+  }
+  if (body.acao_vpa != null && (typeof body.acao_vpa !== "number" || !Number.isFinite(body.acao_vpa) || body.acao_vpa <= 0)) {
+    return "acao_vpa deve ser um número > 0";
   }
   if (body.cripto_rendimento_aa != null) {
     const v = Number(body.cripto_rendimento_aa);

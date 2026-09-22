@@ -45,7 +45,7 @@ const LABEL_REC = { COMPRAR: 'Comprar', NEUTRO: 'Neutro', AGUARDAR: 'Aguardar' }
 const ORDEM_REC = { COMPRAR: 2, NEUTRO: 1, AGUARDAR: 0 } as const
 
 // ── Ordenação por coluna ───────────────────────────────────────
-type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'pvp' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'idealPct' | 'comprar' | 'venc' | 'indexador' | 'taxa' | 'instituicao' | 'magic' | 'protecao'
+type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'pvp' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'idealPct' | 'comprar' | 'venc' | 'indexador' | 'taxa' | 'instituicao' | 'magic' | 'protecao' | 'precoTeto' | 'valorJusto'
 function precoMedio(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_custo / l.quantidade : 0 }
 function precoAtual(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_mercado / l.quantidade : 0 }
 // P/VP (FIIs): preço atual ÷ valor patrimonial por cota — VP é informado
@@ -55,6 +55,26 @@ function pvp(l: AtivoLinha): number | null {
   const vp = l.meta?.fii_vp
   if (!vp || vp <= 0) return null
   return precoAtual(l) / vp
+}
+
+// Preço Teto (Bazin, Ações): dividendo anual por ação ÷ 6% (yield mínimo
+// exigido, padrão clássico de Décio Bazin). Dividendo anual por ação é
+// derivado do DY (12m) já disponível na linha (mesma aproximação usada pelo
+// Magic Number acima — evita buscar o histórico de dividendos ativo a
+// ativo): dividendo anual = preço atual × DY12m/100.
+const PRECO_TETO_BAZIN_YIELD_MINIMO = 0.06
+function precoTeto(l: AtivoLinha): number | null {
+  if (l.dividend_yield_pct <= 0) return null
+  const dividendoAnualPorAcao = precoAtual(l) * (l.dividend_yield_pct / 100)
+  return dividendoAnualPorAcao / PRECO_TETO_BAZIN_YIELD_MINIMO
+}
+
+// Valor Justo (Graham, Ações): raiz(22,5 × LPA × VPA) — LPA/VPA vêm do
+// último balanço anual (DFP) da CVM, ver cvmAcoes.ts. null sem fundamentos
+// (empresa fora do dataset) ou LPA/VPA <= 0 (Graham não se aplica a empresa
+// no prejuízo/patrimônio líquido negativo).
+function valorJusto(l: AtivoLinha): number | null {
+  return l.meta?.acao_valor_justo ?? null
 }
 
 // Magic Number (FIIs): quantas cotas seriam necessárias para que o próprio
@@ -94,7 +114,7 @@ function protecaoInfo(
   )
   if (!entrada) return null
   return calcularProtecaoPoderCompraCompleta(
-    entrada.valorPatrimonio, entrada.rendimentoTotal, ipca12mPct, entrada.historicoCompras,
+    entrada.valorPatrimonio, entrada.rendimentoTotal, ipca12mPct, entrada.historicoCompras, entrada.precoCota,
   )
 }
 // idealPct/comprar são derivados no nível do QUADRO (rateio da meta do tipo,
@@ -136,6 +156,8 @@ function valorOrdenacao(
     // negativa num déficit (inflação > provento) sem por isso ser "sem
     // dado" — precisa de uma distância segura pra não se misturar.
     case 'protecao':   return protecaoInfo(l, ctx.ipca12mPct, ctx.dividendosPorAtivo, ctx.operacoesPorAtivo)?.percentualRendaLivre ?? -1e9
+    case 'precoTeto':  return precoTeto(l) ?? -1
+    case 'valorJusto': return valorJusto(l) ?? -1
   }
 }
 
@@ -577,15 +599,50 @@ export default function QuadroTipoAtivos({
           </div>
         )
       } },
+    precoTeto: { id: 'precoTeto', label: 'Preço Teto', align: 'right', sortKey: 'precoTeto',
+      title: 'O preço mais alto que valeria a pena pagar hoje, olhando só quanto essa ação costuma pagar de dividendo: dividendo dos últimos 12 meses ÷ 6% (o mínimo que se espera ganhar só de dividendo). Preço atual menor que o teto = ação "barata" nesse sentido; maior = "cara".',
+      cell: (l) => {
+        const v = precoTeto(l)
+        if (v == null) return traco
+        const atual = precoAtual(l)
+        const pot = ((v - atual) / atual) * 100
+        return (
+          <>
+            <span style={{ color: atual < v ? VERDE : atual > v ? VERMELHO : MUTED }}>{formatBRL(v)}</span>
+            <span className="block text-[10px]" style={{ color: pot >= 0 ? VERDE : VERMELHO }}>
+              {pot >= 0 ? '+' : ''}{pot.toFixed(1).replace('.', ',')}%
+            </span>
+          </>
+        )
+      } },
+    valorJusto: { id: 'valorJusto', label: 'Valor Justo', align: 'right', sortKey: 'valorJusto',
+      title: 'Estimativa de quanto essa ação deveria valer, olhando o lucro por ação (LPA) e o patrimônio por ação (VPA) do último balanço anual entregue à CVM. Preço atual menor que o Valor Justo = ação pode estar "barata"; maior = pode estar "cara". Ausente se a empresa não constar no balanço da CVM ou estiver no prejuízo.',
+      cell: (l) => {
+        const v = valorJusto(l)
+        if (v == null) return traco
+        const atual = precoAtual(l)
+        const pot = ((v - atual) / atual) * 100
+        return (
+          <>
+            <span style={{ color: atual < v ? VERDE : atual > v ? VERMELHO : MUTED }}>{formatBRL(v)}</span>
+            <span className="block text-[10px]" style={{ color: pot >= 0 ? VERDE : VERMELHO }}>
+              {pot >= 0 ? '+' : ''}{pot.toFixed(1).replace('.', ',')}%
+            </span>
+          </>
+        )
+      } },
   }
 
+  const ehAcoes = tipo === 'ACOES'
   const base: Coluna[] = ehRF
     ? [C.titulo, C.instituicao, C.indexador, C.taxa, C.venc, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
     : ehFII
       ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.pvp, C.rent, C.dy, C.yoc, C.magic, C.protecao, C.saldo, C.nota, C.cart, C.idealPct]
-      : mostraDyYocMedio
-        ? [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart, C.idealPct]
-        : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
+      : ehAcoes
+        ? [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.precoTeto, C.valorJusto, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart, C.idealPct]
+        : mostraDyYocMedio
+          ? [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart, C.idealPct]
+          : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
   // Quando o quadro NÃO está agrupado por categoria, ela deixa de aparecer como
   // cabeçalho de grupo — então a exibimos como coluna (após Título+Instituição,
   // na RF, ou após Nome, nos demais). Sem dados de categoria, a coluna é omitida.
@@ -598,8 +655,9 @@ export default function QuadroTipoAtivos({
   // "Posição" (fixa à esquerda) + colunas visíveis + "Comprar?" + (Ações, se houver)
   const nCols = visiveis.length + 2 + (acoes ? 1 : 0)
   // +70px pela coluna "% Ideal"; FII soma +90px pela "Magic Number", +60px
-  // pela "P/VP" e +80px pela "Proteção"; +40px pela "Posição"
-  const minWidth = (ehFII ? 980 + 90 + 60 + 80 : ehRF ? 1040 : mostraDyYocMedio ? 1000 : 860) + 70 + 40
+  // pela "P/VP" e +80px pela "Proteção"; Ações soma +100px pelo "Preço Teto"
+  // e +100px pelo "Valor Justo"; +40px pela "Posição"
+  const minWidth = (ehFII ? 980 + 90 + 60 + 80 : ehRF ? 1040 : ehAcoes ? 1000 + 100 + 100 : mostraDyYocMedio ? 1000 : 860) + 70 + 40
 
 
   function LinhaAtivo({ l, posicao, realce, alvo, primeira, ultima }: {

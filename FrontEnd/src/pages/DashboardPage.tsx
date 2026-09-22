@@ -42,6 +42,7 @@ import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import CalendarioDashboard from '../components/ui/CalendarioDashboard'
 import ModalLembrete from '../components/ui/ModalLembrete'
 import { useLembretes } from '../hooks/useLembretes'
+import { useDividendos } from '../hooks/useDividendos'
 import { useOcultarValores } from '../hooks/useOcultarValores'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
 import type { Lembrete } from '../types'
@@ -1826,6 +1827,24 @@ export default function DashboardPage() {
     return mapa
   }, [doMesRaw])
 
+  // Dias com Data COM de provento (última data com direito ao próximo
+  // pagamento) no mês exibido — só proventos ainda em PROJEÇÃO (já pagos
+  // não precisam mais de aviso). Mesma fonte do aviso de login
+  // (useAvisosDataCom), aqui só filtrada pro mês do calendário em vez de
+  // "próximos N dias".
+  const { dividendos: dividendosDoMes } = useDividendos({})
+  const datasComProventos = useMemo(() => {
+    const mapa = new Map<string, { ticker: string; valorProjetado: number }[]>()
+    for (const d of dividendosDoMes) {
+      if (!d.data_com || !d.data_com.startsWith(mes)) continue
+      if (d.transacoes?.status !== 'PROJECAO') continue
+      const lista = mapa.get(d.data_com) ?? []
+      lista.push({ ticker: d.inv_ativos?.ticker ?? '', valorProjetado: d.valor })
+      mapa.set(d.data_com, lista)
+    }
+    return mapa
+  }, [dividendosDoMes, mes])
+
   return (
     <div className="p-5">
       <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100 text-center sm:text-left mb-3">Dashboard</h1>
@@ -1936,6 +1955,7 @@ export default function DashboardPage() {
                 contas={contas}
                 diasNegativos={diasNegativos}
                 ultimasParcelas={ultimasParcelas}
+                datasComProventos={datasComProventos}
                 onEditar={l => { setLembreteEditando(l); setModalLembreteAberto(true) }}
                 onExcluir={id => excluirLembrete(id)}
                 onToggle={(id, novoStatus) => editarLembrete(id, { status: novoStatus })}

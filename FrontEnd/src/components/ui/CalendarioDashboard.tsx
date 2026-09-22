@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bell, CreditCard, Check, Trash2, Pencil, X, Plus, AlertTriangle, Flag, List } from 'lucide-react'
+import { Bell, CreditCard, Check, Trash2, Pencil, X, Plus, AlertTriangle, Flag, List, Coins } from 'lucide-react'
 import type { Lembrete, Conta } from '../../types'
 import { MESES_ABREV, hojeLocal } from '../../lib/utils'
 
@@ -19,6 +19,8 @@ interface Props {
   diasNegativos?:  Map<string, { nome: string; saldo: number }[]>
   /** Map data (YYYY-MM-DD) → lista de transações recorrentes com última parcela PROJEÇÃO nesse dia. */
   ultimasParcelas?: Map<string, UltimaParcela[]>
+  /** Map data (YYYY-MM-DD) → ativos com Data COM (direito a provento) nesse dia. */
+  datasComProventos?: Map<string, { ticker: string; valorProjetado: number }[]>
   onEditar:        (l: Lembrete) => void
   onExcluir:       (id: string) => void
   onToggle:        (id: string, status: 'PENDENTE' | 'CONCLUIDO') => void
@@ -27,7 +29,7 @@ interface Props {
 }
 
 export default function CalendarioDashboard({
-  mes, lembretes, contas, diasNegativos, ultimasParcelas,
+  mes, lembretes, contas, diasNegativos, ultimasParcelas, datasComProventos,
   onEditar, onExcluir, onToggle, onNovoNoDia, onAbrirTodosLembretes,
 }: Props) {
   const [diaAberto, setDiaAberto] = useState<string | null>(null)
@@ -73,6 +75,7 @@ export default function CalendarioDashboard({
   const lembrsDiaAberto    = diaAberto ? (lembretesPorDia.get(diaAberto) ?? []) : []
   const evsDiaAberto       = diaAberto ? eventosDia(parseInt(diaAberto.split('-')[2])) : []
   const temUltimasParcelas = (ultimasParcelas?.size ?? 0) > 0
+  const temDataCom         = (datasComProventos?.size ?? 0) > 0
 
   return (
     <div
@@ -93,6 +96,9 @@ export default function CalendarioDashboard({
           )}
           {temUltimasParcelas && (
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#c084fc' }} title="Última parcela (projeção)" />
+          )}
+          {temDataCom && (
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#eab308' }} title="Data COM de provento" />
           )}
           {onAbrirTodosLembretes && (
             <button
@@ -133,7 +139,8 @@ export default function CalendarioDashboard({
           const aberto          = diaAberto === ds
           const negativo        = (diasNegativos?.get(ds)?.length ?? 0) > 0
           const ultimaParc      = (ultimasParcelas?.get(ds)?.length ?? 0) > 0
-          const temEv           = lembs.length > 0 || evs.length > 0 || negativo || ultimaParc
+          const dataCom         = (datasComProventos?.get(ds)?.length ?? 0) > 0
+          const temEv           = lembs.length > 0 || evs.length > 0 || negativo || ultimaParc || dataCom
           const concl           = lembs.length > 0 && lembs.every(l => l.status === 'CONCLUIDO')
 
           return (
@@ -211,6 +218,9 @@ export default function CalendarioDashboard({
                   )}
                   {ultimaParc && (
                     <span className="w-1 h-1 rounded-full" style={{ background: '#c084fc' }} />
+                  )}
+                  {dataCom && (
+                    <span className="w-1 h-1 rounded-full" style={{ background: '#eab308' }} />
                   )}
                 </div>
               )}
@@ -338,9 +348,25 @@ export default function CalendarioDashboard({
             </div>
           ))}
 
+          {/* Data COM de proventos */}
+          {diaAberto && (datasComProventos?.get(diaAberto) ?? []).map((dc, i) => (
+            <div key={`dc-${i}`}
+              className="flex items-center gap-1.5 py-1 px-1.5 rounded"
+              style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)' }}>
+              <Coins size={9} style={{ color: '#eab308', flexShrink: 0 }} />
+              <span className="flex-1 text-[14px] truncate" style={{ color: '#eab308' }}>
+                Data COM: {dc.ticker}
+              </span>
+              <span className="text-[13px] font-semibold flex-shrink-0" style={{ color: '#eab308' }}>
+                {dc.valorProjetado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              </span>
+            </div>
+          ))}
+
           {lembrsDiaAberto.length === 0 && evsDiaAberto.length === 0
             && (diasNegativos?.get(diaAberto ?? '')?.length ?? 0) === 0
-            && (ultimasParcelas?.get(diaAberto ?? '')?.length ?? 0) === 0 && (
+            && (ultimasParcelas?.get(diaAberto ?? '')?.length ?? 0) === 0
+            && (datasComProventos?.get(diaAberto ?? '')?.length ?? 0) === 0 && (
             <span className="text-[14px]" style={{ color: '#4a5168' }}>Sem eventos neste dia.</span>
           )}
         </div>

@@ -37,6 +37,10 @@ export interface CriarAtivoInput {
   fii_vp?:          number | null
   // Ações
   acoes_subtipo?:   AcoesSubtipo | null
+  // LPA/VPA informados manualmente — fallback quando a CVM não encontra a
+  // companhia; usados no cálculo do Valor Justo (Graham)
+  acao_lpa?:        number | null
+  acao_vpa?:        number | null
   // Cripto — rendimento (yield) anual em % a.a. (gera operações RENDIMENTO)
   cripto_rendimento_aa?: number | null
   cripto_rendimento_inicio?: string | null

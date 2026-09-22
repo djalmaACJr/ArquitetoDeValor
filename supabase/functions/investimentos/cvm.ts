@@ -66,9 +66,9 @@ interface DadosCvmFii {
   fonte: 'FII' | 'FIAGRO';
 }
 
-type LinhaCsv = Record<string, string>;
+export type LinhaCsv = Record<string, string>;
 
-function parseCsv(texto: string): LinhaCsv[] {
+export function parseCsv(texto: string): LinhaCsv[] {
   const linhas = texto.split(/\r?\n/).filter((l) => l.trim() !== "");
   if (linhas.length < 2) return [];
   const cab = linhas[0].split(";");
@@ -80,24 +80,25 @@ function parseCsv(texto: string): LinhaCsv[] {
   });
 }
 
-// Por CNPJ (campo indicado em `campoCnpj` — nome do campo difere entre FII e
-// FIAGRO), mantém só a linha de referência mais recente (maior
+// Por chave (campo indicado em `campoChave` — CNPJ para FII/FIAGRO, mas
+// serve para qualquer chave de agrupamento — ver uso com Codigo_Negociacao
+// em cvmAcoes.ts), mantém só a linha de referência mais recente (maior
 // Data_Referencia; empatada, maior Versao — retificação do mesmo mês).
-function maisRecentePorCnpj(linhas: LinhaCsv[], campoCnpj: string): Map<string, LinhaCsv> {
-  const porCnpj = new Map<string, LinhaCsv>();
+export function maisRecentePorChave(linhas: LinhaCsv[], campoChave: string): Map<string, LinhaCsv> {
+  const porChave = new Map<string, LinhaCsv>();
   for (const l of linhas) {
-    const chave = l[campoCnpj];
+    const chave = l[campoChave];
     if (!chave) continue;
-    const atual = porCnpj.get(chave);
+    const atual = porChave.get(chave);
     if (
       !atual ||
       l.Data_Referencia > atual.Data_Referencia ||
       (l.Data_Referencia === atual.Data_Referencia && Number(l.Versao) > Number(atual.Versao))
     ) {
-      porCnpj.set(chave, l);
+      porChave.set(chave, l);
     }
   }
-  return porCnpj;
+  return porChave;
 }
 
 // Raiz do ticker (sem o sufixo "11") a partir do Código ISIN.
@@ -110,13 +111,13 @@ function raizDoTicker(ticker: string): string {
   return ticker.trim().toUpperCase().replace(/11$/, "");
 }
 
-async function baixarZip(url: string): Promise<JSZip> {
+export async function baixarZip(url: string): Promise<JSZip> {
   const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
   if (!res.ok) throw new Error(`CVM: HTTP ${res.status} em ${url}`);
   return JSZip.loadAsync(await res.arrayBuffer());
 }
 
-async function lerCsvDoZip(zip: JSZip, nome: string, url: string): Promise<string> {
+export async function lerCsvDoZip(zip: JSZip, nome: string, url: string): Promise<string> {
   const arq = zip.files[nome];
   if (!arq) throw new Error(`CVM: arquivo "${nome}" ausente no ZIP (${url})`);
   return DECODER.decode(await arq.async("uint8array"));
@@ -129,8 +130,8 @@ async function buscarDadosFii(ano: number): Promise<Map<string, DadosCvmFii>> {
   const geralCsv       = await lerCsvDoZip(zip, `inf_mensal_fii_geral_${ano}.csv`, url);
   const complementoCsv = await lerCsvDoZip(zip, `inf_mensal_fii_complemento_${ano}.csv`, url);
 
-  const geralPorCnpj = maisRecentePorCnpj(parseCsv(geralCsv), "CNPJ_Fundo_Classe");
-  const complPorCnpj = maisRecentePorCnpj(parseCsv(complementoCsv), "CNPJ_Fundo_Classe");
+  const geralPorCnpj = maisRecentePorChave(parseCsv(geralCsv), "CNPJ_Fundo_Classe");
+  const complPorCnpj = maisRecentePorChave(parseCsv(complementoCsv), "CNPJ_Fundo_Classe");
 
   const out = new Map<string, DadosCvmFii>();
   for (const [cnpj, geral] of geralPorCnpj) {
@@ -186,7 +187,7 @@ async function buscarDadosFiagro(): Promise<Map<string, DadosCvmFii>> {
     }
   }
 
-  const porCnpj = maisRecentePorCnpj(todasLinhas, "CNPJ_Classe");
+  const porCnpj = maisRecentePorChave(todasLinhas, "CNPJ_Classe");
   const out = new Map<string, DadosCvmFii>();
   for (const [, l] of porCnpj) {
     const raiz = raizDoIsin(l.Codigo_ISIN);

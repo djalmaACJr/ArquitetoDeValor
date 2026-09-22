@@ -5,7 +5,9 @@ import { Menu } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import Sidebar from './Sidebar'
 import NovidadesProventos from '../ui/NovidadesProventos'
+import AvisoDataComProxima from '../ui/AvisoDataComProxima'
 import AvisosCronAdmin from '../ui/AvisosCronAdmin'
+import AvisoFecharAba from '../ui/AvisoFecharAba'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useAutoLogout } from '../../hooks/useAutoLogout'
@@ -195,11 +197,20 @@ export default function AppLayout() {
         <Outlet />
       </main>
 
-      {/* Aviso de login: proventos provisionados pelo job BRL */}
-      <NovidadesProventos />
+      {/* Avisos de login empilhados no canto inferior direito — wrapper com
+          pointer-events-none pra não bloquear cliques no espaço vazio entre
+          os cards; cada card reativa pointer-events-auto em si mesmo. */}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col-reverse gap-3 pointer-events-none">
+        {/* Proventos provisionados pelo job BRL (já mostra a Data COM quando a fonte tem) */}
+        <NovidadesProventos />
+        {/* Ativos da carteira com Data COM próxima (próximos dias) */}
+        <AvisoDataComProxima />
+      </div>
       {/* Aviso de login (só admin): cron com falha, inclusive falhas que nem
           chegaram a invocar a Edge Function (pg_cron/pg_net) */}
       <AvisosCronAdmin />
+      {/* Modal de decisão ao expirar por inatividade nesta aba (ver useAutoLogout) */}
+      <AvisoFecharAba />
     </div>
   )
 }

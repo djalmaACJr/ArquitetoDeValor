@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import {
   Sparkles, RefreshCw, Bot, AlertTriangle, Settings, ChevronDown, CheckCircle2,
   Trophy, Medal, ShieldCheck, TrendingUp, Coins, Scale, Star, CalendarClock,
@@ -10,6 +10,8 @@ import { useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
 import { useInvestimentosHistorico } from '../hooks/useInvestimentosHistorico'
 import QuadroSobreposicao from '../components/ui/QuadroSobreposicao'
 import QuadroCorrelacao from '../components/ui/QuadroCorrelacao'
+import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
+import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
 import { useInvAvaliacoes } from '../hooks/useInvAvaliacoes'
 import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
 import { useInvPerfil } from '../hooks/useInvPerfil'
@@ -254,6 +256,19 @@ function IconePosicao({ pos }: { pos: number }) {
   if (pos === 1) return <Medal size={14} style={{ color: '#c0c4cc' }} />
   if (pos === 2) return <Medal size={14} style={{ color: '#cd7f32' }} />
   return <span className="text-[11px] w-[14px] text-center inline-block" style={{ color: MUTED }}>{pos + 1}</span>
+}
+
+// Divisória entre macro-áreas da página (ex.: "Ranking por tipo de ativo" vs.
+// "Concentração e sobreposição") — só um rótulo com régua dos dois lados,
+// pra marcar visualmente a troca de assunto sem virar mais uma seção com borda.
+function DivisorArea({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 mt-1 mb-3">
+      <span className="h-px flex-1" style={{ background: 'rgba(255,255,255,0.08)' }} />
+      <span className="text-[10.5px] font-semibold uppercase tracking-wider shrink-0" style={{ color: MUTED }}>{label}</span>
+      <span className="h-px flex-1" style={{ background: 'rgba(255,255,255,0.08)' }} />
+    </div>
+  )
 }
 
 // Card de ranking compacto (melhores ou piores de um tipo): lista ticker + nota.
@@ -778,7 +793,7 @@ export default function AvaliacoesInvestimentosPage() {
     for (const a of ativos) {
       const av = avalPorAtivo.get(a.id)
       if (!av) continue
-      const ef = questionarioEfetivo(a.tipo_ativo, perfil?.perfil ?? null, pesosGlobais)
+      const ef = questionarioEfetivo(a.tipo_ativo, perfil?.perfil ?? null, pesosGlobais, a.fii_categoria)
       m.set(a.id, { perguntas: ef.perguntas, medias: mediasPorCriterio(av, ef.perguntas) })
     }
     return m
@@ -818,36 +833,71 @@ export default function AvaliacoesInvestimentosPage() {
     return m
   }, [roundSelecionado, detalhePorAtivo, avalView])
 
-  // Ativos exibidos, agrupados por tipo (usam a visão atual ou o snapshot).
+  // Ativos exibidos, agrupados por tipo — separados em duas listas conforme
+  // têm posição na carteira hoje ou não (venda total desde a última
+  // avaliação). "Sem posição" fica numa seção à parte (ver render) — o
+  // histórico de notas continua no banco, só não se mistura com o que
+  // efetivamente compõe a carteira atual.
   const gruposAvaliados = useMemo(() => {
-    const porTipo = new Map<TipoAtivoInvestimento, InvestimentoAtivo[]>()
-    for (const a of ativos) {
-      if (!avalView.has(a.id)) continue
-      const arr = porTipo.get(a.tipo_ativo) ?? []
-      arr.push(a)
-      porTipo.set(a.tipo_ativo, arr)
+    const agrupar = (filtro: (a: InvestimentoAtivo) => boolean) => {
+      const porTipo = new Map<TipoAtivoInvestimento, InvestimentoAtivo[]>()
+      for (const a of ativos) {
+        if (!avalView.has(a.id) || !filtro(a)) continue
+        const arr = porTipo.get(a.tipo_ativo) ?? []
+        arr.push(a)
+        porTipo.set(a.tipo_ativo, arr)
+      }
+      return [...porTipo.entries()].sort((x, y) => TIPOS_ATIVO_INV.indexOf(x[0]) - TIPOS_ATIVO_INV.indexOf(y[0]))
     }
-    return [...porTipo.entries()].sort((x, y) => TIPOS_ATIVO_INV.indexOf(x[0]) - TIPOS_ATIVO_INV.indexOf(y[0]))
-  }, [ativos, avalView])
+    return {
+      comPosicao: agrupar((a) => comSaldo.has(a.id)),
+      semPosicao: agrupar((a) => !comSaldo.has(a.id)),
+    }
+  }, [ativos, avalView, comSaldo])
+
+  // Ordem dos quadros "por tipo de ativo" — arrastável pelo usuário,
+  // persistida em arqvalor.usuarios.ordem_quadros (mesmo padrão de
+  // InvestimentosPage/DestaquesInvestimentosPage). Dois grupos independentes
+  // (com posição / sem posição) porque são listas conceitualmente separadas.
+  const { blob: ordemDb, salvar: salvarOrdemDb } = usePreferenciasOrdemQuadros()
+  const chavesTiposComPosicao = useMemo(() => gruposAvaliados.comPosicao.map(([tipo]) => tipo), [gruposAvaliados])
+  const chavesTiposSemPosicao = useMemo(() => gruposAvaliados.semPosicao.map(([tipo]) => tipo), [gruposAvaliados])
+  const mapaComPosicao = useMemo(() => new Map(gruposAvaliados.comPosicao), [gruposAvaliados])
+  const mapaSemPosicao = useMemo(() => new Map(gruposAvaliados.semPosicao), [gruposAvaliados])
+  const { ordem: ordemComPosicao, dragHandleProps: alcaComPosicao, dropTargetProps: alvoComPosicao, dropTargetOutlineClass: contornoComPosicao } =
+    useOrdemReordenavel<TipoAtivoInvestimento>('arqvalor:avaliacoes-ordem-tipos', chavesTiposComPosicao, {
+      valorRemoto: (ordemDb['avaliacoes-tipos'] as TipoAtivoInvestimento[] | undefined) ?? null,
+      aoMudar: (nova) => salvarOrdemDb('avaliacoes-tipos', nova),
+    })
+  const { ordem: ordemSemPosicao, dragHandleProps: alcaSemPosicao, dropTargetProps: alvoSemPosicao, dropTargetOutlineClass: contornoSemPosicao } =
+    useOrdemReordenavel<TipoAtivoInvestimento>('arqvalor:avaliacoes-ordem-tipos-sem-posicao', chavesTiposSemPosicao, {
+      valorRemoto: (ordemDb['avaliacoes-tipos-sem-posicao'] as TipoAtivoInvestimento[] | undefined) ?? null,
+      aoMudar: (nova) => salvarOrdemDb('avaliacoes-tipos-sem-posicao', nova),
+    })
+  const [semPosicaoAberto, setSemPosicaoAberto] = useState(false)
 
   // Avaliação da carteira COMO UM TODO (antes da quebra por tipo): qualidade
-  // média de todos os ativos avaliados na visão atual / snapshot.
+  // média dos ativos avaliados que AINDA fazem parte da carteira (com
+  // posição) — vendas já encerradas não devem puxar a nota da carteira
+  // atual pra cima/baixo.
   const resumoCarteira = useMemo(() => {
-    const todos = ativos.filter((a) => avalView.has(a.id))
+    const todos = ativos.filter((a) => avalView.has(a.id) && comSaldo.has(a.id))
     return resumoQualidade(todos, avalView, detalheView)
-  }, [ativos, avalView, detalheView])
+  }, [ativos, avalView, detalheView, comSaldo])
 
-  // Linhas do ranking do topo (refletem a visão atual ou o snapshot).
+  // Linhas do ranking do topo (refletem a visão atual ou o snapshot) — só
+  // ativos com posição, mesmo motivo do resumo da carteira acima.
   const dadosRank = useMemo<LinhaRank[]>(() => {
     const out: LinhaRank[] = []
     for (const a of ativos) {
+      if (!comSaldo.has(a.id)) continue
       const av = avalView.get(a.id)
       const det = detalheView.get(a.id)
       if (!av || !det) continue
       out.push({ ativo: a, final: av.nota_final, medias: det.medias })
     }
     return out
-  }, [ativos, avalView, detalheView])
+  }, [ativos, avalView, detalheView, comSaldo])
 
   // Agenda de reavaliação: deriva a última avaliação e a próxima data.
   const ultimaEm = useMemo(() => {
@@ -1045,7 +1095,7 @@ export default function AvaliacoesInvestimentosPage() {
         if (r) mentores.push(r)
       }
       if (mentores.length === 0) continue
-      const ef = questionarioEfetivo(a.tipo_ativo, perfil?.perfil ?? null, pesosGlobais)
+      const ef = questionarioEfetivo(a.tipo_ativo, perfil?.perfil ?? null, pesosGlobais, a.fii_categoria)
       efPorAtivo.set(a.id, { perguntas: ef.perguntas, pesos: ef.pesos })
       resultadosPorAtivo.set(a.id, mentores)
       lista.push(a)
@@ -1094,7 +1144,7 @@ export default function AvaliacoesInvestimentosPage() {
 
     // Questionário efetivo por ativo (resolvido uma vez).
     const efPorAtivo = new Map<string, EfQ>(lista.map((a) => {
-      const ef = questionarioEfetivo(a.tipo_ativo, perfil?.perfil ?? null, pesosGlobais)
+      const ef = questionarioEfetivo(a.tipo_ativo, perfil?.perfil ?? null, pesosGlobais, a.fii_categoria)
       return [a.id, { perguntas: ef.perguntas, pesos: ef.pesos }]
     }))
     const resultadosPorAtivo = new Map<string, InvAvaliacaoMentor[]>()
@@ -1550,7 +1600,7 @@ export default function AvaliacoesInvestimentosPage() {
 
           {/* Avaliação da carteira COMO UM TODO + IAs que participaram —
               exibida antes da listagem (por tipo) de ativos. */}
-          {gruposAvaliados.length > 0 && (
+          {(gruposAvaliados.comPosicao.length > 0 || gruposAvaliados.semPosicao.length > 0) && (
             <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-4">
               <h2 className="text-[13px] font-semibold text-white mb-2 flex items-center gap-1.5">
                 <Sparkles size={15} style={{ color: '#8b5cf6' }} /> Avaliação da carteira
@@ -1594,28 +1644,78 @@ export default function AvaliacoesInvestimentosPage() {
           {/* Ranking geral dos ativos — logo após a avaliação da carteira */}
           {dadosRank.length > 0 && <RankingTopo dados={dadosRank} />}
 
-          {/* Concentração de risco da carteira: sobreposição de ETFs e
-              correlação entre ativos (independem do modo histórico). */}
-          {!modoHistorico && ativosComSaldo.length > 0 && (
-            <QuadroSobreposicao ativosCarteira={ativosComSaldo} ativoPorId={ativoPorId} />
-          )}
-          {!modoHistorico && ativosComSaldo.length > 0 && (
-            <QuadroCorrelacao historico={historico} ativosCarteira={ativosComSaldo} ativoPorId={ativoPorId} />
-          )}
+          {/* ── Ranking por tipo de ativo ──────────────────────────────── */}
+          <DivisorArea label="Ranking por tipo de ativo" />
 
           {avaliacoes.length === 0 && !progMentores ? (
             <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center text-[13px]" style={{ color: MUTED }}>
               Nenhuma avaliação ainda. Clique em “Avaliar carteira com os mentores”.
             </div>
           ) : (
-            <div className="space-y-5">
-              {gruposAvaliados.map(([tipo, lista]) => (
-                <GrupoTipoAvaliacao key={tipo} tipo={tipo} ativos={lista} comSaldo={comSaldo}
-                  avalPorAtivo={avalView} detalhePorAtivo={detalheView}
-                  ordenar={ordenar} setOrdenar={setOrdenar} modoHistorico={modoHistorico}
-                  rodando={rodando} onReavaliar={(id) => avaliar([ativoPorId.get(id)!], true)} />
-              ))}
-            </div>
+            <>
+              <div className="space-y-3 mb-4">
+                {ordemComPosicao.map((tipo) => {
+                  const lista = mapaComPosicao.get(tipo)
+                  if (!lista) return null
+                  return (
+                    <div key={tipo} data-quadro-arrastavel
+                      className={`rounded-xl transition-all duration-150 ${contornoComPosicao(tipo)}`}
+                      {...alvoComPosicao(tipo)}>
+                      <GrupoTipoAvaliacao tipo={tipo} ativos={lista} comSaldo={comSaldo}
+                        avalPorAtivo={avalView} detalhePorAtivo={detalheView}
+                        ordenar={ordenar} setOrdenar={setOrdenar} modoHistorico={modoHistorico}
+                        rodando={rodando} onReavaliar={(id) => avaliar([ativoPorId.get(id)!], true)}
+                        alca={<AlcaArrastar {...alcaComPosicao(tipo)} />} />
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* "Sem posição" — quadro à parte, recolhido por padrão (venda
+                  encerrada, mantido só como histórico; não compõe a carteira
+                  atual e raramente precisa de atenção). */}
+              {gruposAvaliados.semPosicao.length > 0 && (
+                <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-4">
+                  <button onClick={() => setSemPosicaoAberto((v) => !v)} className="w-full flex items-center justify-between gap-2 text-left">
+                    <h3 className="text-[13px] font-semibold flex items-center gap-1.5" style={{ color: MUTED }}>
+                      <ChevronDown size={15} className={`shrink-0 transition-transform ${semPosicaoAberto ? '' : '-rotate-90'}`} />
+                      Sem posição
+                      <span className="font-normal text-[11.5px]">
+                        — venda encerrada, mantido só como histórico ({gruposAvaliados.semPosicao.reduce((s, [, l]) => s + l.length, 0)} ativos)
+                      </span>
+                    </h3>
+                  </button>
+                  {semPosicaoAberto && (
+                    <div className="space-y-3 mt-3">
+                      {ordemSemPosicao.map((tipo) => {
+                        const lista = mapaSemPosicao.get(tipo)
+                        if (!lista) return null
+                        return (
+                          <div key={`sem-${tipo}`} data-quadro-arrastavel
+                            className={`rounded-xl transition-all duration-150 ${contornoSemPosicao(tipo)}`}
+                            {...alvoSemPosicao(tipo)}>
+                            <GrupoTipoAvaliacao tipo={tipo} ativos={lista} comSaldo={comSaldo}
+                              avalPorAtivo={avalView} detalhePorAtivo={detalheView}
+                              ordenar={ordenar} setOrdenar={setOrdenar} modoHistorico={modoHistorico}
+                              rodando={rodando} onReavaliar={(id) => avaliar([ativoPorId.get(id)!], true)}
+                              alca={<AlcaArrastar {...alcaSemPosicao(tipo)} />} />
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </section>
+              )}
+            </>
+          )}
+
+          {/* ── Concentração e sobreposição ────────────────────────────── */}
+          {!modoHistorico && ativosComSaldo.length > 0 && (
+            <>
+              <DivisorArea label="Concentração e sobreposição" />
+              <QuadroSobreposicao ativosCarteira={ativosComSaldo} ativoPorId={ativoPorId} />
+              <QuadroCorrelacao historico={historico} ativosCarteira={ativosComSaldo} ativoPorId={ativoPorId} />
+            </>
           )}
         </>
       )}
@@ -1665,7 +1765,7 @@ function ThSort({ col, label, icon: Icon, ordenar, setOrdenar, className }: {
 
 // ── Grupo de um tipo de ativo: lista ordenável (médias por critério + nota
 //    final), com cada ativo expansível para a planilha mentor × pergunta. ──
-function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAtivo, ordenar, setOrdenar, rodando, onReavaliar, modoHistorico }: {
+function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAtivo, ordenar, setOrdenar, rodando, onReavaliar, modoHistorico, alca }: {
   tipo: TipoAtivoInvestimento
   ativos: InvestimentoAtivo[]
   /** Ativos com posição válida (saldo > 0) — só estes podem ser reavaliados
@@ -1681,6 +1781,9 @@ function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAt
   onReavaliar: (id: string) => void
   /** Visualizando um snapshot do histórico (só leitura, sem detalhe). */
   modoHistorico?: boolean
+  /** Alça de arrastar (AlcaArrastar de useOrdemReordenavel) — renderizada no
+      cabeçalho do quadro. Só quem envolve isto numa lista reordenável passa. */
+  alca?: ReactNode
 }) {
   const [aberto, setAberto] = useState<Set<string>>(new Set())
   const [grupoAberto, setGrupoAberto] = useState(true)
@@ -1736,12 +1839,14 @@ function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAt
   }, [ativos, avalPorAtivo])
 
   return (
-    <div>
-      {/* Cabeçalho do tipo — clicável para colapsar/expandir o grupo. Fica
-          fixo no topo (sticky) enquanto a lista daquele tipo estiver em tela. */}
-      <button onClick={() => setGrupoAberto((o) => !o)}
-        className="w-full flex items-center gap-2 mb-2 text-left sticky top-0 z-10 py-1.5"
-        style={{ background: 'var(--bg-page, #0a0f1a)' }}>
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      {/* Cabeçalho do tipo — clicável para colapsar/expandir o grupo.
+          div (não <button>): a alça de arrastar, quando presente, é ela
+          própria um <button>, e um <button> não pode conter outro. */}
+      <div role="button" tabIndex={0} onClick={() => setGrupoAberto((o) => !o)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setGrupoAberto((o) => !o) } }}
+        className="w-full flex items-center gap-2 text-left cursor-pointer">
+        {alca && <span onClick={(e) => e.stopPropagation()}>{alca}</span>}
         <ChevronDown size={15} style={{ color: MUTED }} className={`shrink-0 transition-transform ${grupoAberto ? '' : '-rotate-90'}`} />
         <span className="w-2.5 h-2.5 rounded-full" style={{ background: TIPO_ATIVO_COR[tipo] }} />
         <span className="text-[14px] font-semibold text-white">{TIPO_ATIVO_LABEL[tipo]}</span>
@@ -1749,9 +1854,9 @@ function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAt
         {resumo && !grupoAberto && (
           <span className="text-[12px] font-semibold ml-1" style={{ color: resumo.cor }}>· {resumo.label}</span>
         )}
-      </button>
+      </div>
 
-      {grupoAberto && (<>
+      {grupoAberto && (<div className="mt-3">
       {/* Resumo da qualidade desta carteira (tipo) */}
       {resumo && (
         <div className="mb-2 rounded-lg border px-3 py-2 text-[12.5px]"
@@ -1867,7 +1972,7 @@ function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAt
           </tbody>
         </table>
       </div>
-      </>)}
+      </div>)}
     </div>
   )
 }

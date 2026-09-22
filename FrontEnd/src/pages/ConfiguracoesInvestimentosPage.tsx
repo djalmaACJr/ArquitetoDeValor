@@ -527,7 +527,10 @@ function SecaoQuestionarios() {
     () => TIPOS_ATIVO_INV.filter((t) => (alocacoes.find((a) => a.tipo_ativo === t)?.percentual_ideal ?? 0) > 0),
     [alocacoes],
   )
-  const tiposComQuestionarioProprio = questionarios.length
+  // Conta TIPOS distintos com ao menos 1 questionário custom — não linhas:
+  // um FII pode ter várias (genérico + por categoria), o que inflaria a
+  // contagem acima do nº de tipos alocados.
+  const tiposComQuestionarioProprio = new Set(questionarios.map((q) => q.tipo_ativo)).size
 
   return (
     <Secao icone={<ClipboardList size={16} />} titulo="Questionários de avaliação"

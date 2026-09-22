@@ -34,6 +34,10 @@ export const INDEXADORES_RF = ["PREFIXADO", "POS_FIXADO", "HIBRIDO"];
 export const INDICES_RF     = ["CDI", "SELIC", "IPCA", "IGPM"];
 // Fundos imobiliários
 export const CATEGORIAS_FII = ["TIJOLO", "PAPEL", "FOF", "DESENVOLVIMENTO", "AGRO", "OUTRO"];
+export const CATEGORIA_FII_LABEL_BR: Record<string, string> = {
+  TIJOLO: "Tijolo", PAPEL: "Papel", FOF: "FoF (Fundo de Fundos)",
+  DESENVOLVIMENTO: "Desenvolvimento", AGRO: "FIAGRO", OUTRO: "Outro/Misto",
+};
 // Ações
 export const SUBTIPOS_ACOES = ["ON", "PN", "UNIT", "BDR"];
 

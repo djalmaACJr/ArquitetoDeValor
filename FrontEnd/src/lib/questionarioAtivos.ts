@@ -8,14 +8,16 @@
 // critério (pesos somam 100).
 //
 // Este arquivo é a SEMENTE (default). O usuário pode sobrepor por tipo
-// com um questionário customizado (manual ou gerado por IA) guardado em
-// arqvalor.inv_questionarios — ver useInvQuestionarios.
+// (e, no caso de FII, por CATEGORIA — Tijolo/Papel/FoF/Desenvolvimento/
+// FIAGRO/Outro têm riscos bem diferentes entre si) com um questionário
+// customizado (manual ou gerado por IA) guardado em arqvalor.inv_questionarios
+// — ver useInvQuestionarios.
 //
 // Respostas são persistidas em inv_ativos.questionario_respostas
 // ({pergunta_id: indice 0..4}) e a nota em inv_ativos.nota_usuario.
 // ============================================================
-import type { TipoAtivoInvestimento } from './constants'
-import { CRITERIOS_QUESTAO, PESOS_SUGERIDOS_POR_PERFIL } from './constants'
+import type { TipoAtivoInvestimento, CategoriaFII } from './constants'
+import { CRITERIOS_QUESTAO, PESOS_SUGERIDOS_POR_PERFIL, CATEGORIAS_FII } from './constants'
 import type { PerguntaAvaliacao, PesosCriterio } from '../types'
 
 // Pesos padrão quando não há perfil/custom — perfil Moderado (equilibrado).
@@ -105,18 +107,16 @@ const PERGUNTAS_BASE: PerguntaAvaliacao[] = [
 ]
 
 // Perguntas específicas adicionais por tipo (enriquecem o default).
+// FII é tratado à parte (PERGUNTAS_FII_COMUM + PERGUNTAS_FII_POR_CATEGORIA)
+// porque um FII de Papel (CRI/CRA) e um FII de Tijolo (imóveis físicos) têm
+// riscos e indicadores praticamente opostos — não faz sentido perguntar
+// "vacância dos imóveis" para um fundo que não tem imóvel nenhum.
 const PERGUNTAS_POR_TIPO: Partial<Record<TipoAtivoInvestimento, PerguntaAvaliacao[]>> = {
   ACOES: [
     { id: 'a_valuation', criterio: 'VALUATION', texto: 'O preço atual está atrativo frente aos fundamentos (valuation)?',
       opcoes: ['Muito caro', 'Caro', 'Justo', 'Barato', 'Muito barato'] },
     { id: 'a_lucro', criterio: 'CRESCIMENTO', texto: 'Qual a tendência de crescimento de lucros da empresa?',
       opcoes: ['Em queda', 'Estagnado', 'Leve alta', 'Crescente', 'Forte crescimento'] },
-  ],
-  FII: [
-    { id: 'fii_vacancia', criterio: 'FUNDAMENTOS', texto: 'Como está a vacância/inadimplência dos imóveis do fundo?',
-      opcoes: ['Muito alta', 'Alta', 'Média', 'Baixa', 'Muito baixa'] },
-    { id: 'fii_pvp', criterio: 'VALUATION', texto: 'O preço sobre valor patrimonial (P/VP) está favorável?',
-      opcoes: ['Muito acima', 'Acima', 'Em linha', 'Abaixo', 'Bem abaixo'] },
   ],
   REIT: [
     { id: 'reit_ocupacao', criterio: 'FUNDAMENTOS', texto: 'Como está a taxa de ocupação dos imóveis do REIT?',
@@ -138,8 +138,72 @@ const PERGUNTAS_POR_TIPO: Partial<Record<TipoAtivoInvestimento, PerguntaAvaliaca
   ],
 }
 
+// ── FII: perguntas comuns a QUALQUER categoria (P/VP se aplica a todas) ──
+const PERGUNTAS_FII_COMUM: PerguntaAvaliacao[] = [
+  { id: 'fii_pvp', criterio: 'VALUATION', texto: 'O preço sobre valor patrimonial (P/VP) está favorável?',
+    opcoes: ['Muito acima', 'Acima', 'Em linha', 'Abaixo', 'Bem abaixo'] },
+]
+
+// ── FII: perguntas ESPECÍFICAS por categoria — um fundo de Papel (CRI/CRA)
+// tem riscos de crédito/indexador de carteira; um fundo de Tijolo tem
+// vacância/localização de imóveis; um FoF tem diversificação/dupla taxa;
+// Desenvolvimento tem risco de obra; FIAGRO tem risco de safra/commodity.
+const PERGUNTAS_FII_POR_CATEGORIA: Record<CategoriaFII, PerguntaAvaliacao[]> = {
+  TIJOLO: [
+    { id: 'fii_tj_vacancia', criterio: 'FUNDAMENTOS', texto: 'Como está a vacância física/financeira dos imóveis do fundo?',
+      opcoes: ['Muito alta', 'Alta', 'Média', 'Baixa', 'Muito baixa'] },
+    { id: 'fii_tj_qualidade', criterio: 'FUNDAMENTOS', texto: 'Qual a qualidade/localização dos imóveis (classe do ativo, praça consolidada)?',
+      opcoes: ['Muito baixa', 'Baixa', 'Mediana', 'Boa', 'Excelente'] },
+    { id: 'fii_tj_contratos', criterio: 'CRESCIMENTO', texto: 'Como estão os contratos de locação (prazo, reajuste, risco de renovação atípica)?',
+      opcoes: ['Muito desfavoráveis', 'Desfavoráveis', 'Neutros', 'Favoráveis', 'Muito favoráveis'] },
+  ],
+  PAPEL: [
+    { id: 'fii_pp_credito', criterio: 'FUNDAMENTOS', texto: 'Qual a qualidade de crédito média dos CRIs/devedores da carteira?',
+      opcoes: ['Muito baixa', 'Baixa', 'Média', 'Alta', 'Muito alta'] },
+    { id: 'fii_pp_indexador', criterio: 'CRESCIMENTO', texto: 'O indexador predominante da carteira (IPCA+/CDI+) combina com o cenário de juros/inflação?',
+      opcoes: ['Não combina', 'Combina pouco', 'Parcialmente', 'Combina bem', 'Perfeito'] },
+    { id: 'fii_pp_inadimplencia', criterio: 'DIVIDENDOS', texto: 'Como está a inadimplência/atraso nos recebíveis da carteira?',
+      opcoes: ['Muito alta', 'Alta', 'Moderada', 'Baixa', 'Muito baixa'] },
+  ],
+  FOF: [
+    { id: 'fii_fof_diversificacao', criterio: 'FUNDAMENTOS', texto: 'Qual o nível de diversificação entre os fundos investidos (nº de cotas, setores)?',
+      opcoes: ['Muito concentrado', 'Concentrado', 'Moderado', 'Diversificado', 'Muito diversificado'] },
+    { id: 'fii_fof_qualidade_alvo', criterio: 'FUNDAMENTOS', texto: 'Qual a qualidade média dos fundos-alvo da carteira?',
+      opcoes: ['Muito baixa', 'Baixa', 'Mediana', 'Boa', 'Excelente'] },
+    { id: 'fii_fof_taxas', criterio: 'VALUATION', texto: 'O custo da dupla camada de taxas (deste fundo + dos fundos-alvo) é compensado pelo resultado?',
+      opcoes: ['Nada compensado', 'Pouco', 'Parcialmente', 'Bem', 'Totalmente'] },
+  ],
+  DESENVOLVIMENTO: [
+    { id: 'fii_dev_execucao', criterio: 'FUNDAMENTOS', texto: 'Qual o risco de execução/atraso das obras em andamento?',
+      opcoes: ['Muito alto', 'Alto', 'Moderado', 'Baixo', 'Muito baixo'] },
+    { id: 'fii_dev_vendido', criterio: 'CRESCIMENTO', texto: 'Qual o percentual já vendido/locado (VGV) antes da entrega dos projetos?',
+      opcoes: ['Muito baixo', 'Baixo', 'Razoável', 'Alto', 'Muito alto'] },
+    { id: 'fii_dev_caixa', criterio: 'DIVIDENDOS', texto: 'O fundo mantém geração de caixa/distribuição até a entrega dos projetos?',
+      opcoes: ['Nenhuma', 'Pouca', 'Alguma', 'Boa', 'Consistente'] },
+  ],
+  AGRO: [
+    { id: 'fii_agro_safra', criterio: 'FUNDAMENTOS', texto: 'Qual o risco de safra/preço das commodities ligadas à carteira?',
+      opcoes: ['Muito alto', 'Alto', 'Moderado', 'Baixo', 'Muito baixo'] },
+    { id: 'fii_agro_indexador', criterio: 'CRESCIMENTO', texto: 'O indexador dos CRAs (IPCA+/CDI+) combina com o cenário atual?',
+      opcoes: ['Não combina', 'Combina pouco', 'Parcialmente', 'Combina bem', 'Perfeito'] },
+    { id: 'fii_agro_concentracao', criterio: 'FUNDAMENTOS', texto: 'Qual o nível de concentração em poucos produtores/sacados?',
+      opcoes: ['Muito concentrado', 'Concentrado', 'Moderado', 'Diversificado', 'Muito diversificado'] },
+  ],
+  OUTRO: [
+    { id: 'fii_outro_vacancia', criterio: 'FUNDAMENTOS', texto: 'Como está a vacância/inadimplência dos ativos do fundo (imóveis ou recebíveis)?',
+      opcoes: ['Muito alta', 'Alta', 'Média', 'Baixa', 'Muito baixa'] },
+  ],
+}
+
 // Perguntas PADRÃO (semente) de um tipo: base + específicas. Sempre ≥10.
-export function perguntasPadrao(tipo: TipoAtivoInvestimento): PerguntaAvaliacao[] {
+// Para FII, `categoriaFII` decide o bloco específico (fundos.fii_categoria do
+// ativo); sem categoria reconhecida cai em 'OUTRO' (bloco neutro).
+export function perguntasPadrao(tipo: TipoAtivoInvestimento, categoriaFII?: CategoriaFII | string | null): PerguntaAvaliacao[] {
+  if (tipo === 'FII') {
+    const cat = (categoriaFII && (CATEGORIAS_FII as readonly string[]).includes(categoriaFII))
+      ? categoriaFII as CategoriaFII : 'OUTRO'
+    return [...PERGUNTAS_BASE, ...PERGUNTAS_FII_COMUM, ...PERGUNTAS_FII_POR_CATEGORIA[cat]]
+  }
   return [...PERGUNTAS_BASE, ...(PERGUNTAS_POR_TIPO[tipo] ?? [])]
 }
 

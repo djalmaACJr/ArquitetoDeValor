@@ -14,6 +14,9 @@ export interface NovidadeProventoItem {
   data_pagamento:  string
   valor:           number
   acao:            'criado' | 'atualizado'
+  // Data COM (última data com direito ao provento) — presente só quando a
+  // fonte (B3) devolveu essa data junto com o provento.
+  data_com?:       string | null
 }
 
 export interface NovidadesProventos {

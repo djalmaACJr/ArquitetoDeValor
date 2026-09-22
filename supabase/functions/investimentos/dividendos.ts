@@ -660,10 +660,16 @@ export async function upsertDividendoProvisionado(admin: Db, p: {
   userId: string; ativoId: string; contaId: string; tipoAtivo: string;
   tipoDivId: string; categoriaId: string; ticker: string; valor: number; payDate: string;
   nome?: string | null; valorPorCota?: number | null; contaExclusiva?: boolean;
+  // Data COM (data-limite pra ter direito ao provento) — só disponível na
+  // fonte BRL/B3 hoje; sempre mantida em dia quando o registro é tocado por
+  // outro motivo (valor/data mudou), mas sozinha NÃO conta como "novidade"
+  // de login (só valor/data de pagamento disparam isso).
+  dataCom?: string | null;
 }): Promise<"criado" | "atualizado" | "ignorado" | { erro: string }> {
   // Dividendo por cota (rate da fonte) na moeda do lançamento; usado por DY/YoC.
   const vpc = p.valorPorCota != null && Number.isFinite(p.valorPorCota) && p.valorPorCota > 0
     ? Number(p.valorPorCota) : null;
+  const dataCom = p.dataCom ?? null;
   const pago   = p.payDate < hojeISO(); // data de pagamento já passou
   const mesIni = `${p.payDate.slice(0, 7)}-01`;
   const mesFim = primeiroDiaProximoMes(p.payDate);
@@ -762,7 +768,11 @@ export async function upsertDividendoProvisionado(admin: Db, p: {
     const dataMudou = String(existente.data_pagamento).slice(0, 10) !== p.payDate;
     if (!valorMudou && !dataMudou && !vpcMudou) return "ignorado";
     await admin.from("inv_dividendos")
-      .update({ valor: p.valor, data_pagamento: p.payDate, ...(vpc != null ? { valor_por_cota: vpc } : {}) })
+      .update({
+        valor: p.valor, data_pagamento: p.payDate,
+        ...(vpc != null ? { valor_por_cota: vpc } : {}),
+        ...(dataCom != null ? { data_com: dataCom } : {}),
+      })
       .eq("id", existente.id);
     if (existente.transacao_extrato_id && (valorMudou || dataMudou)) {
       // Ainda em projeção: acompanha o valor/data mais recentes da fonte.
@@ -801,7 +811,7 @@ export async function upsertDividendoProvisionado(admin: Db, p: {
       data_pagamento: soVinculo ? manual.data : p.payDate,
       tipo_ativo: p.tipoAtivo,
       tipo_dividendo_id: p.tipoDivId, descricao: null, transacao_extrato_id: manual.id,
-      valor_por_cota: vpc,
+      valor_por_cota: vpc, data_com: dataCom,
     }).select("id").single();
     if (errDiv || !div) {
       // Mesma corrida documentada acima na criação "do zero" — outro processo
@@ -826,6 +836,7 @@ export async function upsertDividendoProvisionado(admin: Db, p: {
     user_id: p.userId, ativo_id: p.ativoId, conta_id: p.contaId,
     valor: p.valor, data_pagamento: p.payDate, tipo_ativo: p.tipoAtivo,
     tipo_dividendo_id: p.tipoDivId, descricao: null, valor_por_cota: vpc,
+    data_com: dataCom,
   }).select("id").single();
   if (errDiv || !div) {
     // 23505 = violação da constraint ux_inv_dividendos_dedup (user+ativo+
@@ -1090,7 +1101,7 @@ export async function provisionarProventosBrl(
       // registros separados, pois a chave de agrupamento inclui o tipo.
       // Dedup de repetição exata da fonte (mesma defesa do path USD).
       const vistos = new Set<string>();
-      const porDataTipo = new Map<string, { payDate: string; nomeTipo: string; rate: number }>();
+      const porDataTipo = new Map<string, { payDate: string; nomeTipo: string; rate: number; dataCom: string | null }>();
       for (const pv of proventos) {
         // Futuros (PROJECAO) + retroativos recentes (lançados como PAGO);
         // cobre dias em que o job não rodou.
@@ -1101,10 +1112,15 @@ export async function provisionarProventosBrl(
         vistos.add(chaveVista);
         const chave = `${pv.payDate}|${nomeTipo}`;
         const atual = porDataTipo.get(chave);
-        porDataTipo.set(chave, { payDate: pv.payDate, nomeTipo, rate: (atual?.rate ?? 0) + pv.rate });
+        // Tranches do mesmo tipo/data compartilham a mesma Data COM — a
+        // 1ª ocorrência não-nula do grupo basta.
+        porDataTipo.set(chave, {
+          payDate: pv.payDate, nomeTipo, rate: (atual?.rate ?? 0) + pv.rate,
+          dataCom: atual?.dataCom ?? pv.dataCom,
+        });
       }
 
-      for (const { payDate, nomeTipo, rate } of porDataTipo.values()) {
+      for (const { payDate, nomeTipo, rate, dataCom } of porDataTipo.values()) {
         const tipo = tipos.get(nomeTipo);
         if (!tipo?.categoria_id) {
           // Sem categoria → não lança; registra pendência para avisar.
@@ -1122,14 +1138,14 @@ export async function provisionarProventosBrl(
             tipoAtivo: ativo.tipo_ativo, tipoDivId: tipo.id,
             categoriaId: String(tipo.categoria_id), ticker: ativo.ticker,
             valor: valorBRL, payDate, nome: ativo.nome,
-            valorPorCota: rate,
+            valorPorCota: rate, dataCom,
             contaExclusiva: posicoes.length === 1,
           });
           if (r === "criado" || r === "atualizado") {
             if (r === "criado") criados++; else atualizados++;
             registrarNovidade(nov, ativo.user_id, {
               ticker: ativo.ticker, tipo: nomeTipo, data_pagamento: payDate,
-              valor: valorBRL, acao: r,
+              valor: valorBRL, acao: r, data_com: dataCom,
             });
           } else if (typeof r === "object") {
             erros++; erroExemplo ??= `${ativo.ticker}: ${r.erro}`;
@@ -1503,7 +1519,7 @@ export async function rotaDividendosDiagnostico(c: Db, m: string, userId: string
 // ============================================================
 export interface NovidadeItem {
   ticker: string; tipo: string; data_pagamento: string; valor: number;
-  acao: "criado" | "atualizado";
+  acao: "criado" | "atualizado"; data_com?: string | null;
 }
 export interface NovidadesPayload {
   gerado_em: string; criados: number; atualizados: number; itens: NovidadeItem[];
@@ -1589,7 +1605,7 @@ export interface AtivoBrl {
   id: string; user_id: string; ticker: string; nome: string;
   tipo_ativo: string; acoes_subtipo: string | null;
 }
-export interface ProventoB3 { payDate: string; rate: number; label: string }
+export interface ProventoB3 { payDate: string; rate: number; label: string; dataCom: string | null }
 
 // Identificador B3 = ticker sem os dígitos finais (PETR4→PETR, HGLG11→HGLG).
 export function emissorB3(ticker: string): string {
@@ -1646,7 +1662,7 @@ export async function coletarProventosB3(ativo: AtivoBrl): Promise<ProventoB3[] 
     const chave = `${b.payDate}|${b.label}|${b.rate}`;
     if (!escolhido.has(chave)) escolhido.set(chave, b);
   }
-  return [...escolhido.values()].map(({ payDate, rate, label }) => ({ payDate, rate, label }));
+  return [...escolhido.values()].map(({ payDate, rate, label, dataCom }) => ({ payDate, rate, label, dataCom }));
 }
 
 // ============================================================
@@ -1728,6 +1744,13 @@ export async function buscarProventosFundoB3(identifier: string): Promise<(Prove
 
 export interface B3CashDividend {
   paymentDate?: string; rate?: string; label?: string; isinCode?: string; assetIssued?: string;
+  // "Data COM" — última data em que o investidor precisa ter o papel em
+  // carteira pra ter direito a este provento (depois dela vira "ex"). Nome
+  // de campo assumido (não verificado ao vivo — ver cvmAcoes.ts pra um
+  // caso análogo de campo não confirmado); se a B3 usar outro nome, isto
+  // fica sempre `undefined` e `dataCom` abaixo vira `null` silenciosamente,
+  // sem quebrar o resto do provento.
+  lastDatePrior?: string;
 }
 
 export function mapearCashDividends(lista?: B3CashDividend[]): (ProventoB3 & { classe: "ON" | "PN" | null })[] {
@@ -1736,8 +1759,10 @@ export function mapearCashDividends(lista?: B3CashDividend[]): (ProventoB3 & { c
     const payDate = brDataISO(String(d.paymentDate ?? ""));
     const rate    = brNumero(String(d.rate ?? ""));
     if (!dataPagamentoPlausivel(payDate) || !Number.isFinite(rate) || rate <= 0) continue;
+    const dataCom = d.lastDatePrior ? brDataISO(String(d.lastDatePrior)) : null;
     out.push({
       payDate, rate, label: String(d.label ?? ""),
+      dataCom: dataCom && dataPagamentoPlausivel(dataCom) ? dataCom : null,
       classe: classeDoIsin(String(d.isinCode ?? d.assetIssued ?? "")),
     });
   }

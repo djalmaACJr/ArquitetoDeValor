@@ -38,7 +38,7 @@ const FORM_VAZIO: FormAtivo = {
   rf_subtipo: null, rf_indexador: null, rf_indice: null, rf_percentual_indice: null,
   rf_taxa_fixa: null, rf_limite_faixa: null, rf_percentual_indice_2: null, rf_taxa: null, rf_emissor: null,
   rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
-  fii_categoria: null, fii_vp: null, acoes_subtipo: null, cripto_rendimento_aa: null,
+  fii_categoria: null, fii_vp: null, acoes_subtipo: null, acao_lpa: null, acao_vpa: null, cripto_rendimento_aa: null,
   cripto_rendimento_inicio: null, cripto_rendimento_periodicidade: null, cotacao_automatica: true,
 }
 
@@ -121,6 +121,7 @@ function formDoAtivo(ativo: InvestimentoAtivo | null): FormAtivo {
     rf_emissor: ativo.rf_emissor, rf_vencimento: ativo.rf_vencimento,
     rf_garantia_fgc: ativo.rf_garantia_fgc, rf_isento_ir: ativo.rf_isento_ir,
     fii_categoria: ativo.fii_categoria, fii_vp: ativo.fii_vp, acoes_subtipo: ativo.acoes_subtipo,
+    acao_lpa: ativo.acao_lpa, acao_vpa: ativo.acao_vpa,
     cripto_rendimento_aa: ativo.cripto_rendimento_aa,
     cripto_rendimento_inicio: ativo.cripto_rendimento_inicio,
     cripto_rendimento_periodicidade: ativo.cripto_rendimento_periodicidade,
@@ -242,14 +243,16 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
     const moedaPadrao = tipo === 'STOCKS' || tipo === 'REIT' ? 'USD' : 'BRL'
     if (tipo === 'TESOURO_DIRETO') {
       const info = SUBTIPO_RF_INFO.TESOURO
-      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, fii_vp: null, acoes_subtipo: null, moeda: 'BRL',
+      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, fii_vp: null, acoes_subtipo: null,
+        acao_lpa: null, acao_vpa: null, moeda: 'BRL',
         rf_subtipo: 'TESOURO', rf_emissor: info.emissor,
         rf_garantia_fgc: info.fgc, rf_isento_ir: info.isentoIR })
     } else if (tipo === 'RENDA_FIXA') {
       // CDB/LCI/LCA/CRI/CRA/Debênture não têm ticker de bolsa — a busca externa
       // não acha nada pra eles. Pula direto pro cadastro manual (só o nome).
       if (!editando) setManualLivre(true)
-      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, fii_vp: null, acoes_subtipo: null, moeda: 'BRL',
+      setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, fii_categoria: null, fii_vp: null, acoes_subtipo: null,
+        acao_lpa: null, acao_vpa: null, moeda: 'BRL',
         rf_subtipo: form.rf_subtipo === 'TESOURO' ? null : form.rf_subtipo })
     } else {
       setForm({ ...form, ...limpaIdent, tipo_ativo: tipo, moeda: moedaPadrao,
@@ -258,7 +261,9 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
         rf_vencimento: null, rf_garantia_fgc: null, rf_isento_ir: null,
         fii_categoria: tipo === 'FII' ? form.fii_categoria : null,
         fii_vp: tipo === 'FII' ? form.fii_vp : null,
-        acoes_subtipo: tipo === 'ACOES' ? form.acoes_subtipo : null })
+        acoes_subtipo: tipo === 'ACOES' ? form.acoes_subtipo : null,
+        acao_lpa: tipo === 'ACOES' ? form.acao_lpa : null,
+        acao_vpa: tipo === 'ACOES' ? form.acao_vpa : null })
     }
   }
 
@@ -464,6 +469,19 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
             {editando?.fii_vp_origem === 'CVM' && editando.fii_vp_atualizado_em
               ? `Atualizado automaticamente pela CVM (referência ${editando.fii_vp_atualizado_em.slice(5, 7)}/${editando.fii_vp_atualizado_em.slice(0, 4)}). Editar aqui vale só até a próxima atualização semanal, que sobrescreve com o dado oficial quando encontra o fundo.`
               : 'Buscado automaticamente na CVM ao salvar (fundos novos podem levar até 7 dias, no cron semanal). Preencha manualmente enquanto isso, se quiser — a CVM sobrescreve assim que achar o fundo.'}
+          </p>
+        </Field>
+      )}
+      {form.tipo_ativo === 'ACOES' && (
+        <Field label="LPA e VPA — Lucro e Valor Patrimonial por Ação (opcional)">
+          <div className="grid grid-cols-2 gap-2">
+            <InputMoeda value={form.acao_lpa ?? null} onChange={(v) => setForm({ ...form, acao_lpa: v })} placeholder="LPA (R$)" />
+            <InputMoeda value={form.acao_vpa ?? null} onChange={(v) => setForm({ ...form, acao_vpa: v })} placeholder="VPA (R$)" />
+          </div>
+          <p className="text-[11.5px] mt-1" style={{ color: MUTED }}>
+            {editando?.acao_fundamentos_origem === 'CVM' && editando.acao_fundamentos_referencia
+              ? `Atualizado automaticamente pela CVM (exercício encerrado em ${editando.acao_fundamentos_referencia.slice(0, 4)}). Editar aqui vale só até a próxima atualização mensal, que sobrescreve com o dado oficial quando encontra a empresa.`
+              : 'Buscado automaticamente na CVM ao salvar (empresas novas podem levar até 30 dias, no cron mensal). Preencha manualmente enquanto isso, se quiser — a CVM sobrescreve assim que achar a empresa. Usado no Valor Justo (fórmula de Graham).'}
           </p>
         </Field>
       )}

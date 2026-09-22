@@ -304,6 +304,22 @@ export interface InvestimentoAtivo {
   fii_dy_mes_cvm:         number | null
   // Subtipo da ação (só tipo_ativo = ACOES)
   acoes_subtipo:   AcoesSubtipo | null
+  // Fundamentos da ação (só tipo_ativo = ACOES), usados no Valor Justo
+  // (fórmula de Graham: raiz de 22,5 × LPA × VPA). Preenchidos pelo cron
+  // mensal da CVM (DFP: Patrimônio Líquido e Lucro Líquido do último
+  // exercício anual; FCA: nº de ações — ponte ticker→CNPJ) quando encontra a
+  // companhia (acao_fundamentos_origem='CVM', sempre tem prioridade) ou
+  // digitados manualmente como fallback ('MANUAL') — ver cvmAcoes.ts e
+  // BUSINESS_RULES.md.
+  acao_lpa:                     number | null
+  acao_vpa:                     number | null
+  // Calculado a partir de acao_lpa/acao_vpa — null se a empresa não constar
+  // no dataset da CVM ou tiver LPA/VPA <= 0 (Graham não se aplica a empresa
+  // no prejuízo/patrimônio líquido negativo).
+  acao_valor_justo:             number | null
+  acao_fundamentos_origem:      'MANUAL' | 'CVM' | null
+  // Ano do exercício anual (DFP) usado no cálculo; null quando manual
+  acao_fundamentos_referencia:  string | null
   // Rendimento anual em % a.a. (só CRIPTOMOEDAS) — gera operações RENDIMENTO
   cripto_rendimento_aa: number | null
   // Desde quando a cripto rende (NULL = 1º aporte)
@@ -386,6 +402,10 @@ export interface InvestimentoDividendo {
   // Dividendo por cota (rate B3/Polygon) — NULL em lançamento manual antigo
   valor_por_cota?:      number | null
   data_pagamento:       string
+  // Data COM (última data com direito ao provento) — só disponível pra
+  // proventos capturados via B3 (dividendos-cron-br); NULL em lançamento
+  // manual ou provento antigo sem esse dado
+  data_com?:            string | null
   tipo_ativo:           TipoAtivoInvestimento
   tipo_dividendo_id:    string | null
   descricao:            string | null
@@ -421,11 +441,17 @@ export interface PerguntaAvaliacao {
 export type PesosCriterio = Record<CriterioQuestao, number>
 
 // Questionário custom por tipo de ativo (linha de inv_questionarios).
+// fii_categoria: só relevante quando tipo_ativo='FII' — '' é o custom
+// GENÉRICO de FII (vale para qualquer categoria sem override mais
+// específico); uma CategoriaFII concreta sobrepõe só ativos daquela
+// categoria (Tijolo/Papel/FoF/Desenvolvimento/FIAGRO/Outro têm riscos
+// bem diferentes entre si — ver questionarioAtivos.ts).
 export interface InvQuestionario {
-  id?:          string
-  tipo_ativo:   TipoAtivoInvestimento
-  perguntas:    PerguntaAvaliacao[]
-  pesos:        PesosCriterio
+  id?:           string
+  tipo_ativo:    TipoAtivoInvestimento
+  fii_categoria: CategoriaFII | ''
+  perguntas:     PerguntaAvaliacao[]
+  pesos:         PesosCriterio
   origem:       'MANUAL' | 'IA'
   ia_provedor:  string | null
   ia_modelo:    string | null

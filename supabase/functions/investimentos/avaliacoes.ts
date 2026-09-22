@@ -6,7 +6,7 @@ import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
 import { chamarProvedorIA, ErroIA, lerConfigIAAtiva, lerMentoresIA } from "../_shared/ia.ts";
 import {
   Db, TIPOS_ATIVO, CRITERIOS_QUESTAO, PESOS_SUGERIDOS_POR_PERFIL,
-  PESOS_PADRAO_CRITERIO, TIPO_ATIVO_LABEL_BR,
+  PESOS_PADRAO_CRITERIO, TIPO_ATIVO_LABEL_BR, CATEGORIAS_FII, CATEGORIA_FII_LABEL_BR,
 } from "./shared.ts";
 import { buscarFatosRelevantesParaAtivo, descreverFatosRelevantes } from "./fatosRelevantes.ts";
 
@@ -15,6 +15,18 @@ export function segmentoTipo(req: Request): string | null {
   const idx = partes.indexOf("questionarios");
   if (idx === -1 || idx + 1 >= partes.length) return null;
   return decodeURIComponent(partes[idx + 1]);
+}
+
+// Categoria de FII (?categoria=PAPEL etc.) para questionários específicos por
+// categoria — só faz sentido para tipo_ativo=FII. '' = questionário genérico
+// de FII (aplica a qualquer categoria sem um custom mais específico) — ver
+// migration 20260922000003_inv_questionarios_por_categoria_fii.sql.
+export function categoriaFiiQuery(req: Request, tipo: string | null): { categoria: string } | { erro: string } {
+  const raw = new URL(req.url).searchParams.get("categoria");
+  if (!raw) return { categoria: "" };
+  if (tipo !== "FII") return { erro: "categoria só se aplica a tipo_ativo FII" };
+  if (!CATEGORIAS_FII.includes(raw)) return { erro: `categoria de FII inválida: ${raw}` };
+  return { categoria: raw };
 }
 
 // Valida o payload { perguntas, pesos } de um questionário. Retorna
@@ -69,14 +81,19 @@ export async function rotaQuestionarios(c: Db, req: Request, m: string, userId: 
 
   if (tipo && !TIPOS_ATIVO.includes(tipo)) return erro(`tipo_ativo inválido: ${tipo}`);
 
+  const catQ = categoriaFiiQuery(req, tipo);
+  if ("erro" in catQ) return erro(catQ.erro);
+  const categoria = catQ.categoria;
+
   // Geração por IA: POST /questionarios/:tipo/gerar
   const acao = extrairAcao(req, "questionarios"); // 3º segmento após "questionarios"
   if (m === "POST" && tipo && acao === "gerar") {
-    return await gerarQuestionarioIA(c, req, tipo!, userId);
+    return await gerarQuestionarioIA(c, req, tipo!, userId, categoria);
   }
 
   if (m === "GET" && tipo) {
-    const { data, error } = await c.from("inv_questionarios").select("*").eq("tipo_ativo", tipo).maybeSingle();
+    const { data, error } = await c.from("inv_questionarios").select("*")
+      .eq("tipo_ativo", tipo).eq("fii_categoria", categoria).maybeSingle();
     if (error) { logError("Buscar questionario", error); return erro(error.message); }
     if (!data) return erro("Sem questionário customizado para este tipo", 404);
     return json({ dados: data });
@@ -84,16 +101,17 @@ export async function rotaQuestionarios(c: Db, req: Request, m: string, userId: 
 
   if (m === "PUT" && tipo) {
     const body = await req.json();
-    logRequest("PUT", `/investimentos/questionarios/${tipo}`);
+    logRequest("PUT", `/investimentos/questionarios/${tipo}${categoria ? ` (categoria ${categoria})` : ""}`);
     const validacao = validarQuestionario(body?.perguntas, body?.pesos);
     if (validacao) return erro(validacao);
 
     const origem = body?.origem === "IA" ? "IA" : "MANUAL";
     const linha = {
-      user_id:     userId,
-      tipo_ativo:  tipo,
-      perguntas:   body.perguntas,
-      pesos:       body.pesos,
+      user_id:       userId,
+      tipo_ativo:    tipo,
+      fii_categoria: categoria,
+      perguntas:     body.perguntas,
+      pesos:         body.pesos,
       origem,
       ia_provedor: origem === "IA" ? (body?.ia_provedor ?? null) : null,
       ia_modelo:   origem === "IA" ? (body?.ia_modelo ?? null) : null,
@@ -102,18 +120,19 @@ export async function rotaQuestionarios(c: Db, req: Request, m: string, userId: 
     };
     const { data, error } = await c
       .from("inv_questionarios")
-      .upsert(linha, { onConflict: "user_id,tipo_ativo" })
+      .upsert(linha, { onConflict: "user_id,tipo_ativo,fii_categoria" })
       .select()
       .single();
     if (error) { logError("Upsert questionario", error); return erro(error.message); }
-    logSuccess("Questionário salvo", { tipo, origem });
+    logSuccess("Questionário salvo", { tipo, categoria, origem });
     return json({ dados: data });
   }
 
   if (m === "DELETE" && tipo) {
-    const { error } = await c.from("inv_questionarios").delete().eq("tipo_ativo", tipo);
+    const { error } = await c.from("inv_questionarios").delete()
+      .eq("tipo_ativo", tipo).eq("fii_categoria", categoria);
     if (error) { logError("Excluir questionario", error); return erro(error.message); }
-    return json({ dados: { tipo_ativo: tipo, removido: true } });
+    return json({ dados: { tipo_ativo: tipo, fii_categoria: categoria, removido: true } });
   }
 
   return erro("Método não permitido", 405);
@@ -122,8 +141,8 @@ export async function rotaQuestionarios(c: Db, req: Request, m: string, userId: 
 // Pede ao provedor de IA do usuário para montar o questionário. NÃO
 // persiste — devolve { perguntas, pesos, ia_provedor, ia_modelo } para
 // pré-visualização; o frontend salva via PUT (origem='IA').
-export async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, userId: string) {
-  logRequest("POST", `/investimentos/questionarios/${tipo}/gerar`);
+export async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, userId: string, categoria = "") {
+  logRequest("POST", `/investimentos/questionarios/${tipo}/gerar${categoria ? ` (categoria ${categoria})` : ""}`);
 
   const cfg = await lerConfigIAAtiva(c, userId);
   if (!cfg.ok) return erro(cfg.erro, cfg.status);
@@ -152,7 +171,9 @@ export async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, use
       `Idade de aposentadoria pretendida: ${perfil.idade_aposentadoria ?? "?"}.`
     : "Perfil do investidor: não informado.";
 
-  const rotuloTipo = TIPO_ATIVO_LABEL_BR[tipo] ?? tipo;
+  const rotuloTipo = categoria
+    ? `${TIPO_ATIVO_LABEL_BR[tipo] ?? tipo} — categoria ${CATEGORIA_FII_LABEL_BR[categoria] ?? categoria}`
+    : TIPO_ATIVO_LABEL_BR[tipo] ?? tipo;
 
   const system =
     "Você é um analista de sistemas e engenheiro financeiro especializado em alocação de ativos de " +
@@ -180,7 +201,16 @@ export async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, use
     `4. MARGEM DE SEGURANÇA E VALUATION — critério VALUATION (peso ${pv}%): múltiplos atuais de preço, ` +
     "se o ativo está historicamente caro ou barato, e quais premissas de risco estão embutidas no preço atual.\n\n" +
     "Cada pergunta deve ser direta, focada em dados, fatos ou indicadores claros do mercado deste ativo " +
-    "específico. Gere agora o JSON do questionário.";
+    "específico. Gere agora o JSON do questionário." +
+    (categoria
+      ? ` IMPORTANTE: o tipo é Fundo Imobiliário (FII), mas a auditoria é ESPECÍFICA da categoria ` +
+        `"${CATEGORIA_FII_LABEL_BR[categoria] ?? categoria}" — foque as perguntas nos riscos e indicadores ` +
+        "PRÓPRIOS dessa categoria (ex.: um FII de Papel tem risco de crédito de CRIs/CRAs e indexador da " +
+        "carteira, não vacância de imóveis; um FII de Tijolo tem vacância/localização dos imóveis, não risco " +
+        "de crédito de devedores; um FoF tem diversificação e dupla camada de taxas; um FII de Desenvolvimento " +
+        "tem risco de obra/entrega; um FIAGRO (Agro) tem risco de safra/commodity e crédito agrícola). Evite " +
+        "perguntas genéricas que sirvam para qualquer categoria de FII."
+      : "");
 
   let bruto: string;
   try {
@@ -207,11 +237,12 @@ export async function gerarQuestionarioIA(c: Db, req: Request, tipo: string, use
 
   return json({
     dados: {
-      tipo_ativo:  tipo,
-      perguntas:   parsed.perguntas,
-      pesos:       pesosFinais,
-      ia_provedor: provedor,
-      ia_modelo:   modelo,
+      tipo_ativo:    tipo,
+      fii_categoria: categoria,
+      perguntas:     parsed.perguntas,
+      pesos:         pesosFinais,
+      ia_provedor:   provedor,
+      ia_modelo:     modelo,
     },
   });
 }

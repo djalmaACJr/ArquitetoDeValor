@@ -32,7 +32,7 @@ export default function NovidadesProventos() {
 
   return (
     <>
-      <div className="fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-xl border shadow-2xl"
+      <div className="pointer-events-auto w-[340px] max-w-[calc(100vw-2rem)] rounded-xl border shadow-2xl"
         style={{ borderColor: 'rgba(59,130,246,0.4)', background: '#0f1729' }}>
         <div className="flex items-start gap-3 p-4">
           <span className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(59,130,246,0.15)' }}>
@@ -56,6 +56,7 @@ export default function NovidadesProventos() {
               <li key={i} className="flex items-center justify-between gap-2 text-[12px]">
                 <span className="text-white truncate">
                   {it.ticker} <span style={{ color: MUTED }}>· {formatData(it.data_pagamento)}</span>
+                  {it.data_com && <span style={{ color: '#eab308' }}> · Data COM {formatData(it.data_com)}</span>}
                 </span>
                 <span className="shrink-0 font-medium" style={{ color: it.acao === 'criado' ? '#4ade80' : '#ffb74d' }}>
                   {formatBRL(it.valor)}
@@ -92,7 +93,10 @@ export default function NovidadesProventos() {
             <li key={i} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 px-3 py-2.5">
               <div className="min-w-0">
                 <p className="text-[13px] font-medium text-white truncate">{it.ticker}</p>
-                <p className="text-[12px]" style={{ color: MUTED }}>{it.tipo} · {formatData(it.data_pagamento)}</p>
+                <p className="text-[12px]" style={{ color: MUTED }}>
+                  {it.tipo} · {formatData(it.data_pagamento)}
+                  {it.data_com && <span style={{ color: '#eab308' }}> · Data COM {formatData(it.data_com)}</span>}
+                </p>
               </div>
               <div className="text-right shrink-0">
                 <p className="text-[13px] font-semibold text-white">{formatBRL(it.valor)}</p>
