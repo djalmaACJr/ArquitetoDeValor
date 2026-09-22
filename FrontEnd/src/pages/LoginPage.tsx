@@ -12,6 +12,7 @@ import {
   biometriaAtiva, biometriaDisponivelNoAparelho, ativarBiometria,
   desativarBiometria, entrarComBiometria,
 } from '../lib/biometria'
+import { APP_VERSION } from '../config/version'
 
 // Marca "não perguntar de novo" após o usuário recusar ativar a digital
 // (por dispositivo — limpo no logout junto com o resto do estado do
@@ -411,7 +412,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-[15px] text-white/20 mt-4">
-          Arquiteto de Valor · BLUEPRINT
+          Arquiteto de Valor · BLUEPRINT · v{APP_VERSION}
         </p>
       </div>
       </div>

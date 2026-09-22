@@ -16,6 +16,7 @@ import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useDividendos } from '../hooks/useDividendos'
 import { useContas } from '../hooks/useContas'
 import { useAuth } from '../hooks/useAuth'
+import { useIndicesEconomicos } from '../hooks/useIndicesEconomicos'
 import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
 import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
@@ -27,6 +28,7 @@ import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_INVESTIMENTOS } from '../lib/tutoriaisPaginas'
 import { linhaDeRanking, type AtivoLinha } from '../lib/ativosLinha'
 import { acumularGanhoInicioPorMes, type AccGanhoInicio } from '../lib/rentabilidadeComposta'
+import { calcularIpcaAcumulado12m } from '../lib/protecaoPoderCompra'
 import { formatBRL } from '../lib/utils'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
@@ -624,6 +626,11 @@ export default function InvestimentosPage() {
   // Só contas de investimento ATIVAS são relevantes na carteira
   const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa)
 
+  // IPCA acumulado 12 meses — alimenta a coluna "Proteção" do quadro de FIIs
+  // (1 busca pra página inteira, não por quadro/linha).
+  const { serie: serieIndice } = useIndicesEconomicos(['IPCA'])
+  const ipca12mPct = calcularIpcaAcumulado12m(serieIndice('IPCA'))?.valorPct ?? null
+
   // Ordem dos quadros "Por tipo de ativo" — arrastável pelo usuário,
   // persistida em arqvalor.usuarios.ordem_quadros. Precisa ficar ANTES do
   // `if (loading) return` abaixo — hooks não podem ser condicionais.
@@ -997,7 +1004,8 @@ export default function InvestimentosPage() {
                     linhas={linhasPorTipo.get(t.tipo_ativo) ?? []}
                     focoSinal={foco?.tipo === t.tipo_ativo ? foco.n : null}
                     alca={<AlcaArrastar {...alcaTipo(chave)} />}
-                    totalCarteira={dashboard?.total_mercado} />
+                    totalCarteira={dashboard?.total_mercado}
+                    ipca12mPct={ipca12mPct} />
                 </div>
               )
             })}

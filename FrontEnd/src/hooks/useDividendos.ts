@@ -49,7 +49,7 @@ async function fetchDividendos(filtros: FiltrosDividendos): Promise<Investimento
   return res.dados ?? []
 }
 
-export function useDividendos(filtros: FiltrosDividendos = {}) {
+export function useDividendos(filtros: FiltrosDividendos = {}, opts: { enabled?: boolean } = {}) {
   const qc  = useQueryClient()
   const { session } = useAuth()
   const uid = session?.user?.id ?? null
@@ -59,7 +59,7 @@ export function useDividendos(filtros: FiltrosDividendos = {}) {
     queryFn:  () => fetchDividendos(filtros),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
-    enabled: !!uid,
+    enabled: !!uid && (opts.enabled ?? true),
   })
 
   // dividendos entram no extrato (Fase 5) e no dashboard → invalida tudo relacionado

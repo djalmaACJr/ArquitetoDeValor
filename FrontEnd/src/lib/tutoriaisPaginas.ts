@@ -785,8 +785,8 @@ export const TUTORIAL_INVESTIMENTOS_PROVENTOS: PassoTutorial[] = [
     flutuante: true,
   },
   {
-    titulo: 'Buscar e diagnosticar',
-    texto: '"Buscar proventos" consulta B3 e Polygon e lança os pagamentos automaticamente. Se voltar vazio, "Diagnóstico" testa cada elo (posição, fonte, tipo mapeado) sem gravar nada — ótimo pra descobrir o que está bloqueando. "Associar do extrato" vincula lançamentos manuais antigos aos investimentos.',
+    titulo: 'Buscar proventos',
+    texto: '"Buscar proventos" consulta B3 e Polygon e lança os pagamentos automaticamente. Se voltar vazio ou você precisar associar lançamentos manuais antigos, veja "Diagnóstico"/"Associar do extrato" em Configurações → Manutenção de proventos.',
     seletor: '[data-tutorial="proventos-header"]',
   },
   {
@@ -808,7 +808,7 @@ export const TUTORIAL_INVESTIMENTOS_PROVENTOS: PassoTutorial[] = [
   },
   {
     titulo: 'Tudo pronto!',
-    texto: 'Sem tipos mapeados a uma categoria, use "Configurar tipos" antes de lançar o 1º provento. Reabra este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
+    texto: 'Sem tipos mapeados a uma categoria, mapeie em Configurações → Tipos de dividendo antes de lançar o 1º provento. Reabra este tutorial pelo botão ❓ na sidebar ou pelo atalho F1.',
     seletor: '',
     flutuante: true,
   },
@@ -884,6 +884,12 @@ export const TUTORIAL_INVESTIMENTOS_CONFIG: PassoTutorial[] = [
     titulo: 'Tipos de dividendo',
     texto: 'Mapeie cada tipo de provento (Dividendos, JSCP, Aluguel de FII...) a uma categoria do extrato. Sem mapeamento, a busca automática de proventos não consegue lançar o pagamento.',
     seletor: '[data-tutorial="config-tipos-dividendo"]',
+    posicao: 'acima',
+  },
+  {
+    titulo: 'Manutenção de proventos',
+    texto: '"Diagnóstico" testa cada elo da busca (posição, fonte, tipo mapeado) sem gravar nada. "Atualizar DY/YoC" re-busca o dividendo por cota dos proventos antigos. "Associar do extrato"/"Associar extrato (lote)" vinculam lançamentos manuais antigos aos investimentos, sem duplicar.',
+    seletor: '[data-tutorial="config-manutencao-proventos"]',
     posicao: 'acima',
   },
   {

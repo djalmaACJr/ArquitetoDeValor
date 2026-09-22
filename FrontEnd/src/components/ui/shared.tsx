@@ -675,21 +675,40 @@ export function InputMoeda({ value, onChange, className, ...rest }: {
   )
 }
 
+// Observa a classe `.dark` no <html> (setada por setTheme/lib/themes.ts).
+// Usado por SelectDark para forçar `color-scheme` direto no <select> — ver
+// comentário abaixo sobre por que herdar de html.dark não basta no Edge.
+function useTemaEscuroAtivo(): boolean {
+  const [dark, setDark] = useState(() =>
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark'))
+  useEffect(() => {
+    const alvo = document.documentElement
+    const obs = new MutationObserver(() => setDark(alvo.classList.contains('dark')))
+    obs.observe(alvo, { attributes: true, attributeFilter: ['class'] })
+    return () => obs.disconnect()
+  }, [])
+  return dark
+}
+
 // ── SelectDark ────────────────────────────────────────────────
 // Apesar do nome histórico, segue o tema ativo: usa tokens semânticos
-// (--bg-input, --text-primary, --border-subtle) e `colorScheme: 'auto'`
-// para que o dropdown de opções nativo do navegador também respeite o
-// tema (claro/escuro) escolhido.
+// (--bg-input, --text-primary, --border-subtle) para a caixa fechada.
 export function SelectDark(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  // O popup de opções nativo segue o `color-scheme` do tema (definido em
-  // globals.css: html.dark → dark / html:not(.dark) → light), ficando
-  // legível e no padrão visual do projeto (escuro no modo noite).
+  // O popup nativo de opções (renderizado pelo SO, fora do nosso CSS) segue
+  // `color-scheme` — herdar de `html.dark`/`html:not(.dark)` (globals.css)
+  // basta no Firefox/Chrome, mas o Edge no Windows às vezes mantém o popup
+  // com fundo branco mesmo com o tema escuro ativo (o valor herdado não é
+  // sempre respeitado pelo picker nativo). Declarar `colorScheme` direto
+  // neste elemento — não só no ancestral — é o que resolve de forma
+  // confiável nos testes feitos.
+  const dark = useTemaEscuroAtivo()
   return (
     <select {...props}
       style={{
         background:  'var(--bg-input)',
         color:       'var(--text-primary)',
         borderColor: 'var(--border-subtle)',
+        colorScheme: dark ? 'dark' : 'light',
         ...props.style,
       }}
       className={`w-full border rounded-lg px-3 py-2 text-[17px] outline-none

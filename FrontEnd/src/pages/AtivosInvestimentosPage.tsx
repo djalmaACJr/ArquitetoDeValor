@@ -7,6 +7,7 @@ import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useInvestimentosHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
 import { useInvestimentosDashboard, useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
+import { useIndicesEconomicos } from '../hooks/useIndicesEconomicos'
 import {
   Drawer, Field, Input, SelectDark, SearchableSelect, Toast,
 } from '../components/ui/shared'
@@ -21,6 +22,7 @@ import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_INVESTIMENTOS_ATIVOS } from '../lib/tutoriaisPaginas'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { linhaDeMeta, type AtivoLinha } from '../lib/ativosLinha'
+import { calcularIpcaAcumulado12m } from '../lib/protecaoPoderCompra'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { formatBRL } from '../lib/utils'
 import { roscaData, rotulosRosca, suavizar } from '../lib/roscaChart'
@@ -299,6 +301,11 @@ export default function AtivosInvestimentosPage() {
   // Agregados financeiros por tipo (valor, variação, dividendos, participação),
   // usados no cabeçalho de cada card — mesma fonte da página de Investimentos.
   const { dashboard } = useInvestimentosDashboard(null)
+
+  // IPCA acumulado 12 meses — alimenta a coluna "Proteção" do quadro de FIIs
+  // (1 busca pra página inteira, não por quadro/linha).
+  const { serie: serieIndice } = useIndicesEconomicos(['IPCA'])
+  const ipca12mPct = calcularIpcaAcumulado12m(serieIndice('IPCA'))?.valorPct ?? null
   const dadosPorTipo = useMemo(() => {
     const m = new Map<TipoAtivoInvestimento, InvestimentoDashboardTipo>()
     for (const t of dashboard?.tipos ?? []) m.set(t.tipo_ativo, t)
@@ -519,7 +526,8 @@ export default function AtivosInvestimentosPage() {
                       focoGrupo={foco?.tipo === g.tipo ? { dim: foco.dim, chave: foco.chave } : null}
                       acoes={{ onPosicoes: (a) => { setMovViaAtalho(false); setPosicoesDe(a) }, onHistorico: setHistoricoDe, onEditar: abrirEditar }}
                       alca={<AlcaArrastar {...alcaTipo(tipo)} />}
-                      totalCarteira={dashboard?.total_mercado} />
+                      totalCarteira={dashboard?.total_mercado}
+                      ipca12mPct={ipca12mPct} />
                   </div>
                 )
               })}

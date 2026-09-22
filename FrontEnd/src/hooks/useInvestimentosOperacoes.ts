@@ -48,7 +48,7 @@ async function fetchOperacoes(filtros: FiltrosOperacoes): Promise<InvestimentoOp
   return res.dados ?? []
 }
 
-export function useInvestimentosOperacoes(filtros: FiltrosOperacoes = {}) {
+export function useInvestimentosOperacoes(filtros: FiltrosOperacoes = {}, opts: { enabled?: boolean } = {}) {
   const qc  = useQueryClient()
   const { session } = useAuth()
   const uid = session?.user?.id ?? null
@@ -58,7 +58,7 @@ export function useInvestimentosOperacoes(filtros: FiltrosOperacoes = {}) {
     queryFn:  () => fetchOperacoes(filtros),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
-    enabled: !!uid,
+    enabled: !!uid && (opts.enabled ?? true),
   })
 
   // A operação agora altera a posição → invalida posições, dashboard, ranking

@@ -13,9 +13,12 @@ import { useDividendos } from '../hooks/useDividendos'
 import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
 import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
 import { usePtax } from '../hooks/usePtax'
+import { useIndicesEconomicos } from '../hooks/useIndicesEconomicos'
 import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo, SelectDark, Field, Input, InputMoeda } from '../components/ui/shared'
 import DrawerAtivo from '../components/ui/DrawerAtivo'
 import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
+import ProtecaoPoderCompra from '../components/ui/ProtecaoPoderCompra'
+import { calcularIpcaAcumulado12m, montarEntradaProtecaoPoderCompra } from '../lib/protecaoPoderCompra'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_INVESTIMENTOS_DETALHE } from '../lib/tutoriaisPaginas'
@@ -47,7 +50,7 @@ type QuadroDetalheKey =
   | 'resumo' | 'caracteristicas'
   | 'grafico_evolucao' | 'grafico_cotas' | 'grafico_rent_mes' | 'grafico_rent_acum'
   | 'grafico_dividendos_mes' | 'grafico_dy_mes' | 'grafico_ultimos_dividendos'
-  | 'magic_number' | 'dy_yoc' | 'operacoes'
+  | 'magic_number' | 'dy_yoc' | 'protecao_poder_compra' | 'operacoes'
 // Gráficos vêm em meia largura por padrão (lado a lado, como antes de virarem
 // quadros independentes) — os demais em largura total, como sempre foram.
 const QUADROS_GRAFICO: QuadroDetalheKey[] = [
@@ -531,6 +534,7 @@ export default function DetalheInvestimentoPage() {
     if (podeDividendosAtivo) ks.push('grafico_ultimos_dividendos')
     if (magicNumberFII) ks.push('magic_number')
     if (dySimuladoPvp1) ks.push('dy_yoc')
+    if (ehFIIAtivo && magicNumberFII) ks.push('protecao_poder_compra')
     ks.push('operacoes')
     return ks
   }, [ativo, magicNumberFII, dySimuladoPvp1, dyPorMes])
@@ -570,6 +574,15 @@ export default function DetalheInvestimentoPage() {
       totalRendimento: rend.reduce((s, o) => s + Number(o.quantidade), 0),
     }
   }, [operacoes, posicoes])
+
+  // Inputs do quadro "Proteção do Poder de Compra" — FONTE ÚNICA (mesma
+  // função usada pelo grid de FIIs, ver montarEntradaProtecaoPoderCompra),
+  // pra nunca haver dois jeitos de calcular a mesma coisa divergindo entre
+  // a página do ativo e o grid.
+  const entradaProtecao = useMemo(
+    () => magicNumberFII ? montarEntradaProtecaoPoderCompra(dividendos, compras, qtdAtual, magicNumberFII.precoCota) : null,
+    [dividendos, compras, qtdAtual, magicNumberFII],
+  )
 
   // Paginação do quadro "Operações recentes": 6 por página (operações já vêm
   // ordenadas da mais recente para a mais antiga). Reinicia ao trocar de ativo.
@@ -624,6 +637,15 @@ export default function DetalheInvestimentoPage() {
     [posicoes],
   )
   const { atual: ptaxAtual, atualData: ptaxData, taxaEm } = usePtax(datasPtax, ehMoedaEstrangeira)
+
+  // IPCA acumulado nos últimos 12 meses — só sugere o valor inicial do
+  // quadro "Proteção do Poder de Compra" (FII); o usuário pode ajustar pra
+  // simular outro cenário. Usa o acumulado de 12 meses, não o último mês
+  // isolado: um único mês pode vir negativo (deflação pontual, ex.: -0,32%
+  // em ago/2026) sem refletir a tendência real de inflação.
+  const { serie: serieIndice } = useIndicesEconomicos(['IPCA'], undefined, ativo?.tipo_ativo === 'FII')
+  const ipcaAcumulado12m = calcularIpcaAcumulado12m(serieIndice('IPCA'))
+  const ipcaSugerido = ipcaAcumulado12m?.valorPct ?? 4.5
 
   const resumoConvertido = useMemo(() => {
     if (!ehMoedaEstrangeira) return null
@@ -694,8 +716,11 @@ export default function DetalheInvestimentoPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+      {/* Header — sticky: o ticker/nome do ativo precisa continuar visível
+          rolando a página (`<main>` do AppLayout é o ancestral com scroll,
+          então `top-0` gruda relativo a ele, não à janela). */}
+      <div className="sticky top-0 z-20 -mx-4 px-4 md:-mx-6 md:px-6 py-3 mb-5 flex items-center justify-between flex-wrap gap-3 border-b border-white/5"
+        style={{ background: 'var(--bg-page)' }}>
         <div className="flex items-center gap-3">
           <button onClick={voltar} title="Voltar" className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
             <ArrowLeft size={15} />
@@ -1291,6 +1316,18 @@ export default function DetalheInvestimentoPage() {
               )}
             </div>
           </section>
+          </Quadro>
+        )
+
+        if (chave === 'protecao_poder_compra') return entradaProtecao && (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <ProtecaoPoderCompra
+              valorPatrimonio={entradaProtecao.valorPatrimonio}
+              rendimentoTotal={entradaProtecao.rendimentoTotal}
+              ipcaSugerido={ipcaSugerido}
+              ipcaCompetencia={ipcaAcumulado12m?.competencia}
+              historicoCompras={entradaProtecao.historicoCompras} />
           </Quadro>
         )
 

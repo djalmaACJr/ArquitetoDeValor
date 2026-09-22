@@ -90,6 +90,10 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
   // deslogar imediatamente ao voltar a uma aba que ficou oculta tempo demais
   // (defesa contra timers estrangulados/congelados em abas inativas).
   const hiddenAtRef = useRef<number>(0)
+  // Início da tentativa de fechar (em vez de deslogar) uma aba secundária
+  // ociosa em segundo plano — ver comentário em checarExpiracao(). 0 = nenhuma
+  // tentativa em andamento.
+  const tentandoFecharDesdeRef = useRef<number>(0)
 
   // Snapshot "sempre atual" de rota/filtros/usuário em ref — o timer lê
   // daqui na hora da expiração sem precisar reiniciar o efeito a cada
@@ -169,6 +173,26 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       // de inatividade recomeçar só quando a operação terminar.
       if (temOperacaoLongaAtiva()) { lastActivityRef.current = Date.now(); persistirAtividade(); return }
       if (!forcar && Date.now() - lastActivityRef.current < limiteMs) return
+
+      // Aba secundária ociosa em segundo plano (ex.: a página de um ativo
+      // aberta numa nova aba a partir do gráfico de Proventos, ver
+      // AtivosPorCategoria em DividendosPage.tsx) — no desktop a sessão fica
+      // em localStorage COMPARTILHADO entre abas (ver "Sessão + biometria"
+      // no CLAUDE.md), então um signOut() aqui apagaria o token das OUTRAS
+      // abas também, mesmo com o usuário ativamente usando uma delas. Em vez
+      // de deslogar todo mundo, fecha só esta aba (só é permitido pelo
+      // navegador porque ela foi aberta via window.open()/`window.opener`).
+      // Se o navegador não deixar fechar, desiste depois de alguns segundos
+      // e cai no comportamento normal — senão a aba ficaria presa, sem
+      // deslogar nem fechar, e o auto-logout de segurança nunca aconteceria
+      // nela.
+      if (!Capacitor.isNativePlatform() && document.visibilityState === 'hidden' && window.opener) {
+        if (!tentandoFecharDesdeRef.current) tentandoFecharDesdeRef.current = Date.now()
+        if (Date.now() - tentandoFecharDesdeRef.current < 5_000) {
+          window.close()
+          return
+        }
+      }
 
       expiradoRef.current = true
       setAviso(false, 0) // some com a contagem ao deslogar

@@ -1,16 +1,17 @@
-import { useState, useMemo, useEffect, type ReactNode } from 'react'
-import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, Link2, ChevronDown, ChevronRight, Layers, AlertTriangle, RefreshCw, Stethoscope, Calendar, Clock } from 'lucide-react'
-import { Doughnut } from 'react-chartjs-2'
-import { Chart as ChartJS, ArcElement, Tooltip as ChartTooltip, type Plugin, type ChartType } from 'chart.js'
-import { Link } from 'react-router-dom'
-import { useDividendos, type CriarDividendoInput, type DiagnosticoProventos } from '../hooks/useDividendos'
+import { useState, useMemo, useEffect } from 'react'
+import { Plus, Trash2, Settings, ArrowLeft, Coins, CheckCircle2, ChevronDown, ChevronRight, Layers, AlertTriangle, RefreshCw, Clock } from 'lucide-react'
+import { Doughnut, Bar } from 'react-chartjs-2'
+import {
+  Chart as ChartJS, ArcElement, BarElement, CategoryScale, LinearScale, Legend,
+  Tooltip as ChartTooltip, type Plugin, type ChartType,
+} from 'chart.js'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useDividendos, type CriarDividendoInput } from '../hooks/useDividendos'
 import { useObjetivos } from '../hooks/useObjetivos'
 import { useTiposDividendo } from '../hooks/useTiposDividendo'
 import { useAvisosDividendos, type AvisoTipoDividendo } from '../hooks/useAvisosDividendos'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
-import { useCategorias } from '../hooks/useCategorias'
 import { useContas } from '../hooks/useContas'
-import { apiFetch, extrairLista } from '../lib/api'
 import {
   Drawer, Field, Input, SelectDark, SearchableSelect, BtnSalvar, BtnCancelar,
   Toast, ModalExcluir,
@@ -25,7 +26,7 @@ import { formatBRL, formatData, hojeLocal, mesAtual, mesLabel, MESES_ABREV } fro
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPO_OBJETIVO_LABEL } from '../lib/constants'
 import type { InvestimentoDividendo, TipoAtivoInvestimento, PeriodoRanking } from '../types'
 
-ChartJS.register(ArcElement, ChartTooltip)
+ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Legend, ChartTooltip)
 
 // Opção customizada do gráfico de dividendos: dados que o plugin de rótulos
 // lê de chart.options (em vez de closure, que o react-chartjs-2 não recria).
@@ -35,10 +36,16 @@ interface CfgRotulos {
   corTexto: string
   corLinha: string
 }
+// Idem para o rótulo de valor acima da barra (quadro "Evolução dos recebimentos").
+interface CfgValorBarra {
+  valores: number[]
+  cor: string
+}
 declare module 'chart.js' {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface PluginOptionsByType<TType extends ChartType> {
     rotulosDividendos?: CfgRotulos
+    valorBarra?: CfgValorBarra
   }
 }
 
@@ -68,37 +75,15 @@ function Barra({ pct, cor }: { pct: number; cor: string }) {
   )
 }
 
-// Lista de meses (YYYY-MM) de `ini` até `fim`, inclusive.
-function gerarMeses(ini: string, fim: string): string[] {
-  const out: string[] = []
-  let [a, m] = ini.split('-').map(Number)
-  const [af, mf] = fim.split('-').map(Number)
-  while (a < af || (a === af && m <= mf)) {
-    out.push(`${a}-${String(m).padStart(2, '0')}`)
-    m++; if (m > 12) { m = 1; a++ }
-  }
-  return out
-}
-function mesMenos(m: string, n: number): string {
-  const [a, mo] = m.split('-').map(Number)
-  let a2 = a, m2 = mo - n
-  while (m2 <= 0) { m2 += 12; a2-- }
-  return `${a2}-${String(m2).padStart(2, '0')}`
-}
-
 export default function DividendosPage() {
   const [drawerNovo,   setDrawerNovo]   = useState(false)
-  const [drawerAssoc,  setDrawerAssoc]  = useState(false)
-  const [drawerDiag,   setDrawerDiag]   = useState(false)
   const [excluindo,    setExcluindo]    = useState<InvestimentoDividendo | null>(null)
   const [confirmando,  setConfirmando]  = useState<InvestimentoDividendo | null>(null)
   const [salvando,     setSalvando]     = useState(false)
   const [buscando,     setBuscando]     = useState(false)
-  const [backfilling,  setBackfilling]  = useState(false)
-  const [associando,   setAssociando]   = useState(false)
   const [toast,        setToast]        = useState<string | null>(null)
 
-  const { dividendos, loading, excluir, buscarBrl, buscarUsd, buscarTesouro, backfillRate, associarMassa } = useDividendos()
+  const { dividendos, loading, excluir, buscarBrl, buscarUsd, buscarTesouro } = useDividendos()
 
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 6000) }
 
@@ -120,34 +105,14 @@ export default function DividendosPage() {
 
     const partes: string[] = []
     if (criados + atualizados > 0) partes.push(`Busca concluída — ${criados} novo(s), ${atualizados} atualizado(s).`)
-    else if (processados === 0 && falhas === 0) partes.push('Busca concluída — nenhum ativo elegível com posição ativa foi processado. Clique em "Diagnóstico" para ver o motivo.')
-    else partes.push('Busca concluída — nenhum provento novo. Use o "Diagnóstico" para ver o que cada fonte devolveu.')
+    else if (processados === 0 && falhas === 0) partes.push('Busca concluída — nenhum ativo elegível com posição ativa foi processado. Veja "Diagnóstico" em Configurações → Manutenção de proventos para o motivo.')
+    else partes.push('Busca concluída — nenhum provento novo. Veja "Diagnóstico" em Configurações → Manutenção de proventos para o que cada fonte devolveu.')
     if (falhas > 0) partes.push(`Fonte indisponível para ${falhas} ativo(s)${tickersFalha.length ? ` (${tickersFalha.slice(0, 5).join(', ')}${tickersFalha.length > 5 ? '…' : ''})` : ''} — tente de novo mais tarde.`)
-    if (pulados > 0) partes.push(`${pulados} provento(s) pulado(s) por tipo sem categoria — veja "Configurar tipos".`)
+    if (pulados > 0) partes.push(`${pulados} provento(s) pulado(s) por tipo sem categoria — veja "Tipos de dividendo" em Configurações.`)
     if (errosGravar > 0) partes.push(`${errosGravar} erro(s) ao gravar no banco${erroExemplo ? ` (${erroExemplo})` : ''}.`)
     if (!usd.ok && usd.erro) partes.push(`Internacionais: ${usd.erro}`)
     if (!br.ok && br.erro) partes.push(`B3: ${br.erro}`)
     showToast(partes.join(' '))
-  }
-
-  async function backfillYoc() {
-    setBackfilling(true)
-    const res = await backfillRate()
-    setBackfilling(false)
-    if (!res.ok) { showToast(res.erro ?? 'Erro ao preencher dividendo por cota'); return }
-    const d = res.dados
-    showToast(`Backfill concluído — ${d?.preenchidos ?? 0} provento(s) atualizado(s) com o dividendo por cota da B3.`)
-  }
-
-  async function associarDoExtrato() {
-    setAssociando(true)
-    const res = await associarMassa()
-    setAssociando(false)
-    if (!res.ok) { showToast(res.erro ?? 'Erro ao associar do extrato'); return }
-    const d = res.dados
-    showToast((d?.associados ?? 0) === 0
-      ? 'Nenhum provento do extrato para associar.'
-      : `${d?.associados} provento(s) do extrato associado(s) aos investimentos.`)
   }
 
   async function confirmarExclusao() {
@@ -201,29 +166,6 @@ export default function DividendosPage() {
             title="Busca proventos na B3 (ações, ETFs e FIIs em BRL) e na Polygon (ativos internacionais em USD): provisiona os futuros e lança os pagos nos últimos 30 dias">
             <RefreshCw size={15} className={buscando ? 'animate-spin' : ''} /> {buscando ? 'Buscando…' : 'Buscar proventos'}
           </button>
-          <button onClick={() => setDrawerDiag(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25"
-            title="Testa cada elo da busca de proventos (posição, fonte, tipos) sem lançar nada — use quando a busca voltar vazia">
-            <Stethoscope size={15} /> Diagnóstico
-          </button>
-          <button onClick={backfillYoc} disabled={backfilling}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
-            title="Re-busca da B3 o dividendo por cota dos proventos antigos — corrige DY e Yield on Cost no padrão investidor10">
-            <Coins size={15} className={backfilling ? 'animate-spin' : ''} /> {backfilling ? 'Atualizando…' : 'Atualizar DY/YoC'}
-          </button>
-          <button onClick={associarDoExtrato} disabled={associando}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
-            title="Vincula em lote proventos que já estão no extrato (ex.: projeções de FII lançadas na mão) aos investimentos">
-            <Link2 size={15} className={associando ? 'animate-spin' : ''} /> {associando ? 'Associando…' : 'Associar extrato (lote)'}
-          </button>
-          <Link to="/investimentos/configuracoes"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
-            <Settings size={15} /> Configurar tipos
-          </Link>
-          <button onClick={() => setDrawerAssoc(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
-            <Link2 size={15} /> Associar do extrato
-          </button>
           <button onClick={() => setDrawerNovo(true)} data-tutorial="proventos-novo"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white" style={{ background: '#3b82f6' }}>
             <Plus size={15} /> Novo dividendo
@@ -257,8 +199,6 @@ export default function DividendosPage() {
       </div>
 
       {drawerNovo   && <DrawerNovoDividendo onClose={() => setDrawerNovo(false)} onToast={showToast} />}
-      {drawerAssoc  && <DrawerAssociar      onClose={() => setDrawerAssoc(false)} onToast={showToast} />}
-      {drawerDiag   && <DrawerDiagnostico   onClose={() => setDrawerDiag(false)} />}
       {confirmando  && <DrawerConfirmar dividendo={confirmando} onClose={() => setConfirmando(null)} onToast={showToast} />}
 
       {excluindo && (
@@ -476,7 +416,7 @@ const COR_SUAVE: Record<TipoAtivoInvestimento, string> = {
 interface LinhaGraf {
   tipo: TipoAtivoInvestimento
   total: number
-  ativos: { ticker: string; total: number }[]
+  ativos: { ticker: string; total: number; ativoId: string }[]
 }
 
 // Observa a classe `.dark` no <html> para re-renderizar no toggle de tema.
@@ -505,8 +445,19 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
   // Ordenação do resumo por categoria: nome ou total do período/status atual.
   const [sortResumo, setSortResumo] = useState<{ key: 'nome' | 'total'; dir: 'asc' | 'desc' }>(
     { key: 'total', dir: 'desc' })
-  // Drill-down: clicar numa categoria foca o gráfico só nela
-  const [tipoFoco, setTipoFoco] = useState<TipoAtivoInvestimento | null>(null)
+  // Drill-down: clicar numa categoria foca o gráfico só nela. Guardado no
+  // `location.state` (em vez de useState solto) e empilhado via navigate() a
+  // cada entrada no zoom — assim o botão Voltar do NAVEGADOR sai do zoom sem
+  // sair da página de Proventos; o botão "Voltar" da própria tela só chama
+  // navigate(-1), consumindo essa mesma entrada em vez de zerar o estado
+  // direto, então os dois jeitos de voltar ficam consistentes entre si.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const tipoFoco = (location.state as { proventosFoco?: TipoAtivoInvestimento } | null)?.proventosFoco ?? null
+  const focarTipo = (tipo: TipoAtivoInvestimento) => navigate(`${location.pathname}${location.search}`, {
+    state: { ...(location.state as Record<string, unknown> ?? {}), proventosFoco: tipo },
+  })
+  const desfocar = () => navigate(-1)
   const [abertos, setAbertos] = useState<Set<TipoAtivoInvestimento>>(new Set())
   const toggleAberto = (t: TipoAtivoInvestimento) => setAbertos((s) => {
     const n = new Set(s)
@@ -516,7 +467,7 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
 
   const linhas = useMemo<LinhaGraf[]>(() => {
     const desde = inicioPeriodo(periodo)
-    const porTipo = new Map<TipoAtivoInvestimento, Map<string, number>>()
+    const porTipo = new Map<TipoAtivoInvestimento, Map<string, { total: number; ativoId: string }>>()
     for (const d of dividendos) {
       const prov = ehProvisionado(d)
       if (mostrarProvisionado ? !prov : prov) continue
@@ -524,10 +475,11 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
       const ticker = d.inv_ativos?.ticker ?? '—'
       if (!porTipo.has(d.tipo_ativo)) porTipo.set(d.tipo_ativo, new Map())
       const porAtivo = porTipo.get(d.tipo_ativo)!
-      porAtivo.set(ticker, (porAtivo.get(ticker) ?? 0) + d.valor)
+      const atual = porAtivo.get(ticker)
+      porAtivo.set(ticker, { total: (atual?.total ?? 0) + d.valor, ativoId: d.ativo_id })
     }
     return [...porTipo.entries()].map(([tipo, porAtivo]) => {
-      const ativos = [...porAtivo.entries()].map(([ticker, total]) => ({ ticker, total }))
+      const ativos = [...porAtivo.entries()].map(([ticker, v]) => ({ ticker, total: v.total, ativoId: v.ativoId }))
       const total = ativos.reduce((s, a) => s + a.total, 0)
       return { tipo, total, ativos }
     }).filter((l) => l.total > 0)
@@ -555,12 +507,12 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
   const externos = useMemo(() => tiposVis.flatMap((t) => {
     const limite = Math.ceil(t.ativos.length * 0.6)
     const agregar = tipoFoco == null && t.ativos.length - limite >= 2
-    const itens = agregar
+    const itens: { label: string; valor: number; ativoId: string | null }[] = agregar
       ? [
-          ...t.ativos.slice(0, limite).map((a) => ({ label: a.ticker, valor: a.total })),
-          { label: 'Outros', valor: t.ativos.slice(limite).reduce((s, a) => s + a.total, 0) },
+          ...t.ativos.slice(0, limite).map((a) => ({ label: a.ticker, valor: a.total, ativoId: a.ativoId as string | null })),
+          { label: 'Outros', valor: t.ativos.slice(limite).reduce((s, a) => s + a.total, 0), ativoId: null },
         ]
-      : t.ativos.map((a) => ({ label: a.ticker, valor: a.total }))
+      : t.ativos.map((a) => ({ label: a.ticker, valor: a.total, ativoId: a.ativoId as string | null }))
     return itens.map((it, i) => ({
       ...it, tipo: t.tipo, pct: totalSel > 0 ? Math.round((it.valor / totalSel) * 100) : 0,
       cor: escalaTom(COR_SUAVE[t.tipo], FATORES_TOM[i % FATORES_TOM.length]),
@@ -703,18 +655,14 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
     <div className="rounded-xl border border-white/10 p-4 mb-4">
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <h2 className="text-[15px] font-semibold text-white">Ativos por categoria</h2>
-        {/* trocar o período mantém o tipo focado (drill-down). Mesmo modelo
-            de período de Destaques (dropdown único) — "Provisionado" é um
-            toggle à parte (status, não período), desativa o dropdown
+        {/* trocar o período mantém o tipo focado (drill-down). "Provisionado"
+            é um toggle à parte (status, não período): desativa o dropdown
             enquanto ligado (o recorte "provisionado" ignora data). */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className={`flex items-center gap-1.5 rounded-lg border border-white/10 px-2 ${mostrarProvisionado ? 'opacity-40 pointer-events-none' : ''}`}>
-            <Calendar size={13} style={{ color: MUTED }} />
-            <SelectDark value={periodo} onChange={(e) => trocarPeriodo(e.target.value as PeriodoRanking)}
-              style={{ width: 'auto', border: 'none', background: 'transparent' }} className="!text-[13px] !py-2">
-              {PERIODOS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </SelectDark>
-          </div>
+          <SelectDark value={periodo} onChange={(e) => trocarPeriodo(e.target.value as PeriodoRanking)}
+            disabled={mostrarProvisionado} style={{ width: 'auto' }} className="!text-[13px] !py-2">
+            {PERIODOS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </SelectDark>
           <button onClick={() => setMostrarProvisionado((v) => !v)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] font-medium transition-colors"
             style={mostrarProvisionado
@@ -727,7 +675,7 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
 
       {/* Voltar do drill-down: abaixo do label, em linha própria */}
       {tipoFoco && (
-        <button onClick={() => setTipoFoco(null)}
+        <button onClick={desfocar}
           className="flex items-center gap-1.5 px-3 py-1.5 mb-3 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
           <ArrowLeft size={13} />
           Voltar
@@ -762,15 +710,25 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
               cutout: '45%',
               // espaço lateral p/ os rótulos com linha-guia
               layout: { padding: { left: 110, right: 110, top: 18, bottom: 18 } },
-              // Drill-down: clique numa categoria (ou num ativo dela) foca o tipo
+              // Sem foco: clique numa categoria (ou num ativo dela) dá zoom no tipo.
+              // Já focado: clique num ativo (anel externo) abre a página dele —
+              // o anel interno, ali, é só o rótulo do tipo (100% da rosca), não
+              // faz nada.
               onClick: (_evt, els) => {
-                if (tipoFoco || !els.length) return
+                if (!els.length) return
                 const el = els[0]
+                if (tipoFoco) {
+                  if (el.datasetIndex !== 0) return
+                  const ativoId = externos[el.index]?.ativoId
+                  if (ativoId) window.open(`/investimentos/ativos/${ativoId}`, '_blank')
+                  return
+                }
                 const t = el.datasetIndex === 1 ? tiposVis[el.index]?.tipo : externos[el.index]?.tipo
-                if (t) setTipoFoco(t)
+                if (t) focarTipo(t)
               },
               onHover: (_evt, els, chart) => {
-                chart.canvas.style.cursor = els.length && !tipoFoco ? 'pointer' : 'default'
+                const podeClicar = els.length > 0 && (!tipoFoco || els[0].datasetIndex === 0)
+                chart.canvas.style.cursor = podeClicar ? 'pointer' : 'default'
               },
               plugins: {
                 // dados lidos pelo nosso plugin pluginRotulos (atualizam no drill-down)
@@ -1048,6 +1006,214 @@ function ResumoMensal({ dividendos: todosDividendos }: { dividendos: Investiment
   )
 }
 
+// ── Quadro "Evolução dos recebimentos" (gráfico de barras) ──────
+// Só dividendos já RECEBIDOS (exclui provisionado/futuro) — igual ao padrão
+// "Recebidos" do quadro Histórico mensal, que é o mesmo dado em tabela.
+type GranularidadeEvolucao = 'mensal' | 'anual'
+const GRANULARIDADES_EVOLUCAO: { value: GranularidadeEvolucao; label: string }[] = [
+  { value: 'mensal', label: 'Mensal' },
+  { value: 'anual',  label: 'Anual' },
+]
+
+// Desenha o TOTAL em cima da barra (ou do topo da pilha, no modo "por tipo de
+// ativo") — o ponto mais alto entre todos os datasets no mesmo índice, já que
+// o dataset "de cima" na pilha varia conforme quais tipos têm valor no
+// período. Lê os dados de chart.options (não de closure) pelo mesmo motivo do
+// pluginRotulos do gráfico de rosca: o react-chartjs-2 captura o plugin na
+// criação do gráfico e não o recria quando a série muda (troca de
+// granularidade, toggle "por tipo", filtro de tipo/ativo etc.).
+const pluginValorBarra: Plugin<'bar'> = {
+  id: 'valorBarra',
+  afterDatasetsDraw(chart) {
+    const cfg = chart.options.plugins?.valorBarra as unknown as CfgValorBarra | undefined
+    if (!cfg) return
+    const { ctx } = chart
+    const nDatasets = chart.data.datasets.length
+    ctx.save()
+    ctx.font = '600 11px ui-sans-serif, system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'bottom'
+    ctx.fillStyle = cfg.cor
+    cfg.valores.forEach((v, i) => {
+      if (v == null) return
+      let topo: { x: number; y: number } | null = null
+      for (let d = 0; d < nDatasets; d++) {
+        const el = chart.getDatasetMeta(d)?.data?.[i]
+        if (!el) continue
+        const p = (el as BarElement).getProps(['x', 'y'], true) as { x: number; y: number }
+        if (!topo || p.y < topo.y) topo = p
+      }
+      if (!topo) return
+      ctx.fillText(formatBRL(v), topo.x, topo.y - 4)
+    })
+    ctx.restore()
+  },
+}
+
+function EvolucaoRecebimentos({ dividendos }: { dividendos: InvestimentoDividendo[] }) {
+  const dark = useModoEscuro()
+  const [granularidade, setGranularidade] = useState<GranularidadeEvolucao>('mensal')
+  const [porTipo, setPorTipo] = useState(false)
+  // Mesmo controle de período do quadro "Ativos por categoria" (PERIODOS/
+  // inicioPeriodo, definidos ali em cima) — reaproveitado aqui pra recortar
+  // até quando a evolução volta, independente da granularidade do agrupamento.
+  const [periodo, setPeriodo] = useState<PeriodoRanking>('ANO')
+
+  const dividendosNoPeriodo = useMemo(() => {
+    const desdeBruto = inicioPeriodo(periodo)
+    if (!desdeBruto) return dividendos
+    // Cada barra representa um mês/ano INTEIRO — arredonda o corte pra baixo
+    // até o início do mês (ou do ano, na granularidade anual). Sem isso, um
+    // período tipo "Últimos 12 meses" corta o mês-fronteira ao meio (ex.: só
+    // as recebidas a partir do dia 21) e a barra daquele mês fica menor que o
+    // total real do extrato, sem nenhum aviso.
+    const desde = granularidade === 'anual' ? `${desdeBruto.slice(0, 4)}-01-01` : `${desdeBruto.slice(0, 7)}-01`
+    return dividendos.filter((d) => d.data_pagamento >= desde)
+  }, [dividendos, periodo, granularidade])
+
+  // Totais por mês (YYYY-MM), já detalhados por tipo de ativo — a versão
+  // agregada (modo padrão) é só a soma dos tipos de cada mês.
+  const porMesDetalhado = useMemo(() => {
+    const mapa = new Map<string, Map<TipoAtivoInvestimento, number>>()
+    for (const d of dividendosNoPeriodo) {
+      if (ehProvisionado(d)) continue
+      const ym = d.data_pagamento.slice(0, 7)
+      if (!mapa.has(ym)) mapa.set(ym, new Map())
+      const m = mapa.get(ym)!
+      m.set(d.tipo_ativo, (m.get(d.tipo_ativo) ?? 0) + d.valor)
+    }
+    return [...mapa.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  }, [dividendosNoPeriodo])
+
+  const serieDetalhada = useMemo(() => {
+    if (granularidade === 'mensal') return porMesDetalhado
+    const porAno = new Map<string, Map<TipoAtivoInvestimento, number>>()
+    for (const [ym, porTipoAno] of porMesDetalhado) {
+      const ano = ym.slice(0, 4)
+      if (!porAno.has(ano)) porAno.set(ano, new Map())
+      const acc = porAno.get(ano)!
+      for (const [tipo, v] of porTipoAno) acc.set(tipo, (acc.get(tipo) ?? 0) + v)
+    }
+    return [...porAno.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  }, [porMesDetalhado, granularidade])
+
+  // Tipos com total > 0 na janela exibida (soma de todos os períodos), na
+  // ordem alfabética do rótulo — cada um vira um dataset (segmento) empilhado
+  // e uma entrada na legenda quando "por tipo" está ligado. Um tipo cujo saldo
+  // no período zera (ex.: estorno) não aparece nem no gráfico nem na legenda.
+  const tiposPresentes = useMemo(() => {
+    const totaisPorTipo = new Map<TipoAtivoInvestimento, number>()
+    for (const [, porTipoNoPeriodo] of serieDetalhada)
+      for (const [tipo, v] of porTipoNoPeriodo) totaisPorTipo.set(tipo, (totaisPorTipo.get(tipo) ?? 0) + v)
+    return [...totaisPorTipo.entries()]
+      .filter(([, total]) => total > 0)
+      .map(([tipo]) => tipo)
+      .sort((a, b) => TIPO_ATIVO_LABEL[a].localeCompare(TIPO_ATIVO_LABEL[b], 'pt-BR'))
+  }, [serieDetalhada])
+
+  const totais = useMemo(() =>
+    serieDetalhada.map(([, porTipoNoPeriodo]) => [...porTipoNoPeriodo.values()].reduce((s, v) => s + v, 0)),
+  [serieDetalhada])
+
+  const corTick  = dark ? '#8b92a8' : '#6b7280'
+  const corGrid  = dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.08)'
+  const corValor = dark ? '#e8eaf0' : '#1f2433'
+
+  if (dividendos.length === 0) return null
+
+  const labels = serieDetalhada.map(([chave]) => granularidade === 'mensal' ? mesLabel(chave) : chave)
+  const espessura = granularidade === 'anual' ? 64 : 28
+
+  return (
+    <div className="rounded-xl border border-white/10 p-4 mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <h2 className="text-[15px] font-semibold text-white">Evolução dos recebimentos</h2>
+        <div className="flex items-center gap-2 flex-wrap">
+          <SelectDark value={periodo} onChange={(e) => setPeriodo(e.target.value as PeriodoRanking)}
+            style={{ width: 'auto' }} className="!text-[13px] !py-1.5">
+            {PERIODOS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </SelectDark>
+          <button onClick={() => setPorTipo((v) => !v)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[13px] font-medium transition-colors"
+            style={porTipo
+              ? { borderColor: 'rgba(0,200,150,.5)', background: 'rgba(0,200,150,.12)', color: '#00c896' }
+              : { borderColor: 'var(--border-subtle)', color: MUTED }}>
+            <Layers size={13} /> Por tipo de ativo
+          </button>
+          <div className="flex items-center gap-1 rounded-lg border border-white/10 p-0.5">
+            {GRANULARIDADES_EVOLUCAO.map((g) => (
+              <button key={g.value} onClick={() => setGranularidade(g.value)}
+                className="px-3 py-1 rounded-md text-[13px] font-medium transition-colors"
+                style={granularidade === g.value
+                  ? { background: 'rgba(0,200,150,.15)', color: '#00c896' }
+                  : { color: MUTED }}>
+                {g.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      {porMesDetalhado.length === 0 ? (
+        <p className="text-[13px] text-center py-6" style={{ color: MUTED }}>
+          Nenhum recebimento no período selecionado.
+        </p>
+      ) : (
+      <div className="h-[280px] w-full">
+        <Bar
+          plugins={[pluginValorBarra]}
+          data={{
+            labels,
+            datasets: porTipo
+              ? tiposPresentes.map((tipo) => ({
+                  label: TIPO_ATIVO_LABEL[tipo],
+                  data: serieDetalhada.map(([, porTipoNoPeriodo]) => Number((porTipoNoPeriodo.get(tipo) ?? 0).toFixed(2))),
+                  backgroundColor: COR_SUAVE[tipo],
+                  stack: 'total',
+                  maxBarThickness: espessura,
+                }))
+              : [{
+                  label: 'Recebido',
+                  data: totais.map((v) => Number(v.toFixed(2))),
+                  backgroundColor: '#00c896aa',
+                  borderRadius: 4,
+                  stack: 'total',
+                  maxBarThickness: espessura,
+                }],
+          }}
+          options={{
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: { padding: { top: 20 } },
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: porTipo
+                ? { display: true, position: 'bottom', labels: { color: corTick, boxWidth: 12, padding: 12 } }
+                : { display: false },
+              tooltip: {
+                // Numa pilha por tipo, nem todo tipo tem valor em todo período
+                // (ex.: só recebeu FII em setembro) — o dataset continua
+                // existindo pra manter a pilha correta nos outros meses, mas
+                // o tooltip desse mês não deve listar tipo nenhum com R$ 0,00.
+                filter: (item) => (item.parsed.y ?? 0) > 0,
+                callbacks: {
+                  label: (ctx) => ` ${ctx.dataset.label}: ${formatBRL(ctx.parsed.y ?? 0)}`,
+                  footer: porTipo ? (itens) => `Total: ${formatBRL(itens.reduce((s, it) => s + (it.parsed.y ?? 0), 0))}` : undefined,
+                },
+              },
+              valorBarra: { valores: totais, cor: corValor },
+            },
+            scales: {
+              x: { ticks: { color: corTick }, grid: { display: false }, stacked: true },
+              y: { ticks: { color: corTick, callback: (v) => formatBRL(Number(v)) }, grid: { color: corGrid }, stacked: true },
+            },
+          }}
+        />
+      </div>
+      )}
+    </div>
+  )
+}
+
 // ── Lista de dividendos (filtros + ordenação + agrupamento) ─────
 
 type DivSortKey = 'ticker' | 'tipo' | 'data' | 'valor'
@@ -1207,11 +1373,13 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
     <>
       {/* Filtros — tipo de ativo → ativo (valem p/ quadro e extrato) */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <SelectDark value={filtroTipoAtivo} onChange={(e) => mudarTipoAtivo(e.target.value as '' | TipoAtivoInvestimento)} className="!py-1.5 !text-[13px] min-w-[130px]">
+        <SelectDark value={filtroTipoAtivo} onChange={(e) => mudarTipoAtivo(e.target.value as '' | TipoAtivoInvestimento)}
+          style={{ width: 'auto' }} className="!py-1.5 !text-[13px] min-w-[130px]">
           <option value="">Todos os tipos</option>
           {tiposAtivo.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
         </SelectDark>
-        <SelectDark value={filtroTicker} onChange={(e) => setFiltroTicker(e.target.value)} className="!py-1.5 !text-[13px] min-w-[130px]">
+        <SelectDark value={filtroTicker} onChange={(e) => setFiltroTicker(e.target.value)}
+          style={{ width: 'auto' }} className="!py-1.5 !text-[13px] min-w-[130px]">
           <option value="">Todos os ativos</option>
           {tickers.map((t) => <option key={t} value={t}>{t}</option>)}
         </SelectDark>
@@ -1224,6 +1392,7 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
       </div>
 
       <ResumoMensal dividendos={filtradosBase} />
+      <EvolucaoRecebimentos dividendos={filtradosBase} />
 
       {/* Extrato — mês escolhido pelo calendário padrão (MonthPicker), centralizado */}
       <div className="flex items-center gap-2 mb-3">
@@ -1344,7 +1513,7 @@ function DrawerNovoDividendo({ onClose, onToast }: { onClose: () => void; onToas
           <option value="">Selecione...</option>
           {tipos.map((t) => <option key={t.id} value={t.id}>{t.nome}{t.categoria_id ? '' : ' (sem categoria)'}</option>)}
         </SelectDark>
-        {semTipos && <p className="text-[12px] mt-1" style={{ color: '#ffb74d' }}>Nenhum tipo configurado. Use "Configurar tipos".</p>}
+        {semTipos && <p className="text-[12px] mt-1" style={{ color: '#ffb74d' }}>Nenhum tipo configurado. Mapeie em Configurações → Tipos de dividendo.</p>}
         {tipoSemCategoria && <p className="text-[12px] mt-1" style={{ color: '#ffb74d' }}>Este tipo não tem categoria mapeada — configure antes de lançar.</p>}
       </Field>
       <Field label="Conta de recebimento">
@@ -1411,392 +1580,3 @@ function DrawerConfirmar({ dividendo, onClose, onToast }: {
   )
 }
 
-// ── Drawer: associar proventos já lançados no extrato ───────────
-// Caso de uso: o usuário já registrava dividendos/aluguéis como receitas
-// no extrato antes de existir o módulo de investimentos. Aqui vinculamos
-// esses lançamentos a um ativo (cria inv_dividendos apontando para a
-// transação existente, SEM criar lançamento novo → sem duplicar).
-interface LinhaAssoc {
-  transacao_id: string
-  data: string
-  descricao: string
-  valor: number
-  ativo_id: string
-  tipo_dividendo_id: string
-  importar: boolean
-}
-interface TxAssoc {
-  id: string; data: string; descricao?: string; valor: number; tipo: string
-  categoria_id?: string; categoria_nome?: string
-}
-
-function DrawerAssociar({ onClose, onToast }: { onClose: () => void; onToast: (m: string) => void }) {
-  const { ativos } = useInvestimentosAtivos()
-  const { tipos }  = useTiposDividendo()
-  const { categorias } = useCategorias()
-  const { dividendos, associar, invalidar } = useDividendos()
-
-  const [categoriaId, setCategoriaId] = useState('')
-  const [de,  setDe]  = useState(mesMenos(mesAtual(), 11))
-  const [ate, setAte] = useState(mesAtual())
-  const [etapa, setEtapa] = useState<'config' | 'revisando'>('config')
-  const [carregando, setCarregando] = useState(false)
-  const [salvando, setSalvando] = useState(false)
-  const [progresso, setProgresso] = useState(0)
-  const [linhas, setLinhas] = useState<LinhaAssoc[]>([])
-
-  // Só categorias já associadas a um tipo de provento (Configurar tipos):
-  // é o mapeamento que define em qual tipo o provento será gravado.
-  const catsMapeadas = new Set(tipos.map((t) => t.categoria_id).filter(Boolean))
-  const catsOpcoes = categorias.filter((c) => catsMapeadas.has(c.id)).map((c) => ({
-    id: c.id, label: c.descricao,
-    sublabel: c.id_pai ? categorias.find((p) => p.id === c.id_pai)?.descricao : undefined,
-  }))
-  // Tickers do mais longo p/ o mais curto, evitando casar um prefixo curto
-  const tickersOrd = [...ativos].sort((a, b) => b.ticker.length - a.ticker.length)
-  // Raiz (letras) → ativos: casa variantes como "MXRF13" (recibo de
-  // subscrição que depois vira 11) e "ALUGUEL MXRF" (sem o sufixo
-  // numérico) com MXRF11 — só quando a raiz aponta para UM único ativo.
-  const porRaiz = new Map<string, string[]>()
-  for (const a of ativos) {
-    const raiz = a.ticker.toUpperCase().replace(/\d+[A-Z]?$/, '')
-    if (raiz.length < 4) continue
-    porRaiz.set(raiz, [...(porRaiz.get(raiz) ?? []), a.id])
-  }
-  const detectarAtivo = (desc: string): string => {
-    const d = desc.toUpperCase()
-    const exato = tickersOrd.find((a) => d.includes(a.ticker.toUpperCase()))
-    if (exato) return exato.id
-    for (const token of d.split(/[^A-Z0-9]+/)) {
-      const m = token.match(/^([A-Z]{4,})(\d{0,4}[A-Z]?)$/)
-      if (!m) continue
-      const ids = porRaiz.get(m[1])
-      if (ids?.length === 1) return ids[0]
-    }
-    return ''
-  }
-  const tipoPorCategoria = (catId: string): string => tipos.find((t) => t.categoria_id === catId)?.id ?? ''
-  // Sugere o tipo: primeiro pelo mapeamento tipo ↔ categoria escolhida;
-  // fallback pelo tipo do ativo (FII → Aluguel de FII; demais → Dividendos)
-  const sugerirTipo = (ativoId: string): string => {
-    const porCategoria = tipoPorCategoria(categoriaId)
-    if (porCategoria) return porCategoria
-    const at = ativos.find((a) => a.id === ativoId)
-    const ehFii = at?.tipo_ativo === 'FII'
-    return tipos.find((x) => (ehFii ? /aluguel|fii/i : /dividend/i).test(x.nome))?.id ?? ''
-  }
-  const setLinha = (idx: number, patch: Partial<LinhaAssoc>) =>
-    setLinhas((ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)))
-
-  // Ordenação clicando no cabeçalho (mantém o índice original p/ edição)
-  type CampoOrd = 'sel' | 'data' | 'descricao' | 'valor' | 'ativo' | 'tipo'
-  const [ordCampo, setOrdCampo] = useState<CampoOrd>('data')
-  const [ordDir, setOrdDir] = useState<1 | -1>(-1)
-  const ordenarPor = (campo: CampoOrd) => {
-    if (campo === ordCampo) setOrdDir((d) => (d === 1 ? -1 : 1))
-    else { setOrdCampo(campo); setOrdDir(campo === 'data' || campo === 'valor' ? -1 : 1) }
-  }
-  const tickerDe   = (id: string) => ativos.find((a) => a.id === id)?.ticker ?? ''
-  const nomeTipoDe = (id: string) => tipos.find((t) => t.id === id)?.nome ?? ''
-  const valorOrd = (l: LinhaAssoc): string | number | boolean => {
-    switch (ordCampo) {
-      case 'sel':       return l.importar
-      case 'valor':     return l.valor
-      case 'descricao': return l.descricao
-      case 'ativo':     return tickerDe(l.ativo_id)
-      case 'tipo':      return nomeTipoDe(l.tipo_dividendo_id)
-      default:          return l.data
-    }
-  }
-  const linhasOrd = linhas.map((l, idx) => ({ l, idx })).sort((a, b) => {
-    const va = valorOrd(a.l), vb = valorOrd(b.l)
-    let cmp: number
-    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb
-    else if (typeof va === 'boolean' && typeof vb === 'boolean') cmp = Number(va) - Number(vb)
-    else cmp = String(va).localeCompare(String(vb), 'pt-BR')
-    return cmp * ordDir
-  })
-  const ThOrd = ({ campo, className, children }: { campo: CampoOrd; className?: string; children: ReactNode }) => (
-    <th className={`px-2 py-2 cursor-pointer select-none hover:text-white ${className ?? ''}`}
-      onClick={() => ordenarPor(campo)} title="Ordenar">
-      {children}{ordCampo === campo ? (ordDir === 1 ? ' ▲' : ' ▼') : ''}
-    </th>
-  )
-
-  async function buscar() {
-    if (!categoriaId) { onToast('Selecione a categoria onde os proventos foram lançados'); return }
-    setCarregando(true); setProgresso(0)
-    try {
-      const meses = gerarMeses(de, ate)
-      let concluidos = 0
-      const resArr = await Promise.all(meses.map(async (mm) => {
-        const r = await apiFetch(`/transacoes?mes=${mm}&per_page=1000`)
-        concluidos++
-        setProgresso(Math.round((concluidos / meses.length) * 100))
-        return r
-      }))
-      const txs = resArr.flatMap((r) => extrairLista<TxAssoc>(r.dados))
-      const linkados = new Set(dividendos.map((d) => d.transacao_extrato_id).filter(Boolean) as string[])
-      const catDesc = (categorias.find((c) => c.id === categoriaId)?.descricao ?? '').toLowerCase()
-      const vistos = new Set<string>()
-      const ls: LinhaAssoc[] = []
-      for (const t of txs) {
-        if (!t.id || vistos.has(t.id) || t.tipo !== 'RECEITA') continue
-        const casa = t.categoria_id === categoriaId ||
-          (!!catDesc && (t.categoria_nome ?? '').toLowerCase() === catDesc)
-        if (!casa || linkados.has(t.id) || !(Number(t.valor) > 0)) continue
-        vistos.add(t.id)
-        const ativoId = detectarAtivo(String(t.descricao ?? ''))
-        ls.push({
-          transacao_id: t.id, data: t.data, descricao: String(t.descricao ?? ''),
-          valor: Number(t.valor), ativo_id: ativoId,
-          tipo_dividendo_id: ativoId ? sugerirTipo(ativoId) : '', importar: !!ativoId,
-        })
-      }
-      ls.sort((a, b) => (a.data < b.data ? 1 : -1))
-      setLinhas(ls)
-      setEtapa('revisando')
-      if (ls.length === 0) onToast('Nenhuma receita não associada encontrada nesse período/categoria.')
-    } catch (e) {
-      onToast(`Erro ao buscar: ${(e as Error).message}`)
-    } finally { setCarregando(false) }
-  }
-
-  async function confirmar() {
-    const sel = linhas.filter((l) => l.importar && l.ativo_id)
-    if (sel.length === 0) { onToast('Defina o ativo e marque ao menos uma linha.'); return }
-    setSalvando(true); setProgresso(0)
-    let ok = 0, erros = 0
-    for (let i = 0; i < sel.length; i++) {
-      const l = sel[i]
-      // skipInvalidar: evita refetch (gráfico/página de fundo) a cada item;
-      // invalidamos uma única vez ao final do lote.
-      const res = await associar({
-        transacao_extrato_id: l.transacao_id, ativo_id: l.ativo_id,
-        tipo_dividendo_id: l.tipo_dividendo_id || null,
-      }, { skipInvalidar: true })
-      if (res.ok) ok++; else erros++
-      setProgresso(Math.round(((i + 1) / sel.length) * 100))
-    }
-    if (ok > 0) await invalidar()
-    setSalvando(false)
-    onToast(`${ok} provento(s) associado(s)${erros ? `, ${erros} com erro` : ''}.`)
-    onClose()
-  }
-
-  const selCount = linhas.filter((l) => l.importar && l.ativo_id).length
-
-  return (
-    <Drawer open onClose={onClose} largura="larga" titulo="Associar proventos do extrato"
-      subtitulo="Vincula dividendos/aluguéis já lançados aos investimentos (sem duplicar)"
-      rodape={etapa === 'revisando'
-        ? <>
-            <button onClick={() => setEtapa('config')}
-              className="px-4 py-2.5 rounded-lg border border-white/10 text-[16px] font-semibold text-white/80 hover:border-white/25">
-              Voltar
-            </button>
-            <BtnSalvar editando={false} onClick={confirmar} salvando={salvando} labelSalvar={`Associar ${selCount}`} />
-          </>
-        : <><BtnCancelar onClick={onClose} /><BtnSalvar editando={false} onClick={buscar} salvando={carregando} labelSalvar="Buscar" /></>}>
-      {etapa === 'config' ? (
-        <>
-          <p className="text-[13px]" style={{ color: MUTED }}>
-            Escolha a categoria onde você lança os proventos no extrato e o período. Listaremos as
-            receitas ainda não associadas para você vincular a cada ativo — sem criar lançamentos novos.
-          </p>
-          <Field label="Categoria dos proventos">
-            <SearchableSelect value={categoriaId} onChange={setCategoriaId} placeholder="Buscar categoria..." opcoes={catsOpcoes} />
-          </Field>
-          {catsOpcoes.length === 0 && (
-            <p className="text-[12px]" style={{ color: '#ffb74d' }}>
-              Nenhuma categoria associada a um tipo de provento. Abra "Configurar tipos" e mapeie
-              cada tipo (Dividendos, JSCP, Aluguel de FII…) para a categoria usada no extrato.
-            </p>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="De"><Input type="month" value={de} onChange={(e) => setDe(e.target.value)} /></Field>
-            <Field label="Até"><Input type="month" value={ate} onChange={(e) => setAte(e.target.value)} /></Field>
-          </div>
-          {carregando && (
-            <div className="mt-3">
-              <div className="flex items-center justify-between text-[12px] mb-1" style={{ color: MUTED }}>
-                <span>Buscando lançamentos…</span><span>{progresso}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-                <div className="h-full rounded-full transition-all" style={{ width: `${progresso}%`, background: '#00c896' }} />
-              </div>
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          <p className="text-[13px] mb-2" style={{ color: MUTED }}>
-            {linhas.length} lançamento(s) encontrado(s). Confira o ativo detectado pela descrição e o tipo de provento.
-          </p>
-          <div className="overflow-auto rounded-lg border border-white/10 max-h-[50vh]">
-            <table className="w-full text-[13px]">
-              {/* fundo sólido (drawer #1a1f2e + leve clareada) — translúcido deixava
-                  as linhas aparecerem através do cabeçalho fixo ao rolar */}
-              <thead className="sticky top-0 z-10 bg-[#232938]">
-                <tr className="text-left" style={{ color: MUTED }}>
-                  <ThOrd campo="sel" className="w-8 text-center">✓</ThOrd>
-                  <ThOrd campo="data">Data</ThOrd>
-                  <ThOrd campo="descricao">Descrição</ThOrd>
-                  <ThOrd campo="valor" className="text-right">Valor</ThOrd>
-                  <ThOrd campo="ativo">Ativo</ThOrd>
-                  <ThOrd campo="tipo">Tipo</ThOrd>
-                </tr>
-              </thead>
-              <tbody>
-                {linhasOrd.map(({ l, idx: i }) => (
-                  <tr key={l.transacao_id} className="border-t border-white/5" style={{ opacity: l.importar ? 1 : 0.5 }}>
-                    <td className="px-2 py-1 text-center">
-                      <input type="checkbox" checked={l.importar} onChange={(e) => setLinha(i, { importar: e.target.checked })} className="accent-av-green" />
-                    </td>
-                    <td className="px-2 py-1 whitespace-nowrap text-white/80">{formatData(l.data)}</td>
-                    <td className="px-2 py-1 text-white/70 max-w-[160px] truncate" title={l.descricao}>{l.descricao}</td>
-                    <td className="px-2 py-1 text-right" style={{ color: '#00c896' }}>{formatBRL(l.valor)}</td>
-                    <td className="px-1 py-1">
-                      <SelectDark value={l.ativo_id} onChange={(e) => setLinha(i, { ativo_id: e.target.value, importar: !!e.target.value, tipo_dividendo_id: e.target.value ? sugerirTipo(e.target.value) : '' })} className="!py-1 !text-[12px] min-w-[88px]">
-                        <option value="">— ativo —</option>
-                        {ativos.map((a) => <option key={a.id} value={a.id}>{a.ticker}</option>)}
-                      </SelectDark>
-                    </td>
-                    <td className="px-1 py-1">
-                      <SelectDark value={l.tipo_dividendo_id} onChange={(e) => setLinha(i, { tipo_dividendo_id: e.target.value })} className="!py-1 !text-[12px] min-w-[130px]">
-                        <option value="">—</option>
-                        {tipos.map((t) => <option key={t.id} value={t.id}>{t.nome}</option>)}
-                      </SelectDark>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {linhas.some((l) => !l.ativo_id) && (
-            <p className="text-[12px] mt-2" style={{ color: '#ffb74d' }}>Linhas sem ativo não serão associadas — selecione o ativo para incluí-las.</p>
-          )}
-          {salvando && (
-            <div className="mt-3">
-              <div className="flex items-center justify-between text-[12px] mb-1" style={{ color: MUTED }}>
-                <span>Associando proventos…</span><span>{progresso}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-                <div className="h-full rounded-full transition-all" style={{ width: `${progresso}%`, background: '#00c896' }} />
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </Drawer>
-  )
-}
-
-// ── Drawer: diagnóstico da busca de proventos (dry-run) ──────
-// Mostra, por ativo, cada elo da corrente de provisão: posição ativa,
-// fonte coberta, resposta HTTP da fonte, proventos devolvidos/na janela
-// e tipos sem categoria. Não lança nada — só explica por que a busca
-// voltou (ou voltaria) vazia.
-function DrawerDiagnostico({ onClose }: { onClose: () => void }) {
-  const { diagnostico } = useDividendos()
-  const [dados, setDados] = useState<DiagnosticoProventos | null>(null)
-  const [erro,  setErro]  = useState<string | null>(null)
-
-  useEffect(() => {
-    let vivo = true
-    diagnostico().then((r) => {
-      if (!vivo) return
-      if (r.ok && r.dados) setDados(r.dados)
-      else setErro(r.erro ?? 'Erro ao executar o diagnóstico')
-    })
-    return () => { vivo = false }
-    // roda uma única vez ao abrir o drawer
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const OK  = '#00c896'
-  const BAD = '#ff6b6b'
-  const WRN = '#ffb74d'
-
-  // Conclusão por ativo: qual elo quebra a provisão deste ativo?
-  function conclusao(a: DiagnosticoProventos['ativos'][number]): { txt: string; cor: string } {
-    if (!a.fonte)            return { txt: 'sem fonte de proventos (tipo/moeda fora da cobertura B3/Polygon)', cor: MUTED }
-    if (!a.posicao_ativa)    return { txt: 'sem posição ATIVA — a busca pula este ativo', cor: WRN }
-    if (a.erro)              return { txt: `fonte falhou: ${a.erro}`, cor: BAD }
-    if (a.proventos_fonte === 0) return { txt: 'a fonte respondeu, mas sem nenhum provento anunciado para este ativo', cor: WRN }
-    if (a.na_janela === 0)   return { txt: `há ${a.proventos_fonte} provento(s) na fonte, mas nenhum com pagamento na janela (futuros + últimos 30 dias)`, cor: WRN }
-    if (a.tipos_pendentes.length > 0) return { txt: `seria lançado, mas o(s) tipo(s) ${a.tipos_pendentes.join(', ')} está(ão) sem categoria — mapeie em "Configurar tipos"`, cor: WRN }
-    return { txt: `${a.na_janela} provento(s) na janela — a busca deve lançar/atualizar`, cor: OK }
-  }
-
-  return (
-    <Drawer open onClose={onClose} titulo="Diagnóstico de proventos"
-      subtitulo="Testa a busca de ponta a ponta, sem lançar nada">
-      {!dados && !erro && (
-        <div className="flex items-center gap-2 text-[14px]" style={{ color: MUTED }}>
-          <RefreshCw size={15} className="animate-spin" /> Consultando B3/Polygon para cada ativo…
-        </div>
-      )}
-      {erro && <p className="text-[14px]" style={{ color: BAD }}>{erro}</p>}
-      {dados && (
-        <div className="space-y-4 text-[13px]">
-          {/* Pré-requisitos globais */}
-          <div className="rounded-lg border border-white/10 p-3 space-y-1">
-            <p className="font-semibold text-white mb-1">Pré-requisitos</p>
-            <p style={{ color: dados.ptax_ultima ? MUTED : BAD }}>
-              PTAX: {dados.ptax_ultima ? `sincronizada até ${formatData(dados.ptax_ultima)}` : 'INDISPONÍVEL — bloqueia proventos em USD'}
-            </p>
-            <p style={{ color: dados.polygon_key ? MUTED : WRN }}>
-              Chave Polygon (ativos USD): {dados.polygon_key ? 'configurada' : 'NÃO configurada — internacionais não são buscados'}
-            </p>
-            <p style={{ color: MUTED }}>
-              Janela de provisão: futuros + últimos {dados.janela_dias} dias (desde {formatData(dados.data_corte)})
-            </p>
-          </div>
-
-          {/* Tipos de provento */}
-          <div className="rounded-lg border border-white/10 p-3">
-            <p className="font-semibold text-white mb-2">Tipos de provento</p>
-            <div className="flex flex-wrap gap-1.5">
-              {dados.tipos.length === 0 && (
-                <p style={{ color: BAD }}>Nenhum tipo cadastrado — nada pode ser lançado.</p>
-              )}
-              {dados.tipos.map((t) => (
-                <span key={t.nome} className="px-2 py-0.5 rounded-full border text-[12px]"
-                  style={{ borderColor: t.mapeado ? `${OK}55` : `${WRN}88`, color: t.mapeado ? OK : WRN }}>
-                  {t.nome} {t.mapeado ? '✓' : '· sem categoria'}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* Por ativo */}
-          <div className="rounded-lg border border-white/10 p-3 space-y-3">
-            <p className="font-semibold text-white">Ativos ({dados.ativos.length})</p>
-            {dados.ativos.length === 0 && (
-              <p style={{ color: BAD }}>Nenhum ativo cadastrado em investimentos.</p>
-            )}
-            {dados.ativos.map((a) => {
-              const c = conclusao(a)
-              return (
-                <div key={`${a.ticker}-${a.tipo_ativo}`} className="border-t border-white/5 pt-2 first:border-t-0 first:pt-0">
-                  <p className="text-white font-semibold">
-                    {a.ticker} <span className="font-normal" style={{ color: MUTED }}>· {a.tipo_ativo} · {a.moeda}</span>
-                  </p>
-                  <p style={{ color: MUTED }}>
-                    posição ativa: {a.posicao_ativa ? 'sim' : 'não'}
-                    {a.fonte ? ` · fonte: ${a.fonte}` : ''}
-                    {a.http != null ? ` · HTTP ${a.http}` : ''}
-                    {a.fonte && a.posicao_ativa && !a.erro
-                      ? ` · ${a.proventos_fonte} na fonte / ${a.na_janela} na janela / ${a.futuros} futuro(s)` : ''}
-                  </p>
-                  <p style={{ color: c.cor }}>→ {c.txt}</p>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-    </Drawer>
-  )
-}

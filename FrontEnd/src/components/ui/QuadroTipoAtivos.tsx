@@ -1,13 +1,20 @@
 import { useMemo, useState, useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
-import { ChevronDown, ChevronUp, ChevronRight, TrendingUp, TrendingDown, Layers, LineChart, Pencil, CheckCircle2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronRight, TrendingUp, TrendingDown, Layers, LineChart, Pencil, CheckCircle2, GripHorizontal, AlertTriangle } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { LogoAtivo, SelectDark } from './shared'
 import { formatBRL, formatData } from '../../lib/utils'
 import { recomendacaoCompra } from '../../lib/questionarioAtivos'
+import {
+  calcularProtecaoPoderCompraCompleta, montarEntradaProtecaoPoderCompra,
+  type ResultadoProtecaoPoderCompraCompleto,
+} from '../../lib/protecaoPoderCompra'
+import { useDividendos } from '../../hooks/useDividendos'
+import { useInvestimentosOperacoes } from '../../hooks/useInvestimentosOperacoes'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, setorLabel, INDEXADOR_RF_LABEL, INDICE_RF_LABEL } from '../../lib/constants'
 import type { AtivoLinha } from '../../lib/ativosLinha'
 import type {
   InvestimentoAtivo, InvestimentoDashboardTipo, TipoAtivoInvestimento,
+  InvestimentoDividendo, InvestimentoOperacao,
 } from '../../types'
 
 const MUTED = '#8b92a8'
@@ -38,7 +45,7 @@ const LABEL_REC = { COMPRAR: 'Comprar', NEUTRO: 'Neutro', AGUARDAR: 'Aguardar' }
 const ORDEM_REC = { COMPRAR: 2, NEUTRO: 1, AGUARDAR: 0 } as const
 
 // ── Ordenação por coluna ───────────────────────────────────────
-type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'pvp' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'idealPct' | 'comprar' | 'venc' | 'indexador' | 'taxa' | 'instituicao' | 'magic'
+type SortKey = 'ticker' | 'nome' | 'setor' | 'categoria' | 'quantidade' | 'pm' | 'pa' | 'pvp' | 'rent' | 'dy' | 'yoc' | 'saldo' | 'nota' | 'cart' | 'idealPct' | 'comprar' | 'venc' | 'indexador' | 'taxa' | 'instituicao' | 'magic' | 'protecao'
 function precoMedio(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_custo / l.quantidade : 0 }
 function precoAtual(l: AtivoLinha) { return l.quantidade > 0 ? l.valor_mercado / l.quantidade : 0 }
 // P/VP (FIIs): preço atual ÷ valor patrimonial por cota — VP é informado
@@ -66,11 +73,39 @@ function magicNumberInfo(l: AtivoLinha): { necessarias: number; atingiu: boolean
   if (!Number.isFinite(necessarias) || necessarias <= 0) return null
   return { necessarias, atingiu: l.quantidade >= necessarias, pct: Math.min(100, (l.quantidade / necessarias) * 100) }
 }
+
+// Proteção do poder de compra (FIIs), no grid: MESMA função e MESMA fonte de
+// dados (último dividendo por cota + histórico de compras) que a página de
+// detalhe do ativo usa — via montarEntradaProtecaoPoderCompra, pra nunca
+// haver dois jeitos de calcular a mesma coisa divergindo entre grid e
+// detalhe. `dividendosPorAtivo`/`operacoesPorAtivo` vêm de UMA busca em lote
+// por tipo (não uma por ativo) — ver useDividendos/useInvestimentosOperacoes
+// no componente abaixo.
+function protecaoInfo(
+  l: AtivoLinha, ipca12mPct: number | null,
+  dividendosPorAtivo: Map<string, InvestimentoDividendo[]>,
+  operacoesPorAtivo: Map<string, InvestimentoOperacao[]>,
+): ResultadoProtecaoPoderCompraCompleto | null {
+  if (ipca12mPct == null) return null
+  const entrada = montarEntradaProtecaoPoderCompra(
+    dividendosPorAtivo.get(l.ativo_id) ?? [],
+    operacoesPorAtivo.get(l.ativo_id) ?? [],
+    l.quantidade, precoAtual(l),
+  )
+  if (!entrada) return null
+  return calcularProtecaoPoderCompraCompleta(
+    entrada.valorPatrimonio, entrada.rendimentoTotal, ipca12mPct, entrada.historicoCompras,
+  )
+}
 // idealPct/comprar são derivados no nível do QUADRO (rateio da meta do tipo,
 // desvio da meta) — não dá pra calcular só a partir da linha, por isso o
 // contexto extra (mesmo mapa/valor já usados pra renderizar as células).
 function valorOrdenacao(
-  l: AtivoLinha, k: SortKey, ctx: { idealPorAtivo: Map<string, number | null>; idealRef: number | null },
+  l: AtivoLinha, k: SortKey,
+  ctx: {
+    idealPorAtivo: Map<string, number | null>; idealRef: number | null; ipca12mPct: number | null
+    dividendosPorAtivo: Map<string, InvestimentoDividendo[]>; operacoesPorAtivo: Map<string, InvestimentoOperacao[]>
+  },
 ): number | string {
   switch (k) {
     case 'ticker':     return l.ticker
@@ -97,6 +132,10 @@ function valorOrdenacao(
     case 'taxa':       return l.meta?.rf_taxa ?? ''
     case 'instituicao': return l.contas.join(', ')
     case 'magic':      return magicNumberInfo(l)?.pct ?? -1
+    // Sentinela bem negativa (não -1): renda livre "de verdade" pode ficar
+    // negativa num déficit (inflação > provento) sem por isso ser "sem
+    // dado" — precisa de uma distância segura pra não se misturar.
+    case 'protecao':   return protecaoInfo(l, ctx.ipca12mPct, ctx.dividendosPorAtivo, ctx.operacoesPorAtivo)?.percentualRendaLivre ?? -1e9
   }
 }
 
@@ -121,11 +160,31 @@ const DIMENSOES: { value: Dimensao; label: string }[] = [
   { value: 'nenhum',    label: 'Nenhum' },
 ]
 
+// ── Altura ajustável da lista (arrastando as alças nas duas pontas) ─────
+// Guardada por TIPO de ativo (mesma altura entre Investimentos e Meus
+// ativos, que reaproveitam este mesmo quadro). Deliberadamente SEM
+// `resize: vertical` nativo do CSS: com ele, o cabeçalho `sticky` da tabela
+// escapava do quadro e ficava grudado no topo da PÁGINA ao rolar — bug que
+// se repetiu mesmo sem nenhum código React reescrevendo o estilo (altura
+// fixa via classe), então é o próprio `resize` interagindo mal com o
+// `overflow-auto`/`sticky` aninhados, não uma questão de re-render. O
+// arraste manual abaixo só grava a altura no fim do gesto (pointerup),
+// evitando qualquer reescrita de estilo durante o arraste.
+const ALTURA_LISTA_PADRAO = 384
+const ALTURA_LISTA_MIN = 160
+const chaveAlturaLista = (tipo: TipoAtivoInvestimento) => `arqvalor:quadro-ativos-altura:${tipo}`
+function lerAlturaListaSalva(tipo: TipoAtivoInvestimento): number {
+  try {
+    const v = Number(localStorage.getItem(chaveAlturaLista(tipo)))
+    return v > 0 ? v : ALTURA_LISTA_PADRAO
+  } catch { return ALTURA_LISTA_PADRAO }
+}
+
 // ── Quadro de um tipo de ativo (cabeçalho colapsável + tabela) ──
 // Componente compartilhado entre a página de Investimentos (sem ações) e
 // Meus ativos (com botões Posições/Histórico/Editar via prop `acoes`).
 export default function QuadroTipoAtivos({
-  tipo, dados, linhas, acoes, defaultAberto = false, focoSinal, focoGrupo, alca, totalCarteira,
+  tipo, dados, linhas, acoes, defaultAberto = false, focoSinal, focoGrupo, alca, totalCarteira, ipca12mPct,
 }: {
   tipo:          TipoAtivoInvestimento
   dados:         InvestimentoDashboardTipo | null
@@ -143,6 +202,10 @@ export default function QuadroTipoAtivos({
   // Valor de mercado da carteira INTEIRA (não só deste tipo) — necessário só
   // pra mostrar "R$ faltando pra bater a meta" no cabeçalho recolhido.
   totalCarteira?: number
+  // IPCA acumulado 12 meses (%) — habilita a coluna "Proteção" (só FIIs, ver
+  // protecaoInfo acima). Sem ele, a coluna nem aparece (calculado 1x por
+  // página, não por quadro — ver useIndicesEconomicos em quem chama isto).
+  ipca12mPct?:   number | null
 }) {
   const location = useLocation()
   // Origem para o botão "voltar" da página de detalhe — preserva de qual página
@@ -166,6 +229,38 @@ export default function QuadroTipoAtivos({
   // payload do foco lido dentro do effect sem re-disparar a cada render
   const focoGrupoRef = useRef(focoGrupo)
   useEffect(() => { focoGrupoRef.current = focoGrupo })
+
+  // Altura da lista (arraste manual — ver comentário em ALTURA_LISTA_PADRAO).
+  const listaRef = useRef<HTMLDivElement>(null)
+  const [alturaLista, setAlturaLista] = useState(() => lerAlturaListaSalva(tipo))
+  // Ajusta a altura DIRETO no DOM durante o arraste (sem re-render — barato e
+  // não mexe em nada que o sticky dependa) e só grava no estado/localStorage
+  // ao soltar. `pointerId` capturado no próprio elemento arrastado, então o
+  // ponteiro continua "preso" a ele mesmo que saia por cima da tabela.
+  const iniciarResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const el = listaRef.current
+    if (!el) return
+    const startY = e.clientY
+    const startH = el.getBoundingClientRect().height
+    const alturaMax = window.innerHeight * 0.8
+    const alvo = e.currentTarget
+    alvo.setPointerCapture(e.pointerId)
+    const mover = (ev: PointerEvent) => {
+      const nova = Math.min(alturaMax, Math.max(ALTURA_LISTA_MIN, startH + (ev.clientY - startY)))
+      el.style.height = `${nova}px`
+    }
+    const soltar = () => {
+      alvo.releasePointerCapture(e.pointerId)
+      alvo.removeEventListener('pointermove', mover)
+      alvo.removeEventListener('pointerup', soltar)
+      const alturaFinal = Math.round(el.getBoundingClientRect().height)
+      setAlturaLista(alturaFinal)
+      try { localStorage.setItem(chaveAlturaLista(tipo), String(alturaFinal)) } catch { /* storage indisponível — só não persiste */ }
+    }
+    alvo.addEventListener('pointermove', mover)
+    alvo.addEventListener('pointerup', soltar)
+  }
 
   const toggleCat = (cat: string) => setCatsFechadas((s) => {
     const n = new Set(s)
@@ -212,6 +307,34 @@ export default function QuadroTipoAtivos({
   const cor = TIPO_ATIVO_COR[tipo]
   const ehFII = tipo === 'FII'
   const ehRF  = tipo === 'RENDA_FIXA' || tipo === 'TESOURO_DIRETO'
+
+  // Coluna "Proteção" (só FII) — busca dividendos/operações EM LOTE por
+  // tipo (1 request pro quadro inteiro, não 1 por ativo) e agrupa por
+  // ativo_id. Mesma função/fonte da página de detalhe do ativo (ver
+  // protecaoInfo acima) — só muda COMO os dados chegam (lote vs. por
+  // ativo_id), nunca o cálculo em si, pra nunca divergir entre os dois
+  // lugares (achado real: grid mostrava um % diferente do detalhe do ativo
+  // porque usava uma estimativa via DY em vez do dado de verdade).
+  const { dividendos: dividendosTipo } = useDividendos({ tipo_ativo: tipo }, { enabled: ehFII })
+  const { operacoes: operacoesTipo } = useInvestimentosOperacoes({ tipo_ativo: tipo }, { enabled: ehFII })
+  const dividendosPorAtivo = useMemo(() => {
+    const m = new Map<string, InvestimentoDividendo[]>()
+    for (const d of dividendosTipo) {
+      if (!m.has(d.ativo_id)) m.set(d.ativo_id, [])
+      m.get(d.ativo_id)!.push(d)
+    }
+    return m
+  }, [dividendosTipo])
+  const operacoesPorAtivo = useMemo(() => {
+    const m = new Map<string, InvestimentoOperacao[]>()
+    for (const o of operacoesTipo) {
+      const ativoId = o.inv_posicoes?.ativo_id
+      if (!ativoId) continue
+      if (!m.has(ativoId)) m.set(ativoId, [])
+      m.get(ativoId)!.push(o)
+    }
+    return m
+  }, [operacoesTipo])
   // Mesmo critério de DetalheInvestimentoPage (podeDividendos): renda fixa,
   // Tesouro e cripto não pagam dividendo de verdade — o campo sempre vem
   // zerado do backend (inv_dividendos não tem linha pra esses tipos).
@@ -290,7 +413,7 @@ export default function QuadroTipoAtivos({
 
   // Agrupa as linhas pela dimensão escolhida (categoria/segmento) e ordena cada grupo
   const grupos = useMemo(() => {
-    const ctx = { idealPorAtivo, idealRef }
+    const ctx = { idealPorAtivo, idealRef, ipca12mPct: ipca12mPct ?? null, dividendosPorAtivo, operacoesPorAtivo }
     const ordenar = (lista: AtivoLinha[]) => {
       const arr = [...lista]
       arr.sort((x, y) => {
@@ -314,7 +437,7 @@ export default function QuadroTipoAtivos({
     return [...map.entries()]
       .map(([chave, lista]) => ({ chave, lista: ordenar(lista), total: lista.reduce((s, l) => s + l.valor_mercado, 0) }))
       .sort((a, b) => b.total - a.total)
-  }, [linhas, dimEf, sort, idealPorAtivo, idealRef])
+  }, [linhas, dimEf, sort, idealPorAtivo, idealRef, ipca12mPct, dividendosPorAtivo, operacoesPorAtivo])
 
   // Só há subdivisão real se houver mais de um grupo (ou um grupo nomeado)
   const semNome = dimEf === 'segmento' ? 'Sem segmento' : 'Sem categoria'
@@ -427,12 +550,39 @@ export default function QuadroTipoAtivos({
           </div>
         )
       } },
+    protecao: { id: 'protecao', label: 'Proteção', align: 'center', sortKey: 'protecao',
+      title: 'Quanto do último dividendo por cota precisa ser reinvestido pra só repor a inflação (IPCA 12m convertido pro mês) sobre o patrimônio — o resto é renda real. Considera aportes dos últimos 12 meses que já tenham coberto parte da perda de inflação sobre o patrimônio mais antigo. Mesmo cálculo da página de detalhe do ativo.',
+      cell: (l) => {
+        const info = protecaoInfo(l, ipca12mPct ?? null, dividendosPorAtivo, operacoesPorAtivo)
+        if (!info) return traco
+        if (info.deficit) {
+          return (
+            <div className="flex justify-center"
+              title={`Inflação (${info.taxaMensalAplicadaPct.toFixed(2).replace('.', ',')}% ao mês) supera o dividendo do mês — mesmo reinvestindo tudo, a cota perde poder de compra`}>
+              <AlertTriangle size={16} style={{ color: VERMELHO }} />
+            </div>
+          )
+        }
+        const tituloCobertura = info.cobertura.isDefasagemCoberta && info.cobertura.perdaInflacaoAnual > 0
+          ? ` · defasagem coberta por compras recentes (${formatBRL(info.cobertura.totalAportes12m)})`
+          : ''
+        return (
+          <div className="flex flex-col items-center gap-0.5"
+            title={`Reinvestir ${info.percentualReinvestimento.toFixed(0)}% · Renda livre ${info.percentualRendaLivre.toFixed(0)}%${tituloCobertura}`}>
+            <div className="w-10 h-1.5 rounded-full overflow-hidden flex bg-white/10">
+              {info.percentualReinvestimentoBarra > 0 && <div style={{ width: `${info.percentualReinvestimentoBarra}%`, background: '#ffb74d' }} />}
+              {info.percentualRendaLivreBarra > 0 && <div style={{ width: `${info.percentualRendaLivreBarra}%`, background: VERDE }} />}
+            </div>
+            <span className="text-[10px]" style={{ color: MUTED }}>{Math.round(info.percentualRendaLivre)}% livre</span>
+          </div>
+        )
+      } },
   }
 
   const base: Coluna[] = ehRF
     ? [C.titulo, C.instituicao, C.indexador, C.taxa, C.venc, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
     : ehFII
-      ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.pvp, C.rent, C.dy, C.yoc, C.magic, C.saldo, C.nota, C.cart, C.idealPct]
+      ? [C.ticker, C.nome, C.quant, C.pm, C.pa, C.pvp, C.rent, C.dy, C.yoc, C.magic, C.protecao, C.saldo, C.nota, C.cart, C.idealPct]
       : mostraDyYocMedio
         ? [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.dy, C.yoc, C.saldo, C.nota, C.cart, C.idealPct]
         : [C.ticker, C.nome, C.setor, C.quant, C.pm, C.pa, C.rent, C.saldo, C.nota, C.cart, C.idealPct]
@@ -447,8 +597,9 @@ export default function QuadroTipoAtivos({
   })()
   // "Posição" (fixa à esquerda) + colunas visíveis + "Comprar?" + (Ações, se houver)
   const nCols = visiveis.length + 2 + (acoes ? 1 : 0)
-  // +70px pela coluna "% Ideal"; FII soma +90px pela "Magic Number" e +60px pela "P/VP"; +40px pela "Posição"
-  const minWidth = (ehFII ? 980 + 90 + 60 : ehRF ? 1040 : mostraDyYocMedio ? 1000 : 860) + 70 + 40
+  // +70px pela coluna "% Ideal"; FII soma +90px pela "Magic Number", +60px
+  // pela "P/VP" e +80px pela "Proteção"; +40px pela "Posição"
+  const minWidth = (ehFII ? 980 + 90 + 60 + 80 : ehRF ? 1040 : mostraDyYocMedio ? 1000 : 860) + 70 + 40
 
 
   function LinhaAtivo({ l, posicao, realce, alvo, primeira, ultima }: {
@@ -648,7 +799,18 @@ export default function QuadroTipoAtivos({
                   linhas passam por baixo. Listas curtas (cabem sem rolar) não
                   perdem o cabeçalho por outro motivo: não há nada pra rolar
                   por cima dele. */}
-              <div className="overflow-auto max-h-96">
+              {/* Altura ajustável por arraste manual (alças nas duas pontas,
+                  abaixo) — NÃO `resize: vertical` nativo do CSS: com ele, o
+                  cabeçalho `sticky` da tabela escapava do quadro e ficava
+                  grudado no topo da PÁGINA ao rolar (bug que persistiu mesmo
+                  com altura fixa/constante, sem nenhum React re-render de
+                  por trás — então é o próprio `resize` nativo colidindo com
+                  o `overflow-auto`/`sticky` aninhados, não uma questão de
+                  timing). O arraste abaixo muda `el.style.height` direto no
+                  DOM durante o gesto (sem passar pelo React) e só chama
+                  `setAlturaLista` — logo, só um re-render — ao soltar. */}
+              <div ref={listaRef} className="overflow-auto"
+                style={{ height: alturaLista, minHeight: ALTURA_LISTA_MIN, maxHeight: '80vh' }}>
                 <table className="w-full text-[12px]" style={{ minWidth }}>
                   {/* sticky top-0: fica visível rolando a listagem — sem isso
                       as colunas somem de vista e é fácil perder o que cada
@@ -722,6 +884,17 @@ export default function QuadroTipoAtivos({
                     )
                   })}
                 </table>
+              </div>
+              {/* Alças de redimensionar, uma em cada ponta (esquerda/direita)
+                  — persistem a altura por tipo de ativo em localStorage. */}
+              <div className="flex justify-between px-1">
+                {(['esquerda', 'direita'] as const).map((lado) => (
+                  <div key={lado} onPointerDown={iniciarResize}
+                    className="flex items-center justify-center w-10 h-3 -mt-px cursor-ns-resize rounded-b-md hover:bg-white/10 transition-colors"
+                    title="Arraste para ajustar a altura da lista">
+                    <GripHorizontal size={13} style={{ color: MUTED }} />
+                  </div>
+                ))}
               </div>
             </>
           )}

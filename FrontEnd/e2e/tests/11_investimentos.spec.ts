@@ -245,7 +245,9 @@ test.describe('Investimentos (E2E)', () => {
   })
 
   // ── E2E-INV08 ────────────────────────────────────────────────
-  test('E2E-INV08 — /investimentos/dividendos carrega e "Diagnóstico" não crasha', async ({ page }) => {
+  // "Diagnóstico" mora em Configurações → Manutenção de proventos (movido
+  // de Proventos, que agora só tem "Buscar proventos"/"Novo dividendo").
+  test('E2E-INV08 — /investimentos/dividendos carrega e "Diagnóstico" (em Configurações) não crasha', async ({ page }) => {
     await page.goto('/investimentos/dividendos')
     await expect(page.getByRole('heading', { name: /proventos/i })).toBeVisible({ timeout: 10_000 })
 
@@ -257,6 +259,8 @@ test.describe('Investimentos (E2E)', () => {
     ])
     expect(await cards.isVisible().catch(() => false) || await vazioText.isVisible().catch(() => false)).toBe(true)
 
+    await page.goto('/investimentos/configuracoes')
+    await expect(page.getByRole('heading', { name: /configurações de investimentos/i })).toBeVisible({ timeout: 10_000 })
     await page.getByRole('button', { name: /diagnóstico/i }).click()
     const drawer = page.getByRole('dialog')
     await expect(drawer).toBeVisible({ timeout: 5_000 })
