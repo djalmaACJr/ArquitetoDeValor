@@ -21,7 +21,7 @@ export default function AvisoFecharAba() {
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/60 z-[300]" />
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[300]" />
       <div
         role="alertdialog"
         aria-modal="true"
@@ -40,12 +40,12 @@ export default function AvisoFecharAba() {
         <div className="p-5 flex flex-col gap-4">
           <p className="text-[15px] leading-relaxed" style={{ color: '#c2c7d6' }}>
             {fechando
-              ? 'Tentando fechar esta aba automaticamente…'
+              ? 'Tentando fechar esta aba automaticamente… Se o navegador não permitir (só funciona em abas abertas por um link dentro do sistema), a sessão será encerrada em todas as abas em instantes.'
               : 'Esta aba ficou muito tempo sem uso. Se você tem outras abas do sistema abertas, feche apenas esta para mantê-las conectadas.'}
           </p>
           {!fechando && (
             <p className="text-[13px]" style={{ color: '#8b92a8' }}>
-              Sem uma ação sua, a sessão será encerrada em todas as abas em {segundos}s.
+              Sem uma ação sua, a sessão será encerrada em todas as abas em {segundos}s. Se o navegador não deixar esta aba se fechar sozinha (abas abertas manualmente costumam não deixar), o botão abaixo vai encerrar a sessão em todas as abas em poucos segundos, mais rápido que esperar.
             </p>
           )}
         </div>

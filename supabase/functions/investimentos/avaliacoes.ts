@@ -567,14 +567,24 @@ export async function rotaAvaliacoes(c: Db, req: Request, m: string, userId: str
     // Consolidação por pergunta: média e mediana dos índices das IAs. Se a
     // diferença entre média e mediana for < 10% (relativa à média), usa a
     // média; caso contrário usa a mediana (reduz impacto de notas extremas).
+    // criterio/texto vão junto (não só o id): o questionário pode mudar
+    // depois (peso editado, pergunta regerada por IA, categoria de FII
+    // trocada) e o detalhe expandido (mentor × pergunta) precisa continuar
+    // mostrando exatamente o que foi perguntado NESTA rodada, sem depender
+    // de casar por ID contra o questionário atual (isso já quebrou o
+    // detalhamento por critério antes — ver mediasPorCriterio no frontend).
     const perguntasConsenso = perguntas.map((p) => {
       const valores = ok.map((r) => r.respostas[p.id]).filter((v) => Number.isInteger(v));
-      if (valores.length === 0) return { id: p.id, media_indice: null as number | null, media_nota: null as number | null };
+      if (valores.length === 0) {
+        return { id: p.id, criterio: p.criterio, texto: p.texto, media_indice: null as number | null, media_nota: null as number | null };
+      }
       const media = valores.reduce((s, v) => s + v, 0) / valores.length;
       const med = mediana(valores);
       const consolidado = (media === 0 || Math.abs(media - med) / media < 0.10) ? media : med;
       return {
         id: p.id,
+        criterio: p.criterio,
+        texto: p.texto,
         media_indice: Math.round(consolidado * 100) / 100,
         media_nota: Math.round(consolidado * 2.5 * 10) / 10,
       };

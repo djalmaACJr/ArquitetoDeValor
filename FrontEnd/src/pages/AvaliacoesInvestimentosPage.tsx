@@ -794,7 +794,16 @@ export default function AvaliacoesInvestimentosPage() {
       const av = avalPorAtivo.get(a.id)
       if (!av) continue
       const ef = questionarioEfetivo(a.tipo_ativo, perfil?.perfil ?? null, pesosGlobais, a.fii_categoria)
-      m.set(a.id, { perguntas: ef.perguntas, medias: mediasPorCriterio(av, ef.perguntas) })
+      // Prioriza os critérios já consolidados pelo servidor no momento da
+      // avaliação (consenso.criterios) — casados corretamente com as
+      // perguntas de ENTÃO. Recalcular via mediasPorCriterio casaria por ID
+      // contra o questionário ATUAL (ef.perguntas), que diverge sempre que o
+      // questionário muda depois (peso, pergunta editada/gerada de novo,
+      // categoria de FII trocada) — o casamento falhava silenciosamente e
+      // zerava todo o detalhamento, mesmo com a nota final correta. Só cai
+      // no recálculo em avaliações antigas salvas antes de `criterios` existir.
+      const medias = av.consenso.criterios ?? mediasPorCriterio(av, ef.perguntas)
+      m.set(a.id, { perguntas: ef.perguntas, medias })
     }
     return m
   }, [ativos, avalPorAtivo, questionarioEfetivo, perfil, pesosGlobais])
@@ -1840,7 +1849,14 @@ function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAt
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-      {/* Cabeçalho do tipo — clicável para colapsar/expandir o grupo.
+      {/* Cabeçalho do tipo — clicável para colapsar/expandir o grupo. NÃO é
+          sticky à página: esta página tem o InvestimentosNav (sticky top-0
+          z-20, com o balão do mascote) logo acima — um segundo `sticky
+          top-0` aqui brigaria pelo mesmo topo e ficaria coberto por ele (z
+          maior). Em vez disso, a tabela abaixo rola no seu PRÓPRIO scroll
+          local (ver comentário lá) — como este cabeçalho fica FORA dessa
+          caixa, ele já permanece visível enquanto a lista rola por dentro,
+          sem precisar de sticky nenhum.
           div (não <button>): a alça de arrastar, quando presente, é ela
           própria um <button>, e um <button> não pode conter outro. */}
       <div role="button" tabIndex={0} onClick={() => setGrupoAberto((o) => !o)}
@@ -1876,10 +1892,21 @@ function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAt
         </div>
       )}
 
-      <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-x-auto">
+      {/* overflow-auto (não só overflow-x) + maxHeight: cria um ancestral de
+          scroll PRÓPRIO desta caixa — `position: sticky` gruda relativo ao
+          scroll ancestral mais próximo, e a página já tem o InvestimentosNav
+          brigando pelo `top: 0` dela (ver comentário no cabeçalho do tipo,
+          acima). Com o scroll local, o thead gruda dentro desta caixa sem
+          disputar nada com o nav. maxHeight só entra em ação em listas
+          grandes; listas curtas continuam exibidas por inteiro, sem scroll. */}
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-auto" style={{ maxHeight: '65vh' }}>
         <table className="w-full text-[12.5px] border-collapse">
-          <thead>
-            <tr style={{ color: MUTED }}>
+          {/* sticky top-0: relativo à caixa de scroll local acima, não à
+              página — sem isso, rolando uma lista longa dentro do grupo,
+              some o rótulo das colunas (Fundam., Cresc. etc.) e fica
+              impossível saber o que cada número é. */}
+          <thead className="sticky top-0 z-20">
+            <tr style={{ color: MUTED, background: 'var(--bg-page, #0a0f1a)' }}>
               <th className="font-medium py-2 pl-3 pr-2 text-center whitespace-nowrap">Ranking</th>
               <th className="font-medium py-2 pl-2 pr-2 text-left min-w-[200px]">Ativo</th>
               {CRITERIOS_QUESTAO.map((cr) => (
@@ -1989,11 +2016,30 @@ function PlanilhaDetalhe({ avaliacao, perguntasTexto }: {
     return m
   }, [avaliacao])
 
-  const textoPorId = useMemo(() => {
+  // Questionário do questionário ATUAL — só usado como fallback de
+  // texto/critério para avaliações salvas antes de consenso.perguntas
+  // guardar isso junto (ver abaixo).
+  const textoPorIdAtual = useMemo(() => {
     const m = new Map<string, { texto: string; criterio: CriterioQuestao }>()
     for (const p of perguntasTexto) m.set(p.id, { texto: p.texto, criterio: p.criterio })
     return m
   }, [perguntasTexto])
+
+  // Perguntas REALMENTE feitas nesta avaliação — texto/critério vêm de
+  // consenso.perguntas (salvos junto no momento da avaliação), imunes a
+  // mudanças posteriores no questionário (peso editado, pergunta regerada
+  // por IA, categoria de FII trocada). Cai no questionário atual só para
+  // avaliações antigas, salvas antes desses campos existirem.
+  const perguntasSalvas = useMemo(() => {
+    const out: { id: string; texto: string; criterio: CriterioQuestao }[] = []
+    for (const p of avaliacao.consenso.perguntas) {
+      const legado = textoPorIdAtual.get(p.id)
+      const criterio = p.criterio ?? legado?.criterio
+      const texto = p.texto ?? legado?.texto
+      if (criterio && texto) out.push({ id: p.id, texto, criterio })
+    }
+    return out
+  }, [avaliacao, textoPorIdAtual])
 
   const mentoresOk = mentores.filter((m) => m.erro === null)
 
@@ -2038,11 +2084,11 @@ function PlanilhaDetalhe({ avaliacao, perguntasTexto }: {
           </thead>
           <tbody>
             {CRITERIOS_QUESTAO.map((criterio) => {
-              const doCriterio = perguntasTexto.filter((p) => p.criterio === criterio)
+              const doCriterio = perguntasSalvas.filter((p) => p.criterio === criterio)
               if (doCriterio.length === 0) return null
               return (
                 <FragmentoCriterio key={criterio} criterio={criterio} perguntas={doCriterio}
-                  mentoresOk={mentoresOk} mediaPorPergunta={mediaPorPergunta} textoPorId={textoPorId} />
+                  mentoresOk={mentoresOk} mediaPorPergunta={mediaPorPergunta} />
               )
             })}
             {/* Linha de notas dos mentores */}
@@ -2064,12 +2110,11 @@ function PlanilhaDetalhe({ avaliacao, perguntasTexto }: {
   )
 }
 
-function FragmentoCriterio({ criterio, perguntas, mentoresOk, mediaPorPergunta, textoPorId }: {
+function FragmentoCriterio({ criterio, perguntas, mentoresOk, mediaPorPergunta }: {
   criterio: CriterioQuestao
   perguntas: { id: string; texto: string }[]
   mentoresOk: InvAvaliacao['consenso']['mentores']
   mediaPorPergunta: Map<string, number | null>
-  textoPorId: Map<string, { texto: string; criterio: CriterioQuestao }>
 }) {
   return (
     <>
@@ -2079,11 +2124,10 @@ function FragmentoCriterio({ criterio, perguntas, mentoresOk, mediaPorPergunta, 
         </td>
       </tr>
       {perguntas.map((p) => {
-        const texto = textoPorId.get(p.id)?.texto ?? p.texto
         const media = mediaPorPergunta.get(p.id)
         return (
           <tr key={p.id} className="border-t border-white/5">
-            <td className="py-1.5 pr-3 text-white/85 align-top">{texto}</td>
+            <td className="py-1.5 pr-3 text-white/85 align-top">{p.texto}</td>
             {mentoresOk.map((m) => {
               const idx = m.respostas[p.id]
               return (

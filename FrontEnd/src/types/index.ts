@@ -477,7 +477,10 @@ export type NivelConsenso = 'ALTO' | 'MEDIO' | 'BAIXO'
 
 export interface InvAvaliacaoConsenso {
   pesos:     PesosCriterio
-  perguntas: { id: string; media_indice: number | null; media_nota: number | null }[]
+  // criterio/texto: ausentes em avaliações salvas antes desse campo existir
+  // (fallback: casar por id contra o questionário atual, com risco de não
+  // achar se o questionário mudou desde então).
+  perguntas: { id: string; criterio?: CriterioQuestao; texto?: string; media_indice: number | null; media_nota: number | null }[]
   mentores:  InvAvaliacaoMentor[]
   /** Nota consolidada de cada critério (média ponderada → nota final). */
   criterios?:      Record<CriterioQuestao, number | null>

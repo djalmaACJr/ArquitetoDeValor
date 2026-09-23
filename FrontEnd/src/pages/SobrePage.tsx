@@ -31,33 +31,13 @@ const VERSOES_ANTERIORES: VersaoAnterior[] = [
 ]
 
 const Logo = () => (
-  <svg width="48" height="48" viewBox="210 30 260 260" xmlns="http://www.w3.org/2000/svg">
-    <g opacity="0.25">
-      {[230, 260, 290, 320, 350, 380, 410, 440].map(x => (
-        <line key={x} x1={x} y1="50" x2={x} y2="270" stroke="#4da6ff" strokeWidth="0.8" />
-      ))}
-      {[90, 130, 170, 210, 250].map(y => (
-        <line key={y} x1="215" y1={y} x2="455" y2={y} stroke="#4da6ff" strokeWidth="0.8" />
-      ))}
-    </g>
-    <rect x="258" y="185" width="18" height="40" rx="3" fill="#1a2540" />
-    <rect x="258" y="183" width="18" height="5" rx="2" fill="#f0b429" />
-    <rect x="282" y="165" width="18" height="60" rx="3" fill="#1a2540" />
-    <rect x="282" y="163" width="18" height="5" rx="2" fill="#00c896" />
-    <rect x="306" y="140" width="18" height="85" rx="3" fill="#1a2540" />
-    <rect x="306" y="138" width="18" height="5" rx="2" fill="#00c896" />
-    <rect x="386" y="120" width="18" height="95" rx="3" fill="#1a2540" />
-    <rect x="386" y="118" width="18" height="5" rx="2" fill="#f0b429" />
-    <rect x="410" y="100" width="18" height="115" rx="3" fill="#1a2540" />
-    <rect x="410" y="98" width="18" height="5" rx="2" fill="#00c896" />
-    <polyline points="267,218 291,195 315,165 395,148 419,128"
-      fill="none" stroke="#00c896" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-    <circle cx="267" cy="218" r="4" fill="#00c896" />
-    <circle cx="291" cy="195" r="4" fill="#00c896" />
-    <circle cx="315" cy="165" r="4" fill="#00c896" />
-    <circle cx="395" cy="148" r="4" fill="#f0b429" />
-    <circle cx="419" cy="128" r="4.5" fill="#f0b429" />
-    <polygon points="419,108 426,124 419,120 412,124" fill="#f0b429" />
+  <svg width="48" height="48" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+    <path d="M32,10 L14,50" fill="none" stroke="#4da6ff" strokeWidth="4" strokeLinecap="round" />
+    <path d="M32,10 L50,50" fill="none" stroke="#4da6ff" strokeWidth="4" strokeLinecap="round" />
+    <circle cx="32" cy="10" r="3.5" fill="#4da6ff" />
+    <polyline points="14,50 26,38 38,42 50,26"
+      fill="none" stroke="#00c896" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="50" cy="26" r="4.5" fill="#f0b429" />
   </svg>
 )
 

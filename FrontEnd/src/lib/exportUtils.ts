@@ -26,6 +26,8 @@ export interface ExportColumn {
   width?: number
   /** override de alinhamento (default segue o type) */
   align?: 'left' | 'right' | 'center'
+  /** aplica uma coloração discreta pra destacar a coluna inteira (ex.: Total, Média) */
+  destaque?: boolean
 }
 
 /**
@@ -75,6 +77,8 @@ const CORES = {
   total:     { bg: 'FFD1FAE5' },
   highlight: { bg: 'FFFEE2E2' },
   border:    'FFE5E7EB',
+  /** tinta neutra usada em colunas marcadas com `destaque` (ex.: Total, Média) */
+  destaque:  { bg: 'FFEEF2F7', border: 'FFCBD5E1' },
 } as const
 
 const NUM_FMT: Record<ColumnType, string | undefined> = {
@@ -118,6 +122,17 @@ function thinBorder(): any {
     bottom: { style: 'thin', color: { argb: CORES.border } },
     left:   { style: 'thin', color: { argb: CORES.border } },
     right:  { style: 'thin', color: { argb: CORES.border } },
+  }
+}
+
+/** Borda de uma coluna `destaque` — lados esquerdo/direito reforçados pra
+ *  demarcar a coluna, mantendo topo/base iguais às demais células. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function destaqueBorder(): any {
+  return {
+    ...thinBorder(),
+    left:  { style: 'medium', color: { argb: CORES.destaque.border } },
+    right: { style: 'medium', color: { argb: CORES.destaque.border } },
   }
 }
 
@@ -188,11 +203,11 @@ export async function exportToExcel(opts: ExportOptions): Promise<void> {
 
     // Cabeçalho — bold, fundo escuro, texto branco, borda
     const headerRow = ws.addRow(cols.map(c => c.label))
-    headerRow.eachCell(cell => {
+    headerRow.eachCell((cell, colNum) => {
       cell.font      = { bold: true, color: { argb: CORES.header.fg }, size: 11 }
       cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: CORES.header.bg } }
       cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-      cell.border    = thinBorder()
+      cell.border    = cols[colNum - 1]?.destaque ? destaqueBorder() : thinBorder()
     })
     headerRow.height = 22
     linhasTopo++
@@ -243,10 +258,23 @@ export async function exportToExcel(opts: ExportOptions): Promise<void> {
           case 'highlight':
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CORES.highlight.bg } }
             break
-          default: // normal — zebra
-            if (zebraIdx % 2 === 1) {
+          default: // normal — zebra, ou tinta discreta pras colunas `destaque`
+            if (c.destaque) {
+              cell.font = { bold: true, color: { argb: 'FF334155' } }
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CORES.destaque.bg } }
+            } else if (zebraIdx % 2 === 1) {
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CORES.zebra.bg } }
             }
+        }
+
+        // Colunas `destaque` ganham bordas laterais reforçadas em qualquer
+        // estilo de linha, delimitando a coluna ao longo de toda a tabela.
+        if (c.destaque) {
+          cell.border = {
+            ...cell.border,
+            left:  { style: 'medium', color: { argb: CORES.destaque.border } },
+            right: { style: 'medium', color: { argb: CORES.destaque.border } },
+          }
         }
       })
 
