@@ -46,6 +46,19 @@ function mesOffset(offset: number): string {
   return d.toISOString().slice(0, 7);
 }
 
+// Payload válido de questionário: 10 perguntas cobrindo os 4 critérios
+// (FUNDAMENTOS, CRESCIMENTO, DIVIDENDOS, VALUATION) + pesos somando 100.
+function questionarioValido(prefixoId: string) {
+  const criterios = ["FUNDAMENTOS", "CRESCIMENTO", "DIVIDENDOS", "VALUATION"];
+  const perguntas = Array.from({ length: 10 }, (_, i) => ({
+    id: `${prefixoId}_${i}`,
+    criterio: criterios[i % criterios.length],
+    texto: `Pergunta de teste ${i}`,
+    opcoes: ["Muito baixo", "Baixo", "Médio", "Alto", "Muito alto"],
+  }));
+  return { perguntas, pesos: { FUNDAMENTOS: 25, CRESCIMENTO: 25, DIVIDENDOS: 25, VALUATION: 25 } };
+}
+
 // Remove resíduos de execuções anteriores (idempotência da suíte)
 async function limparResiduosJest(): Promise<void> {
   const { data: divs } = await api("/investimentos/dividendos");
@@ -352,6 +365,115 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect(sErr3).toBe(200);
 
     await api(`/investimentos/ativos/${idOk}`, "DELETE");
+  });
+
+  test("CA-INV31 — Ações: valida acao_lpa/acao_vpa e recalcula acao_valor_justo (Graham) no cadastro e no PUT parcial", async () => {
+    // acao_vpa <= 0 → 400 (VPA não pode ser negativo/zero; LPA pode)
+    const { status: sErrVpa } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVGRA", nome: "Jest Graham", tipo_ativo: "ACOES", acao_lpa: 2, acao_vpa: 0,
+    });
+    expect(sErrVpa).toBe(400);
+
+    // acao_lpa não-numérico → 400
+    const { status: sErrLpa } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVGRA", nome: "Jest Graham", tipo_ativo: "ACOES", acao_lpa: "dois", acao_vpa: 8,
+    });
+    expect(sErrLpa).toBe(400);
+
+    // Cadastro com LPA=2, VPA=8 → Valor Justo = raiz(22,5 × 2 × 8) = raiz(360)
+    const { status, data } = await api("/investimentos/ativos", "POST", {
+      ticker: "JESTINVGRA", nome: "Jest Graham", tipo_ativo: "ACOES", acao_lpa: 2, acao_vpa: 8,
+    });
+    expect(status).toBe(201);
+    const id = data.dados.id as string;
+    expect(Number(data.dados.acao_lpa)).toBe(2);
+    expect(Number(data.dados.acao_vpa)).toBe(8);
+    expect(Number(data.dados.acao_valor_justo)).toBeCloseTo(Math.sqrt(22.5 * 2 * 8), 6);
+    expect(data.dados.acao_fundamentos_origem).toBe("MANUAL");
+
+    // PUT parcial só com acao_lpa — precisa recalcular o Valor Justo usando
+    // o acao_vpa JÁ SALVO (8), não perdê-lo. Mesma classe de bug que já
+    // mordeu o rf_indice (ver validarIndiceObrigatorio) — um recálculo que
+    // só olha o body, não o estado final, silenciosamente derrapa.
+    const { status: sPut1, data: dPut1 } = await api(`/investimentos/ativos/${id}`, "PUT", { acao_lpa: 4 });
+    expect(sPut1).toBe(200);
+    expect(Number(dPut1.dados.acao_lpa)).toBe(4);
+    expect(Number(dPut1.dados.acao_vpa)).toBe(8);
+    expect(Number(dPut1.dados.acao_valor_justo)).toBeCloseTo(Math.sqrt(22.5 * 4 * 8), 6);
+
+    // PUT parcial só com acao_vpa — mesma checagem, agora usando o
+    // acao_lpa já salvo (4).
+    const { status: sPut2, data: dPut2 } = await api(`/investimentos/ativos/${id}`, "PUT", { acao_vpa: 2 });
+    expect(sPut2).toBe(200);
+    expect(Number(dPut2.dados.acao_lpa)).toBe(4);
+    expect(Number(dPut2.dados.acao_vpa)).toBe(2);
+    expect(Number(dPut2.dados.acao_valor_justo)).toBeCloseTo(Math.sqrt(22.5 * 4 * 2), 6);
+
+    // LPA negativo (empresa no prejuízo) é válido, mas zera o Valor Justo
+    // (Graham não se aplica) — não é erro de validação.
+    const { status: sPut3, data: dPut3 } = await api(`/investimentos/ativos/${id}`, "PUT", { acao_lpa: -1 });
+    expect(sPut3).toBe(200);
+    expect(Number(dPut3.dados.acao_lpa)).toBe(-1);
+    expect(dPut3.dados.acao_valor_justo).toBeNull();
+
+    await api(`/investimentos/ativos/${id}`, "DELETE");
+  });
+
+  test("CA-INV32 — questionário por categoria de FII: ?categoria= valida, isola a chave de unicidade e não afeta o genérico", async () => {
+    // categoria só se aplica a FII
+    const { status: sErrTipo } = await api("/investimentos/questionarios/ACOES?categoria=PAPEL");
+    expect(sErrTipo).toBe(400);
+
+    // categoria inválida
+    const { status: sErrCat } = await api("/investimentos/questionarios/FII?categoria=HIBRIDO");
+    expect(sErrCat).toBe(400);
+
+    // Sem nenhum questionário salvo ainda → 404 (nem genérico nem por categoria)
+    const { status: s404Generico } = await api("/investimentos/questionarios/FII");
+    expect(s404Generico).toBe(404);
+    const { status: s404Papel } = await api("/investimentos/questionarios/FII?categoria=PAPEL");
+    expect(s404Papel).toBe(404);
+
+    // Salva o genérico (sem categoria)
+    const generico = questionarioValido("gen");
+    const { status: sPutGen, data: dPutGen } = await api("/investimentos/questionarios/FII", "PUT", generico);
+    expect(sPutGen).toBe(200);
+    expect(dPutGen.dados.fii_categoria).toBe("");
+
+    // Salva um específico pra PAPEL — chave de unicidade diferente, não
+    // deve sobrescrever nem ser sobrescrito pelo genérico.
+    const papel = questionarioValido("pap");
+    const { status: sPutPapel, data: dPutPapel } = await api(
+      "/investimentos/questionarios/FII?categoria=PAPEL", "PUT", papel,
+    );
+    expect(sPutPapel).toBe(200);
+    expect(dPutPapel.dados.fii_categoria).toBe("PAPEL");
+
+    // GET sem categoria continua devolvendo o genérico, intacto
+    const { status: sGetGen, data: dGetGen } = await api("/investimentos/questionarios/FII");
+    expect(sGetGen).toBe(200);
+    expect(dGetGen.dados.fii_categoria).toBe("");
+    expect(dGetGen.dados.perguntas[0].id).toBe("gen_0");
+
+    // GET ?categoria=PAPEL devolve o específico, não o genérico
+    const { status: sGetPapel, data: dGetPapel } = await api("/investimentos/questionarios/FII?categoria=PAPEL");
+    expect(sGetPapel).toBe(200);
+    expect(dGetPapel.dados.perguntas[0].id).toBe("pap_0");
+
+    // Categoria sem custom próprio (TIJOLO) continua 404 — sem fallback
+    // automático no backend (é decisão de UI usar o genérico nesse caso).
+    const { status: s404Tijolo } = await api("/investimentos/questionarios/FII?categoria=TIJOLO");
+    expect(s404Tijolo).toBe(404);
+
+    // DELETE só do específico — genérico sobrevive
+    const { status: sDelPapel } = await api("/investimentos/questionarios/FII?categoria=PAPEL", "DELETE");
+    expect(sDelPapel).toBe(200);
+    const { status: sGetPapelApos } = await api("/investimentos/questionarios/FII?categoria=PAPEL");
+    expect(sGetPapelApos).toBe(404);
+    const { status: sGetGenApos } = await api("/investimentos/questionarios/FII");
+    expect(sGetGenApos).toBe(200);
+
+    await api("/investimentos/questionarios/FII", "DELETE");
   });
 
   test("CA-INV24 — vencimento limita a série: passado para no vencimento, futuro volta a render", async () => {

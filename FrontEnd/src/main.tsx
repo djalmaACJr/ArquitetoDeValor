@@ -110,7 +110,7 @@ function persistirCache() {
 queryClient.getQueryCache().subscribe(event => {
   if (
     event.type === 'updated' &&
-    (event.query.queryKey as unknown[])[0] === 'lancamentos' &&
+    (event.query.queryKey as unknown[])[0] === 'transacoes-mes' &&
     event.query.state.status === 'success'
   ) {
     persistirCache()

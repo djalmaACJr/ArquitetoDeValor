@@ -138,18 +138,29 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
       }
     }
 
-    // Ação nova: busca LPA/VPA (fundamentos DFP/FCA) na CVM já no cadastro,
-    // best-effort — mesma regra do FII acima (CVM tem prioridade sobre valor
-    // manual informado no mesmo cadastro; nunca falha o cadastro).
+    // Ação nova: busca LPA/VPA (fundamentos DFP/FCA) na CVM — mesma regra do
+    // FII acima (CVM tem prioridade sobre valor manual informado no mesmo
+    // cadastro), mas ao contrário do FII (dataset mensal pequeno), o dataset
+    // de Ações (DFP+FCA de ~450 companhias abertas, 6 CSVs) é grande o
+    // bastante pra estourar o limite de memória/CPU da function quando
+    // baixado+parseado DENTRO do próprio request — achado ago/2026: todo
+    // POST /investimentos/ativos com tipo_ativo=ACOES vinha derrubando com
+    // WORKER_RESOURCE_LIMIT (o ativo chegava a ser inserido antes de
+    // crashar, deixando um registro órfão sem o cliente nunca ver o 201).
+    // Por isso roda em segundo plano via EdgeRuntime.waitUntil() — nunca
+    // bloqueia nem quebra a resposta do cadastro; se não completar a tempo
+    // (ou estourar recurso em background, sem afetar o cliente já
+    // respondido), o cron mensal (cvm-acoes-mensal) faz o backfill depois.
     if (data.tipo_ativo === "ACOES") {
-      const achado = await buscarFundamentosPorTicker(data.ticker);
-      if (achado) {
-        const { data: atualizado } = await c.from("inv_ativos").update({
+      const tarefa = buscarFundamentosPorTicker(data.ticker).then(async (achado) => {
+        if (!achado) return;
+        await c.from("inv_ativos").update({
           acao_lpa: achado.lpa, acao_vpa: achado.vpa, acao_valor_justo: achado.valorJusto,
           acao_fundamentos_origem: "CVM", acao_fundamentos_referencia: achado.exercicio,
-        }).eq("id", data.id).select().single();
-        if (atualizado) ativoFinal = atualizado;
-      }
+        }).eq("id", data.id);
+      }).catch((e) => logError("CVM fundamentos (segundo plano) — cadastro de ação", e));
+      const waitUntil = (globalThis as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil;
+      if (waitUntil) waitUntil(tarefa);
     }
     return json({ dados: ativoFinal }, 201);
   }
