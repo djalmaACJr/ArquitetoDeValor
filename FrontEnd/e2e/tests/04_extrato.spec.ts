@@ -36,6 +36,71 @@ test.describe('Extrato (Lançamentos)', () => {
     await expect(page.getByRole('dialog').first()).toBeVisible({ timeout: 5000 })
   })
 
+  // ── E2E-EX15 ─────────────────────────────────────────────────
+  test('E2E-EX15 — Tab no drawer nunca escapa pro conteúdo por trás (focus trap)', async ({ page }) => {
+    await abrirNovoLancamento(page)
+    const drawer = page.getByRole('dialog').first()
+    await expect(drawer).toBeVisible({ timeout: 5000 })
+    await page.waitForTimeout(400)
+    // Fecha o calendário de Data (auto-aberto em lançamento novo — ver
+    // comentário de preencherValor em helpers.ts) com um clique neutro.
+    await drawer.getByText(/^(novo|editar) lançamento$/i).click()
+    await page.waitForTimeout(200)
+
+    // Marca cada elemento focável do dialog com o índice na ordem do DOM —
+    // mesmo critério usado pelo focus trap real (Drawer em shared.tsx) pra
+    // achar "primeiro"/"último".
+    const total = await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]')!
+      const focaveis = dialog.querySelectorAll(
+        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )
+      focaveis.forEach((el, i) => el.setAttribute('data-idx', String(i)))
+      return focaveis.length
+    })
+    expect(total).toBeGreaterThan(1)
+
+    await page.evaluate(() => {
+      (document.querySelector('[role="dialog"] [data-idx="0"]') as HTMLElement)?.focus()
+    })
+    const idxFocado = () => page.evaluate(() => document.activeElement?.getAttribute('data-idx'))
+
+    // Shift+Tab a partir do primeiro elemento deve ciclar pro último —
+    // nunca deixar o foco escapar pro conteúdo escondido atrás do overlay.
+    await page.keyboard.press('Shift+Tab')
+    await page.waitForTimeout(150)
+    expect(await idxFocado()).toBe(String(total - 1))
+
+    // Tab a partir do último volta pro primeiro.
+    await page.keyboard.press('Tab')
+    await page.waitForTimeout(150)
+    expect(await idxFocado()).toBe('0')
+
+    await page.keyboard.press('Escape')
+  })
+
+  // ── E2E-EX16 ─────────────────────────────────────────────────
+  test('E2E-EX16 — toggle "Lançamento único/Recorrente" tem 1 só parada de Tab e nome acessível', async ({ page }) => {
+    await abrirNovoLancamento(page)
+    const drawer = page.getByRole('dialog').first()
+    await expect(drawer).toBeVisible({ timeout: 5000 })
+    await page.waitForTimeout(400)
+    await drawer.getByText(/^(novo|editar) lançamento$/i).click()
+    await page.waitForTimeout(200)
+
+    // O switch é o ÚNICO ponto de foco do controle — o texto do label não
+    // pode ser um elemento focável separado (regressão: dois Tabs pro mesmo
+    // controle lógico). O nome acessível vem do aria-label, já que o label
+    // visual deixou de ser um <button>.
+    const switchEl = drawer.getByRole('switch')
+    await expect(switchEl).toHaveAccessibleName(/lançamento único/i)
+
+    const labelTexto = drawer.getByText(/lançamento único/i)
+    await expect(labelTexto).not.toHaveJSProperty('tagName', 'BUTTON')
+
+    await page.keyboard.press('Escape')
+  })
+
   test('E2E-EX04 — criar lançamento simples e verificar na lista', async ({ page }) => {
     await abrirNovoLancamento(page)
     const drawer = page.getByRole('dialog').first()

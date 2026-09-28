@@ -180,6 +180,12 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
         if (ke.key === 'Tab' || ke.key === 'Alt' || ke.key === 'Meta' || ke.altKey || ke.metaKey) return
       }
       lastActivityRef.current = Date.now()
+      // Rearma a tentativa de auto-fechamento (ver checarExpiracao) — sem
+      // isso, uma aba secundária que já tentou se fechar sozinha uma vez
+      // (e o navegador recusou) nunca mais tentava de novo em episódios de
+      // ociosidade seguintes, porque o timestamp da 1ª tentativa nunca era
+      // resetado.
+      tentandoFecharDesdeRef.current = 0
     }
 
     // Registra listeners de interação. `passive: true` para não bloquear

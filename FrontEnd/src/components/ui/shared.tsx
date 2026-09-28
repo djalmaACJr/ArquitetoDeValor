@@ -65,11 +65,42 @@ export function Drawer({
   // 'larga' para conteúdos largos (ex.: tabelas com vários campos editáveis)
   largura?: 'normal' | 'larga'
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     const fn = (e: KeyboardEvent) => { if (e.key === 'Escape' && open) onClose() }
     document.addEventListener('keydown', fn)
     return () => document.removeEventListener('keydown', fn)
   }, [open, onClose])
+
+  // Focus trap: role="dialog"/aria-modal="true" pede que o Tab nunca escape
+  // pro conteúdo por trás do overlay enquanto aberto — sem isso, tabular a
+  // partir do último campo (ou Shift+Tab a partir do primeiro) levava o
+  // foco pra fora do drawer, pro resto da página escondida atrás dele.
+  useEffect(() => {
+    if (!open) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Tab') return
+      const dialog = dialogRef.current
+      if (!dialog) return
+      const focaveis = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter(el => el.offsetParent !== null)
+      if (focaveis.length === 0) { e.preventDefault(); return }
+      const primeiro = focaveis[0]
+      const ultimo = focaveis[focaveis.length - 1]
+      const ativoDentro = dialog.contains(document.activeElement)
+      if (e.shiftKey) {
+        if (!ativoDentro || document.activeElement === primeiro) { e.preventDefault(); ultimo.focus() }
+      } else {
+        if (!ativoDentro || document.activeElement === ultimo) { e.preventDefault(); primeiro.focus() }
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [open])
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
@@ -82,7 +113,7 @@ export function Drawer({
         style={{ pointerEvents: open ? 'auto' : 'none', opacity: open ? 1 : 0 }}
         className="fixed inset-0 bg-black/60 z-[100] transition-opacity duration-300" />
 
-      <div role="dialog" aria-modal="true"
+      <div ref={dialogRef} role="dialog" aria-modal="true"
         style={{
           visibility: open ? 'visible' : 'hidden',
           pointerEvents: open ? 'auto' : 'none',
@@ -723,17 +754,22 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
   const toggle = () => onChange(!checked)
   return (
     <div className="flex items-center gap-2.5">
-      <button type="button" role="switch" aria-checked={checked} onClick={toggle}
-        className={`w-11 h-6 rounded-full relative transition-colors flex-shrink-0 ${checked ? 'bg-av-green' : 'bg-white/10'}`}>
+      <button type="button" role="switch" aria-checked={checked} aria-label={label} onClick={toggle}
+        className={`w-11 h-6 rounded-full relative transition-colors flex-shrink-0
+          outline-none focus:ring-1 focus:ring-av-green/50 ${checked ? 'bg-av-green' : 'bg-white/10'}`}>
         <span className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all"
           style={{ left: checked ? '22px' : '2px' }} />
       </button>
       {label && (
-        <button type="button" onClick={toggle}
-          className="text-[16px] cursor-pointer bg-transparent border-0 p-0 text-left"
+        // `<span>` clicável, de propósito NÃO focável — o switch acima já é
+        // o único ponto de parada do Tab pro controle (com aria-label
+        // pegando este texto como nome acessível); um `<button>` aqui
+        // duplicava a parada de Tab pro mesmo controle lógico.
+        <span onClick={toggle}
+          className="text-[16px] cursor-pointer"
           style={{ color: '#8b92a8' }}>
           {label}
-        </button>
+        </span>
       )}
     </div>
   )

@@ -24,6 +24,43 @@ test.describe('Transferências (E2E)', () => {
     await page.keyboard.press('Escape')
   })
 
+  // ── E2E-TRF08 ────────────────────────────────────────────────
+  test('E2E-TRF08 — trocar a conta origem move a conta anterior pro destino (se destino estava vazio)', async ({ page }) => {
+    await abrirNovoLancamento(page, 'Transferência')
+    const drawer = page.getByRole('dialog').first()
+    await expect(drawer).toBeVisible({ timeout: 5000 })
+    await page.waitForTimeout(400)
+    await drawer.getByText(/^(novo|editar) lançamento$/i).click()
+    await page.waitForTimeout(200)
+
+    // Seleciona "Corrente" na origem — destino continua vazio
+    const btnOrigem = drawer.getByRole('button').filter({ hasText: /selecione a conta/i }).first()
+    await btnOrigem.click()
+    await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
+    await drawer.getByPlaceholder('Buscar...').fill('Corrente')
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(200)
+    await expect(drawer.getByRole('button').filter({ hasText: /selecione a conta destino/i })).toBeVisible()
+
+    // Troca a origem pra "Poupança" — como o destino ainda estava vazio, a
+    // conta que estava na origem ("Corrente") deve migrar pro destino.
+    const btnOrigemAtual = drawer.getByRole('button').filter({ hasText: /corrente/i }).first()
+    await btnOrigemAtual.click()
+    await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
+    await drawer.getByPlaceholder('Buscar...').fill('Poupança')
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(200)
+
+    await expect(drawer.getByRole('button').filter({ hasText: /poupança/i }).first()).toBeVisible()
+    await expect(drawer.getByRole('button').filter({ hasText: /^.*corrente.*$/i })).toBeVisible()
+    // Não deve mais existir o placeholder vazio de destino — foi preenchido.
+    await expect(drawer.getByRole('button').filter({ hasText: /selecione a conta destino/i })).not.toBeVisible()
+
+    await page.keyboard.press('Escape')
+  })
+
   // ── E2E-TRF02 ────────────────────────────────────────────────
   test('E2E-TRF02 — criar transferência e verificar na lista', async ({ page }) => {
     await abrirNovoLancamento(page, 'Transferência')
