@@ -19,6 +19,27 @@ interface VersaoAnterior {
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '6.1',
+    titulo: 'Revisão de fatura e sincronização do Extrato',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '🔗 Revisão de fatura', d: 'lançamentos sem vínculo com a fatura agora linkam direto pro item correspondente no Extrato, já filtrado no mês/conta certos.' },
+      { t: '🗂️ Revisão de fatura', d: 'corrigido grupo duplicado no modo "Por categoria" ao reclassificar um item que já havia sido classificado/separado antes.' },
+      { t: '🔄 Extrato', d: 'ao alterar o status de uma perna de transferência (ex.: marcar como Pago), a outra perna atualiza junto na hora — sem esperar recarregar a página.' },
+    ],
+  },
+  {
+    versao: '6.3',
+    titulo: 'CVM automática em FIIs e avaliação de cotas',
+    icone:  <Wallet size={16} />,
+    itens: [
+      { t: '📐 P/VP de FIIs/FIAGROs', d: 'Valor Patrimonial por cota atualizado automaticamente via CVM, com categoria "Agro" nos fundos.' },
+      { t: '🔢 Magic Number', d: 'quantas cotas a mais são necessárias pra dividendo cobrir a mensalidade de um novo aporte, direto na página do ativo.' },
+      { t: '🧮 Simulação de compra/venda', d: 'simule o efeito de comprar ou vender cotas na página do ativo antes de decidir de verdade.' },
+      { t: '🧭 Perfil de investidor', d: 'questionário de suitability revisado.' },
+    ],
+  },
+  {
     versao: '5.0',
     titulo: 'Objetivos Financeiros',
     icone:  <Target size={16} />,
@@ -170,12 +191,15 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das correções desta versão (6.1.0) */}
+        {/* Detalhe das correções desta versão (6.4.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🔗 Revisão de fatura', d: 'lançamentos sem vínculo com a fatura agora linkam direto pro item correspondente no Extrato, já filtrado no mês/conta certos.' },
-            { t: '🗂️ Revisão de fatura', d: 'corrigido grupo duplicado no modo "Por categoria" ao reclassificar um item que já havia sido classificado/separado antes.' },
-            { t: '🔄 Extrato', d: 'ao alterar o status de uma perna de transferência (ex.: marcar como Pago), a outra perna atualiza junto na hora — sem esperar recarregar a página.' },
+            { t: '🏦 Fundamentos de Ações', d: 'LPA, VPA e Valor Justo (fórmula de Graham) buscados automaticamente na CVM ao cadastrar uma ação, com atualização mensal via cron.' },
+            { t: '📋 Questionário por categoria de FII', d: 'Tijolo, Papel, FoF, Desenvolvimento, FIAGRO e Outro passam a ter perguntas específicas de avaliação, além do questionário genérico.' },
+            { t: '🔔 Aviso de Data COM', d: 'alerta quando a data-limite pra ter o ativo em carteira e receber um provento anunciado está se aproximando.' },
+            { t: '💰 Proteção do Poder de Compra', d: 'novo indicador em FIIs: quanto do provento recebido precisa ser reinvestido só pra repor a inflação sobre o valor da cota.' },
+            { t: '🔒 Sessão mais segura em múltiplas abas', d: 'um aviso de "aba inativa" evita que uma aba esquecida em segundo plano derrube a sessão de outras abas ativas.' },
+            { t: '🔁 Transferências', d: 'ao trocar a conta de origem, a conta anterior migra automaticamente pro campo de destino (se ainda estiver vazio).' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

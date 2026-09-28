@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "6.3.0"
+export const APP_VERSION = "6.4.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -16,7 +16,7 @@ export const getVersionInfo = () => ({
   },
   current: {
     level: "minor",
-    description: "Valor patrimonial por cota (VP) de FIIs/FIAGROs atualizado automaticamente via CVM, com categoria 'Agro'; Magic Number do FII e simulação de compra/venda de cotas na página do ativo; questionário de perfil de investidor revisado"
+    description: "Fundamentos de Ações (LPA/VPA/Valor Justo) via CVM, questionário de avaliação por categoria de FII, aviso de Data COM de proventos, Proteção do Poder de Compra em FIIs e sessão mais segura em múltiplas abas"
   }
 })
 
