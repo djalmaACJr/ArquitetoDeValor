@@ -469,11 +469,12 @@ export function IconPicker({ value, onChange }: { value: string; onChange: (ic: 
 // ── SearchableSelect ─────────────────────────────────────────
 // Dropdown com campo de busca e navegação por teclado completa.
 // Tab/Enter/Space: abre | Setas: navega | Enter: seleciona | Escape: fecha
-export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selecione...' }: {
+export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selecione...', className = '' }: {
   opcoes: { id: string; label: string; sublabel?: string; icone?: string; idPai?: string }[]
   value: string
   onChange: (id: string) => void
   placeholder?: string
+  className?: string
 }) {
   const [busca,    setBusca]    = useState('')
   const [aberto,   setAberto]   = useState(false)
@@ -557,7 +558,7 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
         tabIndex={0}
         onClick={() => aberto ? fechar() : abrir()}
         onKeyDown={onKeyDownBotao}
-        className="w-full flex items-center justify-between bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[17px] outline-none focus:border-av-green transition-colors"
+        className={`w-full flex items-center justify-between bg-[#252d42] border border-white/10 rounded-lg px-3 py-2 text-[17px] outline-none focus:border-av-green transition-colors ${className}`}
         style={{ color: selecionada?.id ? '#e8eaf0' : '#ffffff50' }}
       >
         <span className="truncate">

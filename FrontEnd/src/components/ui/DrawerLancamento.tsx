@@ -849,7 +849,7 @@ export default function DrawerLancamento({
             (que sugere categoria/conta a partir da descrição) faça sentido */}
         <Field label="Descrição *" data-tutorial="drawer-descricao">
           <div className="relative">
-            <Input ref={descricaoRef} value={form.descricao}
+            <Input ref={descricaoRef} value={form.descricao} className="focus:ring-1 focus:ring-av-green/50"
               onChange={e => set({ descricao: e.target.value })}
               onFocus={() => { if (sugestoes.length > 0) setSugestoesAbertas(true) }}
               onBlur={() => { setTimeout(() => setSugestoesAbertas(false), 150) }}
@@ -1001,7 +1001,7 @@ export default function DrawerLancamento({
             aria-label="Valor"
             onClick={abrirCalc}
             onFocus={() => { if (!ignorarFoco.current && Capacitor.isNativePlatform()) abrirCalc() }}
-            className="w-full text-left px-3 py-2 rounded-lg border transition-colors text-[17px]"
+            className="w-full text-left px-3 py-2 rounded-lg border transition-colors text-[17px] outline-none focus:ring-1 focus:ring-av-green/50"
             style={{
               background: '#252d42',
               borderColor: calcAberta ? '#00c896' : 'rgba(255,255,255,0.1)',
@@ -1030,6 +1030,7 @@ export default function DrawerLancamento({
               value={form.categoria_id}
               onChange={id => set({ categoria_id: id })}
               placeholder="Sem categoria"
+              className="focus:ring-1 focus:ring-av-green/50"
             />
           </Field>
         )}
@@ -1039,8 +1040,19 @@ export default function DrawerLancamento({
           <SearchableSelect
             opcoes={opcoesContas}
             value={form.conta_id}
-            onChange={id => set({ conta_id: id })}
+            onChange={id => set({
+              conta_id: id,
+              // Transferência com destino ainda vazio: a conta que estava na
+              // origem (ex.: pré-preenchida pelo filtro de conta da página)
+              // vai pro destino em vez de simplesmente sumir — evita que o
+              // usuário tenha que escolher os dois lados de novo quando só
+              // queria inverter o sentido da transferência.
+              ...(form.tipo === 'TRANSFERENCIA' && !form.conta_destino_id && form.conta_id && form.conta_id !== id
+                ? { conta_destino_id: form.conta_id }
+                : {}),
+            })}
             placeholder="Selecione a conta..."
+            className="focus:ring-1 focus:ring-av-green/50"
           />
         </Field>
 
@@ -1052,6 +1064,7 @@ export default function DrawerLancamento({
               value={form.conta_destino_id}
               onChange={id => set({ conta_destino_id: id })}
               placeholder="Selecione a conta destino..."
+              className="focus:ring-1 focus:ring-av-green/50"
             />
           </Field>
         )}
@@ -1342,7 +1355,7 @@ export default function DrawerLancamento({
             placeholder="Observação opcional..."
             rows={2}
             className="w-full bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-              text-[17px] outline-none focus:border-av-green transition-colors
+              text-[17px] outline-none focus:border-av-green focus:ring-1 focus:ring-av-green/50 transition-colors
               placeholder:text-white/30 resize-none"
             style={{ color: '#e8eaf0' }}
           />

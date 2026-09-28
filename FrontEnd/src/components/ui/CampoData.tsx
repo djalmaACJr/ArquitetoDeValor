@@ -112,7 +112,7 @@ export const CampoData = forwardRef<CampoDataHandle, Props>(function CampoData(
         id={id}
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-2 bg-[#252d42] border border-white/10 rounded-lg px-3 py-2
-                   text-[17px] text-left outline-none focus:border-av-green transition-colors"
+                   text-[17px] text-left outline-none focus:border-av-green focus:ring-1 focus:ring-av-green/50 transition-colors"
       >
         <Calendar size={16} style={{ color: '#00c896' }} className="flex-shrink-0" />
         {valido ? (
