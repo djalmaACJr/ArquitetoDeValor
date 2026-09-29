@@ -84,7 +84,9 @@ const AVISO_MS = 60_000
 // inatividade por mais tempo que o usuário ficasse fora. localStorage
 // sobrevive ao processo ser morto; ao montar, comparamos com o relógio real
 // e deslogamos na hora se o limite já passou enquanto o app estava fechado.
-const LS_ULTIMA_ATIVIDADE = 'arqvalor:ultima-atividade'
+// Exportado para o listener de auth em main.tsx poder zerá-lo em todo
+// SIGNED_IN (ver comentário lá — não dá pra confiar só na troca de userId).
+export const LS_ULTIMA_ATIVIDADE = 'arqvalor:ultima-atividade'
 
 // Janela de decisão do modal "Aba inativa" (ver avisoFecharAba.ts) antes de
 // cair no signOut() global. Tempo suficiente pra notar o alerta sem

@@ -6,6 +6,7 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater'
 import App from './App'
 import { supabase } from './lib/supabase'
 import { limparEstadoCliente } from './lib/clientCache'
+import { LS_ULTIMA_ATIVIDADE } from './hooks/useAutoLogout'
 import './styles/globals.css'
 
 // Confirma pro plugin de OTA (@capgo/capacitor-updater) que o bundle atual
@@ -119,12 +120,25 @@ queryClient.getQueryCache().subscribe(event => {
 
 // ── Hidratação + limpeza em troca de usuário ────────────────────────────────
 // O listener resolve a sessão real ANTES de hidratar — eliminando o vazamento.
-supabase.auth.onAuthStateChange((_event, session) => {
+supabase.auth.onAuthStateChange((event, session) => {
   const newUserId = session?.user?.id ?? null
 
   // 1º callback: tenta hidratar (só funciona se o userId bate)
   if (!cacheHidratado) {
     tentarHidratar(newUserId)
+  }
+
+  // Todo login (mesmo re-login da MESMA conta) zera o relógio de inatividade
+  // do useAutoLogout. Não dá pra confiar só na comparação de userId abaixo:
+  // se a sessão anterior morreu sem um SIGNED_OUT real (token expirado no
+  // servidor, aba suspensa/fechada antes do auto-logout do cliente rodar até
+  // o fim), `currentUserId` nunca chegou a virar null, então um re-login da
+  // mesma conta não cairia no branch de troca de usuário — e o timestamp
+  // antigo (de horas atrás) sobrevivia e disparava o modal "Aba inativa" na
+  // cara assim que o AppLayout montava pós-login (bug relatado: aviso de aba
+  // parada logo após logar).
+  if (event === 'SIGNED_IN') {
+    localStorage.removeItem(LS_ULTIMA_ATIVIDADE)
   }
 
   // Troca de usuário durante a sessão (login em outra conta, logout): limpa
