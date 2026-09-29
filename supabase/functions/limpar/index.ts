@@ -2,7 +2,7 @@
 // Arquiteto de Valor — Edge Function: limpar v7
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, corsPreFlight } from "../_shared/utils.ts";
-import { registrarOrigem } from "../_shared/utils.ts";
+import { comOrigem } from "../_shared/utils.ts";
 import { logError, logInfo, logSuccess } from "../_shared/logger.ts";
 
 // Reativa todas as contas inativas do usuário e devolve seus ids.
@@ -25,8 +25,7 @@ async function reinativarContas(c: ReturnType<typeof db>, ids: string[]): Promis
   if (error) logError("[limpar] reinativar contas", JSON.stringify(error));
 }
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
   if (req.method !== "DELETE") return erro("Método não permitido", 405);
 
@@ -49,7 +48,7 @@ Deno.serve(async (req: Request) => {
     logError("[limpar] Erro inesperado", e);
     return erro("Erro interno", 500);
   }
-});
+}));
 
 async function limparTransacoes(c: ReturnType<typeof db>, userId: string) {
   logInfo("[limpar] Iniciando limpeza de transacoes", { userId });

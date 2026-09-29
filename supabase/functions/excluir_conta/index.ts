@@ -5,11 +5,10 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { json, erro, autenticar, corsPreFlight, registrarOrigem } from "../_shared/utils.ts";
+import { json, erro, autenticar, corsPreFlight, comOrigem } from "../_shared/utils.ts";
 import { logError, logInfo } from "../_shared/logger.ts";
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
   if (req.method !== "POST") return erro("Método não permitido", 405);
 
@@ -67,4 +66,4 @@ Deno.serve(async (req: Request) => {
     logError("excluir_conta: erro inesperado", e);
     return erro("Erro interno", 500);
   }
-});
+}));

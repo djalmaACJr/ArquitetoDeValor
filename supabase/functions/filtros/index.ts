@@ -6,11 +6,10 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import {
   json, erro, db, autenticar, extrairId, corsPreFlight,
 } from "../_shared/utils.ts";
-import { registrarOrigem } from "../_shared/utils.ts";
+import { comOrigem } from "../_shared/utils.ts";
 import { logError, logRequest, logResponse, logSuccess } from "../_shared/logger.ts";
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
@@ -31,7 +30,7 @@ Deno.serve(async (req: Request) => {
     logError("Handler principal", e);
     return erro("Erro interno", 500);
   }
-});
+}));
 
 async function listar(
   c: ReturnType<typeof db>,

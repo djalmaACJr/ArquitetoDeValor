@@ -12,7 +12,7 @@
 // FrontEnd/scripts/publish-android-ota.mjs).
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { json, erro, corsPreFlight, registrarOrigem, dbAdmin } from "../_shared/utils.ts";
+import { json, erro, corsPreFlight, comOrigem, dbAdmin } from "../_shared/utils.ts";
 
 interface AppInfos {
   platform?: string;
@@ -43,8 +43,7 @@ function versaoMaisNova(nova: string, atual: string): boolean {
   return false;
 }
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
   if (req.method !== "POST") return erro("Método não permitido", 405);
 
@@ -78,4 +77,4 @@ Deno.serve(async (req: Request) => {
     checksum: data.checksum,
     session_key: data.session_key,
   });
-});
+}));

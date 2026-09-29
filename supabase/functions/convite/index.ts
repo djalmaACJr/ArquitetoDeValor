@@ -10,7 +10,7 @@
 //   resp: { dados: { enviado: true } }
 // ============================================================
 
-import { autenticar, corsPreFlight, db, erro, json, registrarOrigem } from "../_shared/utils.ts";
+import { autenticar, corsPreFlight, db, erro, json, comOrigem } from "../_shared/utils.ts";
 
 const BREVO_API_KEY      = Deno.env.get("BREVO_API_KEY");
 const BREVO_SENDER_EMAIL = Deno.env.get("BREVO_SENDER_EMAIL") ?? "convites@arquitetodevalor.com.br";
@@ -40,8 +40,7 @@ const RECURSOS_EMAIL = [
   { emoji: "🤖", titulo: "Mentor com IA", texto: "Converse com um mentor financeiro escolhido por você." },
 ];
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
@@ -190,4 +189,4 @@ Deno.serve(async (req: Request) => {
   }
 
   return json({ dados: { enviado: true } }, 200);
-});
+}));

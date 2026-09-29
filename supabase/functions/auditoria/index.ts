@@ -25,7 +25,7 @@
 // via pg_cron (fn_purgar_trilha_auditoria), não por chamada desta rota.
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { json, erro, db, autenticar, corsPreFlight, registrarOrigem } from "../_shared/utils.ts";
+import { json, erro, db, autenticar, corsPreFlight, comOrigem } from "../_shared/utils.ts";
 import { logError, logRequest, logResponse } from "../_shared/logger.ts";
 
 const LIMITE_PADRAO = 100;
@@ -33,8 +33,7 @@ const LIMITE_MAXIMO = 500;
 const RETENCAO_MIN_DIAS = 30;
 const RETENCAO_MAX_DIAS = 3650;
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
@@ -52,7 +51,7 @@ Deno.serve(async (req: Request) => {
 
   if (req.method !== "GET") return erro("Método não permitido", 405);
   return await listarTrilha(c, req, userId);
-});
+}));
 
 async function listarTrilha(c: ReturnType<typeof db>, req: Request, userId: string) {
   const params = new URL(req.url).searchParams;

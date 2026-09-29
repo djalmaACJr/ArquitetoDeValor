@@ -6,7 +6,7 @@ import {
   json, erro, db, autenticar, extrairId,
   verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight, hojeBR,
 } from "../_shared/utils.ts";
-import { registrarOrigem } from "../_shared/utils.ts";
+import { comOrigem } from "../_shared/utils.ts";
 import {
   logError, logRequest, logResponse, logSuccess,
 } from "../_shared/logger.ts";
@@ -15,8 +15,7 @@ const TIPOS_OBJETIVO  = ["SONHO", "OBJETIVO", "PROJETO", "CRESCIMENTO"];
 const STATUS_OBJETIVO = ["EM_PROGRESSO", "ATINGIDO", "CANCELADO"];
 const FREQUENCIAS     = ["DIARIA", "SEMANAL", "MENSAL", "ANUAL"];
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
 
   const auth = await autenticar(req);
@@ -46,7 +45,7 @@ Deno.serve(async (req: Request) => {
     logError("Handler principal", e);
     return erro("Erro interno", 500);
   }
-});
+}));
 
 // ── GET /objetivos ──────────────────────────────────────────
 

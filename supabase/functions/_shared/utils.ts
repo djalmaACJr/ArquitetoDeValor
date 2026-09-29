@@ -4,6 +4,7 @@
 // Alteração: CORS com origem configurável via ALLOWED_ORIGIN
 // ============================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { logError } from "./logger.ts";
 
 // ── Data de "hoje" no fuso de Brasília — NUNCA use `new Date().toISOString()`
@@ -52,21 +53,32 @@ function resolverOrigem(origin: string): string {
   return ORIGEM_PADRAO; // origem não permitida → devolve a primária (o navegador bloqueia)
 }
 
-// Origem resolvida da requisição atual. App de usuário único: não há
-// concorrência de origens distintas no mesmo isolate, então guardar a origem
-// por requisição num módulo é seguro na prática. É um trade-off consciente — a
-// alternativa sem estado exigiria envolver o handler de todas as funções.
-let _origemAtual = ORIGEM_PADRAO;
+// Origem resolvida da requisição atual — isolada POR REQUISIÇÃO via
+// AsyncLocalStorage, não num `let` de módulo. Achado de revisão de
+// segurança (2026-09): guardar a origem resolvida num `let` compartilhado
+// do isolate é uma race condition real sob requisições concorrentes de
+// origens diferentes — entre `registrarOrigem()` e a resposta final
+// (`json()`/`erro()`), qualquer `await` no meio do handler cede o event
+// loop, e uma 2ª requisição concorrente pode sobrescrever o valor antes da
+// 1ª terminar. Nunca vaza dado entre origens (o browser bloqueia a
+// leitura pela origem errada), mas causa falhas de CORS intermitentes sob
+// múltiplas origens simultâneas em produção. AsyncLocalStorage propaga o
+// valor certo por toda a cadeia de `await`s de CADA requisição, mesmo
+// com outras rodando ao mesmo tempo no mesmo isolate.
+const _origemPorRequisicao = new AsyncLocalStorage<string>();
 
-// ── Registra a origem da requisição (chame como 1ª linha do handler) ──
-export function registrarOrigem(req: Request): void {
-  _origemAtual = resolverOrigem(req.headers.get("Origin") ?? "");
+// ── Executa `handler` com a origem desta requisição isolada no contexto
+// assíncrono. Chame envolvendo o corpo do `Deno.serve` (ver index.ts de
+// qualquer função) — substitui o antigo `registrarOrigem(req)` de 1ª linha.
+export function comOrigem(req: Request, handler: () => Promise<Response>): Promise<Response> {
+  const origem = resolverOrigem(req.headers.get("Origin") ?? "");
+  return _origemPorRequisicao.run(origem, handler);
 }
 
 // ── Headers CORS com a origem resolvida da requisição atual ───
 export function corsHeaders(): Record<string, string> {
   return {
-    "Access-Control-Allow-Origin":  _origemAtual,
+    "Access-Control-Allow-Origin":  _origemPorRequisicao.getStore() ?? ORIGEM_PADRAO,
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type, Idempotency-Key",
     "Vary":                         "Origin",

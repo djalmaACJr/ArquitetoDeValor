@@ -15,10 +15,9 @@ import {
   json,
   type Db,
 } from "../_shared/utils.ts";
-import { registrarOrigem } from "../_shared/utils.ts";
+import { comOrigem } from "../_shared/utils.ts";
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
 
   const auth = await autenticar(req);
@@ -36,7 +35,7 @@ Deno.serve(async (req: Request) => {
   if (m === "DELETE" &&  id) return excluir(c, id, userId);
 
   return erro("Método não suportado", 405);
-});
+}));
 
 // ── GET /assistente?termo=...&limit=N ─────────────────────────
 // Retorna a lista de candidatos:

@@ -28,7 +28,7 @@ import {
   erro,
   json,
 } from "../_shared/utils.ts";
-import { registrarOrigem } from "../_shared/utils.ts";
+import { comOrigem } from "../_shared/utils.ts";
 import { chamarProvedorIA, ErroIA, lerConfigIAAtiva, parsearImagem } from "../_shared/ia.ts";
 
 // ── Persona dos mascotes ──────────────────────────────────────────────
@@ -207,8 +207,7 @@ interface HistoricoItem {
 
 // ── Handler principal ────────────────────────────────────────────────
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
@@ -298,4 +297,4 @@ Deno.serve(async (req: Request) => {
     const msg = e instanceof Error ? e.message : String(e);
     return erro(`Não consegui falar com a IA (${provedor}) agora. Tente novamente em instantes. (${msg.slice(0, 160)})`, 502);
   }
-});
+}));

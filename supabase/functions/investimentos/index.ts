@@ -30,7 +30,7 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { erro, db, autenticar, corsPreFlight, executarComLogDeCron } from "../_shared/utils.ts";
-import { registrarOrigem } from "../_shared/utils.ts";
+import { comOrigem } from "../_shared/utils.ts";
 import { logError } from "../_shared/logger.ts";
 
 import { rotaAtivos, rotaAlocacoes } from "./ativos.ts";
@@ -56,8 +56,7 @@ import { dashboard, ranking } from "./dashboard.ts";
 import { rotaCronExecucoes } from "./admin.ts";
 import { rotaIndicadores } from "./indicadores.ts";
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
 
   const url     = new URL(req.url);
@@ -188,4 +187,4 @@ Deno.serve(async (req: Request) => {
     logError("Handler investimentos", e);
     return erro("Erro interno", 500);
   }
-});
+}));

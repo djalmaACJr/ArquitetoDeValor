@@ -7,7 +7,7 @@ import {
   json, erro, db, autenticar, extrairId,
   validarStatus, calcularDataParcela, corsPreFlight, hojeBR, comIdempotencia
 } from "../_shared/utils.ts";
-import { registrarOrigem } from "../_shared/utils.ts";
+import { comOrigem } from "../_shared/utils.ts";
 import { logError, logSuccess, logRequest, logResponse } from "../_shared/logger.ts";
 
 const FREQUENCIAS = ["DIARIA","SEMANAL","MENSAL","ANUAL"];
@@ -89,8 +89,7 @@ function validarPayload(body: Record<string, unknown>, modoEdicao = false): stri
   return null;
 }
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
@@ -119,7 +118,7 @@ Deno.serve(async (req: Request) => {
     logError("Handler principal", e);
     return erro("Erro interno: " + (e as Error).message, 500);
   }
-});
+}));
 
 async function buscarPorId(c: ReturnType<typeof db>, idPar: string, userId: string) {
   const par = await buscarPar(c, idPar, userId);

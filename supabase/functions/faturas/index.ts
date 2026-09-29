@@ -16,7 +16,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId, extrairAcao, corsPreFlight,
          verificarExistencia, camposParaAtualizar, calcularDataParcela, hojeBR } from "../_shared/utils.ts";
-import { registrarOrigem } from "../_shared/utils.ts";
+import { comOrigem } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWarn } from "../_shared/logger.ts";
 // Usamos `npm:` (suportado no Supabase Edge Runtime) em vez de esm.sh:
 // o esm.sh fazia o pdfjs-dist falhar em iniciar (worker resolver não acha
@@ -30,8 +30,7 @@ type Decisao = typeof DECISOES[number];
 
 const STATUS_SESSAO = ["EM_ANALISE", "CONFIRMADA", "CANCELADA"] as const;
 
-Deno.serve(async (req: Request) => {
-  registrarOrigem(req);
+Deno.serve((req: Request) => comOrigem(req, async () => {
   if (req.method === "OPTIONS") return corsPreFlight();
   const auth = await autenticar(req);
   if (auth instanceof Response) return auth;
@@ -88,7 +87,7 @@ Deno.serve(async (req: Request) => {
     logError("Handler faturas", e);
     return erro("Erro interno", 500);
   }
-});
+}));
 
 
 // ── Helpers de path ────────────────────────────────────────────

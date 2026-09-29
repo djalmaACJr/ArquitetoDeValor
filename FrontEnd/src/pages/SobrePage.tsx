@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
   LayoutDashboard, List, CreditCard, Tag, Target, ArrowLeftRight,
   FileText, GitCompare, Repeat2, TrendingUp, Bell, Bot, Sparkles,
-  ShieldCheck, HelpCircle, Heart, Wallet, KeyRound, UserPlus, Zap,
+  ShieldCheck, HelpCircle, Heart, Wallet,
   ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { APP_VERSION, getVersionInfo } from '../config/version'
@@ -19,34 +19,62 @@ interface VersaoAnterior {
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
-    versao: '6.1',
-    titulo: 'Revisão de fatura e sincronização do Extrato',
-    icone:  <FileText size={16} />,
+    versao: '6.4',
+    titulo: 'Fundos Imobiliários mais completos e mais segurança',
+    icone:  <ShieldCheck size={16} />,
     itens: [
-      { t: '🔗 Revisão de fatura', d: 'lançamentos sem vínculo com a fatura agora linkam direto pro item correspondente no Extrato, já filtrado no mês/conta certos.' },
-      { t: '🗂️ Revisão de fatura', d: 'corrigido grupo duplicado no modo "Por categoria" ao reclassificar um item que já havia sido classificado/separado antes.' },
-      { t: '🔄 Extrato', d: 'ao alterar o status de uma perna de transferência (ex.: marcar como Pago), a outra perna atualiza junto na hora — sem esperar recarregar a página.' },
+      { t: '🏦 Preço justo de ações', d: 'ao cadastrar uma ação, o app já busca os dados pra te ajudar a saber se o preço está caro ou barato.' },
+      { t: '📋 Avaliação de Fundos Imobiliários por tipo', d: 'as perguntas de avaliação agora mudam conforme o tipo do fundo (imóveis, recebíveis, etc.), já que os riscos são diferentes.' },
+      { t: '🔔 Aviso de dividendo chegando', d: 'um alerta avisa quando está perto da data em que você precisa ter o ativo pra receber o próximo provento.' },
+      { t: '💰 Quanto reinvestir pra não perder poder de compra', d: 'um novo indicador mostra quanto do dividendo você precisa reaplicar só pra não perder valor pra inflação.' },
+      { t: '🔒 Mais segurança com várias abas abertas', d: 'uma aba esquecida aberta não derruba mais o login das outras.' },
+      { t: '🔁 Transferência mais prática', d: 'ao trocar a conta de origem, a conta anterior já vai sozinha pro campo de destino.' },
     ],
   },
   {
     versao: '6.3',
-    titulo: 'CVM automática em FIIs e avaliação de cotas',
+    titulo: 'Fundos Imobiliários com dados automáticos',
     icone:  <Wallet size={16} />,
     itens: [
-      { t: '📐 P/VP de FIIs/FIAGROs', d: 'Valor Patrimonial por cota atualizado automaticamente via CVM, com categoria "Agro" nos fundos.' },
-      { t: '🔢 Magic Number', d: 'quantas cotas a mais são necessárias pra dividendo cobrir a mensalidade de um novo aporte, direto na página do ativo.' },
-      { t: '🧮 Simulação de compra/venda', d: 'simule o efeito de comprar ou vender cotas na página do ativo antes de decidir de verdade.' },
-      { t: '🧭 Perfil de investidor', d: 'questionário de suitability revisado.' },
+      { t: '📐 Valor patrimonial dos Fundos atualizado sozinho', d: 'não precisa mais digitar isso na mão.' },
+      { t: '🔢 "Magic Number"', d: 'mostra quantas cotas a mais você precisa comprar pra o dividendo pagar sua próxima compra.' },
+      { t: '🧮 Simulação de compra e venda', d: 'veja o efeito antes de decidir de verdade.' },
+      { t: '🧭 Questionário de perfil revisado', d: 'pra saber se seu jeito de investir é mais conservador ou mais arrojado.' },
+    ],
+  },
+  {
+    versao: '6.1',
+    titulo: 'Ajustes na fatura e no Extrato',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '🔗 Fatura ligada ao Extrato', d: 'agora dá pra clicar num item da fatura e já ir direto pro lançamento correspondente no Extrato.' },
+      { t: '🗂️ Correção ao revisar a fatura', d: 'corrigido um problema ao reclassificar um item que já tinha sido organizado antes.' },
+      { t: '🔄 Transferência sempre atualizada dos dois lados', d: 'marcar uma perna como paga já atualiza a outra na hora, sem precisar recarregar a página.' },
+    ],
+  },
+  {
+    versao: '6.0',
+    titulo: 'Chegada do módulo de Investimentos',
+    icone:  <Wallet size={16} />,
+    itens: [
+      { t: '📊 Módulo de Investimentos', d: 'acompanhe ações, Fundos Imobiliários, Tesouro Direto, renda fixa e criptomoedas num só lugar, com valores atualizados automaticamente.' },
+      { t: '💵 Dividendos', d: 'lance e acompanhe os proventos recebidos dos seus investimentos.' },
+      { t: '🏆 Ranking da carteira', d: 'veja quais investimentos estão indo bem e quais estão no prejuízo.' },
+      { t: '🤖 Avaliação por Mentor de IA', d: 'receba uma nota pra cada investimento, respondendo um questionário simples.' },
+      { t: '🔁 Transferências mais confiáveis', d: 'nunca mais fica só um lado registrado se alguma coisa der errado no meio do caminho.' },
+      { t: '🔑 Recuperação de senha mais simples', d: 'e-mails mais claros e opção de mostrar a senha digitada no login.' },
+      { t: '📨 Convide amigos', d: 'envie um convite de cadastro direto pelo app.' },
+      { t: '⚡ Extrato e Dashboard mais rápidos', d: 'navegar entre os meses ficou mais ágil.' },
     ],
   },
   {
     versao: '5.0',
-    titulo: 'Objetivos Financeiros',
+    titulo: 'Chegada dos Objetivos Financeiros',
     icone:  <Target size={16} />,
     itens: [
-      { t: '💰 Patrimônio',       d: 'meta de saldo acumulado em uma ou mais contas, com estimativa de quanto crescer por mês para chegar lá.' },
-      { t: '🎯 Renda Recorrente', d: 'receita recorrente por categoria, com média por período, evolução mensal e % por categoria.' },
-      { t: '📈 Evolução Anual',   d: 'percentual de aumento das receitas ano a ano, comparando cada ano com o ano base (YoY).' },
+      { t: '💰 Objetivo de Patrimônio', d: 'defina uma meta de quanto guardar e acompanhe o progresso mês a mês.' },
+      { t: '🎯 Objetivo de Renda', d: 'meta de renda recorrente por categoria, com a média de quanto você já recebe.' },
+      { t: '📈 Evolução Anual', d: 'veja se sua renda está crescendo de um ano pro outro.' },
     ],
   },
 ]
@@ -191,94 +219,18 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das correções desta versão (6.4.0) */}
+        {/* Detalhe das correções desta versão (6.4.1) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🏦 Fundamentos de Ações', d: 'LPA, VPA e Valor Justo (fórmula de Graham) buscados automaticamente na CVM ao cadastrar uma ação, com atualização mensal via cron.' },
-            { t: '📋 Questionário por categoria de FII', d: 'Tijolo, Papel, FoF, Desenvolvimento, FIAGRO e Outro passam a ter perguntas específicas de avaliação, além do questionário genérico.' },
-            { t: '🔔 Aviso de Data COM', d: 'alerta quando a data-limite pra ter o ativo em carteira e receber um provento anunciado está se aproximando.' },
-            { t: '💰 Proteção do Poder de Compra', d: 'novo indicador em FIIs: quanto do provento recebido precisa ser reinvestido só pra repor a inflação sobre o valor da cota.' },
-            { t: '🔒 Sessão mais segura em múltiplas abas', d: 'um aviso de "aba inativa" evita que uma aba esquecida em segundo plano derrube a sessão de outras abas ativas.' },
-            { t: '🔁 Transferências', d: 'ao trocar a conta de origem, a conta anterior migra automaticamente pro campo de destino (se ainda estiver vazio).' },
+            { t: '🔐 Correção de segurança', d: 'corrigimos uma falha que podia deixar dados de outro usuário acessíveis indevidamente.' },
+            { t: '💾 Sessão mais estável', d: 'suas preferências (tema, mostrar/ocultar valores) não resetam mais sozinhas ao recarregar a página.' },
+            { t: '⌨️ Navegação por teclado corrigida', d: 'o Tab no formulário de novo lançamento agora passa pelos campos certos, sem travar nem "escapar" da tela.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
             </li>
           ))}
         </ul>
-
-        {/* Destaque do último módulo: Investimentos */}
-        <div className="mt-4 pt-4 border-t border-white/8">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
-              bg-av-blue/10 text-av-blue border border-av-blue/20">
-              <Wallet size={16} />
-            </div>
-            <div>
-              <p className="text-[14px] font-semibold text-white/85">Novo módulo: Investimentos</p>
-              <p className="text-[12px]" style={{ color: '#8b92a8' }}>O grande destaque da versão 6</p>
-            </div>
-          </div>
-          <p className="text-[13px] leading-relaxed mb-3" style={{ color: '#8b92a8' }}>
-            Acompanhe sua carteira de ponta a ponta, num dashboard estilo corretora que se
-            atualiza sozinho a partir das suas operações:
-          </p>
-          <ul className="flex flex-col gap-2 mb-3">
-            {[
-              { t: '📊 Ativos e posições',    d: 'ações, FIIs, ETFs, renda fixa, Tesouro Direto e criptomoedas — com preço médio e valor de mercado calculados automaticamente a partir das operações.' },
-              { t: '💵 Dividendos',           d: 'proventos lançados direto no extrato (projeção → pago), com busca automática na B3/exterior e diagnóstico de pendências — e um aviso de "novidades" quando um provento novo é detectado.' },
-              { t: '🏆 Ranking',              d: 'performance por ativo — em alta, em prejuízo, maior dividend yield e participação na carteira.' },
-              { t: '🤖 Mentores de IA',       d: 'avaliação da carteira por questionário (nota 0–10 por ativo), perfil de investidor por suitability e pesos de avaliação configuráveis por critério.' },
-              { t: '🧭 Correlação e sobreposição', d: 'veja o quanto os ativos da carteira se movem juntos (correlação de preço) e onde há concentração/sobreposição por segmento ou área.' },
-              { t: '🏦 Resumo por instituição', d: 'quanto do patrimônio está em cada corretora/banco, num gráfico de rosca.' },
-              { t: '💹 Cotações automáticas', d: 'Tesouro Direto, índices econômicos (CDI/IPCA/Selic) e PTAX atualizados sozinhos — inclusive cupom semestral do Tesouro lançado e o juros-sobre-juros recalculado automaticamente no vencimento.' },
-            ].map(x => (
-              <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
-                <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
-              </li>
-            ))}
-          </ul>
-          <p className="text-[13px] leading-relaxed" style={{ color: '#8b92a8' }}>
-            Também dá pra definir metas de alocação por tipo de ativo, migrar posições entre
-            contas (inteira ou ativo por ativo) e simular sua aposentadoria pela regra dos 4% —
-            tudo em Investimentos → Configurações.
-          </p>
-        </div>
-      </section>
-
-      {/* Changelog v5 → v6 */}
-      <section className="bg-[#1a1f2e] rounded-xl p-5 border border-white/5">
-        <h2 className="text-[15px] font-semibold text-white/80 mb-1 flex items-center gap-2">
-          <Sparkles size={16} className="text-av-blue" /> O que mudou da versão 5 para a 6
-        </h2>
-        <p className="text-[13px] mb-4" style={{ color: '#8b92a8' }}>
-          Resumo das principais novidades e correções desde a v5.0.
-        </p>
-        <div className="flex flex-col gap-3">
-          {[
-            { icon: <Wallet size={16} />,     t: 'Módulo de Investimentos',
-              d: 'cadastro de ativos, posições e operações, dividendos, dashboard, ranking de performance, avaliação por Mentores de IA, histórico mensal de valor de mercado e migração entre contas.' },
-            { icon: <ArrowLeftRight size={16} />, t: 'Transferências mais robustas',
-              d: 'edição e exclusão de transferências recorrentes com escopo "este e os seguintes" corrigidas; criação e exclusão passaram a ser atômicas — nunca mais fica só um lado do par em caso de falha.' },
-            { icon: <KeyRound size={16} />,   t: 'Recuperação de senha e sessão',
-              d: 'e-mail de recuperação de senha e de confirmação mais amigáveis, botão de mostrar/ocultar senha no login, e retomada da tela e dos filtros exatamente de onde parou após logout por inatividade.' },
-            { icon: <UserPlus size={16} />,   t: 'Convide amigos',
-              d: 'envie um convite de cadastro por e-mail direto do Perfil.' },
-            { icon: <Zap size={16} />,        t: 'Extrato e Dashboard mais rápidos',
-              d: 'cache de lançamentos consolidado numa única fonte por mês, reduzindo requisições repetidas e deixando a navegação entre meses mais ágil.' },
-          ].map(c => (
-            <div key={c.t} className="flex gap-3">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0
-                bg-white/5 text-white/70 border border-white/10">
-                {c.icon}
-              </div>
-              <div className="min-w-0">
-                <p className="text-[13.5px] font-medium text-white/85">{c.t}</p>
-                <p className="text-[12.5px] leading-snug" style={{ color: '#8b92a8' }}>{c.d}</p>
-              </div>
-            </div>
-          ))}
-        </div>
       </section>
 
       {/* Versões anteriores — recolhido por padrão */}
