@@ -105,6 +105,35 @@ export async function preencherValor(page: Page, drawer: Locator, valor: string)
  * drawer nunca abria. Em vez de falhar direto, tenta clicar de novo uma
  * vez antes de exigir o drawer visível.
  */
+/**
+ * Seleciona uma opção num <SelectDark> — desde a migração pra
+ * @radix-ui/react-select (ver shared.tsx, corrige texto ilegível em opção
+ * sob hover no <select> nativo do Windows), o componente não é mais um
+ * <select> real, então `.selectOption()` do Playwright não funciona nele
+ * (erro "Element is not a <select> element"). Em vez disso: clica no
+ * trigger (que continua com `role="combobox"`, então locators existentes
+ * como `getByRole('combobox')` não mudam) e clica na opção.
+ *
+ * As opções (`role="option"`) são renderizadas num Portal do Radix — fora
+ * da árvore do drawer/trigger — por isso a busca é sempre a partir de
+ * `page`, nunca escopada ao drawer. Aceita o texto visível da opção (não o
+ * value do enum, que deixou de existir no DOM) ou um índice posicional.
+ *
+ * IMPORTANTE ao construir o `trigger`: `role="combobox"` NÃO deriva o nome
+ * acessível do conteúdo (ao contrário de `role="option"`, usado acima, que
+ * deriva) — `getByRole('combobox', { name: /texto do valor atual/ })` NÃO
+ * encontra nada mesmo com o texto visível ali (achado real, ver E2E-INV03).
+ * Para localizar um trigger pelo texto que ele mostra, use
+ * `.filter({ hasText })` (compara texto bruto) em vez de `{ name }`.
+ */
+export async function selecionarDropdown(page: Page, trigger: Locator, opcao: string | { index: number }) {
+  await trigger.click()
+  const item = typeof opcao === 'string'
+    ? page.getByRole('option', { name: opcao, exact: true })
+    : page.getByRole('option').nth(opcao.index)
+  await item.click()
+}
+
 export async function abrirEdicaoLancamento(page: Page, textoLinha: string): Promise<Locator> {
   const linha = page.getByText(textoLinha).first()
   await linha.waitFor({ state: 'visible', timeout: 10_000 })

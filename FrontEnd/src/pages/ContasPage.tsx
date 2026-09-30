@@ -37,6 +37,7 @@ const TIPOS: { value: TipoConta; label: string }[] = [
   { value: 'CARTAO',       label: 'Cartão'       },
   { value: 'INVESTIMENTO', label: 'Investimento' },
   { value: 'CARTEIRA',     label: 'Carteira'     },
+  { value: 'OUTROS',       label: 'Outros'       },
 ]
 
 type Grupo = { label: string; tipos: TipoConta[]; cor: string }
@@ -46,6 +47,7 @@ const GRUPOS_INICIAL: Grupo[] = [
   { label: 'Cartão de Crédito',     tipos: ['CARTAO'],                  cor: '#e91e8c' },
   { label: 'Investimento',          tipos: ['INVESTIMENTO'],            cor: '#f0b429' },
   { label: 'Carteira',              tipos: ['CARTEIRA'],                cor: '#4da6ff' },
+  { label: 'Outros',                tipos: ['OUTROS'],                  cor: '#8b92a8' },
 ]
 
 interface FormState {

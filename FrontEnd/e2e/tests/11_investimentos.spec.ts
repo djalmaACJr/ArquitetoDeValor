@@ -20,6 +20,7 @@
 import { test, expect } from '@playwright/test'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
+import { selecionarDropdown } from './helpers'
 
 dotenv.config()
 dotenv.config({ path: path.resolve(process.cwd(), '../.env') })
@@ -143,7 +144,7 @@ test.describe('Investimentos (E2E)', () => {
     await expect(drawer).toBeVisible({ timeout: 5_000 })
 
     // Tipo primeiro — revela o resto do formulário
-    await drawer.locator('select').first().selectOption('ACOES')
+    await selecionarDropdown(page, drawer.getByRole('combobox').first(), 'Ações')
 
     // Cadastro manual — evita depender da busca externa (brapi)
     await drawer.getByText(/não encontrei — cadastrar manualmente/i).click()
@@ -152,8 +153,11 @@ test.describe('Investimentos (E2E)', () => {
 
     // Primeira compra (opcional) — registrar já cria a posição
     await drawer.getByText(/primeira compra/i).scrollIntoViewIfNeeded()
-    const selectConta = drawer.locator('select').filter({ hasText: /não registrar agora/i })
-    await selectConta.selectOption({ label: NOME_CONTA })
+    // role="combobox" não deriva o nome acessível do conteúdo (ao contrário de
+    // role="option", que Playwright já casa por texto normalmente) — por isso
+    // aqui precisa de `.filter({ hasText })` (texto bruto), não `{ name }`.
+    const selectConta = drawer.getByRole('combobox').filter({ hasText: 'Não registrar agora' })
+    await selecionarDropdown(page, selectConta, NOME_CONTA)
     await drawer.getByPlaceholder('0', { exact: true }).fill('10')
     await drawer.getByPlaceholder('0,00').first().fill('25.5')
 
@@ -188,8 +192,8 @@ test.describe('Investimentos (E2E)', () => {
     await expect(drawer.getByText(/saldo atual/i)).toBeVisible()
 
     // Registra uma venda parcial (5 de 10) — mantém posição ativa
-    await drawer.locator('select').first().selectOption('VENDA')
-    await drawer.locator('select').nth(1).selectOption({ label: NOME_CONTA })
+    await selecionarDropdown(page, drawer.getByRole('combobox').first(), 'Venda')
+    await selecionarDropdown(page, drawer.getByRole('combobox').nth(1), NOME_CONTA)
     await drawer.getByPlaceholder('0', { exact: true }).fill('5')
     await drawer.getByPlaceholder('0,00').first().fill('30')
     await drawer.getByRole('button', { name: /registrar movimentação/i }).click()
@@ -332,7 +336,7 @@ test.describe('Investimentos (E2E)', () => {
     await expect(page.getByText(/^maior participação/i)).toBeVisible()
 
     // Troca o período — a página não deve quebrar/navegar embora
-    await page.getByRole('combobox').first().selectOption('ANO')
+    await selecionarDropdown(page, page.getByRole('combobox').first(), 'Últimos 12 meses')
     await expect(page.getByRole('heading', { name: /destaques da carteira/i })).toBeVisible()
     await expect(page).toHaveURL(/\/investimentos\/destaques$/)
   })

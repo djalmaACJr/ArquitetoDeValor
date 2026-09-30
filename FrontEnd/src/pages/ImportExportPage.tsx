@@ -1609,7 +1609,7 @@ function SecaoImport({ modo, setModo }: { modo: ModoImport; setModo: (m: ModoImp
         const abaNome = wb.SheetNames.find((n: string) => n.toLowerCase() === 'contas') ?? wb.SheetNames[0]
         const ws   = wb.Sheets[abaNome]
         const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as XlsxRow[]
-        const tiposValidos = ['CORRENTE','REMUNERACAO','CARTAO','INVESTIMENTO','CARTEIRA']
+        const tiposValidos = ['CORRENTE','REMUNERACAO','CARTAO','INVESTIMENTO','CARTEIRA','OUTROS']
         const contasExist  = new Set(contas.map((x: Conta) => normalizarNome(x.nome)))
 
         const parsed: ContaImport[] = rows.map((row, idx) => {
@@ -2300,7 +2300,7 @@ function SecaoImport({ modo, setModo }: { modo: ModoImport; setModo: (m: ModoImp
                     </div>
                   ))}
                 </div>
-                <p className="text-[14px] text-gray-400">Tipos válidos: CORRENTE | REMUNERACAO | CARTAO | INVESTIMENTO | CARTEIRA</p>
+                <p className="text-[14px] text-gray-400">Tipos válidos: CORRENTE | REMUNERACAO | CARTAO | INVESTIMENTO | CARTEIRA | OUTROS</p>
               </>}
               {modo === 'categorias' && <>
                 <p className="text-[15px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Colunas esperadas:</p>
@@ -2441,7 +2441,7 @@ function SecaoImport({ modo, setModo }: { modo: ModoImport; setModo: (m: ModoImp
                             onChange={e => setContaLinha(l.idx, { tipo: e.target.value })}
                             className="bg-transparent border border-transparent hover:border-white/10 rounded px-1 py-0.5 text-[15px] text-gray-300 outline-none"
                             style={{ background: '#1a1f2e' }}>
-                            {['CORRENTE','REMUNERACAO','CARTAO','INVESTIMENTO','CARTEIRA'].map(t => (
+                            {['CORRENTE','REMUNERACAO','CARTAO','INVESTIMENTO','CARTEIRA','OUTROS'].map(t => (
                               <option key={t} value={t}>{t}</option>
                             ))}
                           </select>

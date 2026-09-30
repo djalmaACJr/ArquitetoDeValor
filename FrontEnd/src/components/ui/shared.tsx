@@ -1,8 +1,9 @@
 // src/components/ui/shared.tsx
 // Para mudar o Drawer (ex: trocar por modal), edite só este arquivo.
 // Todas as páginas que importam daqui refletem automaticamente.
-import React, { useState, useEffect, useRef } from 'react'
-import { X, Check } from 'lucide-react'
+import React, { useState, useEffect, useRef, Children, isValidElement } from 'react'
+import * as RadixSelect from '@radix-ui/react-select'
+import { X, Check, ChevronDown } from 'lucide-react'
 import { formatBRL, parsearValorBR } from '../../lib/utils'
 import type { TipoAtivoInvestimento } from '../../types'
 
@@ -707,45 +708,96 @@ export function InputMoeda({ value, onChange, className, ...rest }: {
   )
 }
 
-// Observa a classe `.dark` no <html> (setada por setTheme/lib/themes.ts).
-// Usado por SelectDark para forçar `color-scheme` direto no <select> — ver
-// comentário abaixo sobre por que herdar de html.dark não basta no Edge.
-function useTemaEscuroAtivo(): boolean {
-  const [dark, setDark] = useState(() =>
-    typeof document !== 'undefined' && document.documentElement.classList.contains('dark'))
-  useEffect(() => {
-    const alvo = document.documentElement
-    const obs = new MutationObserver(() => setDark(alvo.classList.contains('dark')))
-    obs.observe(alvo, { attributes: true, attributeFilter: ['class'] })
-    return () => obs.disconnect()
-  }, [])
-  return dark
-}
-
 // ── SelectDark ────────────────────────────────────────────────
 // Apesar do nome histórico, segue o tema ativo: usa tokens semânticos
-// (--bg-input, --text-primary, --border-subtle) para a caixa fechada.
+// (--bg-input, --bg-elevated, --text-primary, --border-subtle).
+//
+// Implementado sobre @radix-ui/react-select em vez de um <select> nativo:
+// o popup nativo é desenhado pelo SO, fora do nosso CSS, e só respeita
+// `background`/`color` por <option> de forma parcial — no Windows, a linha
+// sob hover/destaque leva o realce do próprio SO por cima, e a cor do texto
+// que a gente força via `style` inline pode ficar ilegível (achado real:
+// "Investimento" invisível no <select> de Tipo de conta). Com Radix o popup
+// é nosso, então isso deixa de poder acontecer.
+//
+// API pública idêntica à do <select> nativo (value/onChange/children como
+// <option>) de propósito — são ~40 pontos de uso espalhados pelo app, e
+// manter a mesma interface evita precisar tocar em nenhum deles.
+const SELECT_VALOR_VAZIO = '__selectdark_vazio__' // Select.Item do Radix não aceita value=""
+
+interface OpcaoSelectDark { value: string; label: React.ReactNode; disabled?: boolean }
+
+function opcoesDeChildren(children: React.ReactNode): OpcaoSelectDark[] {
+  const out: OpcaoSelectDark[] = []
+  Children.forEach(children, child => {
+    if (!isValidElement(child) || child.type !== 'option') return
+    const p = child.props as React.OptionHTMLAttributes<HTMLOptionElement>
+    out.push({ value: p.value == null ? '' : String(p.value), label: p.children, disabled: p.disabled })
+  })
+  return out
+}
+
 export function SelectDark(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  // O popup nativo de opções (renderizado pelo SO, fora do nosso CSS) segue
-  // `color-scheme` — herdar de `html.dark`/`html:not(.dark)` (globals.css)
-  // basta no Firefox/Chrome, mas o Edge no Windows às vezes mantém o popup
-  // com fundo branco mesmo com o tema escuro ativo (o valor herdado não é
-  // sempre respeitado pelo picker nativo). Declarar `colorScheme` direto
-  // neste elemento — não só no ancestral — é o que resolve de forma
-  // confiável nos testes feitos.
-  const dark = useTemaEscuroAtivo()
+  const opcoes = opcoesDeChildren(props.children)
+  const valorAtual = props.value == null ? '' : String(props.value)
+  const opcaoAtual = opcoes.find(o => o.value === valorAtual)
+
   return (
-    <select {...props}
-      style={{
-        background:  'var(--bg-input)',
-        color:       'var(--text-primary)',
-        borderColor: 'var(--border-subtle)',
-        colorScheme: dark ? 'dark' : 'light',
-        ...props.style,
+    <RadixSelect.Root
+      value={valorAtual === '' ? SELECT_VALOR_VAZIO : valorAtual}
+      onValueChange={v => {
+        const valorReal = v === SELECT_VALOR_VAZIO ? '' : v
+        props.onChange?.({ target: { value: valorReal } } as unknown as React.ChangeEvent<HTMLSelectElement>)
       }}
-      className={`w-full border rounded-lg px-3 py-2 text-[17px] outline-none
-        focus:border-av-green transition-colors cursor-pointer
-        ${props.className ?? ''}`} />
+      disabled={props.disabled}
+    >
+      <RadixSelect.Trigger
+        className={`w-full border rounded-lg px-3 py-2 text-[17px] outline-none
+          focus:border-av-green transition-colors cursor-pointer
+          flex items-center justify-between gap-2 text-left
+          disabled:opacity-50 disabled:cursor-not-allowed
+          ${props.className ?? ''}`}
+        style={{
+          background:  'var(--bg-input)',
+          color:       'var(--text-primary)',
+          borderColor: 'var(--border-subtle)',
+          ...props.style,
+        }}
+      >
+        <RadixSelect.Value>{opcaoAtual?.label}</RadixSelect.Value>
+        <RadixSelect.Icon>
+          <ChevronDown size={16} className="opacity-50 flex-shrink-0" />
+        </RadixSelect.Icon>
+      </RadixSelect.Trigger>
+      <RadixSelect.Portal>
+        <RadixSelect.Content
+          position="popper"
+          sideOffset={4}
+          className="overflow-hidden rounded-lg border shadow-2xl z-[210]"
+          style={{ background: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+        >
+          <RadixSelect.Viewport className="p-1 max-h-[300px]">
+            {opcoes.map(o => (
+              <RadixSelect.Item
+                key={o.value || SELECT_VALOR_VAZIO}
+                value={o.value === '' ? SELECT_VALOR_VAZIO : o.value}
+                disabled={o.disabled}
+                className="relative flex items-center gap-2 rounded-md pl-7 pr-3 py-2 text-[15px] outline-none
+                  cursor-pointer select-none
+                  data-[highlighted]:bg-av-green/15
+                  data-[disabled]:opacity-40 data-[disabled]:cursor-not-allowed"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <RadixSelect.ItemIndicator className="absolute left-2 inline-flex items-center">
+                  <Check size={14} className="text-av-green" />
+                </RadixSelect.ItemIndicator>
+                <RadixSelect.ItemText>{o.label}</RadixSelect.ItemText>
+              </RadixSelect.Item>
+            ))}
+          </RadixSelect.Viewport>
+        </RadixSelect.Content>
+      </RadixSelect.Portal>
+    </RadixSelect.Root>
   )
 }
 

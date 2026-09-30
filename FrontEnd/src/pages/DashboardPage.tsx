@@ -1290,6 +1290,11 @@ const CardContas = memo(function CardContas({ contas, oculto, mes, modo, setModo
       cor: '#f87171',
       tipos: ['CARTAO'],
     },
+    {
+      label: 'Outros',
+      cor: '#8b92a8',
+      tipos: ['OUTROS'],
+    },
   ]
 
   return (

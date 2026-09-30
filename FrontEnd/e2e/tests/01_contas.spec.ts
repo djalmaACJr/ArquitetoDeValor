@@ -1,5 +1,6 @@
 // e2e/tests/03_contas.spec.ts
 import { test, expect } from '@playwright/test'
+import { selecionarDropdown } from './helpers'
 
 test.describe('Contas', () => {
 
@@ -44,7 +45,7 @@ test.describe('Contas', () => {
     const drawer = page.getByRole('dialog')
 
     // Selecionar tipo Cartão
-    await drawer.getByRole('combobox').selectOption('CARTAO')
+    await selecionarDropdown(page, drawer.getByRole('combobox'), 'Cartão')
 
     // Campos específicos de cartão devem aparecer
     await expect(drawer.getByText(/dia de fechamento/i)).toBeVisible()
@@ -61,7 +62,7 @@ test.describe('Contas', () => {
     const drawer = page.getByRole('dialog').first()
 
     // Selecionar tipo Cartão e aguardar campos extras renderizarem
-    await drawer.getByRole('combobox').selectOption('CARTAO')
+    await selecionarDropdown(page, drawer.getByRole('combobox'), 'Cartão')
     await expect(drawer.getByText(/limite de crédito/i)).toBeVisible()
 
     // Field renderiza <div><p>label</p><input/></div>. Localizamos o <p>

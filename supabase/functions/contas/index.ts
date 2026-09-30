@@ -7,7 +7,7 @@ import { json, erro, db, autenticar, extrairId,
 import { comOrigem } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWarn } from "../_shared/logger.ts";
 
-const TIPOS_CONTA = ["CORRENTE","REMUNERACAO","CARTAO","INVESTIMENTO","CARTEIRA"];
+const TIPOS_CONTA = ["CORRENTE","REMUNERACAO","CARTAO","INVESTIMENTO","CARTEIRA","OUTROS"];
 
 interface CartaoVirtual { id: string; sufixo: string; apelido: string }
 

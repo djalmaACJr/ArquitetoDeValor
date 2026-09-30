@@ -4,7 +4,7 @@
 //   supabase/functions/_shared/utils.ts e edge functions (validações)
 
 // ── Tipos de conta ───────────────────────────────────────────
-export const TIPOS_CONTA = ['CORRENTE', 'REMUNERACAO', 'CARTAO', 'INVESTIMENTO', 'CARTEIRA'] as const
+export const TIPOS_CONTA = ['CORRENTE', 'REMUNERACAO', 'CARTAO', 'INVESTIMENTO', 'CARTEIRA', 'OUTROS'] as const
 export type TipoConta = typeof TIPOS_CONTA[number]
 
 // ── Tipos de transação ───────────────────────────────────────

@@ -167,7 +167,7 @@ Permite:
 
 ### Contas
 
-- Tipos: `CORRENTE` | `REMUNERACAO` | `CARTAO` | `INVESTIMENTO` | `CARTEIRA`
+- Tipos: `CORRENTE` | `REMUNERACAO` | `CARTAO` | `INVESTIMENTO` | `CARTEIRA` | `OUTROS`
 - Cartão: campos opcionais `dia_fechamento` / `dia_pagamento` (1..31) e `limite_credito` (NUMERIC, ≥ 0). Para `CARTAO` o backend força `saldo_inicial = 0`; o formulário esconde "Saldo inicial" e mostra "Limite de crédito" no lugar.
 - Banco bloqueia exclusão se houver lançamentos (trigger `fn_bloquear_exclusao_conta`).
 - Saldo calculado pela view `vw_saldo_contas` (= `saldo_inicial` + soma de receitas − despesas). ⚠️ **Saldo soma TODAS as transações até a data, independente de `status`** (PAGO, PENDENTE, PROJECAO contam igual). Não reintroduzir filtro `t.status = 'PAGO'` em views/funções de saldo.

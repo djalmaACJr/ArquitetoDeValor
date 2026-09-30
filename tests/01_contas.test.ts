@@ -132,7 +132,7 @@ describe("Contas — CA-CONTA01 a CA-CONTA19", () => {
 
   // ── CA-CONTA09 ──────────────────────────────────────────
   test("CA-CONTA09 — POST /contas aceita todos os tipos válidos", async () => {
-    const tipos = ["CORRENTE", "REMUNERACAO", "CARTAO", "INVESTIMENTO", "CARTEIRA"];
+    const tipos = ["CORRENTE", "REMUNERACAO", "CARTAO", "INVESTIMENTO", "CARTEIRA", "OUTROS"];
 
     for (const tipo of tipos) {
       const { status, data } = await api("/contas", {
