@@ -30,7 +30,7 @@ Permite:
 - Assistente de lançamentos (sugestão automática por descrição)
 - **Objetivos** (Sonho/Meta de Renda/Projeto/Crescimento Anual) — metas financeiras com progresso calculado por trigger
 - **Investimentos** — carteira (ações, FIIs, renda fixa, tesouro direto, cripto, stocks/ETFs), dividendos/proventos com DY/YoC, avaliação de ativos por mentores de IA, snapshot mensal de patrimônio
-- **Importação de fatura de cartão** (PDF Nubank/C6/Inter/MercadoPago/genérico) com matching automático e revisão assistida
+- **Importação de fatura de cartão** (PDF Nubank/C6/Inter/Itaú/MercadoPago/genérico) com matching automático e revisão assistida
 - Cartões virtuais (sub-identificadores de um cartão físico, só organizacionais)
 - Análises client-side sobre o extrato: Assinaturas (detecção de recorrência), Comparativo Mensal, Projeção de Economia
 - **App Android** (Capacitor, mesmo código React) — login por digital (biometria), auto-logout mais curto e atualização OTA do bundle sem passar pela Play Store

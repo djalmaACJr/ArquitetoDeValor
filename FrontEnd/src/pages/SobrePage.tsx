@@ -29,6 +29,9 @@ const VERSOES_ANTERIORES: VersaoAnterior[] = [
       { t: '💰 Quanto reinvestir pra não perder poder de compra', d: 'um novo indicador mostra quanto do dividendo você precisa reaplicar só pra não perder valor pra inflação.' },
       { t: '🔒 Mais segurança com várias abas abertas', d: 'uma aba esquecida aberta não derruba mais o login das outras.' },
       { t: '🔁 Transferência mais prática', d: 'ao trocar a conta de origem, a conta anterior já vai sozinha pro campo de destino.' },
+      { t: '🔐 Correção de segurança', d: 'corrigimos uma falha que podia deixar dados de outro usuário acessíveis indevidamente.' },
+      { t: '💾 Sessão mais estável', d: 'suas preferências (tema, mostrar/ocultar valores) não resetam mais sozinhas ao recarregar a página.' },
+      { t: '⌨️ Navegação por teclado corrigida', d: 'o Tab no formulário de novo lançamento agora passa pelos campos certos, sem travar nem "escapar" da tela.' },
     ],
   },
   {
@@ -219,12 +222,13 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das correções desta versão (6.4.1) */}
+        {/* Detalhe das novidades desta versão (6.5.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🔐 Correção de segurança', d: 'corrigimos uma falha que podia deixar dados de outro usuário acessíveis indevidamente.' },
-            { t: '💾 Sessão mais estável', d: 'suas preferências (tema, mostrar/ocultar valores) não resetam mais sozinhas ao recarregar a página.' },
-            { t: '⌨️ Navegação por teclado corrigida', d: 'o Tab no formulário de novo lançamento agora passa pelos campos certos, sem travar nem "escapar" da tela.' },
+            { t: '🧾 Importação de fatura do Itaú', d: 'mais um banco na lista — suba o PDF da fatura do cartão Itaú e o sistema já reconhece os lançamentos, igual já fazia com Nubank, Inter e C6.' },
+            { t: '🗂️ Novo tipo de conta "Outros"', d: 'pra cadastrar contas que não se encaixam em corrente, cartão, investimento ou carteira — tipo vale-refeição ou uma conta de terceiros.' },
+            { t: '🔒 Aviso de sessão corrigido', d: 'a mensagem de "aba inativa" não aparece mais por engano logo depois de você acabar de entrar.' },
+            { t: '🖱️ Dropdown de tipo de conta mais confiável', d: 'no Windows, a opção "Investimento" às vezes ficava com o texto ilegível ao passar o mouse — corrigido.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
