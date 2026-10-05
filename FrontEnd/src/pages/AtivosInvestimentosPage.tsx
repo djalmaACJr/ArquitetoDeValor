@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, Search, Wallet, Sparkles, ArrowLeftRight } from 'lucide-react'
+import { Plus, Trash2, Search, Wallet, Sparkles, ArrowLeftRight, Upload } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, type ChartData } from 'chart.js'
@@ -463,6 +463,13 @@ export default function AtivosInvestimentosPage() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30">
             <Sparkles size={15} style={{ color: '#8b5cf6' }} /> Avaliações
           </Link>
+          {/* Importar opera sempre sob o usuário autenticado, nunca sob o espaço do dono */}
+          {!emEspacoAgregado && (
+            <Link to="/importexport?import=investimentos"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30">
+              <Upload size={15} /> Importar
+            </Link>
+          )}
           {podeEscrever && (
             <>
               <button onClick={() => setSeletorMov(true)} data-tutorial="ativos-nova-movimentacao"

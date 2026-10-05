@@ -22,11 +22,14 @@ echo  10. Lembretes
 echo  11. Assistente de Lancamentos
 echo  12. Objetivos
 echo  13. Investimentos
-echo  14. Abrir relatorio HTML do ultimo run
-echo  15. Modo visual (--ui)
+echo  14. Compartilhamento (Agregados)
+echo  15. Seletor de espaco (Agregados)
+echo  16. Sessao (aba inativa / seguranca)
+echo  17. Abrir relatorio HTML do ultimo run
+echo  18. Modo visual (--ui)
 echo   0. Sair
 echo.
-set /p OPC="Digite a opcao (0-15): "
+set /p OPC="Digite a opcao (0-18): "
 
 if "%OPC%"=="0"  goto FIM
 if "%OPC%"=="1"  goto OPC1
@@ -44,6 +47,9 @@ if "%OPC%"=="12" goto OPC12
 if "%OPC%"=="13" goto OPC13
 if "%OPC%"=="14" goto OPC14
 if "%OPC%"=="15" goto OPC15
+if "%OPC%"=="16" goto OPC16
+if "%OPC%"=="17" goto OPC17
+if "%OPC%"=="18" goto OPC18
 echo Opcao invalida.
 goto MENU
 
@@ -113,12 +119,27 @@ call :RUNTEST
 goto PAUSA
 
 :OPC14
+set TESTFILE=e2e/tests/12_agregados.spec.ts
+call :RUNTEST
+goto PAUSA
+
+:OPC15
+set TESTFILE=e2e/tests/13_seletor_espaco.spec.ts
+call :RUNTEST
+goto PAUSA
+
+:OPC16
+set TESTFILE=e2e/tests/12_seguranca_sessao.spec.ts
+call :RUNTEST
+goto PAUSA
+
+:OPC17
 echo.
 echo Abrindo relatorio HTML...
 call npm run test:e2e:report
 goto PAUSA
 
-:OPC15
+:OPC18
 echo.
 echo Iniciando modo visual (--ui)...
 echo Verificando dependencias...

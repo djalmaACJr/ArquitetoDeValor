@@ -593,12 +593,62 @@ Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `
 
 ---
 
+## 🤝 Usuários agregados (compartilhamento)
+
+### Conceito
+
+"Conta conjunta": um **dono** convida outro usuário já cadastrado (ou a cadastrar) como **agregado**, dando acesso aos seus dados em até 3 módulos — **EXTRATO**, **OBJETIVOS**, **INVESTIMENTOS** — cada um independentemente como só-leitura ou leitura+escrita. O agregado mantém seus próprios dados intactos e separados; só ganha uma janela pros dados do dono, nunca o contrário (o dono não vê os dados do agregado). A UI nunca mistura os dois: um **seletor de espaço** na Sidebar troca entre "Meus dados" e "Conta de \<dono\>".
+
+### Modelo de dados (3 tabelas)
+
+| Tabela | Conteúdo |
+|---|---|
+| `agregados` | 1 vínculo dono↔agregado. `status` (`PENDENTE`\|`ACEITO`\|`RECUSADO`\|`REVOGADO`), `email_convidado`, `token`+`token_expira_em` (7 dias — nunca exposto pela API pública), `criado_em`/`atualizado_em`/`aceito_em`/`revogado_em`. `agregado_id` fica `NULL` até o convite ser aceito (o convidado pode nem ter conta ainda). |
+| `agregados_permissoes` | 1 linha por módulo liberado nesse vínculo: `modulo` (ENUM `EXTRATO`\|`OBJETIVOS`\|`INVESTIMENTOS`) + `pode_escrever` (boolean). Módulo ausente = não liberado. |
+| `agregados_contas` | Contas liberadas nesse vínculo — **lista única, compartilhada entre EXTRATO e INVESTIMENTOS** (não existe escopo de conta separado por módulo; liberar uma conta vale para os dois, conforme o módulo em si esteja liberado). |
+
+Único convite "vivo" (`PENDENTE`/`ACEITO`) por par dono+e-mail — um novo convite pro mesmo e-mail reaproveita o `PENDENTE` existente (gera novo token) em vez de duplicar.
+
+### Fluxo de convite
+
+- **E-mail já cadastrado**: link `/aceitar-convite?token=...` → exige login → aceita por token (`fn_aceitar_convite_agregado`) ou, pela tela "Convites que recebi" já logado, por id (`fn_aceitar_convite_agregado_por_id`) — ambos validam o token/vínculo contra o **e-mail da sessão atual** (`usuarios.email`), nunca só posse do link.
+- **E-mail sem cadastro**: link `/cadastro?convite_token=...` → o token viaja em `raw_user_meta_data` do `signUp()` → a trigger de criação de usuário (`fn_sincronizar_usuario`) resolve e aceita o vínculo automaticamente. Falha silenciosa (token inválido/expirado) nunca bloqueia o cadastro.
+- Revogação tem efeito imediato — RLS reavalia a cada query, sem cache de sessão.
+
+### Escopo por módulo
+
+- **EXTRATO**: conta precisa estar em `agregados_contas`. Lançamento criado pelo agregado (com `pode_escrever`) grava sob o `user_id` do **dono** (isolamento de categorias/contas do dono intocado) com `criado_por` = quem de fato digitou — a UI mostra "lançado por Fulano" quando `criado_por != user_id`.
+- **Transferências**: atômicas — se qualquer uma das 2 pernas estiver fora do escopo de conta do agregado, a operação inteira falha (nenhuma perna muda), nunca um par pela metade.
+- **INVESTIMENTOS**: operações/dividendos seguem a mesma regra de conta (`inv_posicoes.conta_id`); `inv_ativos`/`inv_questionarios`/`inv_avaliacoes` (sem `conta_id` próprio) ficam visíveis via join em `inv_posicoes` — um ativo aparece se tiver ao menos 1 posição numa conta liberada.
+- **OBJETIVOS**: tratamento **diferente por tipo**, porque só 2 dos 4 tipos têm um conceito de "conta" pra checar escopo:
+  - `SONHO`/`PROJETO` são amarrados a conta(s) (`contas_sonho[]`/`contas_projeto[]`, com fallback pro `conta_id` legado em SONHO) — só ficam visíveis ao agregado se **todas** as contas monitoradas estiverem liberadas.
+  - `OBJETIVO`/`CRESCIMENTO` somam por **categoria em todas as contas do dono** — não existe "escopo de categoria" nesta feature. **Nunca ficam visíveis a um agregado**, mesmo com o módulo OBJETIVOS liberado (decisão final, confirmada com o usuário out/2026 — RLS bloqueia incondicionalmente via `fn_agregado_pode_ver_objetivo`, migration `20261006000007`). Motivo: sem escopo de conta possível, se a mesma categoria recebe lançamentos numa conta liberada **e** numa conta não liberada, o total exibido ao agregado somaria as duas — um vazamento parcial (nunca o lançamento individual, mas o efeito agregado dele) de uma conta que o agregado nem deveria saber que existe. A tela de criação de objetivo (`DrawerObjetivo`) já esconde essas 2 opções de tipo quando o espaço ativo é de um agregado, pra não oferecer uma ação que o backend sempre rejeitaria.
+  - `POST /objetivos/sincronizar-progresso` (recálculo em massa) exige `pode_escrever` e opera sobre **todos** os objetivos ativos do dono de uma vez — não filtra por tipo/escopo individualmente (é um refresh de valores já existentes, não uma leitura nova).
+
+### Páginas que nunca operam sob o espaço do agregado
+
+`ContasPage`, `CategoriasPage` e `ImportExportPage` (backup/exportação/importação/"Limpar dados") são **sempre pessoais** — a gestão de contas/categorias e as operações de backup/restore/limpeza de dados do dono nunca são feitas por um agregado, mesmo com módulos liberados. O backend já garante isso estruturalmente (as rotas de escrita dessas 3 páginas nunca chamam `resolverContexto()` — sempre operam sob o usuário autenticado de verdade, ignorando qualquer header de contexto); o frontend some com a UI de gestão nesse espaço só por clareza para o agregado, não como garantia de segurança.
+
+### Hardening (throttling, expurgo, aviso de revogação)
+
+- **Convites por hora**: `fn_convidar_agregado` limita a 100 convites/hora por dono (throttling contra abuso/spam de e-mail).
+- **Cooldown de reenvio**: `fn_reenviar_convite_agregado` recusa (`REENVIO_MUITO_RECENTE`) um 2º reenvio do mesmo convite antes de 60s do 1º — não se aplica ao 1º reenvio depois de criar (coluna dedicada `ultimo_reenvio_em`, nunca reaproveita `atualizado_em`, que a própria criação também seta).
+- **Expurgo de convites expirados**: job diário (`pg_cron`, 08:30) roda `fn_expurgar_convites_agregados_expirados()` — convites `PENDENTE` com `token_expira_em` vencido viram `REVOGADO`.
+- **Aviso de revogação**: ao logar, um agregado cujo acesso foi revogado desde a última vez que viu os avisos recebe um banner (`usuarios.agregados_avisos_vistos_em` guarda o "visto até").
+
+### Segurança
+
+RLS é a garantia real, não o backend. Toda tabela de domínio ganha uma **policy adicional permissiva** (nunca reescreve a policy de dono existente — Postgres faz `OR` entre permissivas do mesmo comando) via `fn_agregado_tem_acesso(dono_id, modulo, conta_id?, escrita?)`, a única função que decide "este agregado pode ver/editar isto?" — um bug ali conserta tudo de uma vez, não precisa caçar N subqueries. O header `X-Contexto-User-Id` (lido por `resolverContexto()` em cada Edge Function) é só uma dica de "qual filtro aplicar" nas queries explícitas; a Edge Function nunca confia só nele. Detalhe técnico completo (RLS por tabela, RPCs, `resolverContexto()`) em `ARCHITECTURE.md`.
+
+---
+
 ## 🔐 Multi-tenant / Isolamento
 
 - Toda tabela de domínio tem `user_id`.
 - RLS aplicada com `USING (user_id = auth.uid())` e `WITH CHECK (user_id = auth.uid())`.
 - Trigger `fn_validar_isolamento_usuario` impede que uma transação use `conta_id` ou `categoria_id` de outro usuário (defesa adicional além da RLS).
 - Edge Functions sempre repassam o JWT do usuário; nunca usam `service_role` para queries de dados de usuário.
+- **Única exceção**: **Usuários agregados** (seção acima) — um dono pode liberar leitura/escrita dos próprios dados a outro usuário específico. Implementada como policies *adicionais* permissivas (nunca reescreve a policy de dono acima), nunca afrouxando o isolamento padrão entre dois usuários sem vínculo.
 
 ---
 

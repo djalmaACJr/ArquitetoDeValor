@@ -883,7 +883,7 @@ export default function InvestimentosPage() {
               <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>
             ))}
           </SelectDark>
-          {/* Atualizar cotação / Preencher histórico / Importar sempre operam
+          {/* Atualizar cotação / Preencher histórico sempre operam
               sob o usuário autenticado de verdade, nunca sob o espaço do
               dono — escondidos por completo dentro de um espaço de agregado
               para não sugerir uma ação que não afeta a carteira em tela. */}
@@ -905,11 +905,6 @@ export default function InvestimentosPage() {
                   {preenchendo ? 'Preenchendo…' : 'Preencher histórico'}
                 </button>
               )}
-              <Link to="/importexport?import=investimentos"
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
-                  text-[13px] text-white transition-all hover:border-white/25">
-                <Upload size={15} /> Importar
-              </Link>
             </>
           )}
         </div>

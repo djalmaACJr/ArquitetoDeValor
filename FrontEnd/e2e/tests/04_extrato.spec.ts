@@ -175,8 +175,12 @@ test.describe('Extrato (Lançamentos)', () => {
     const toggle = page.getByRole('button', { name: 'Saldo anterior' })
     await expect(toggle).toBeVisible()
     await toggle.click()
-    // Não deve mostrar erro
-    await expect(page.locator('text=Erro')).not.toBeVisible()
+    // Não deve mostrar erro. `text=Erro` sozinho é frágil (achado real: uma
+    // dica aleatória do mascote contendo a palavra "erro" — ex.: "Aprenda com
+    // cada erro próprio..." — já bastou pra disparar um falso positivo) —
+    // casa só a mensagem de erro de verdade, que sempre começa com esse
+    // prefixo (ver fetchTransacoesMes/LancamentosPage.tsx).
+    await expect(page.getByText(/^erro ao carregar/i)).not.toBeVisible()
   })
 
   test('E2E-EX08 — filtros persistem ao navegar entre páginas', async ({ page }) => {
@@ -206,7 +210,8 @@ test.describe('Extrato (Lançamentos)', () => {
     // Aguarda possível spinner e verifica que os filtros continuam presentes
     await page.waitForTimeout(800)
     await expect(page.getByRole('button', { name: /todos status/i })).toBeVisible()
-    await expect(page.locator('text=Erro')).not.toBeVisible()
+    // Ver nota em E2E-EX07 sobre por que `text=Erro` sozinho é frágil.
+    await expect(page.getByText(/^erro ao carregar/i)).not.toBeVisible()
   })
 
   // ── E2E-EX09 ─────────────────────────────────────────────────

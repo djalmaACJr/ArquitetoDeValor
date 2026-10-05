@@ -50,6 +50,8 @@ const LS_MAX_AGE = 8 * 60 * 60 * 1000 // 8 horas
 
 let currentUserId: string | null | undefined = undefined
 let cacheHidratado = false
+// true só até o 1º callback do listener abaixo (ver uso em onAuthStateChange).
+let primeiroEventoAuth = true
 
 function tentarHidratar(userIdAtual: string | null) {
   if (cacheHidratado) return
@@ -123,6 +125,8 @@ queryClient.getQueryCache().subscribe(event => {
 // O listener resolve a sessão real ANTES de hidratar — eliminando o vazamento.
 supabase.auth.onAuthStateChange((event, session) => {
   const newUserId = session?.user?.id ?? null
+  const ehPrimeiroEvento = primeiroEventoAuth
+  primeiroEventoAuth = false
 
   // Seletor de espaço (ver lib/espacoAtivo.ts) — carrega o vínculo salvo
   // para ESTE uid (chave já namespaced por usuário, não precisa limpar em
@@ -135,16 +139,26 @@ supabase.auth.onAuthStateChange((event, session) => {
     tentarHidratar(newUserId)
   }
 
-  // Todo login (mesmo re-login da MESMA conta) zera o relógio de inatividade
-  // do useAutoLogout. Não dá pra confiar só na comparação de userId abaixo:
-  // se a sessão anterior morreu sem um SIGNED_OUT real (token expirado no
+  // Login de verdade (1ª vez numa aba nova, ou re-login da MESMA conta após
+  // sessão anterior morrer sem um SIGNED_OUT real — token expirado no
   // servidor, aba suspensa/fechada antes do auto-logout do cliente rodar até
-  // o fim), `currentUserId` nunca chegou a virar null, então um re-login da
-  // mesma conta não cairia no branch de troca de usuário — e o timestamp
-  // antigo (de horas atrás) sobrevivia e disparava o modal "Aba inativa" na
-  // cara assim que o AppLayout montava pós-login (bug relatado: aviso de aba
-  // parada logo após logar).
-  if (event === 'SIGNED_IN') {
+  // o fim) zera o relógio de inatividade do useAutoLogout — sem isso, o
+  // timestamp antigo (de horas atrás) sobrevivia e disparava o modal "Aba
+  // inativa" na cara assim que o AppLayout montava pós-login (bug relatado:
+  // aviso de aba parada logo após logar).
+  //
+  // EXCETO no 1º evento recebido por este listener na vida da aba: nesse
+  // caso SIGNED_IN é a restauração automática da sessão já persistida (ao
+  // abrir/recarregar a página com um refresh token ainda válido) — não um
+  // login interativo de verdade. Achado real (E2E): o SDK do Supabase aqui
+  // dispara SIGNED_IN em TODO carregamento com sessão restaurada, inclusive
+  // antes do próprio INITIAL_SESSION — sem esta checagem, um simples F5 (ou
+  // reabrir a aba) numa sessão esquecida havia horas também zerava o
+  // relógio, destruindo exatamente a defesa que esta feature existe pra dar
+  // ("sessão esquecida em PC compartilhado", ver CLAUDE.md): o check de
+  // `persistida` vencida no mount do useAutoLogout encontrava o timestamp já
+  // apagado e recomeçava a contagem do zero em vez de deslogar na hora.
+  if (event === 'SIGNED_IN' && !ehPrimeiroEvento) {
     localStorage.removeItem(LS_ULTIMA_ATIVIDADE)
   }
 

@@ -97,13 +97,13 @@ describe("Segurança — Auth e CORS", () => {
   });
 
   // ── SEG-CORS02: headers necessários liberados ────────────────
-  test("SEG-CORS02 — OPTIONS libera Authorization, apikey, Content-Type", async () => {
+  test("SEG-CORS02 — OPTIONS libera Authorization, apikey, Content-Type, X-Contexto-User-Id", async () => {
     const res = await fetch(`${BASE_URL}/contas`, {
       method: "OPTIONS",
       headers: {
         "Origin":                          "http://localhost:5173",
         "Access-Control-Request-Method":   "GET",
-        "Access-Control-Request-Headers":  "authorization,apikey,content-type",
+        "Access-Control-Request-Headers":  "authorization,apikey,content-type,x-contexto-user-id",
       },
     });
     expect(res.status).toBe(200);
@@ -111,6 +111,12 @@ describe("Segurança — Auth e CORS", () => {
     expect(allowHeaders).toContain("authorization");
     expect(allowHeaders).toContain("apikey");
     expect(allowHeaders).toContain("content-type");
+    // Achado real (E2E Firefox, usuários agregados): sem este header na
+    // lista, o preflight do navegador barra toda requisição com o header
+    // X-Contexto-User-Id ANTES dela sair — a troca de espaço falhava
+    // silenciosamente (NS_ERROR_DOM_BAD_URI), sem nenhum log no backend,
+    // porque fetch() em Jest/Node nunca aplica CORS e nunca pegaria isso.
+    expect(allowHeaders).toContain("x-contexto-user-id");
   });
 
   // ── SEG-CORS03: Allow-Methods também inclui GET/POST/PUT/DELETE ─

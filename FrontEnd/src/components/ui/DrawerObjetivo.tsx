@@ -6,6 +6,7 @@ import { SearchableSelect } from './shared'
 import { MultiSelect } from './MultiSelect'
 import { useContas } from '../../hooks/useContas'
 import { useCategorias } from '../../hooks/useCategorias'
+import { useEmEspacoDeAgregado } from '../../hooks/useEspacoAtivo'
 import type { Objetivo, TipoObjetivo, Frequencia } from '../../types'
 import type { CriarObjetivoInput, EditarObjetivoInput } from '../../hooks/useObjetivos'
 
@@ -83,6 +84,16 @@ export function DrawerObjetivo({
 
   const { contas }     = useContas()
   const { categorias } = useCategorias()
+  const emEspacoAgregado = useEmEspacoDeAgregado()
+
+  // OBJETIVO/CRESCIMENTO somam por categoria em TODAS as contas do dono —
+  // sem escopo de conta possível — nunca ficam disponíveis a um agregado
+  // (RLS bloqueia de qualquer forma; escondido aqui só pra não oferecer uma
+  // opção que o backend sempre rejeitaria). SONHO continua disponível
+  // (escopo por conta, respeitado pela RLS).
+  const tipoOpcoes = emEspacoAgregado
+    ? TIPO_OPCOES.filter(op => op.value !== 'OBJETIVO' && op.value !== 'CRESCIMENTO')
+    : TIPO_OPCOES
 
   // Reinicializa o form quando o drawer abre ou troca de objetivo. Padrão
   // "ajustar estado na renderização" (React docs) — evita setState em efeito.
@@ -176,7 +187,7 @@ export function DrawerObjetivo({
       {!editando && (
         <Field label="Tipo" data-tutorial="objetivo-tipo">
           <div className="grid grid-cols-2 gap-2">
-            {TIPO_OPCOES.map(op => (
+            {tipoOpcoes.map(op => (
               <button key={op.value} onClick={() => set('tipo', op.value)}
                 className={`flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl border text-center transition-all
                   ${form.tipo === op.value

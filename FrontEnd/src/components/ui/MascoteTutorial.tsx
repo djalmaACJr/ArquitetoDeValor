@@ -81,9 +81,18 @@ export default function MascoteTutorial({
   if (escondidoPorScroll) return null
 
   const exibindoTutorial = estado === 'tutorial'
-  const dica = exibindoTutorial ? null : pool[estado]
-  const pose = exibindoTutorial ? tutorial.pose : dica!.pose
-  const texto = exibindoTutorial ? tutorial.texto : dica!.texto
+  // `estado` (índice numérico) é calculado a partir do pool do mascote NO
+  // MOMENTO do sorteio (idxRandomDica) — mas `mascote` pode mudar entre um
+  // render e outro (ex.: valor padrão 'sabio' enquanto mascote_preferido
+  // ainda carrega do banco, substituído pelo valor real logo em seguida).
+  // Nessa janela de 1 render, `pool` já reflete o NOVO mascote mas `estado`
+  // ainda é um índice válido só pro pool ANTIGO — se o pool novo for mais
+  // curto, `pool[estado]` fica fora dos limites. `dica` cai para `pool[0]`
+  // (corrigido no próximo render pelo useEffect) e, na pior hipótese de
+  // pool vazio, para o conteúdo do tutorial — nunca undefined.
+  const dica = exibindoTutorial ? null : (pool[estado] ?? pool[0])
+  const pose = exibindoTutorial ? tutorial.pose : (dica?.pose ?? tutorial.pose)
+  const texto = exibindoTutorial ? tutorial.texto : (dica?.texto ?? tutorial.texto)
 
   const proxima = () => {
     setEstado(prev => idxRandomDica(typeof prev === 'number' ? prev : undefined))

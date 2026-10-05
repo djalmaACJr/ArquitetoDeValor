@@ -80,7 +80,13 @@ export function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin":  _origemPorRequisicao.getStore() ?? ORIGEM_PADRAO,
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type, Idempotency-Key",
+    // X-Contexto-User-Id: header do seletor de espaço (ver resolverContexto())
+    // — sem declarar aqui, o preflight do navegador barra a requisição ANTES
+    // dela sair (nunca chega ao servidor), algo que testes via Jest/Node
+    // nunca pegam porque fetch() fora do browser não aplica CORS. Achado real
+    // em E2E (Firefox): toda a troca de espaço falhava silenciosamente com
+    // NS_ERROR_DOM_BAD_URI, sem nenhum log no backend.
+    "Access-Control-Allow-Headers": "Authorization, apikey, Content-Type, Idempotency-Key, X-Contexto-User-Id",
     "Vary":                         "Origin",
   };
 }

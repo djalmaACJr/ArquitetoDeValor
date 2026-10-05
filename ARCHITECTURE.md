@@ -60,9 +60,9 @@ Sistema cliente-servidor 100% serverless:
 | `pages/` | Composição de UI por rota — sem regra de negócio |
 | `components/layout/` | `AppLayout`, `Sidebar` — chrome da aplicação |
 | `components/ui/` | Componentes reusáveis (`DrawerLancamento`, `Calculadora`, `MultiSelect`, `BotaoNovoLancamento`, `BotaoOcultar`, `FiltrosSalvosBtn`, `IconeConta`, `MonthPicker`, `ModalLembrete`, `CalendarioDashboard`, …) |
-| `hooks/` | Lógica de negócio + estado — todos baseados em `@tanstack/react-query` (`useLancamentos`, `useDashboard`, `useContas`, `useCategorias`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useOcultarValores`, `useAuth`, `useTheme`) |
+| `hooks/` | Lógica de negócio + estado — todos baseados em `@tanstack/react-query` (`useLancamentos`, `useDashboard`, `useContas`, `useCategorias`, `useFiltrosSalvos`, `useLembretes`, `useAssistente`, `useOcultarValores`, `useAuth`, `useTheme`, `useEspacoAtivo` — ver "Usuários agregados" abaixo) |
 | `context/` | `AuthContext` (sessão), `PageStateContext` (filtros persistidos entre páginas) |
-| `lib/` | `api.ts` (HTTP), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums centralizados), `queryKeys.ts` (chaves React Query), `logger.ts` (log condicional dev-only) |
+| `lib/` | `api.ts` (HTTP — anexa `X-Contexto-User-Id` automaticamente), `supabase.ts` (Auth), `utils.ts`, `constants.ts` (enums centralizados), `queryKeys.ts` (chaves React Query — toda chave afetada por agregados incorpora o uid de contexto), `logger.ts` (log condicional dev-only), `espacoAtivo.ts` (store do espaço ativo — ver "Usuários agregados" abaixo) |
 | `types/` | Contratos TypeScript compartilhados — re-exporta enums de `constants.ts` |
 
 ### Cliente HTTP — `lib/api.ts`
@@ -84,6 +84,8 @@ interface ApiResult<T> {
 ```
 
 A API responde `{ dados }` em sucesso e `{ erro }` em falha — `apiFetch` desembala 1 nível (`data.dados ?? data`).
+
+Ambas anexam o header `X-Contexto-User-Id` automaticamente quando há um espaço de agregado ativo (lido de `lib/espacoAtivo.ts`, fora da árvore React — nenhum hook precisa passar isso explicitamente). ⚠️ Headers customizados novos precisam entrar em `Access-Control-Allow-Headers` (`_shared/utils.ts`, backend) — ver seção CORS; sem isso o preflight do navegador barra a requisição silenciosamente, algo que os testes Jest nunca pegam (CORS não é aplicado fora do browser).
 
 ### Princípios
 
@@ -141,6 +143,7 @@ supabase/functions/
 ├── chat_mascote/index.ts       # proxy autenticado para o provedor escolhido — recebe contexto opcional (texto + screenshot)
 ├── _shared/cripto.ts           # helpers AES-256-GCM (Web Crypto) usando o secret IA_KEYS_ENCRYPTION_KEY
 ├── objetivos/index.ts          # CRUD de objetivos (SONHO/OBJETIVO/PROJETO/CRESCIMENTO) + POST /sincronizar-progresso
+├── agregados/index.ts          # ciclo de vida do compartilhamento ("usuários agregados") — ver seção "Usuários agregados" abaixo
 ├── investimentos/index.ts      # ~6.500 linhas — maior função do sistema; ver seção "Investimentos" abaixo
 ├── faturas/
 │   ├── index.ts                 # sessão de importação de fatura (upload → parse → revisão → confirmação)
@@ -188,6 +191,7 @@ Deno.serve(async (req) => {
 | `executarComLogDeCron(jobNome, fn)` | Envolve a chamada de uma rota de cron: mede duração, extrai o corpo `dados` da `Response` como resumo, grava via `registrarExecucaoCron`, repassa a `Response` original. Usada pelas rotas `*-cron` de `investimentos/index.ts` |
 | `hojeBR()` / `mesCorrenteBR()` | **AUD-01**: data/mês de "hoje" no fuso `America/Sao_Paulo` (via `Intl.DateTimeFormat('en-CA', {timeZone: ...})`), substituindo `new Date().toISOString()` (que resolve em UTC, errando o dia das 21h à meia-noite BRT). Ponto único reusado em `transacoes`, `transferencias`, `objetivos`, `faturas`; `investimentos/shared.ts` mantém seu `hojeISO()` histórico, que agora só delega pra `hojeBR()` |
 | `comIdempotencia(c, userId, rota, chave, executar)` | **AUD-06**: se `chave` (header `Idempotency-Key`) vier, reivindica-a via INSERT em `idempotency_keys` (claim-first, não check-then-write — evita a mesma race que a feature existe pra fechar); colisão (`23505`) → devolve a resposta já cacheada; sem colisão → roda `executar()` e grava o resultado. Sem `chave`, ou se o INSERT falhar por outro motivo (ex.: tabela não migrada ainda), cai em fail-open (roda `executar()` normalmente) — nunca bloqueia criação por causa da própria feature de proteção. Usada em `POST /transacoes` e `POST /transferencias` |
+| `resolverContexto(req, c, userId, modulos, escrita?)` | **Usuários agregados**: lê o header `X-Contexto-User-Id`; sem header, ou igual ao próprio `userId`, devolve `{ userId, isAgregado: false }` (caminho normal, sem overhead). Com header diferente, chama a RPC `fn_agregado_tem_acesso` pra cada módulo em `modulos` (OR — qualquer um bastando) com `p_conta_id: null` (checagem de módulo, não de conta específica — a RLS de cada tabela faz a checagem granular por conta na query em si); se nenhum módulo autorizar, `403`. O header é só uma dica de "qual filtro aplicar" nas queries explícitas do handler — a RLS, reavaliada a cada query, é a garantia real. Ver `BUSINESS_RULES.md` → Usuários agregados |
 
 ### CORS
 
@@ -198,6 +202,8 @@ supabase secrets set ALLOWED_ORIGIN=https://seu-dominio.com
 ```
 
 Em dev fica `*`.
+
+`corsHeaders()` (`_shared/utils.ts`) declara `Access-Control-Allow-Headers` com a lista exata de headers customizados que o frontend manda — hoje `Authorization, apikey, Content-Type, Idempotency-Key, X-Contexto-User-Id`. ⚠️ **Todo header customizado novo precisa entrar nessa lista antes de qualquer PR usá-lo.** Achado real (E2E, out/2026): o header `X-Contexto-User-Id` (usuários agregados) foi usado em todo o frontend por várias fases sem nunca ter sido adicionado aqui — o preflight do navegador barrava a requisição **antes dela sair do cliente** (`NS_ERROR_DOM_BAD_URI` no Firefox), sem log nenhum no backend. A feature inteira de troca de espaço funcionava nos testes Jest (que usam `fetch` fora do browser — CORS nunca é aplicado) e nunca tinha funcionado de verdade num navegador real. `tests/10_seguranca_auth_cors.test.ts` (SEG-CORS02) agora cobre isso explicitamente — qualquer header novo deve ganhar uma linha lá também.
 
 ### Convenções de rota
 
@@ -236,6 +242,8 @@ Tudo vive em **`arqvalor`** — `search_path` é configurado nas migrations. Ext
 | `subtipo_rf` | `TESOURO`, `CDB`, `LCI`, `LCA`, `CRI`, `CRA`, `DEBENTURE`, `OUTRO` |
 | `indexador_rf` | `PREFIXADO`, `POS_FIXADO`, `HIBRIDO` |
 | `indice_rf` | `CDI`, `SELIC`, `IPCA`, `IGPM` |
+| `status_convite_agregado` | `PENDENTE`, `ACEITO`, `RECUSADO`, `REVOGADO` |
+| `modulo_agregado` | `EXTRATO`, `OBJETIVOS`, `INVESTIMENTOS` |
 | `categoria_fii` | `TIJOLO`, `PAPEL`, `FOF`, `DESENVOLVIMENTO`, `OUTRO` |
 | `acoes_subtipo` | `ON`, `PN`, `UNIT`, `BDR` |
 
@@ -399,6 +407,79 @@ Cache compartilhado (sem `user_id`) de composição de ETF: PK `(etf_ticker, hol
 
 ---
 
+### 🤝 Tabelas — Usuários agregados
+
+Migrations: `20260930000001_agregados_fundacao.sql` (schema + RPCs + Fase 0) até `20261006000007` (mais recente). Detalhe de negócio completo em `BUSINESS_RULES.md`.
+
+#### `agregados`
+| Coluna | Tipo | Notas |
+|---|---|---|
+| `id` | UUID PK | |
+| `dono_id` | UUID | FK `usuarios` cascade DELETE |
+| `agregado_id` | UUID nullable | FK `usuarios` cascade DELETE — `NULL` até o convite ser aceito (o convidado pode nem ter conta ainda) |
+| `email_convidado` | TEXT | |
+| `status` | `status_convite_agregado` | `PENDENTE` \| `ACEITO` \| `RECUSADO` \| `REVOGADO` |
+| `token` | UUID | default `gen_random_uuid()` — **nunca** exposto pela API pública (`semToken()` em `agregados/index.ts`) |
+| `token_expira_em` | TIMESTAMPTZ | default `now() + 7 days` |
+| `ultimo_reenvio_em` | TIMESTAMPTZ nullable | `20261006000005` — cooldown de reenvio (60s), separado de `atualizado_em` de propósito (a própria criação também seta `atualizado_em`, o que fazia o 1º reenvio sempre bater no cooldown por engano) |
+| `criado_em` / `atualizado_em` / `aceito_em` / `revogado_em` | TIMESTAMPTZ | |
+| `CHECK chk_agregados_nao_proprio` | | `agregado_id IS NULL OR agregado_id <> dono_id` — não dá pra convidar a própria conta |
+
+Índices: `token` (único), `dono_id`, `agregado_id`. `ux_agregados_dono_email_ativo` (único, parcial `WHERE status IN ('PENDENTE','ACEITO')`) — só 1 convite "vivo" por par dono+e-mail; pode reconvidar livremente depois de `RECUSADO`/`REVOGADO`.
+
+#### `agregados_permissoes`
+`id`, `agregado_vinculo_id → agregados` cascade DELETE, `modulo modulo_agregado`, `pode_escrever BOOLEAN DEFAULT false`, timestamps. `UNIQUE(agregado_vinculo_id, modulo)` — módulo ausente = não liberado.
+
+#### `agregados_contas`
+`id`, `agregado_vinculo_id → agregados` cascade DELETE, `conta_id → contas` cascade DELETE, `criado_em`. `UNIQUE(agregado_vinculo_id, conta_id)`. **Lista única, compartilhada entre EXTRATO e INVESTIMENTOS** — não existe coluna de módulo aqui, de propósito. Trigger `fn_validar_conta_agregado` (BEFORE INSERT) garante que `conta_id` pertence mesmo ao `dono_id` do vínculo.
+
+#### RLS nas 3 tabelas
+Só `SELECT` para `authenticated` (`dono_id = auth.uid() OR agregado_id = auth.uid()`, com join equivalente nas 2 tabelas filhas). **Nenhuma policy de escrita** — toda mutação passa pelas RPCs `SECURITY DEFINER` listadas na tabela "Funções" acima (mesmo padrão de `fn_excluir_dados_usuario`: checagem manual de `auth.uid()`, `search_path` fixo), porque as transições de estado do convite (só o convidado com e-mail batendo pode aceitar, só enquanto pendente e não expirado, etc.) são difíceis de expressar em RLS puro e ficam mais auditáveis centralizadas.
+
+#### Policies adicionais nas tabelas de domínio
+Nunca reescreve a policy de dono existente (Postgres faz `OR` entre permissivas do mesmo comando) — sempre uma policy **a mais**, condicionada por `fn_agregado_tem_acesso` (ou `fn_agregado_pode_ver_objetivo`/`fn_agregado_pode_ver_ativo`, que materializam regras mais específicas por não terem como se reduzir a módulo+conta sozinhas):
+
+| Tabela | Comando(s) | Predicado |
+|---|---|---|
+| `contas` | SELECT | `fn_agregado_tem_acesso(user_id, 'EXTRATO', id) OR ..., 'INVESTIMENTOS', id) OR ..., 'OBJETIVOS', id)` |
+| `categorias` | SELECT | `fn_agregado_tem_acesso(user_id, 'EXTRATO') OR ..., 'OBJETIVOS')` — sem escopo de conta (categoria não é por conta) |
+| `transacoes` | SELECT / INSERT / UPDATE / DELETE | `fn_agregado_tem_acesso(user_id, 'EXTRATO', conta_id, <escrita só em I/U/D>)`; INSERT também exige `criado_por = auth.uid()` |
+| `objetivos` / `objetivos_progresso` | SELECT (+ I/U/D onde aplicável) | `fn_agregado_pode_ver_objetivo(user_id, tipo, conta_id, contas_sonho, contas_projeto, <escrita>)` |
+| `inv_posicoes`, `inv_operacoes`, `inv_dividendos`, `inv_historico_mensal` | SELECT (+ I/U/D) | `fn_agregado_tem_acesso(user_id, 'INVESTIMENTOS', conta_id, <escrita>)` |
+| `inv_ativos`, `inv_questionarios`, `inv_avaliacoes` | SELECT (+ I/U onde aplicável) | Via `EXISTS` join em `inv_posicoes` (ativo não tem `conta_id` próprio — `fn_agregado_pode_ver_ativo`) |
+| `inv_alocacoes_tipo`, `inv_tipos_dividendo`, `inv_indicadores` | SELECT | `fn_agregado_tem_acesso(user_id, 'INVESTIMENTOS')` — sem conta, são preferências globais do dono |
+
+`inv_etf_holdings`, `inv_proventos_fundo`, `cotacoes_*`: sem mudança (já compartilhadas entre todos os usuários, sem `user_id`).
+
+#### Edge Function — `supabase/functions/agregados/index.ts`
+Mesmo padrão de handler do resto do repo — thin wrappers chamando as RPCs via `c.rpc(...)`:
+```
+GET  /agregados                     -- meus vínculos como dono (permissões+contas aninhadas)
+GET  /agregados/convites-recebidos  -- vínculos onde sou o convidado (base do seletor de espaço)
+GET  /agregados/:id                 -- detalhe pra tela de edição
+POST /agregados {email}             -- convida + envia e-mail (Brevo)
+POST /agregados/:id/reenviar
+POST /agregados/:id/revogar
+POST /agregados/aceitar {token}     -- por token (link de e-mail)
+POST /agregados/recusar {token}
+POST /agregados/:id/aceitar         -- por id (tela "Convites que recebi", já logado)
+POST /agregados/:id/recusar
+PUT  /agregados/:id/permissoes {modulo, liberado, pode_escrever}
+PUT  /agregados/:id/contas     {conta_ids: uuid[]}
+```
+Nunca faz `select('*')` em `agregados` — toda resposta passa por `semToken()`.
+
+#### Fluxo de convite + signup
+Convite a um e-mail **sem cadastro** carrega o token em `raw_user_meta_data` do `signUp()` (`?convite_token=` → `CadastroPage.tsx`) — a trigger `fn_sincronizar_usuario` (mesma que já lia `nome` de lá) resolve e aceita o vínculo **dentro da própria trigger**, não via RPC pública (a trigger não roda num contexto de request autenticado). Falha silenciosa (token inválido/expirado) nunca bloqueia o cadastro em si.
+
+#### `fn_excluir_dados_usuario`
+`DELETE FROM agregados WHERE dono_id = p_user_id OR agregado_id = p_user_id` faz parte do bloco `DISABLE/ENABLE TRIGGER USER` já existente — exclusão de conta limpa os vínculos nos dois sentidos (como dono e como agregado). ⚠️ Esta lista de tabelas é fácil de regredir silenciosamente ao copiar a função inteira entre migrations (já aconteceu uma vez, `20260930000001` sobrescreveu uma versão mais completa de `20260929000003` por engano — corrigido em `20261005000001`, que também é a versão atual) — qualquer tabela nova de usuário precisa entrar nesse bloco.
+
+#### Frontend — seletor de espaço
+`lib/espacoAtivo.ts` é um store fora do React (mesmo padrão de `operacaoLonga.ts`/`avisoFecharAba.ts`): `{ vinculo: VinculoAgregado | null }`, persistido em `localStorage` **namespaced por uid** (nunca herdar entre contas no mesmo navegador), lido tanto por `hooks/useEspacoAtivo.ts` (ponte React, `useSyncExternalStore`) quanto por `lib/api.ts` (fora da árvore React, pra anexar o header `X-Contexto-User-Id` em toda requisição). `useContextoUserId()` é o substituto direto de `session?.user?.id` nas query keys dos hooks de domínio que precisam respeitar o seletor — sem isso, "Meus dados" e "Conta de Fulano" compartilhariam a mesma entrada de cache do React Query.
+
+---
+
 ### 🧾 Tabelas — Importação de fatura
 
 ✅ **Corrigido em 2026-08-04**: a migration fundacional `supabase/migrations/Aplicados/20260527000001_fatura_import.sql` estava **corrompida** (depois deletada por completo) em todo o histórico do git. Foi reconstruída por evidência indireta (migrations `ALTER` posteriores, código de `functions/faturas/index.ts`, tipos do frontend) e recolocada no mesmo slot cronológico, incluindo a trigger `trg_validar_conta_cartao_fatura` que antes só existia em comentário.
@@ -524,6 +605,16 @@ Padrão parecido, mas o "visto" é um **conjunto de chaves** (`datacom_avisos_vi
 | `fn_sync_dividendo_tipo_ativo` | trigger AFTER UPDATE OF `tipo_ativo` em `inv_ativos` | Propaga mudança de tipo para todos os `inv_dividendos` do ativo |
 | `fn_dividendo_tipo_do_ativo` / `trg_dividendo_tipo_do_ativo` | trigger | Mantém `inv_dividendos.tipo_ativo` sincronizado no INSERT (achado de drift documentado em `20260709000001`) |
 | `fn_seed_investimentos_exemplo` | trigger AFTER INSERT em `auth.users` (`trg_z_seed_investimentos_exemplo`, roda depois de `trg_sincronizar_usuario` por ordem alfabética) | Popula conta "XP Investimentos" + 2 ativos + posições/operações + histórico de exemplo para novo usuário |
+| `fn_agregado_tem_acesso(p_dono_id, p_modulo, p_conta_id?, p_escrita?)` | SQL stable, `SECURITY INVOKER` | **Usuários agregados** — único ponto de verdade de "este agregado pode ver/editar isto?", usado por toda RLS adicional e por `resolverContexto()`. Ver "Tabelas — Usuários agregados" abaixo |
+| `fn_agregado_pode_ver_objetivo(...)` / `fn_agregado_pode_ver_ativo(p_ativo_id, p_dono_id, p_escrita?)` | SQL stable, `SECURITY INVOKER` | Materializam a regra de visibilidade por tipo de objetivo / por posição de ativo (não dá pra expressar com `fn_agregado_tem_acesso` sozinha, que só sabe checar módulo+conta) |
+| `fn_convidar_agregado(p_email)` / `fn_reenviar_convite_agregado(p_vinculo_id)` / `fn_revogar_agregado(p_vinculo_id)` | RPC, `SECURITY DEFINER` | Ciclo de vida do convite pelo lado do dono. Convidar tem throttling (100/h); reenviar tem cooldown de 60s (`ultimo_reenvio_em`) |
+| `fn_aceitar_convite_agregado(p_token)` / `fn_recusar_convite_agregado(p_token)` | RPC, `SECURITY DEFINER` | Aceite/recusa por token (link de e-mail) — valida contra `usuarios.email` da sessão, nunca só posse do token |
+| `fn_aceitar_convite_agregado_por_id(p_vinculo_id)` / `fn_recusar_convite_agregado_por_id(p_vinculo_id)` | RPC, `SECURITY DEFINER` | Mesmo aceite/recusa, pela tela "Convites que recebi" (já logado, sem token na URL) |
+| `fn_definir_permissoes_agregado(p_vinculo_id, p_modulo, p_liberado, p_pode_escrever)` / `fn_definir_contas_agregado(p_vinculo_id, p_conta_ids)` | RPC, `SECURITY DEFINER` | Dono edita módulos/contas liberadas de um vínculo — `fn_definir_contas_agregado` substitui o conjunto inteiro atomicamente, validando que toda conta é mesmo do dono |
+| `fn_meus_vinculos_como_agregado()` | RPC, `SECURITY DEFINER` | Vínculos onde o chamador é o agregado (inclusive `REVOGADO`, pra alimentar o aviso de revogação) ou um convite `PENDENTE` pro seu e-mail |
+| `fn_expurgar_convites_agregados_expirados()` | RPC, `SECURITY DEFINER`, chamada por `pg_cron` | Convites `PENDENTE` com `token_expira_em` vencido → `REVOGADO`. Job diário 08:30 |
+| `fn_validar_conta_agregado` | trigger BEFORE INSERT em `agregados_contas` | Defesa em profundidade: a conta liberada precisa pertencer ao dono do vínculo (a RPC já valida; o trigger fecha a garantia independente de quem chame o INSERT) |
+| `fn_saldos_contas_ate_data(p_user_id, p_data)` / `fn_saldo_conta_ate_data(p_conta_id, p_data)` | RPC, `SECURITY INVOKER` | Saldo por conta até uma data — chamadas direto pelo frontend (`useSaldoBaseMes`), sem Edge Function. Aceitam `p_user_id`/dono de uma conta igual a `auth.uid()` OU um agregado com EXTRATO liberado (estendido em `20261006000006` — tinham ficado de fora da Fase 1 por descuido, fazendo o Extrato de um agregado mostrar o PRÓPRIO saldo-base dele em vez do saldo do dono) |
 
 ### Triggers
 
@@ -595,6 +686,8 @@ Habilitada em **todas** as tabelas de domínio. Policy padrão:
 USING      (user_id = auth.uid())
 WITH CHECK (user_id = auth.uid());
 ```
+
+**Usuários agregados** é a única exceção, e nunca reescrevendo essa policy: sempre uma policy *adicional* permissiva por cima (Postgres faz `OR` entre permissivas do mesmo comando), condicionada por `fn_agregado_tem_acesso`/`fn_agregado_pode_ver_objetivo`/`fn_agregado_pode_ver_ativo`. Ver "Tabelas — Usuários agregados" acima para a lista completa por tabela.
 
 ### Migrations
 
@@ -778,6 +871,9 @@ Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já 
 - **Regressão conhecida em Objetivos tipo CRESCIMENTO**: a migration `20260605000001_sonho_saldo_base.sql`, ao reescrever as funções de cálculo, reintroduziu a versão **antiga** do bloco CRESCIMENTO (ano-base fixo, só receita bruta, sem cutoff YTD), descartando as melhorias de `20260603000003..006` (YoY/YTD/líquido). O valor gravado no banco (`objetivos.valor_atingido`/`percentual`/`status`) usa essa versão simples, enquanto a tela `ObjetivoDetalhe.tsx` recalcula no client a versão completa (YoY+YTD+líquido) — os dois números podem divergir para o mesmo objetivo. Antes de "corrigir", confirmar com quem mantém o código se isso foi intencional.
 - **Cartões virtuais sem resolução sufixo→apelido**: o parser Nubank grava `"Cartão final <sufixo>"` na `observacao` do item de fatura com a intenção declarada em comentário de casar com `contas.cartoes_virtuais` para mostrar o apelido — isso não está implementado; a UI hoje mostra a string crua do sufixo.
 - **`hash_match`** em `fatura_import_item` é calculado e persistido mas não é usado em nenhuma query de deduplicação hoje — não assumir que reimportar a mesma fatura é bloqueado automaticamente.
+- **Header customizado novo (`X-Contexto-User-Id` ou outro) sem `Access-Control-Allow-Headers`**: o preflight do navegador barra a requisição ANTES dela sair do cliente, sem log nenhum no backend — e os testes Jest nunca pegam isso (CORS não existe fora do browser). Foi exatamente o que aconteceu com `X-Contexto-User-Id` até out/2026 (ver seção CORS). Qualquer header novo precisa entrar em `_shared/utils.ts::corsHeaders()` E ganhar uma asserção em `tests/10_seguranca_auth_cors.test.ts` (SEG-CORS02).
+- **Objetivos tipo OBJETIVO/CRESCIMENTO nunca ficam visíveis a um agregado** (`fn_agregado_pode_ver_objetivo` retorna `false` incondicional pros 2 tipos, `20261006000007`) — decisão final confirmada com o usuário, não um bug: somam por categoria em TODAS as contas do dono, sem escopo de conta possível (ver `BUSINESS_RULES.md` → Usuários agregados). Não "corrigir" isso sem reabrir essa decisão com o usuário.
+- **`arqvalor:ultima-atividade` só pode ser zerado num login de verdade, nunca numa restauração de sessão** (`main.tsx`, flag `primeiroEventoAuth`) — o SDK do supabase-js dispara `SIGNED_IN` em todo carregamento com sessão já persistida (F5, reabrir aba), não só num login interativo; sem o guard de "1º evento", um reload numa sessão esquecida apagava o timestamp vencido e destruía a defesa de "sessão esquecida em PC compartilhado" do `useAutoLogout`. Achado real via E2E (`12_seguranca_sessao.spec.ts`), out/2026.
 
 ---
 
