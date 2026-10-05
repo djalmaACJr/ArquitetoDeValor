@@ -20,6 +20,7 @@ import { apiMutate } from '../lib/api'
 import { usePageState } from '../context/PageStateContext'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { useSaldoBaseMes } from '../hooks/useSaldoBaseMes'
+import { useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAtivo'
 import { IconeConta } from '../components/ui/IconeConta'
 import { Toast, ModalExcluir } from '../components/ui/shared'
 import { MonthPicker } from '../components/ui/MonthPicker'
@@ -233,6 +234,13 @@ export default function LancamentosPage() {
 
   const { contas }     = useContas()
 
+  // Espaço de agregado: por padrão (próprios dados) sempre pode escrever.
+  // Num espaço compartilhado, só se o dono liberou "pode editar" pro módulo
+  // Extrato — senão a tela vira só-leitura (sem criar/editar/excluir/pagar).
+  const emEspacoAgregado = useEmEspacoDeAgregado()
+  const permissaoExtrato = usePermissaoModulo('EXTRATO')
+  const podeEscrever = !emEspacoAgregado || permissaoExtrato?.pode_escrever === true
+
   const [drawerAberto,       setDrawerAberto]       = useState(false)
   const [lancamentoEditando, setLancamentoEditando] = useState<Lancamento | null>(null)
   const [novoLancamento,     setNovoLancamento]     = useState(false)
@@ -383,6 +391,10 @@ export default function LancamentosPage() {
   }
 
   const abrirEditar = (l: Lancamento) => {
+    // Espaço de agregado sem permissão de escrita: tela é só-leitura (os
+    // botões/linha já não aparecem clicáveis, mas centraliza a trava aqui
+    // também — defesa contra qualquer outro call-site que venha a existir).
+    if (!podeEscrever) return
     // Para transferência, garantir que editamos pela perna de saída
     if (l.id_par_transferencia && l.descricao?.includes('entrada')) {
       const saida = lancamentos.find(x => x.id_par_transferencia === l.id_par_transferencia && x.descricao?.includes('saída'))
@@ -908,9 +920,11 @@ export default function LancamentosPage() {
             <FileDown size={14} />
             <span className="hidden sm:inline">Exportar XLS</span>
           </button>
-          <div data-tutorial="extrato-novo-lancamento" className="flex-shrink-0">
-            <BotaoNovoLancamento onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
-          </div>
+          {podeEscrever && (
+            <div data-tutorial="extrato-novo-lancamento" className="flex-shrink-0">
+              <BotaoNovoLancamento onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
+            </div>
+          )}
         </div>
 
         {/* Filtros — Conta/Categoria/Status/Saldo anterior, recolhível.
@@ -1269,7 +1283,7 @@ export default function LancamentosPage() {
                             else    linhasRef.current.delete(l.id)
                           }}
                           onClick={() => abrirEditar(l)}
-                          className="grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center cursor-pointer"
+                          className={`grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center${podeEscrever ? ' cursor-pointer' : ''}`}
                           style={{
                             gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px',
                             ...(isAtrasado && {
@@ -1331,6 +1345,11 @@ export default function LancamentosPage() {
                             {l.observacao && (
                               <p className="text-[14px] truncate mt-0.5" style={{ color: '#8b92a8' }}>{l.observacao}</p>
                             )}
+                            {l.criado_por_nome && (
+                              <p className="text-[13px] truncate mt-0.5" style={{ color: '#6b7a99' }}>
+                                lançado por {l.criado_por_nome}
+                              </p>
+                            )}
                           </div>
 
                           {/* Categoria */}
@@ -1366,48 +1385,52 @@ export default function LancamentosPage() {
                             )}
                           </div>
 
-                          {/* Status — clicável (dropdown renderizado via portal) */}
+                          {/* Status — clicável (dropdown via portal) só quando pode escrever;
+                              senão o badge fica só informativo */}
                           <div className="relative" onClick={e => e.stopPropagation()}>
                             <div onClick={e => {
+                              if (!podeEscrever) return
                               if (statusOpen?.id === l.id) { setStatusOpen(null); return }
                               const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
                               setStatusOpen({ id: l.id, top: r.bottom + 4, left: r.left })
                             }}
-                              className="cursor-pointer">
+                              className={podeEscrever ? 'cursor-pointer' : ''}>
                               <StatusBadge status={l.status} />
                             </div>
                           </div>
 
-                          {/* Ações */}
-                          <div className="flex items-center gap-1 justify-end">
-                            {/* Antecipar: recorrente + não última parcela */}
-                            {!isTransf && !isPago && isRecorr &&
-                              (l.nr_parcela ?? 0) < (l.total_parcelas ?? 0) && (
-                              <AcaoBtn onClick={e => { e.stopPropagation(); setAntecipando(l) }}
-                                title="Antecipar parcelas" color="#f0b429">
-                                <Zap size={12} />
+                          {/* Ações — escondidas no espaço de agregado sem permissão de escrita */}
+                          {podeEscrever && (
+                            <div className="flex items-center gap-1 justify-end">
+                              {/* Antecipar: recorrente + não última parcela */}
+                              {!isTransf && !isPago && isRecorr &&
+                                (l.nr_parcela ?? 0) < (l.total_parcelas ?? 0) && (
+                                <AcaoBtn onClick={e => { e.stopPropagation(); setAntecipando(l) }}
+                                  title="Antecipar parcelas" color="#f0b429">
+                                  <Zap size={12} />
+                                </AcaoBtn>
+                              )}
+                              {/* Pagar: todo não-PAGO */}
+                              {!isTransf && !isPago && (
+                                <AcaoBtn onClick={async e => {
+                                  e.stopPropagation()
+                                  if (l.status === 'PROJECAO') {
+                                    setValorConfirmado(l.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                                    setConfirmandoProjecao(l)
+                                  } else {
+                                    const { ok, erro: e2 } = await alterarStatus(l.id, 'PAGO')
+                                    if (!ok) toast(e2 ?? 'Erro ao pagar.')
+                                    else toast('Pago!')
+                                  }
+                                }} title="Pagar" color="#00c896">
+                                  <Check size={12} />
+                                </AcaoBtn>
+                              )}
+                              <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
+                                <Pencil size={12} />
                               </AcaoBtn>
-                            )}
-                            {/* Pagar: todo não-PAGO */}
-                            {!isTransf && !isPago && (
-                              <AcaoBtn onClick={async e => {
-                                e.stopPropagation()
-                                if (l.status === 'PROJECAO') {
-                                  setValorConfirmado(l.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
-                                  setConfirmandoProjecao(l)
-                                } else {
-                                  const { ok, erro: e2 } = await alterarStatus(l.id, 'PAGO')
-                                  if (!ok) toast(e2 ?? 'Erro ao pagar.')
-                                  else toast('Pago!')
-                                }
-                              }} title="Pagar" color="#00c896">
-                                <Check size={12} />
-                              </AcaoBtn>
-                            )}
-                            <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
-                              <Pencil size={12} />
-                            </AcaoBtn>
-                          </div>
+                            </div>
+                          )}
                         </div>
                       )
                     })}
@@ -1508,7 +1531,7 @@ export default function LancamentosPage() {
                         return (
                           <div key={l.id}
                             onClick={() => abrirEditar(l)}
-                            className="bg-[#1a1f2e] rounded-xl p-3 cursor-pointer"
+                            className={`bg-[#1a1f2e] rounded-xl p-3${podeEscrever ? ' cursor-pointer' : ''}`}
                             style={{
                               border: isAtrasado ? '1px solid rgba(248,113,113,0.4)' : '1px solid rgba(255,255,255,0.1)',
                               ...(isAtrasado && {
@@ -1561,6 +1584,11 @@ export default function LancamentosPage() {
                                   <p className="text-[14px] mt-0.5" style={{ color: '#8b92a8' }}>
                                     {l.categoria_nome ?? ''}
                                   </p>
+                                  {l.criado_por_nome && (
+                                    <p className="text-[13px] truncate mt-0.5" style={{ color: '#6b7a99' }}>
+                                      lançado por {l.criado_por_nome}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                               <div className="text-right flex-shrink-0">
@@ -1576,24 +1604,26 @@ export default function LancamentosPage() {
                                 <IconeConta icone={l.conta_icone} cor={l.conta_cor} size="sm" />
                                 <span className="text-[15px]" style={{ color: '#8b92a8' }}>{l.conta_nome}</span>
                               </div>
-                              <div className="flex gap-1">
-                                {!isTransf && !isPago && (
-                                  isRecorr ? (
-                                    <AcaoBtn onClick={() => setAntecipando(l)} title="Antecipar parcelas" color="#f0b429">
-                                      <Zap size={11} />
+                              {podeEscrever && (
+                                <div className="flex gap-1">
+                                  {!isTransf && !isPago && (
+                                    isRecorr ? (
+                                      <AcaoBtn onClick={() => setAntecipando(l)} title="Antecipar parcelas" color="#f0b429">
+                                        <Zap size={11} />
+                                      </AcaoBtn>
+                                    ) : (
+                                      <AcaoBtn onClick={() => setAntecipando(l)} title="Pagar" color="#00c896">
+                                        <Check size={11} />
+                                      </AcaoBtn>
+                                    )
+                                  )}
+                                  {podeEditar && (
+                                    <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
+                                      <Pencil size={11} />
                                     </AcaoBtn>
-                                  ) : (
-                                    <AcaoBtn onClick={() => setAntecipando(l)} title="Pagar" color="#00c896">
-                                      <Check size={11} />
-                                    </AcaoBtn>
-                                  )
-                                )}
-                                {podeEditar && (
-                                  <AcaoBtn onClick={() => abrirEditar(l)} title="Editar">
-                                    <Pencil size={11} />
-                                  </AcaoBtn>
-                                )}
-                              </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
                         )
@@ -1776,8 +1806,9 @@ export default function LancamentosPage() {
         )
       })()}
 
-      {/* Barra flutuante — só aparece com selecionados */}
-      {selecionados.size > 0 && (
+      {/* Barra flutuante — só aparece com selecionados (e só se puder escrever;
+          selecionar linhas é inofensivo, mas as ações da barra não são) */}
+      {selecionados.size > 0 && podeEscrever && (
         <div
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl border shadow-xl"
           style={{

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Plus, Pencil, X as XIcon, CreditCard, Trash2 } from 'lucide-react'
 import { useContas } from '../hooks/useContas'
 import { useOcultarValores } from '../hooks/useOcultarValores'
+import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
 import { formatBRL, formatData } from '../lib/utils'
 import { IconeConta } from '../components/ui/IconeConta'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
@@ -129,6 +130,7 @@ function LinhaConta({ conta, oculto, onEditar, onExcluir }: {
 export default function ContasPage() {
   const { contas, loading, error, criar, editar, excluir } = useContas()
   const { oculto, toggle: toggleOculto } = useOcultarValores()
+  const emEspacoAgregado = useEmEspacoDeAgregado()
 
   // Ordem dos grupos — reordenável pelo usuário
   const [ordemGrupos, setOrdemGrupos] = useState<Grupo[]>(GRUPOS_INICIAL)
@@ -249,6 +251,24 @@ export default function ContasPage() {
 
   // Contas inativas (seção separada)
   const contasInativas = contas.filter(c => !c.ativa)
+
+  // Gestão de contas (criar/editar/excluir, cartões virtuais) é sempre do
+  // dono — nunca liberada a um agregado, mesmo com escrita no Extrato (o
+  // backend já recusa: POST/PUT/DELETE /contas ignoram o contexto de
+  // propósito). Escondida por inteiro aqui pra não sugerir uma ação que, na
+  // prática, mexeria na PRÓPRIA conta do agregado em vez da do dono.
+  if (emEspacoAgregado) {
+    return (
+      <div className="p-5">
+        <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
+          <p className="font-medium" style={{ color: '#e8eaf0' }}>Gestão de contas não disponível neste espaço</p>
+          <p className="text-[13px] mt-1" style={{ color: '#8b92a8' }}>
+            Contas são sempre gerenciadas pelo dono — volte para "Meus dados" para acessá-las.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-5">

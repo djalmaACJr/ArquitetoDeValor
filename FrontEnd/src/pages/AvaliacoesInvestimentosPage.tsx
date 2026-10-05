@@ -20,6 +20,7 @@ import { useIAPreferencia } from '../hooks/useIAPreferencia'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { useInvAvaliacaoAgenda, FREQUENCIA_LABEL, DIAS_FREQUENCIA } from '../hooks/useInvAvaliacaoAgenda'
 import { useAuth } from '../hooks/useAuth'
+import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
 import { useLembretes } from '../hooks/useLembretes'
 import { provedorPorId } from '../lib/iaProvedores'
 import { SelectDark } from '../components/ui/shared'
@@ -571,6 +572,7 @@ function BarraMentor({ prog }: { prog?: ProgMentor }) {
 export default function AvaliacoesInvestimentosPage() {
   const { session } = useAuth()
   const uid = session?.user?.id ?? null
+  const emEspacoAgregado = useEmEspacoDeAgregado()
   const { configs, ativa, carregando: carregandoIA } = useIAPreferencia()
   const { mascote } = useMascotePreferido()
   const { ativos, loading: loadingAtivos } = useInvestimentosAtivos()
@@ -1323,6 +1325,25 @@ export default function AvaliacoesInvestimentosPage() {
   }, [carregandoIA, loadingAtivos, loadingAval, avaliacoes, ativos, configs.length, ranking]))
 
   if (carregandoIA || loadingAtivos || loadingAval || loadingRanking) return <LoadingMascote fullPage />
+
+  // Avaliação por mentores de IA sempre usa a config do visitante (nunca a
+  // do dono) — escondida por inteiro num espaço de agregado pro mesmo
+  // motivo de ConfiguracoesInvestimentosPage, evitando o caso ambíguo de
+  // sobrescrever a nota de um ativo do dono com a config de IA de outra
+  // pessoa.
+  if (emEspacoAgregado) {
+    return (
+      <div className="p-5">
+        <InvestimentosNav />
+        <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
+          <p className="text-white font-medium">Avaliações não disponíveis neste espaço</p>
+          <p className="text-[13px] mt-1" style={{ color: MUTED }}>
+            A avaliação por mentores de IA usa sua própria configuração — volte para "Meus dados" para acessá-la.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   // Gating: precisa de ≥1 mentor configurado.
   const semMentor = configs.length === 0

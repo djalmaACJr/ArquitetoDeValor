@@ -2,7 +2,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import type { Conta, TipoConta, CartaoVirtual } from '../types'
 
 interface OpResult { ok: boolean; erro: string | null }
@@ -15,8 +15,10 @@ async function fetchContas(): Promise<Conta[]> {
 
 export function useContas() {
   const qc = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  // uid "efetivo": o próprio usuário, ou o dono cujo espaço está ativo via
+  // seletor de espaço (ver useEspacoAtivo.ts) — garante que "Meus dados" e
+  // "Conta de Fulano" nunca compartilhem a mesma entrada de cache.
+  const uid = useContextoUserId()
 
   const { data: contasRaw = [], isLoading: loading, error } = useQuery({
     queryKey: qk.contas(uid),

@@ -14,6 +14,7 @@ export async function rotaPosicoes(c: Db, req: Request, m: string, userId: strin
     logRequest("GET", "/investimentos/posicoes", { params: Object.fromEntries(params) });
     let q = c.from("inv_posicoes")
       .select("*, inv_ativos(ticker, nome, tipo_ativo), contas(nome)")
+      .eq("user_id", userId)
       .order("data_compra", { ascending: false });
     const ativoId = params.get("ativo_id");
     const contaId = params.get("conta_id");
@@ -40,8 +41,8 @@ export async function rotaPosicoes(c: Db, req: Request, m: string, userId: strin
     if (!body.ativo_id || !body.conta_id || body.quantidade == null || body.preco_custo == null || !body.data_compra) {
       return erro("Campos obrigatórios: ativo_id, conta_id, quantidade, preco_custo, data_compra");
     }
-    if (!(await ativoExiste(c, body.ativo_id))) return erro("Ativo não encontrado", 404);
-    if (!(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
+    if (!(await ativoExiste(c, body.ativo_id, userId))) return erro("Ativo não encontrado", 404);
+    if (!(await contaExiste(c, body.conta_id, userId))) return erro("Conta não encontrada", 404);
 
     const qtd   = Number(body.quantidade);
     const preco = Number(body.preco_custo);
@@ -69,11 +70,11 @@ export async function rotaPosicoes(c: Db, req: Request, m: string, userId: strin
   if (m === "PUT" && id) {
     const body = await req.json();
     logRequest("PUT", `/investimentos/posicoes/${id}`, body);
-    const naoEncontrado = await verificarExistencia(c, "inv_posicoes", id, "Posição não encontrada");
+    const naoEncontrado = await verificarExistencia(c, "inv_posicoes", id, "Posição não encontrada", userId);
     if (naoEncontrado) return naoEncontrado;
 
-    if (body.conta_id && !(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
-    if (body.ativo_id && !(await ativoExiste(c, body.ativo_id))) return erro("Ativo não encontrado", 404);
+    if (body.conta_id && !(await contaExiste(c, body.conta_id, userId))) return erro("Conta não encontrada", 404);
+    if (body.ativo_id && !(await ativoExiste(c, body.ativo_id, userId))) return erro("Ativo não encontrado", 404);
     if (body.status && !STATUS_POSICAO.includes(String(body.status))) {
       return erro(`status inválido: ${STATUS_POSICAO.join(" | ")}`);
     }
@@ -88,7 +89,7 @@ export async function rotaPosicoes(c: Db, req: Request, m: string, userId: strin
 
   if (m === "DELETE" && id) {
     logRequest("DELETE", `/investimentos/posicoes/${id}`);
-    const naoEncontrado = await verificarExistencia(c, "inv_posicoes", id, "Posição não encontrada");
+    const naoEncontrado = await verificarExistencia(c, "inv_posicoes", id, "Posição não encontrada", userId);
     if (naoEncontrado) return naoEncontrado;
     // inv_operacoes referencia posicao com ON DELETE CASCADE — operações somem junto.
     const { error } = await c.from("inv_posicoes").delete().eq("id", id);
@@ -103,7 +104,7 @@ export async function rotaPosicoes(c: Db, req: Request, m: string, userId: strin
 // /investimentos/operacoes
 // ============================================================
 
-export async function rotaOperacoes(c: Db, req: Request, m: string, userId: string) {
+export async function rotaOperacoes(c: Db, req: Request, m: string, userId: string, criadoPor: string = userId) {
   const id = extrairId(req, "operacoes");
 
   if (m === "GET") {
@@ -122,12 +123,12 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
     // seguro de acertar do que filtrar direto na tabela embutida).
     let posIdsFiltro: string[] | null = null;
     if (ativoId) {
-      const { data: pos, error: errPos } = await c.from("inv_posicoes").select("id").eq("ativo_id", ativoId);
+      const { data: pos, error: errPos } = await c.from("inv_posicoes").select("id").eq("ativo_id", ativoId).eq("user_id", userId);
       if (errPos) { logError("Listar operacoes (posicoes do ativo)", errPos); return erro(errPos.message); }
       posIdsFiltro = (pos ?? []).map((p) => String(p.id));
     } else if (tipoAtivo && TIPOS_ATIVO.includes(tipoAtivo)) {
       const { data: pos, error: errPos } = await c.from("inv_posicoes")
-        .select("id, inv_ativos(tipo_ativo)");
+        .select("id, inv_ativos(tipo_ativo)").eq("user_id", userId);
       if (errPos) { logError("Listar operacoes (posicoes por tipo)", errPos); return erro(errPos.message); }
       posIdsFiltro = (pos ?? [])
         .filter((p) => (p.inv_ativos as { tipo_ativo?: string } | null)?.tipo_ativo === tipoAtivo)
@@ -138,6 +139,7 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
     const montar = (deReg: number, ateReg: number) => {
       let q = c.from("inv_operacoes")
         .select("*, inv_posicoes(ativo_id, rf_taxa, inv_ativos(ticker, nome, tipo_ativo, moeda)), contas(nome)")
+        .eq("user_id", userId)
         .order("data_operacao", { ascending: false })
         .range(deReg, ateReg);
       if (posicaoId) q = q.eq("posicao_id", posicaoId);
@@ -172,13 +174,13 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
     let posicaoId: string;
     let contaId: string;
     if (body.posicao_id) {
-      const { data: pos } = await c.from("inv_posicoes").select("id, conta_id").eq("id", String(body.posicao_id)).maybeSingle();
+      const { data: pos } = await c.from("inv_posicoes").select("id, conta_id").eq("id", String(body.posicao_id)).eq("user_id", userId).maybeSingle();
       if (!pos) return erro("Posição não encontrada", 404);
       posicaoId = String(pos.id); contaId = String(pos.conta_id);
     } else {
       if (!body.ativo_id || !body.conta_id) return erro("Informe posicao_id ou (ativo_id e conta_id)");
-      if (!(await ativoExiste(c, String(body.ativo_id)))) return erro("Ativo não encontrado", 404);
-      if (!(await contaExiste(c, String(body.conta_id)))) return erro("Conta não encontrada", 404);
+      if (!(await ativoExiste(c, String(body.ativo_id), userId))) return erro("Ativo não encontrado", 404);
+      if (!(await contaExiste(c, String(body.conta_id), userId))) return erro("Conta não encontrada", 404);
       contaId = String(body.conta_id);
       // novo_lote: força uma posição nova em vez de somar na ATIVA existente
       // (ex.: mesmo título de Tesouro/RF comprado depois a uma taxa diferente).
@@ -193,6 +195,7 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
 
     const { data, error } = await c.from("inv_operacoes").insert({
       user_id:        userId,
+      criado_por:     criadoPor,
       posicao_id:     posicaoId,
       tipo_operacao:  body.tipo_operacao,
       conta_id:       contaId,
@@ -210,17 +213,17 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
   if (m === "PUT" && id) {
     const body = await req.json();
     logRequest("PUT", `/investimentos/operacoes/${id}`, body);
-    const naoEncontrado = await verificarExistencia(c, "inv_operacoes", id, "Operação não encontrada");
+    const naoEncontrado = await verificarExistencia(c, "inv_operacoes", id, "Operação não encontrada", userId);
     if (naoEncontrado) return naoEncontrado;
 
     if (body.tipo_operacao && !TIPOS_OPERACAO.includes(String(body.tipo_operacao))) {
       return erro(`tipo_operacao inválido: ${TIPOS_OPERACAO.join(" | ")}`);
     }
     if (body.posicao_id) {
-      const posExiste = await verificarExistencia(c, "inv_posicoes", String(body.posicao_id), "Posição não encontrada");
+      const posExiste = await verificarExistencia(c, "inv_posicoes", String(body.posicao_id), "Posição não encontrada", userId);
       if (posExiste) return posExiste;
     }
-    if (body.conta_id && !(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
+    if (body.conta_id && !(await contaExiste(c, body.conta_id, userId))) return erro("Conta não encontrada", 404);
     if (body.quantidade != null) {
       const qtd = Number(body.quantidade);
       if (!Number.isFinite(qtd) || qtd < 0) return erro("quantidade deve ser >= 0");
@@ -256,7 +259,7 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
 
   if (m === "DELETE" && id) {
     logRequest("DELETE", `/investimentos/operacoes/${id}`);
-    const { data: op } = await c.from("inv_operacoes").select("posicao_id").eq("id", id).maybeSingle();
+    const { data: op } = await c.from("inv_operacoes").select("posicao_id").eq("id", id).eq("user_id", userId).maybeSingle();
     if (!op) return erro("Operação não encontrada", 404);
     const { error } = await c.from("inv_operacoes").delete().eq("id", id);
     if (error) { logError("Excluir operacao", error); return erro(error.message); }

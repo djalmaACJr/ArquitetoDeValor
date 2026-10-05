@@ -5,6 +5,7 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import {
   json, erro, db, autenticar, extrairId,
   verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight, hojeBR,
+  resolverContexto,
 } from "../_shared/utils.ts";
 import { comOrigem } from "../_shared/utils.ts";
 import {
@@ -34,12 +35,40 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
   const isSincronizar = proxSeg === "sincronizar-progresso";
 
   try {
-    if (m === "GET"    && !id)          return await listar(c, url.searchParams);
-    if (m === "GET"    &&  id)          return await buscarPorId(c, id);
-    if (m === "POST"   && isSincronizar) return await sincronizar(c, userId);
-    if (m === "POST"   && !id)          return await criar(c, await req.json(), userId);
-    if (m === "PUT"    &&  id)          return await editar(c, id, await req.json());
-    if (m === "DELETE" &&  id)          return await excluir(c, id);
+    // GET aceita o contexto de um agregado com OBJETIVOS liberado (mesmo
+    // raciocínio de /transacoes). Escrita (criar/editar/excluir/
+    // sincronizar) exige `pode_escrever` — resolvido com escrita=true em
+    // cada rota de mutação abaixo.
+    if (m === "GET"    && !id) {
+      const ctx = await resolverContexto(req, c, userId, ["OBJETIVOS"]);
+      if (ctx instanceof Response) return ctx;
+      return await listar(c, url.searchParams, ctx.userId);
+    }
+    if (m === "GET"    &&  id) {
+      const ctx = await resolverContexto(req, c, userId, ["OBJETIVOS"]);
+      if (ctx instanceof Response) return ctx;
+      return await buscarPorId(c, id, ctx.userId);
+    }
+    if (m === "POST"   && isSincronizar) {
+      const ctx = await resolverContexto(req, c, userId, ["OBJETIVOS"], true);
+      if (ctx instanceof Response) return ctx;
+      return await sincronizar(c, ctx.userId);
+    }
+    if (m === "POST"   && !id) {
+      const ctx = await resolverContexto(req, c, userId, ["OBJETIVOS"], true);
+      if (ctx instanceof Response) return ctx;
+      return await criar(c, await req.json(), ctx.userId, userId);
+    }
+    if (m === "PUT"    &&  id) {
+      const ctx = await resolverContexto(req, c, userId, ["OBJETIVOS"], true);
+      if (ctx instanceof Response) return ctx;
+      return await editar(c, id, await req.json());
+    }
+    if (m === "DELETE" &&  id) {
+      const ctx = await resolverContexto(req, c, userId, ["OBJETIVOS"], true);
+      if (ctx instanceof Response) return ctx;
+      return await excluir(c, id);
+    }
     return erro("Rota não encontrada", 404);
   } catch (e) {
     logError("Handler principal", e);
@@ -49,11 +78,16 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
 
 // ── GET /objetivos ──────────────────────────────────────────
 
-async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
+async function listar(c: ReturnType<typeof db>, params: URLSearchParams, contextoUserId: string) {
   logRequest("GET", "/objetivos", { params: Object.fromEntries(params) });
 
+  // Filtro explícito por user_id do CONTEXTO ativo — a policy adicional de
+  // agregado faz objetivos devolver a união própria+do dono; sem isso aqui
+  // "Meus dados" e "Objetivos de Fulano" vazariam um pro outro (mesmo
+  // raciocínio de transacoes/index.ts::listar()).
   let q = c.from("vw_objetivos_detalhes")
     .select("*")
+    .eq("user_id", contextoUserId)
     .order("criado_em", { ascending: false });
 
   const tipo   = params.get("tipo");
@@ -74,11 +108,15 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
 
 // ── GET /objetivos/:id ──────────────────────────────────────
 
-async function buscarPorId(c: ReturnType<typeof db>, id: string) {
+async function buscarPorId(c: ReturnType<typeof db>, id: string, contextoUserId: string) {
   logRequest("GET", `/objetivos/${id}`);
 
   const [objRes, progRes] = await Promise.all([
-    c.from("vw_objetivos_detalhes").select("*").eq("id", id).single(),
+    // `.eq("user_id", contextoUserId)` evita que um agregado "veja" um
+    // objetivo do dono por engano quando está no espaço "Meus dados" (sem
+    // header de contexto) mas tem acesso via a RLS de agregado de outro
+    // vínculo — só o id não basta pra decidir "pertence a este contexto".
+    c.from("vw_objetivos_detalhes").select("*").eq("id", id).eq("user_id", contextoUserId).single(),
     c.from("objetivos_progresso")
       .select("data_snapshot, valor_atingido, percentual")
       .eq("objetivo_id", id)
@@ -96,7 +134,13 @@ async function buscarPorId(c: ReturnType<typeof db>, id: string) {
 
 // ── POST /objetivos ─────────────────────────────────────────
 
-async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string) {
+async function criar(
+  c: ReturnType<typeof db>, body: Record<string, unknown>,
+  // `userId` = contexto ativo (dono, se for agregado escrevendo). `criadoPor`
+  // = quem está autenticado de verdade — nunca lido do body do cliente (a
+  // RLS também reforça isso, ver migration da Fase 3).
+  userId: string, criadoPor: string,
+) {
   logRequest("POST", "/objetivos", body);
 
   // Campos obrigatórios
@@ -172,6 +216,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
 
   const { data, error } = await c.from("objetivos").insert({
     user_id:        userId,
+    criado_por:     criadoPor,
     tipo,
     nome,
     descricao:      body.descricao      ?? null,

@@ -4,13 +4,14 @@ import {
   LayoutDashboard, List, CreditCard, Tag, Target,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
   ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2, TrendingUp, X,
-  Receipt,
+  Receipt, Users,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
 import { useUsuarioPerfil } from '../../hooks/useUsuarioPerfil'
 import AppVersion from '../ui/AppVersion'
 import ContagemLogout from '../ui/ContagemLogout'
+import SeletorEspaco from '../ui/SeletorEspaco'
 
 const Logo = () => (
   <svg width="36" height="36" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -82,6 +83,7 @@ const navPrincipal: NavItem[] = [
 const navCadastros: NavItem[] = [
   { to: '/contas',     icon: <CreditCard size={15}/>, label: 'Contas' },
   { to: '/categorias', icon: <Tag size={15}/>,        label: 'Categorias' },
+  { to: '/compartilhamento', icon: <Users size={15}/>, label: 'Compartilhamento' },
 ]
 const navRelatorios: NavItem[] = [
   {
@@ -403,6 +405,8 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
           </div>
         )}
       </div>
+
+      <SeletorEspaco colapsado={colapsado} />
 
       <NavGroup label="Principal"   items={navPrincipal}   collapsed={colapsado} />
       <div className="h-px bg-blue-400/15 my-2" />

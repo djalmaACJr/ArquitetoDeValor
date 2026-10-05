@@ -18,7 +18,7 @@ import {
 } from "./mercado.ts";
 import { recomputarPosicao, acharOuCriarPosicao } from "./posicoes.ts";
 
-export async function rotaDividendos(c: Db, req: Request, m: string, userId: string) {
+export async function rotaDividendos(c: Db, req: Request, m: string, userId: string, criadoPor: string = userId) {
   const id   = extrairId(req, "dividendos");
   const acao = extrairAcao(req, "dividendos");
 
@@ -29,7 +29,7 @@ export async function rotaDividendos(c: Db, req: Request, m: string, userId: str
     logRequest("POST", `/investimentos/dividendos/${id}/confirmar`, body);
 
     const { data: div } = await c.from("inv_dividendos")
-      .select("id, valor, data_pagamento, transacao_extrato_id").eq("id", id).maybeSingle();
+      .select("id, valor, data_pagamento, transacao_extrato_id").eq("id", id).eq("user_id", userId).maybeSingle();
     if (!div) return erro("Dividendo não encontrado", 404);
     if (!div.transacao_extrato_id) return erro("Dividendo sem transação vinculada no extrato", 409);
 
@@ -65,17 +65,17 @@ export async function rotaDividendos(c: Db, req: Request, m: string, userId: str
     logRequest("PUT", `/investimentos/dividendos/${id}`, body);
 
     const { data: div } = await c.from("inv_dividendos")
-      .select("id, transacao_extrato_id").eq("id", id).maybeSingle();
+      .select("id, transacao_extrato_id").eq("id", id).eq("user_id", userId).maybeSingle();
     if (!div) return erro("Dividendo não encontrado", 404);
 
     if (body.valor != null) {
       const v = Number(body.valor);
       if (!Number.isFinite(v) || v <= 0) return erro("valor deve ser > 0");
     }
-    if (body.conta_id && !(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
+    if (body.conta_id && !(await contaExiste(c, body.conta_id, userId))) return erro("Conta não encontrada", 404);
     if (body.tipo_dividendo_id) {
       const { data: td } = await c.from("inv_tipos_dividendo")
-        .select("id").eq("id", body.tipo_dividendo_id).maybeSingle();
+        .select("id").eq("id", body.tipo_dividendo_id).eq("user_id", userId).maybeSingle();
       if (!td) return erro("Tipo de dividendo não encontrado", 404);
     }
 
@@ -118,6 +118,7 @@ export async function rotaDividendos(c: Db, req: Request, m: string, userId: str
     const montar = (de: number, ate: number) => {
       let q = c.from("inv_dividendos")
         .select("*, inv_ativos(ticker, nome, tipo_ativo), inv_tipos_dividendo(nome), transacoes(status)")
+        .eq("user_id", userId)
         .order("data_pagamento", { ascending: false })
         .range(de, ate);
       if (ativoId) q = q.eq("ativo_id", ativoId);
@@ -147,7 +148,7 @@ export async function rotaDividendos(c: Db, req: Request, m: string, userId: str
     // (não cria transação nova). Para trazer dividendos antigos, lançados
     // manualmente como receitas, para o módulo de investimentos.
     if (body.transacao_extrato_id) {
-      return await associarDividendoExistente(c, body, userId);
+      return await associarDividendoExistente(c, body, userId, criadoPor);
     }
 
     if (!body.ativo_id || !body.conta_id || body.valor == null || !body.data_pagamento ||
@@ -160,13 +161,13 @@ export async function rotaDividendos(c: Db, req: Request, m: string, userId: str
     const valorInformado = Number(body.valor);
     // A transação do extrato exige valor > 0 (CHECK valor > 0 em transacoes)
     if (!Number.isFinite(valorInformado) || valorInformado <= 0) return erro("valor deve ser > 0");
-    if (!(await contaExiste(c, body.conta_id))) return erro("Conta não encontrada", 404);
+    if (!(await contaExiste(c, body.conta_id, userId))) return erro("Conta não encontrada", 404);
 
     // Carrega ativo (ticker/moeda p/ descrição e conversão) e tipo de
     // dividendo (categoria mapeada)
     const [{ data: ativo }, { data: tipoDiv }] = await Promise.all([
-      c.from("inv_ativos").select("ticker, nome, moeda").eq("id", body.ativo_id).maybeSingle(),
-      c.from("inv_tipos_dividendo").select("id, nome, categoria_id").eq("id", body.tipo_dividendo_id).maybeSingle(),
+      c.from("inv_ativos").select("ticker, nome, moeda").eq("id", body.ativo_id).eq("user_id", userId).maybeSingle(),
+      c.from("inv_tipos_dividendo").select("id, nome, categoria_id").eq("id", body.tipo_dividendo_id).eq("user_id", userId).maybeSingle(),
     ]);
     if (!ativo)   return erro("Ativo não encontrado", 404);
     if (!tipoDiv) return erro("Tipo de dividendo não encontrado", 404);
@@ -192,6 +193,7 @@ export async function rotaDividendos(c: Db, req: Request, m: string, userId: str
     // 1) Cria o dividendo (sem vínculo ainda)
     const { data: div, error: errDiv } = await c.from("inv_dividendos").insert({
       user_id:           userId,
+      criado_por:        criadoPor,
       ativo_id:          body.ativo_id,
       conta_id:          body.conta_id,
       valor,
@@ -212,6 +214,7 @@ export async function rotaDividendos(c: Db, req: Request, m: string, userId: str
 
     const { data: tx, error: errTx } = await c.from("transacoes").insert({
       user_id:         userId,
+      criado_por:      criadoPor,
       conta_id:        body.conta_id,
       categoria_id:    tipoDiv.categoria_id,
       data:            String(body.data_pagamento),
@@ -243,7 +246,7 @@ export async function rotaDividendos(c: Db, req: Request, m: string, userId: str
   if (m === "DELETE" && id) {
     logRequest("DELETE", `/investimentos/dividendos/${id}`);
     const { data: div } = await c.from("inv_dividendos")
-      .select("id, transacao_extrato_id").eq("id", id).maybeSingle();
+      .select("id, transacao_extrato_id").eq("id", id).eq("user_id", userId).maybeSingle();
     if (!div) return erro("Dividendo não encontrado", 404);
 
     const { error } = await c.from("inv_dividendos").delete().eq("id", id);
@@ -263,15 +266,17 @@ export async function rotaDividendos(c: Db, req: Request, m: string, userId: str
 // Associa um provento já lançado no extrato a um ativo, criando o
 // inv_dividendos vinculado SEM gerar nova transação. Idempotente: uma
 // transação só pode ser associada a um dividendo.
-export async function associarDividendoExistente(c: Db, body: Record<string, unknown>, userId: string) {
+export async function associarDividendoExistente(
+  c: Db, body: Record<string, unknown>, userId: string, criadoPor: string = userId,
+) {
   if (!body.ativo_id) return erro("ativo_id é obrigatório");
 
   const { data: ativo } = await c.from("inv_ativos")
-    .select("id, tipo_ativo").eq("id", body.ativo_id).maybeSingle();
+    .select("id, tipo_ativo").eq("id", body.ativo_id).eq("user_id", userId).maybeSingle();
   if (!ativo) return erro("Ativo não encontrado", 404);
 
   const { data: tx } = await c.from("transacoes")
-    .select("id, conta_id, categoria_id, valor, data, tipo").eq("id", body.transacao_extrato_id).maybeSingle();
+    .select("id, conta_id, categoria_id, valor, data, tipo").eq("id", body.transacao_extrato_id).eq("user_id", userId).maybeSingle();
   if (!tx) return erro("Transação do extrato não encontrada", 404);
   if (tx.tipo !== "RECEITA") return erro("Só é possível associar transações de RECEITA", 409);
   if (Number(tx.valor) <= 0) return erro("A transação deve ter valor maior que zero", 409);
@@ -282,18 +287,19 @@ export async function associarDividendoExistente(c: Db, body: Record<string, unk
 
   let tipoDivId: string | null = body.tipo_dividendo_id ? String(body.tipo_dividendo_id) : null;
   if (tipoDivId) {
-    const { data: td } = await c.from("inv_tipos_dividendo").select("id").eq("id", tipoDivId).maybeSingle();
+    const { data: td } = await c.from("inv_tipos_dividendo").select("id").eq("id", tipoDivId).eq("user_id", userId).maybeSingle();
     if (!td) tipoDivId = null; // tipo inválido → grava sem tipo (não bloqueia)
   }
   // Sem tipo informado: infere pelo mapeamento tipo ↔ categoria do extrato
   if (!tipoDivId && tx.categoria_id) {
     const { data: td } = await c.from("inv_tipos_dividendo")
-      .select("id").eq("categoria_id", tx.categoria_id).limit(1).maybeSingle();
+      .select("id").eq("categoria_id", tx.categoria_id).eq("user_id", userId).limit(1).maybeSingle();
     if (td) tipoDivId = String(td.id);
   }
 
   const { data, error } = await c.from("inv_dividendos").insert({
     user_id:              userId,
+    criado_por:           criadoPor,
     ativo_id:             ativo.id,
     conta_id:             tx.conta_id,
     valor:                tx.valor,
@@ -406,6 +412,7 @@ export async function rotaTiposDividendo(c: Db, req: Request, m: string, userId:
     logRequest("GET", "/investimentos/tipos-dividendo");
     const { data, error } = await c.from("inv_tipos_dividendo")
       .select("*, categorias(descricao, icone, cor)")
+      .eq("user_id", userId)
       .order("nome", { ascending: true });
     if (error) { logError("Listar tipos-dividendo", error); return erro(error.message); }
     return json({ dados: data });
@@ -436,7 +443,7 @@ export async function rotaTiposDividendo(c: Db, req: Request, m: string, userId:
   if (m === "PUT" && id) {
     const body = await req.json();
     logRequest("PUT", `/investimentos/tipos-dividendo/${id}`, body);
-    const naoEncontrado = await verificarExistencia(c, "inv_tipos_dividendo", id, "Tipo de dividendo não encontrado");
+    const naoEncontrado = await verificarExistencia(c, "inv_tipos_dividendo", id, "Tipo de dividendo não encontrado", userId);
     if (naoEncontrado) return naoEncontrado;
     if (body.nome !== undefined) {
       const nome = String(body.nome).trim();
@@ -459,7 +466,7 @@ export async function rotaTiposDividendo(c: Db, req: Request, m: string, userId:
 
   if (m === "DELETE" && id) {
     logRequest("DELETE", `/investimentos/tipos-dividendo/${id}`);
-    const naoEncontrado = await verificarExistencia(c, "inv_tipos_dividendo", id, "Tipo de dividendo não encontrado");
+    const naoEncontrado = await verificarExistencia(c, "inv_tipos_dividendo", id, "Tipo de dividendo não encontrado", userId);
     if (naoEncontrado) return naoEncontrado;
     const { count } = await c.from("inv_dividendos").select("id", { count: "exact", head: true }).eq("tipo_dividendo_id", id);
     if ((count ?? 0) > 0) return erro("Não é possível excluir: há dividendos lançados com este tipo", 409);

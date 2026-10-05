@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Plus, RefreshCw } from 'lucide-react'
 import { useObjetivos } from '../hooks/useObjetivos'
+import { useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAtivo'
 import { CardObjetivo } from '../components/ui/CardObjetivo'
 import { DrawerObjetivo } from '../components/ui/DrawerObjetivo'
 import { FiltrosObjetivos } from '../components/ui/FiltrosObjetivos'
@@ -35,14 +36,18 @@ export default function ObjetivosPage() {
 
   const { objetivos, loading, error, criar, editar, excluir, sincronizar } = useObjetivos(filtros)
 
+  const emEspacoAgregado = useEmEspacoDeAgregado()
+  const permissaoObjetivos = usePermissaoModulo('OBJETIVOS')
+  const podeEscrever = !emEspacoAgregado || permissaoObjetivos?.pode_escrever === true
+
   function showToast(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
   }
 
-  function abrirNovo() { setEditando(null); setDrawerAberto(true) }
+  function abrirNovo() { if (!podeEscrever) return; setEditando(null); setDrawerAberto(true) }
 
-  function abrirEditar(o: Objetivo) { setEditando(o); setDrawerAberto(true) }
+  function abrirEditar(o: Objetivo) { if (!podeEscrever) return; setEditando(o); setDrawerAberto(true) }
 
   async function onSalvar(
     payload: CriarObjetivoInput | EditarObjetivoInput,
@@ -55,8 +60,10 @@ export default function ObjetivosPage() {
     return { ok: res.ok, erro: res.erro }
   }
 
+  function abrirExcluir(o: Objetivo) { if (!podeEscrever) return; setExcluindo(o) }
+
   async function confirmarExclusao() {
-    if (!excluindo) return
+    if (!excluindo || !podeEscrever) return
     const res = await excluir(excluindo.id)
     if (res.ok) showToast('Objetivo cancelado.')
     else showToast(res.erro ?? 'Erro ao cancelar')
@@ -64,6 +71,7 @@ export default function ObjetivosPage() {
   }
 
   async function onSincronizar() {
+    if (!podeEscrever) return
     setSincronizando(true)
     const res = await sincronizar()
     setSincronizando(false)
@@ -82,24 +90,26 @@ export default function ObjetivosPage() {
             Patrimônio, renda recorrente e evolução anual
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onSincronizar} disabled={sincronizando}
-            title="Sincronizar progresso"
-            data-tutorial="objetivos-sincronizar"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
-              text-[13px] transition-all hover:border-white/25 disabled:opacity-50"
-            style={{ color: '#8b92a8' }}>
-            <RefreshCw size={13} className={sincronizando ? 'animate-spin' : ''} />
-            Sincronizar
-          </button>
-          <button onClick={abrirNovo}
-            data-tutorial="objetivos-novo"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[14px] font-medium
-              bg-av-green/15 border border-av-green/30 text-av-green hover:bg-av-green/25 transition-all">
-            <Plus size={15} />
-            Novo objetivo
-          </button>
-        </div>
+        {podeEscrever && (
+          <div className="flex items-center gap-2">
+            <button onClick={onSincronizar} disabled={sincronizando}
+              title="Sincronizar progresso"
+              data-tutorial="objetivos-sincronizar"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
+                text-[13px] transition-all hover:border-white/25 disabled:opacity-50"
+              style={{ color: '#8b92a8' }}>
+              <RefreshCw size={13} className={sincronizando ? 'animate-spin' : ''} />
+              Sincronizar
+            </button>
+            <button onClick={abrirNovo}
+              data-tutorial="objetivos-novo"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[14px] font-medium
+                bg-av-green/15 border border-av-green/30 text-av-green hover:bg-av-green/25 transition-all">
+              <Plus size={15} />
+              Novo objetivo
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filtros */}
@@ -125,19 +135,22 @@ export default function ObjetivosPage() {
           <p className="text-[13px]" style={{ color: '#8b92a8' }}>
             Crie sonhos, metas de renda ou orçamentos de projeto.
           </p>
-          <button onClick={abrirNovo}
-            className="mt-2 flex items-center gap-1.5 px-4 py-2 rounded-lg text-[14px] font-medium
-              bg-av-green/15 border border-av-green/30 text-av-green hover:bg-av-green/25 transition-all">
-            <Plus size={15} />
-            Criar primeiro objetivo
-          </button>
+          {podeEscrever && (
+            <button onClick={abrirNovo}
+              className="mt-2 flex items-center gap-1.5 px-4 py-2 rounded-lg text-[14px] font-medium
+                bg-av-green/15 border border-av-green/30 text-av-green hover:bg-av-green/25 transition-all">
+              <Plus size={15} />
+              Criar primeiro objetivo
+            </button>
+          )}
         </div>
       ) : tipoFiltro !== 'TODOS' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {objetivos.map(o => (
             <CardObjetivo key={o.id} objetivo={o}
               onEditar={abrirEditar}
-              onExcluir={setExcluindo} />
+              onExcluir={abrirExcluir}
+              podeEscrever={podeEscrever} />
           ))}
         </div>
       ) : (
@@ -158,7 +171,8 @@ export default function ObjetivosPage() {
                   {lista.map(o => (
                     <CardObjetivo key={o.id} objetivo={o}
                       onEditar={abrirEditar}
-                      onExcluir={setExcluindo} />
+                      onExcluir={abrirExcluir}
+                      podeEscrever={podeEscrever} />
                   ))}
                 </div>
               </section>

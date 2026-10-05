@@ -35,6 +35,7 @@ import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvPesos } from '../hooks/useInvPesos'
 import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
 import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
+import { useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAtivo'
 import type { InvestimentoAtivo, QuestionarioRespostas, PerguntaAvaliacao, CriterioQuestao, TipoAtivoInvestimento } from '../types'
 import type { CategoriaFII } from '../lib/constants'
 
@@ -169,6 +170,10 @@ export default function DetalheInvestimentoPage() {
   const { dividendos } = useDividendos(ativoId ? { ativo_id: ativoId } : {})
   const { operacoes } = useInvestimentosOperacoes(ativoId ? { ativo_id: ativoId } : {})
   const { dashboard } = useInvestimentosDashboard()
+
+  const emEspacoAgregado = useEmEspacoDeAgregado()
+  const permissaoInvestimentos = usePermissaoModulo('INVESTIMENTOS')
+  const podeEscrever = !emEspacoAgregado || permissaoInvestimentos?.pode_escrever === true
 
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 3000) }
 
@@ -849,13 +854,18 @@ export default function DetalheInvestimentoPage() {
               {recomendacao.recomendacao === 'COMPRAR' ? 'Comprar' : recomendacao.recomendacao === 'AGUARDAR' ? 'Aguardar' : 'Neutro'}
             </span>
           )}
-          <button onClick={() => setEditandoNota(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
-            <Star size={14} style={{ color: '#f0b429' }} />
-            Nota: {ativo.nota_usuario ?? '—'}
-            <Pencil size={12} style={{ color: MUTED }} />
-          </button>
-          {ativo.tipo_ativo === 'CRIPTOMOEDAS' && Number(ativo.cripto_rendimento_aa) > 0 && (
+          {podeEscrever && (
+            <button onClick={() => setEditandoNota(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
+              <Star size={14} style={{ color: '#f0b429' }} />
+              Nota: {ativo.nota_usuario ?? '—'}
+              <Pencil size={12} style={{ color: MUTED }} />
+            </button>
+          )}
+          {/* Provisionar rendimento sempre opera sob o usuário autenticado de
+              verdade (rota não aceita contexto) — escondido num espaço de
+              agregado, mesmo caso das ações de manutenção de outras páginas. */}
+          {!emEspacoAgregado && ativo.tipo_ativo === 'CRIPTOMOEDAS' && Number(ativo.cripto_rendimento_aa) > 0 && (
             <button onClick={provisionarRendimento} disabled={provisionando}
               title={`Credita o rendimento de ${ativo.cripto_rendimento_aa}% a.a. em mais tokens (operações RENDIMENTO)`}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60">
@@ -863,26 +873,32 @@ export default function DetalheInvestimentoPage() {
               {provisionando ? 'Provisionando…' : 'Provisionar rendimento'}
             </button>
           )}
-          <button onClick={() => setGerenciar(true)} title="Registrar compra, venda ou outra movimentação"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold text-white"
-            style={{ background: '#3b82f6' }}>
-            <Plus size={14} /> Nova movimentação
-          </button>
+          {podeEscrever && (
+            <button onClick={() => setGerenciar(true)} title="Registrar compra, venda ou outra movimentação"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-semibold text-white"
+              style={{ background: '#3b82f6' }}>
+              <Plus size={14} /> Nova movimentação
+            </button>
+          )}
           {!ehRendaFixaAtivo && (
             <button onClick={() => setSimulando(true)} title="Simular quantas cotas/ações dá para comprar com um valor"
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
               <Calculator size={14} style={{ color: MUTED }} /> Simular compra
             </button>
           )}
-          <button onClick={() => setEditandoAtivo(true)} title="Editar dados do ativo"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
-            <Pencil size={14} style={{ color: MUTED }} /> Editar
-          </button>
-          <button onClick={() => setExcluindo(true)} title="Excluir ativo"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] transition-colors hover:bg-red-400/10"
-            style={{ borderColor: 'rgba(248,113,113,0.4)', color: '#ff5c7a' }}>
-            <Trash2 size={14} /> Excluir
-          </button>
+          {podeEscrever && (
+            <>
+              <button onClick={() => setEditandoAtivo(true)} title="Editar dados do ativo"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
+                <Pencil size={14} style={{ color: MUTED }} /> Editar
+              </button>
+              <button onClick={() => setExcluindo(true)} title="Excluir ativo"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] transition-colors hover:bg-red-400/10"
+                style={{ borderColor: 'rgba(248,113,113,0.4)', color: '#ff5c7a' }}>
+                <Trash2 size={14} /> Excluir
+              </button>
+            </>
+          )}
         </div>
       </div>
 

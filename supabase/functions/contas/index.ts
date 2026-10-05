@@ -3,7 +3,8 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId,
-         verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight } from "../_shared/utils.ts";
+         verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight,
+         resolverContexto } from "../_shared/utils.ts";
 import { comOrigem } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWarn } from "../_shared/logger.ts";
 
@@ -43,40 +44,59 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
   const c  = db(req);
 
   try {
-    if (m === "GET"    && !id) return await listar(c);
-    if (m === "GET"    &&  id) return await buscarPorId(c, id);
+    // GET aceita o cabeçalho X-Contexto-User-Id (seletor de espaço — ver
+    // EspacoContext.tsx no front): um agregado com EXTRATO ou
+    // INVESTIMENTOS liberado pode listar as contas de outro user_id.
+    // Escrita (POST/PUT/DELETE) continua restrita ao próprio dono — a
+    // Fase 2 estende isso quando `pode_escrever` existir pro módulo.
+    if (m === "GET" && !id) {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO", "INVESTIMENTOS"]);
+      if (ctx instanceof Response) return ctx;
+      return await listar(c, ctx.userId);
+    }
+    if (m === "GET" && id) {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO", "INVESTIMENTOS"]);
+      if (ctx instanceof Response) return ctx;
+      return await buscarPorId(c, id, ctx.userId);
+    }
     if (m === "POST")          return await criar(c, await req.json(), userId);
     if (m === "PUT"    &&  id) return await editar(c, id, await req.json());
     if (m === "DELETE" &&  id) return await excluir(c, id);
     return erro("Rota não encontrada", 404);
-  } catch (e) { 
+  } catch (e) {
     logError("Handler principal", e);
-    return erro("Erro interno", 500); 
+    return erro("Erro interno", 500);
   }
 }));
 
-async function listar(c: ReturnType<typeof db>) {
+async function listar(c: ReturnType<typeof db>, contextoUserId: string) {
   logRequest("GET", "/contas");
-  
-  const { data, error } = await c.from("vw_saldo_contas").select("*").order("nome");
+
+  // Filtro explícito por user_id do CONTEXTO ativo — não dá pra confiar só
+  // na RLS aqui: desde que um agregado pode ter acesso de leitura a contas
+  // de outro dono, a policy adicional passou a devolver a UNIÃO (contas
+  // próprias + do dono, se o chamador também tiver contas suas). Sem este
+  // filtro, "Meus dados" e "Conta de Fulano" vazariam um pro outro.
+  const { data, error } = await c.from("vw_saldo_contas").select("*").eq("user_id", contextoUserId).order("nome");
   if (error) {
     logError("Listar contas", error);
     return erro(error.message);
   }
-  
+
   logResponse(200, { count: data?.length });
   return json({ dados: data });
 }
 
-async function buscarPorId(c: ReturnType<typeof db>, id: string) {
+async function buscarPorId(c: ReturnType<typeof db>, id: string, contextoUserId: string) {
   logRequest("GET", `/contas/${id}`);
-  
-  const { data, error } = await c.from("vw_saldo_contas").select("*").eq("conta_id", id).single();
+
+  const { data, error } = await c.from("vw_saldo_contas").select("*")
+    .eq("conta_id", id).eq("user_id", contextoUserId).single();
   if (error) {
     logResponse(404);
     return erro("Conta não encontrada", 404);
   }
-  
+
   logResponse(200, { id, nome: data.nome });
   return json(data);
 }

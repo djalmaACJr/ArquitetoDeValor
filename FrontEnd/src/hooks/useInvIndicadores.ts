@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import type { InvIndicador, PontoIndicador, TipoIndicador, OpcaoIndiceB3 } from '../types'
 
 // Watchlist pessoal de indicadores de mercado (ETF / ETF internacional)
@@ -27,8 +27,7 @@ export interface CriarIndicadorInput {
 // `desde`: competência mínima 'YYYY-MM' (default: 5 anos atrás, no servidor).
 export function useInvIndicadores(desde?: string) {
   const qc = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data, isLoading: loading, error } = useQuery({
     queryKey: qk.invIndicadores(uid, desde),

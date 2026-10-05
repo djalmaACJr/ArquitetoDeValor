@@ -97,7 +97,7 @@ export async function rotaIndicadores(c: Db, req: Request, m: string, userId: st
   if (m === "GET" && !id) {
     const params = new URL(req.url).searchParams;
     logRequest("GET", "/investimentos/indicadores");
-    const { data, error } = await c.from("inv_indicadores").select("*").order("criado_em", { ascending: true });
+    const { data, error } = await c.from("inv_indicadores").select("*").eq("user_id", userId).order("criado_em", { ascending: true });
     if (error) { logError("Listar indicadores", error); return erro(error.message); }
     const indicadores = (data ?? []) as Indicador[];
 

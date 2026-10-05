@@ -75,6 +75,7 @@ export async function rotaHistorico(c: Db, req: Request, m: string, userId: stri
     const montar = (dePag: number, atePag: number) => {
       let q = c.from("inv_historico_mensal")
         .select("*, inv_ativos(ticker, nome, tipo_ativo)")
+        .eq("user_id", userId)
         .order("mes_ano", { ascending: false })
         .range(dePag, atePag);
       if (ativoId) q = q.eq("ativo_id", ativoId);

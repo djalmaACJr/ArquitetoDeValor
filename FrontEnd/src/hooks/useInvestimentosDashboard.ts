@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import type {
   InvestimentoDashboard, InvestimentoAlocacaoTipo, InvestimentoRanking, TipoAtivoInvestimento,
   PeriodoRanking,
@@ -29,8 +29,7 @@ export async function fetchTotaisPorConta(): Promise<TotalPorConta[]> {
 }
 
 export function useInvestimentosDashboard(contaId?: string | null) {
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data, isLoading: loading, error } = useQuery({
     queryKey: qk.invDashboard(uid, contaId),
@@ -59,8 +58,7 @@ async function fetchRanking(contaId?: string | null): Promise<InvestimentoRankin
 }
 
 export function useInvestimentosRanking(contaId?: string | null) {
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data, isLoading: loading, error } = useQuery({
     queryKey: qk.invRanking(uid, contaId),
@@ -92,8 +90,7 @@ async function fetchDestaques(contaId: string | null | undefined, periodo: Perio
 }
 
 export function useInvestimentosDestaques(contaId: string | null | undefined, periodo: PeriodoRanking) {
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   // placeholderData: keepPreviousData — trocar período/conta troca a query
   // key inteira; sem isso a tela inteira (ranking + Rentabilidade, que fica
@@ -133,8 +130,7 @@ export interface AlocacaoInput {
 
 export function useInvestimentosAlocacao() {
   const qc  = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data: alocacoes = [], isLoading: loading, error } = useQuery({
     queryKey: qk.invAlocacoes(uid),

@@ -15,7 +15,7 @@ import { DrawerObjetivo } from '../components/ui/DrawerObjetivo'
 import { ModalExcluir, Toast } from '../components/ui/shared'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import { apiFetch } from '../lib/api'
-import { useAuth } from '../hooks/useAuth'
+import { useContextoUserId, useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAtivo'
 import { qk } from '../lib/queryKeys'
 import { formatBRL, formatData } from '../lib/utils'
 import { avaliarTendencia } from '../lib/objetivosTendencia'
@@ -1789,13 +1789,16 @@ function ContasSonho({ objetivo }: { objetivo: Objetivo }) {
 export default function ObjetivoDetalhe() {
   const { id }    = useParams<{ id: string }>()
   const navigate  = useNavigate()
-  const { session } = useAuth()
-  const uid       = session?.user?.id ?? null
+  const uid       = useContextoUserId()
   const qc        = useQueryClient()
 
   const { objetivo, loading, error } = useObjetivoDetalhe(id ?? null)
   const { editar, excluir, sincronizar } = useObjetivos()
   const { contas } = useContas()
+
+  const emEspacoAgregado = useEmEspacoDeAgregado()
+  const permissaoObjetivos = usePermissaoModulo('OBJETIVOS')
+  const podeEscrever = !emEspacoAgregado || permissaoObjetivos?.pode_escrever === true
 
   const [drawerAberto,  setDrawerAberto]  = useState(false)
   const [excluindo,     setExcluindo]     = useState(false)
@@ -1835,7 +1838,7 @@ export default function ObjetivoDetalhe() {
   }
 
   async function onSalvar(payload: EditarObjetivoInput): Promise<{ ok: boolean; erro: string | null }> {
-    if (!id) return { ok: false, erro: 'ID inválido' }
+    if (!id || !podeEscrever) return { ok: false, erro: 'ID inválido' }
     const res = await editar(id, payload)
     if (res.ok) {
       showToast('Objetivo atualizado!')
@@ -1845,7 +1848,7 @@ export default function ObjetivoDetalhe() {
   }
 
   async function onExcluir() {
-    if (!id) return
+    if (!id || !podeEscrever) return
     const res = await excluir(id)
     if (res.ok) { navigate('/objetivos'); return }
     showToast(res.erro ?? 'Erro ao cancelar')
@@ -1853,6 +1856,7 @@ export default function ObjetivoDetalhe() {
   }
 
   async function onSincronizar() {
+    if (!podeEscrever) return
     setSincronizando(true)
     const res = await sincronizar()
     setSincronizando(false)
@@ -1892,28 +1896,30 @@ export default function ObjetivoDetalhe() {
           <ArrowLeft size={14} />
           Objetivos
         </button>
-        <div className="flex items-center gap-2">
-          <button onClick={onSincronizar} disabled={sincronizando}
-            title="Recalcular progresso"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10
-              text-[13px] hover:border-white/25 disabled:opacity-50 transition-all"
-            style={{ color: '#8b92a8' }}>
-            <RefreshCw size={12} className={sincronizando ? 'animate-spin' : ''} />
-            Sincronizar
-          </button>
-          <button onClick={() => setDrawerAberto(true)}
-            className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center
-              hover:border-white/30 hover:text-white transition-colors"
-            style={{ color: '#8b92a8' }}>
-            <Pencil size={13} />
-          </button>
-          <button onClick={() => setExcluindo(true)}
-            className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center
-              hover:border-red-400/50 hover:text-red-400 transition-colors"
-            style={{ color: '#8b92a8' }}>
-            <Trash2 size={13} />
-          </button>
-        </div>
+        {podeEscrever && (
+          <div className="flex items-center gap-2">
+            <button onClick={onSincronizar} disabled={sincronizando}
+              title="Recalcular progresso"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10
+                text-[13px] hover:border-white/25 disabled:opacity-50 transition-all"
+              style={{ color: '#8b92a8' }}>
+              <RefreshCw size={12} className={sincronizando ? 'animate-spin' : ''} />
+              Sincronizar
+            </button>
+            <button onClick={() => setDrawerAberto(true)}
+              className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center
+                hover:border-white/30 hover:text-white transition-colors"
+              style={{ color: '#8b92a8' }}>
+              <Pencil size={13} />
+            </button>
+            <button onClick={() => setExcluindo(true)}
+              className="w-8 h-8 rounded-lg border border-white/10 flex items-center justify-center
+                hover:border-red-400/50 hover:text-red-400 transition-colors"
+              style={{ color: '#8b92a8' }}>
+              <Trash2 size={13} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Cabeçalho do objetivo */}

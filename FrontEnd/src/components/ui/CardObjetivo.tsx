@@ -38,10 +38,12 @@ export function CardObjetivo({
   objetivo,
   onEditar,
   onExcluir,
+  podeEscrever = true,
 }: {
   objetivo: Objetivo
   onEditar:  (o: Objetivo) => void
   onExcluir: (o: Objetivo) => void
+  podeEscrever?: boolean
 }) {
   const tipoCor  = TIPO_COR[objetivo.tipo]  ?? '#4da6ff'
   const baraCor  = objetivo.status === 'ATINGIDO'  ? '#00c896'
@@ -86,18 +88,22 @@ export function CardObjetivo({
             <BarChart2 size={13} />
             <span className="text-[12px] font-medium">Detalhes</span>
           </Link>
-          <button onClick={() => onEditar(objetivo)}
-            className="w-7 h-7 rounded-lg border border-white/10 flex items-center justify-center
-              hover:border-white/30 hover:text-white transition-colors"
-            style={{ color: '#8b92a8' }}>
-            <Pencil size={12} />
-          </button>
-          <button onClick={() => onExcluir(objetivo)}
-            className="w-7 h-7 rounded-lg border border-white/10 flex items-center justify-center
-              hover:border-red-400/50 hover:text-red-400 transition-colors"
-            style={{ color: '#8b92a8' }}>
-            <Trash2 size={12} />
-          </button>
+          {podeEscrever && (
+            <>
+              <button onClick={() => onEditar(objetivo)}
+                className="w-7 h-7 rounded-lg border border-white/10 flex items-center justify-center
+                  hover:border-white/30 hover:text-white transition-colors"
+                style={{ color: '#8b92a8' }}>
+                <Pencil size={12} />
+              </button>
+              <button onClick={() => onExcluir(objetivo)}
+                className="w-7 h-7 rounded-lg border border-white/10 flex items-center justify-center
+                  hover:border-red-400/50 hover:text-red-400 transition-colors"
+                style={{ color: '#8b92a8' }}>
+                <Trash2 size={12} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 

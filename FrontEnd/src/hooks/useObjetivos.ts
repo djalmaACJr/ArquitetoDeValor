@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId, useEmEspacoDeAgregado, usePermissaoModulo } from './useEspacoAtivo'
 import type { Objetivo, TipoObjetivo, StatusObjetivo, Frequencia } from '../types'
 
 export type { Objetivo, TipoObjetivo, StatusObjetivo }
@@ -104,22 +104,23 @@ async function sincronizarProgressoSilencioso(uid: string, qc: QueryClient): Pro
  * Montar uma única vez num componente sempre presente enquanto logado (ex.: AppLayout). */
 export function useSincronizarObjetivosDiario(): void {
   const qc = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
+  const emEspacoAgregado = useEmEspacoDeAgregado()
+  const permissaoObjetivos = usePermissaoModulo('OBJETIVOS')
+  const podeEscrever = !emEspacoAgregado || permissaoObjetivos?.pode_escrever === true
 
   useEffect(() => {
-    if (!uid) return
+    if (!uid || !podeEscrever) return
     if (localStorage.getItem(LS_ULTIMA_SINCRONIZACAO) === new Date().toDateString()) return
     sincronizarProgressoSilencioso(uid, qc)
-  }, [uid, qc])
+  }, [uid, podeEscrever, qc])
 }
 
 // ── Hook principal ────────────────────────────────────────────
 
 export function useObjetivos(filtros: FiltrosObjetivos = {}) {
   const qc  = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data: objetivos = [], isLoading: loading, error } = useQuery({
     queryKey: qk.objetivos(uid, filtros),
@@ -173,16 +174,19 @@ export function useObjetivos(filtros: FiltrosObjetivos = {}) {
 
 export function useObjetivoDetalhe(id: string | null) {
   const qc = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
+  const emEspacoAgregado = useEmEspacoDeAgregado()
+  const permissaoObjetivos = usePermissaoModulo('OBJETIVOS')
+  const podeEscrever = !emEspacoAgregado || permissaoObjetivos?.pode_escrever === true
 
   // Sincroniza o progresso ao abrir a tela de detalhe, mesmo que já tenha
   // rodado hoje via useSincronizarObjetivosDiario — o usuário quer ver o
-  // número mais atual justamente quando entra nessa tela.
+  // número mais atual justamente quando entra nessa tela. Agregado sem
+  // escrita no módulo não tem permissão pra chamar o endpoint de sync.
   useEffect(() => {
-    if (!uid || !id) return
+    if (!uid || !id || !podeEscrever) return
     sincronizarProgressoSilencioso(uid, qc)
-  }, [uid, id, qc])
+  }, [uid, id, podeEscrever, qc])
 
   const { data: objetivo, isLoading: loading, error } = useQuery({
     queryKey: qk.objetivoDetalhe(uid ?? '', id ?? ''),

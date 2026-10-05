@@ -41,15 +41,24 @@ export const CATEGORIA_FII_LABEL_BR: Record<string, string> = {
 // Ações
 export const SUBTIPOS_ACOES = ["ON", "PN", "UNIT", "BDR"];
 
-export async function contaExiste(c: Db, contaId: unknown): Promise<boolean> {
+// `userId` opcional escopa a checagem ao contexto ativo (dono, quando um
+// agregado está operando via X-Contexto-User-Id) — sem isso, um agregado
+// poderia referenciar uma conta/ativo DA PRÓPRIA carteira dele (visível pela
+// RLS de dono) enquanto grava sob o user_id do dono, quebrando o vínculo
+// lógico entre a linha criada e o dono "dono" de verdade.
+export async function contaExiste(c: Db, contaId: unknown, userId?: string): Promise<boolean> {
   if (!contaId) return false;
-  const { data } = await c.from("contas").select("id").eq("id", contaId).maybeSingle();
+  let q = c.from("contas").select("id").eq("id", contaId);
+  if (userId) q = q.eq("user_id", userId);
+  const { data } = await q.maybeSingle();
   return !!data;
 }
 
-export async function ativoExiste(c: Db, ativoId: unknown): Promise<boolean> {
+export async function ativoExiste(c: Db, ativoId: unknown, userId?: string): Promise<boolean> {
   if (!ativoId) return false;
-  const { data } = await c.from("inv_ativos").select("id").eq("id", ativoId).maybeSingle();
+  let q = c.from("inv_ativos").select("id").eq("id", ativoId);
+  if (userId) q = q.eq("user_id", userId);
+  const { data } = await q.maybeSingle();
   return !!data;
 }
 

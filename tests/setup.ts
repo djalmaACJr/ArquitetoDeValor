@@ -9,8 +9,12 @@ const TEST_PASSWORD     = process.env.TEST_PASSWORD     as string;
 // Se não estiver no env, o setup cria um usuário descartável via signUp.
 const TEST_EMAIL_B      = process.env.TEST_EMAIL_B      as string | undefined;
 const TEST_PASSWORD_B   = process.env.TEST_PASSWORD_B   as string | undefined;
-// Só pra limpeza do usuário descartável (auth.admin.deleteUser exige
-// service_role — a suíte principal nunca usa isso pra nada além disso).
+// Reservado a dois usos: (1) limpeza do usuário descartável
+// (auth.admin.deleteUser exige service_role) e (2) manipular estado que
+// nenhuma RPC/Edge Function expõe, só para testar hardening (ex.: forçar um
+// convite de agregado "expirado" sem esperar os 7 dias de verdade, ver
+// clienteServiceRole()). Nunca usado pra contornar RLS em teste de
+// comportamento normal da API.
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY as string | undefined;
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !TEST_EMAIL || !TEST_PASSWORD) {
@@ -24,6 +28,7 @@ let cachedToken: string | null = null;
 let cachedTokenB: string | null = null;
 let cachedUserId: string | null = null;
 let cachedUserIdB: string | null = null;
+let cachedEmailB: string | null = null;
 // true só quando User B veio do signUp dinâmico deste módulo (não de
 // TEST_EMAIL_B/PASSWORD_B configurados) — usado por limparUserBSeDinamico()
 // pra nunca excluir uma conta de teste real por engano.
@@ -76,6 +81,7 @@ export async function getTokenB(): Promise<string> {
     }
     cachedTokenB  = data.session.access_token;
     cachedUserIdB = data.user?.id ?? null;
+    cachedEmailB  = TEST_EMAIL_B;
     return cachedTokenB;
   }
 
@@ -92,6 +98,7 @@ export async function getTokenB(): Promise<string> {
   // sem nenhuma limpeza em lugar nenhum).
   const email    = `jest-rls-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
   const password = "Jest!Pass" + Math.random().toString(36).slice(2, 10);
+  cachedEmailB = email;
   const { data, error } = await client.auth.signUp({ email, password });
   if (error) {
     throw new Error(
@@ -110,7 +117,23 @@ export async function getTokenB(): Promise<string> {
     cachedTokenB = data.session.access_token;
     return cachedTokenB;
   }
-  // Caso contrário, faz login imediato (signUp confirma na hora em dev).
+  // Projeto exige confirmação por e-mail (caso comum) — com a service role
+  // key disponível, confirma via Admin API em vez de desistir. Sem isso,
+  // TODA suíte que depende de User B dinâmico (inclusive
+  // 07_seguranca_rls.test.ts, já existente) ficava sempre SKIPPED neste
+  // projeto — achado real ao validar 13_agregados.test.ts.
+  if (SUPABASE_SERVICE_ROLE_KEY && cachedUserIdB) {
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const { error: errConfirmar } = await admin.auth.admin.updateUserById(cachedUserIdB, { email_confirm: true });
+    if (errConfirmar) {
+      throw new Error(
+        `signUp do User B funcionou mas não foi possível confirmar o e-mail via Admin API: ${errConfirmar.message}\n` +
+        `(A conta ${email} já foi criada e ficará órfã se ninguém chamar limparUserBSeDinamico().)`,
+      );
+    }
+  }
+  // Login (imediato se confirmação estava desabilitada, ou logo após a
+  // confirmação via Admin API acima).
   const { data: login, error: errLogin } = await client.auth.signInWithPassword({ email, password });
   if (errLogin || !login.session?.access_token) {
     throw new Error(
@@ -148,6 +171,7 @@ export async function limparUserBSeDinamico(): Promise<void> {
   userBEhDinamico = false;
   cachedUserIdB   = null;
   cachedTokenB    = null;
+  cachedEmailB    = null;
 
   if (!SUPABASE_SERVICE_ROLE_KEY) {
     // eslint-disable-next-line no-console
@@ -188,6 +212,13 @@ export async function getUserIdB(): Promise<string> {
   return cachedUserIdB;
 }
 
+/** E-mail do User B (fixo via TEST_EMAIL_B, ou o gerado pelo signUp dinâmico). */
+export async function getEmailB(): Promise<string> {
+  if (!cachedEmailB) await getTokenB();
+  if (!cachedEmailB) throw new Error("e-mail do User B não disponível");
+  return cachedEmailB;
+}
+
 /**
  * Versão "soft" do getTokenB: retorna null se não conseguir obter o 2º
  * usuário (env não configurado e signUp dinâmico bloqueado pelo Supabase).
@@ -202,6 +233,29 @@ export async function tryGetTokenB(): Promise<string | null> {
 }
 
 export const obterToken = getToken;
+
+/**
+ * Cliente Supabase (schema arqvalor) autenticado com um token já obtido —
+ * mesmo padrão de `db(req)` em supabase/functions/_shared/utils.ts (anon
+ * key + Authorization repassado, RLS normal se aplica). Usado por testes
+ * de RPCs que ainda não têm Edge Function própria (ex.: fn_agregado_* na
+ * Fase 0 de "usuários agregados" — chamado direto via PostgREST).
+ */
+export function clienteComToken(token: string) {
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    db: { schema: "arqvalor" },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+}
+
+/** Cliente service_role — ver comentário em SUPABASE_SERVICE_ROLE_KEY acima
+ *  sobre os dois únicos usos legítimos. `null` quando a chave não está
+ *  configurada no .env (o teste chamador deve pular graciosamente, nunca
+ *  falhar a suíte inteira por isso — mesmo critério de tryGetTokenB()). */
+export function clienteServiceRole() {
+  if (!SUPABASE_SERVICE_ROLE_KEY) return null;
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { db: { schema: "arqvalor" } });
+}
 
 // ================= HEADERS =================
 export async function authHeaders(): Promise<Record<string, string>> {

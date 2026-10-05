@@ -3,7 +3,7 @@ import { useMemo, useEffect, useState } from 'react'
 import { useQuery, useQueries, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiFetch, extrairLista } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import { fetchTransacoesMes, TRANSACOES_MES_STALE } from './useLancamentos'
 import { hojeLocal } from '../lib/utils'
 import type { Conta, Transacao, ResumoMensal, DespesaCategoria } from '../types'
@@ -118,8 +118,7 @@ export function useDashboard(
   filtStatus:   string[] = [],
 ) {
   const qc = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
   const parsed = useMemo(() => parseMes(mes), [mes])
   
   // Lazy-load: ativa fase 2 somente após UI renderizar (500ms)

@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
 import { useAuth } from './hooks/useAuth'
 import AppLayout from './components/layout/AppLayout'
 import LoginPage from './pages/LoginPage'
@@ -24,6 +25,8 @@ const ComparativoMensalPage  = lazy(() => import('./pages/ComparativoMensalPage'
 const AssinaturasPage        = lazy(() => import('./pages/AssinaturasPage'))
 const ProjecaoEconomiaPage   = lazy(() => import('./pages/ProjecaoEconomiaPage'))
 const ApresentacaoMascotes   = lazy(() => import('./pages/ApresentacaoMascotes'))
+const CompartilhamentoPage   = lazy(() => import('./pages/CompartilhamentoPage'))
+const AceitarConvitePage     = lazy(() => import('./pages/AceitarConvitePage'))
 const PerfilPage             = lazy(() => import('./pages/PerfilPage'))
 const ObjetivosPage          = lazy(() => import('./pages/ObjetivosPage'))
 const ObjetivoDetalhe        = lazy(() => import('./pages/ObjetivoDetalhe'))
@@ -50,12 +53,18 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
     </div>
   )
   if (session) return <>{children}</>
-  // Exceção só pra raiz do site: visitante não-autenticado vê a página de
-  // propaganda (LandingPage) em vez de ser jogado direto pro /login. Link
-  // direto pra qualquer página interna (ex.: /lancamentos) continua exigindo
-  // login normalmente.
-  if (location.pathname === '/') return <LandingPage/>
-  return <Navigate to="/login" replace/>
+  // Exceção só pra raiz do site NO NAVEGADOR: visitante não-autenticado vê a
+  // página de propaganda (LandingPage) em vez de ser jogado direto pro
+  // /login. Link direto pra qualquer página interna (ex.: /lancamentos)
+  // continua exigindo login normalmente. No app Android instalado
+  // (Capacitor) não faz sentido mostrar propaganda do próprio app pra quem
+  // já o instalou — vai direto pro login, como antes da LandingPage existir.
+  if (location.pathname === '/' && !Capacitor.isNativePlatform()) return <LandingPage/>
+  // Preserva a rota pedida (ex.: /aceitar-convite?token=...) pra LoginPage
+  // voltar pra cá depois do login — sem isso, um link de convite aberto
+  // deslogado jogava a pessoa pro login e perdia o token de vista.
+  const next = encodeURIComponent(location.pathname + location.search)
+  return <Navigate to={`/login?next=${next}`} replace/>
 }
 
 // Fallback usado pelo Suspense enquanto o chunk da página é baixado.
@@ -87,6 +96,11 @@ export default function App() {
               <ApresentacaoMascotes/>
             </PrivateRoute>
           }/>
+          <Route path="/aceitar-convite" element={
+            <PrivateRoute>
+              <AceitarConvitePage/>
+            </PrivateRoute>
+          }/>
           <Route path="/" element={
             <PrivateRoute>
               <AppLayout/>
@@ -116,6 +130,7 @@ export default function App() {
             <Route path="importar-fatura"      element={<ImportarFaturaPage/>}/>
             <Route path="importar-fatura/:id"  element={<ImportarFaturaPage/>}/>
             <Route path="perfil"       element={<PerfilPage/>}/>
+            <Route path="compartilhamento" element={<CompartilhamentoPage/>}/>
             <Route path="sobre"        element={<SobrePage/>}/>
             <Route path="admin/crons"  element={<AdminCronsPage/>}/>
             <Route path="admin/auditoria" element={<AdminAuditoriaPage/>}/>

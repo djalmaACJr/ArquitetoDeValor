@@ -6,6 +6,7 @@ import { Capacitor } from '@capacitor/core'
 import Sidebar from './Sidebar'
 import NovidadesProventos from '../ui/NovidadesProventos'
 import AvisoDataComProxima from '../ui/AvisoDataComProxima'
+import AvisoRevogacaoAgregado from '../ui/AvisoRevogacaoAgregado'
 import AvisosCronAdmin from '../ui/AvisosCronAdmin'
 import AvisoFecharAba from '../ui/AvisoFecharAba'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
@@ -205,6 +206,8 @@ export default function AppLayout() {
         <NovidadesProventos />
         {/* Ativos da carteira com Data COM próxima (próximos dias) */}
         <AvisoDataComProxima />
+        {/* Algum dono revogou meu acesso de agregado desde a última vez que vi */}
+        <AvisoRevogacaoAgregado />
       </div>
       {/* Aviso de login (só admin): cron com falha, inclusive falhas que nem
           chegaram a invocar a Edge Function (pg_cron/pg_net) */}

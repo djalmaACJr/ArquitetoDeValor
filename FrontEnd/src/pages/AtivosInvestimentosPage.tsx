@@ -16,6 +16,7 @@ import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
 import QuadroTipoAtivos, { type Dimensao } from '../components/ui/QuadroTipoAtivos'
 import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
 import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
+import { useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAtivo'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
 import ResumoPorInstituicao from '../components/ui/ResumoPorInstituicao'
 import TutorialTour from '../components/ui/TutorialTour'
@@ -287,6 +288,10 @@ export default function AtivosInvestimentosPage() {
   const filtros = tipoFiltro ? { tipo: tipoFiltro } : {}
   const { ativos, loading, error } = useInvestimentosAtivos(filtros)
 
+  const emEspacoAgregado = useEmEspacoDeAgregado()
+  const permissaoInvestimentos = usePermissaoModulo('INVESTIMENTOS')
+  const podeEscrever = !emEspacoAgregado || permissaoInvestimentos?.pode_escrever === true
+
   // Foco vindo do clique numa fatia da rosca: abre o quadro do tipo, rola até
   // ele e realça só o agrupamento (dim + chave) que originou aquela fatia.
   const [foco, setFoco] = useState<{ tipo: TipoAtivoInvestimento; dim: Dimensao; chave: string; n: number } | null>(null)
@@ -458,16 +463,20 @@ export default function AtivosInvestimentosPage() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30">
             <Sparkles size={15} style={{ color: '#8b5cf6' }} /> Avaliações
           </Link>
-          <button onClick={() => setSeletorMov(true)} data-tutorial="ativos-nova-movimentacao"
-            title="Registra compra/venda (ou aporte/resgate) de um ativo já cadastrado, sem entrar na página dele"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30">
-            <ArrowLeftRight size={15} /> Nova movimentação
-          </button>
-          <button onClick={abrirNovo} data-tutorial="ativos-novo"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white"
-            style={{ background: '#3b82f6' }}>
-            <Plus size={15} /> Novo ativo
-          </button>
+          {podeEscrever && (
+            <>
+              <button onClick={() => setSeletorMov(true)} data-tutorial="ativos-nova-movimentacao"
+                title="Registra compra/venda (ou aporte/resgate) de um ativo já cadastrado, sem entrar na página dele"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30">
+                <ArrowLeftRight size={15} /> Nova movimentação
+              </button>
+              <button onClick={abrirNovo} data-tutorial="ativos-novo"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white"
+                style={{ background: '#3b82f6' }}>
+                <Plus size={15} /> Novo ativo
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -524,7 +533,9 @@ export default function AtivosInvestimentosPage() {
                       linhas={g.linhas} defaultAberto
                       focoSinal={foco?.tipo === g.tipo ? foco.n : focoTipo?.tipo === g.tipo ? focoTipo.n : null}
                       focoGrupo={foco?.tipo === g.tipo ? { dim: foco.dim, chave: foco.chave } : null}
-                      acoes={{ onPosicoes: (a) => { setMovViaAtalho(false); setPosicoesDe(a) }, onHistorico: setHistoricoDe, onEditar: abrirEditar }}
+                      acoes={podeEscrever
+                        ? { onPosicoes: (a) => { setMovViaAtalho(false); setPosicoesDe(a) }, onHistorico: setHistoricoDe, onEditar: abrirEditar }
+                        : undefined}
                       alca={<AlcaArrastar {...alcaTipo(tipo)} />}
                       totalCarteira={dashboard?.total_mercado}
                       ipca12mPct={ipca12mPct} />

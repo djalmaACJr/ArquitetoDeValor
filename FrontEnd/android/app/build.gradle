@@ -9,8 +9,18 @@ android {
         applicationId "br.com.arquitetodevalor.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // versionCode precisa SEMPRE subir a cada instalação nova — é a
+        // única coisa que o gerenciador de pacotes do Android usa pra saber
+        // que o app mudou de verdade. Ficou travado em 1 desde o início do
+        // projeto: mesmo com várias reinstalações via `gradlew installDebug`
+        // com recursos diferentes (ex.: troca do ícone em b740702), o Android
+        // via sempre "a mesma versão" e alguns caches do sistema/launcher
+        // (o mais sensível a isso é o cache de ícone — inclusive o "Taskbar"
+        // do One UI em tablets Samsung) não tinham motivo pra invalidar o
+        // ícone antigo. versionName só é exibido pro usuário (Configurações
+        // > Apps) — mantido igual ao APP_VERSION do app (ver ../../../version.ts).
+        versionCode 2
+        versionName "6.5.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

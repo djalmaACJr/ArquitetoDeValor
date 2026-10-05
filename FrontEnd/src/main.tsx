@@ -7,6 +7,7 @@ import App from './App'
 import { supabase } from './lib/supabase'
 import { limparEstadoCliente } from './lib/clientCache'
 import { LS_ULTIMA_ATIVIDADE } from './hooks/useAutoLogout'
+import { initEspacoAtivo } from './lib/espacoAtivo'
 import './styles/globals.css'
 
 // Confirma pro plugin de OTA (@capgo/capacitor-updater) que o bundle atual
@@ -122,6 +123,12 @@ queryClient.getQueryCache().subscribe(event => {
 // O listener resolve a sessão real ANTES de hidratar — eliminando o vazamento.
 supabase.auth.onAuthStateChange((event, session) => {
   const newUserId = session?.user?.id ?? null
+
+  // Seletor de espaço (ver lib/espacoAtivo.ts) — carrega o vínculo salvo
+  // para ESTE uid (chave já namespaced por usuário, não precisa limpar em
+  // troca de conta). Roda em todo evento pra já estar pronto antes do
+  // primeiro fetch da sessão recém-logada.
+  initEspacoAtivo(newUserId)
 
   // 1º callback: tenta hidratar (só funciona se o userId bate)
   if (!cacheHidratado) {

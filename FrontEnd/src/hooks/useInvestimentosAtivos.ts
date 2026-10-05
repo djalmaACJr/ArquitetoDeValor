@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import type {
   InvestimentoAtivo, QuestionarioRespostas, TipoAtivoInvestimento,
   SubtipoRF, IndexadorRF, IndiceRF, CategoriaFII, AcoesSubtipo,
@@ -79,8 +79,7 @@ async function fetchAtivos(filtros: FiltrosAtivos): Promise<InvestimentoAtivo[]>
 
 export function useInvestimentosAtivos(filtros: FiltrosAtivos = {}) {
   const qc  = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data: ativos = [], isLoading: loading, error } = useQuery({
     queryKey: qk.invAtivos(uid, filtros),
@@ -187,8 +186,7 @@ export interface RendimentoCriptoResultado {
 // ── Detalhe de um ativo (GET /investimentos/ativos/:id) ───────
 
 export function useInvestimentoAtivo(id: string | null) {
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data, isLoading: loading, error } = useQuery({
     queryKey: qk.invAtivo(uid, id ?? ''),
@@ -214,8 +212,7 @@ export function useInvestimentoAtivo(id: string | null) {
 // na B3 (CDB/LCI/LCA são privados) — o formulário oferece fallback manual.
 
 export function useBuscaAtivoExterno(tipo: TipoAtivoInvestimento, q: string) {
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
   const termo = q.trim()
 
   const { data, isFetching: buscando, error } = useQuery({

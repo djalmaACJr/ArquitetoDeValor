@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { CampoSenha } from '../components/ui/CampoSenha'
 
@@ -17,6 +17,12 @@ const Logo = () => (
 
 export default function CadastroPage() {
   const navigate = useNavigate()
+  // Cadastro veio de um link de convite de agregado (?convite_token=...,
+  // ver agregados/index.ts § montarEmailConvite) — repassado no signUp via
+  // raw_user_meta_data; fn_sincronizar_usuario resolve o vínculo sozinha,
+  // best-effort, nunca bloqueando o cadastro se o token já tiver expirado.
+  const [searchParams] = useSearchParams()
+  const conviteToken = searchParams.get('convite_token')
 
   useEffect(() => {
     const html = document.documentElement
@@ -50,7 +56,7 @@ export default function CadastroPage() {
     const { error: err } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { nome } },
+      options: { data: conviteToken ? { nome, convite_agregado_token: conviteToken } : { nome } },
     })
     setLoading(false)
 

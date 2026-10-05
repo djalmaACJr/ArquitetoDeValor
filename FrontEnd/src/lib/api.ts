@@ -2,6 +2,7 @@
 // Cliente HTTP centralizado.
 
 import { supabase } from './supabase'
+import { contextoUserIdAtivo } from './espacoAtivo'
 
 const BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`
 
@@ -45,10 +46,17 @@ async function getSession() {
 }
 
 function makeHeaders(token: string, extra?: Record<string, string>): Record<string, string> {
+  const contextoUserId = contextoUserIdAtivo()
   return {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
     'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+    // Seletor de espaço (ver lib/espacoAtivo.ts): quando o usuário está
+    // visualizando os dados de um dono como agregado, toda chamada carrega
+    // de quem são os dados pedidos. Ausente = "meus dados" (comportamento
+    // de sempre). O backend nunca confia só nisso — resolverContexto()
+    // revalida via fn_agregado_tem_acesso a cada request.
+    ...(contextoUserId ? { 'X-Contexto-User-Id': contextoUserId } : {}),
     ...extra,
   }
 }

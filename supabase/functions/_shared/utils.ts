@@ -320,6 +320,46 @@ export function extrairAcao(req: Request, recurso: string): string | null {
   return partes[idx + 2];
 }
 
+// ── "Usuários agregados" — resolve de QUEM são os dados pedidos ───────
+// O frontend manda o header X-Contexto-User-Id quando o usuário está no
+// "espaço" de outra pessoa (seletor de espaço — ver EspacoContext.tsx no
+// front). Sem o header, ou com ele igual ao próprio userId, o contexto é
+// sempre "os próprios dados" (comportamento idêntico ao de antes desta
+// feature existir).
+//
+// A validação aqui chama a MESMA função usada nas policies de RLS
+// (fn_agregado_tem_acesso) — nunca pode divergir do que o banco realmente
+// garante. Esta checagem é só pra devolver um 403 com mensagem clara em
+// vez de uma lista vazia sem explicação; a garantia de segurança de
+// verdade continua sendo a RLS em cada tabela.
+export type ModuloAgregado = "EXTRATO" | "OBJETIVOS" | "INVESTIMENTOS";
+
+export interface ContextoAcesso {
+  /** user_id de quem os dados pertencem — o próprio chamador, ou o dono
+   *  cujo espaço ele está visualizando como agregado. */
+  userId: string;
+  isAgregado: boolean;
+}
+
+export async function resolverContexto(
+  req: Request,
+  c: Db,
+  userId: string,
+  modulos: ModuloAgregado[],
+  escrita = false,
+): Promise<ContextoAcesso | Response> {
+  const header = req.headers.get("X-Contexto-User-Id");
+  if (!header || header === userId) return { userId, isAgregado: false };
+
+  for (const modulo of modulos) {
+    const { data, error } = await c.rpc("fn_agregado_tem_acesso", {
+      p_dono_id: header, p_modulo: modulo, p_conta_id: null, p_escrita: escrita,
+    });
+    if (!error && data === true) return { userId: header, isAgregado: true };
+  }
+  return erro("Sem permissão para acessar os dados deste contexto.", 403);
+}
+
 // ── Verifica existência e posse do registro ───────────────────
 export async function verificarExistencia(
   c: Db,

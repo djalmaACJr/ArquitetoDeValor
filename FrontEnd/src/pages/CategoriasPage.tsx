@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Plus, Pencil, X as XIcon, ChevronDown, ChevronUp, Shield, RefreshCw, ArrowLeft } from 'lucide-react'
 import { useCategorias } from '../hooks/useCategorias'
+import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
 import {
   Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, SelectDark,
 } from '../components/ui/shared'
@@ -340,6 +341,7 @@ export default function CategoriasPage() {
   const [expandidos,   setExpandidos]   = useState<Set<string>>(new Set())
   const [busca,        setBusca]        = useState('')
   const [catReclassif, setCatReclassif] = useState<Categoria | null>(null)
+  const emEspacoAgregado = useEmEspacoDeAgregado()
 
   const pais   = categorias.filter(c => !c.id_pai)
   const subsOf = (id: string) => categorias.filter(c => c.id_pai === id)
@@ -395,6 +397,24 @@ export default function CategoriasPage() {
     !q || p.descricao.toLowerCase().includes(q) ||
     subsOf(p.id).some(s => s.descricao.toLowerCase().includes(q))
   )
+
+  // Gestão de categorias (criar/editar/excluir/reclassificar) é sempre do
+  // dono — nunca liberada a um agregado, mesmo com escrita no Extrato (o
+  // backend já recusa: POST/PUT/DELETE /categorias ignoram o contexto de
+  // propósito, mesmo padrão de /contas). Escondida por inteiro pra não
+  // sugerir uma ação que mexeria na PRÓPRIA categoria do agregado.
+  if (emEspacoAgregado) {
+    return (
+      <div className="p-5">
+        <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
+          <p className="font-medium" style={{ color: '#e8eaf0' }}>Gestão de categorias não disponível neste espaço</p>
+          <p className="text-[13px] mt-1" style={{ color: '#8b92a8' }}>
+            Categorias são sempre gerenciadas pelo dono — volte para "Meus dados" para acessá-las.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   if (catReclassif) {
     return (

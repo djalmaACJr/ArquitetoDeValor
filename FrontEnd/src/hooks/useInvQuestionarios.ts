@@ -12,7 +12,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import { perguntasPadrao, PESOS_PADRAO } from '../lib/questionarioAtivos'
 import { PESOS_SUGERIDOS_POR_PERFIL } from '../lib/constants'
 import type {
@@ -64,8 +64,7 @@ async function fetchQuestionarios(): Promise<InvQuestionario[]> {
 
 export function useInvQuestionarios() {
   const qc = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data: questionarios = [], isLoading: loading } = useQuery({
     queryKey: qk.invQuestionarios(uid),

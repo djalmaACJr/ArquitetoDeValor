@@ -5,7 +5,8 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import {
   json, erro, db, autenticar, extrairId,
-  validarStatus, calcularDataParcela, corsPreFlight, hojeBR, comIdempotencia
+  validarStatus, calcularDataParcela, corsPreFlight, hojeBR, comIdempotencia,
+  resolverContexto,
 } from "../_shared/utils.ts";
 import { comOrigem } from "../_shared/utils.ts";
 import { logError, logSuccess, logRequest, logResponse } from "../_shared/logger.ts";
@@ -103,16 +104,39 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
   const escopo = url.searchParams.get("escopo") ?? "SOMENTE_ESTE";
 
   try {
-    if (m === "GET"    && id)  return await buscarPorId(c, id, userId);
-    if (m === "GET"    && !id) return await listar(c, userId, url.searchParams);
+    // GET aceita o contexto de um agregado com EXTRATO liberado (mesmo
+    // raciocínio de /transacoes). Escrita exige `pode_escrever` — resolvido
+    // separadamente em cada rota de mutação abaixo.
+    if (m === "GET"    && id)  {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"]);
+      if (ctx instanceof Response) return ctx;
+      return await buscarPorId(c, id, ctx.userId);
+    }
+    if (m === "GET"    && !id) {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"]);
+      if (ctx instanceof Response) return ctx;
+      return await listar(c, ctx.userId, url.searchParams);
+    }
     if (m === "POST"   && !id) {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"], true);
+      if (ctx instanceof Response) return ctx;
       // Idempotency-Key opcional (AUD-06) — mesmo padrão de /transacoes.
+      // Gravada sob o usuário AUTENTICADO (userId), nunca sob ctx.userId —
+      // idempotency_keys tem RLS `user_id = auth.uid()`.
       const chaveIdemp = req.headers.get("Idempotency-Key");
       const body = await req.json();
-      return await comIdempotencia(c, userId, "POST /transferencias", chaveIdemp, () => criar(c, body, userId));
+      return await comIdempotencia(c, userId, "POST /transferencias", chaveIdemp, () => criar(c, body, ctx.userId, userId));
     }
-    if (m === "PUT"    && id)  return await editar(c, id, await req.json(), userId, escopo);
-    if (m === "DELETE" && id)  return await excluir(c, id, userId, escopo);
+    if (m === "PUT"    && id)  {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"], true);
+      if (ctx instanceof Response) return ctx;
+      return await editar(c, id, await req.json(), ctx.userId, escopo);
+    }
+    if (m === "DELETE" && id)  {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"], true);
+      if (ctx instanceof Response) return ctx;
+      return await excluir(c, id, ctx.userId, escopo);
+    }
     return erro("Rota não encontrada", 404);
   } catch (e) {
     logError("Handler principal", e);
@@ -164,7 +188,12 @@ async function listar(c: ReturnType<typeof db>, userId: string, params: URLSearc
   }).filter(Boolean));
 }
 
-async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string) {
+async function criar(
+  c: ReturnType<typeof db>, body: Record<string, unknown>,
+  // `userId` = contexto ativo (dono, se for agregado escrevendo numa conta
+  // compartilhada). `criadoPor` = quem está autenticado de verdade.
+  userId: string, criadoPor: string,
+) {
   logRequest("POST", "/transferencias", body);
 
   const erroVal = validarPayload(body);
@@ -220,6 +249,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
       nr_parcela:       isRecorrente ? i + 1 : null,
       total_parcelas:   isRecorrente ? totalParcelas : null,
       tipo_recorrencia: isRecorrente ? tipoRecBanco : null,
+      criado_por: criadoPor,
     };
     linhas.push({ ...comum, conta_id: body.conta_origem_id,  tipo: "DESPESA", descricao: `[Transf. saída] ${desc}`.trim() });
     linhas.push({ ...comum, conta_id: body.conta_destino_id, tipo: "RECEITA", descricao: `[Transf. entrada] ${desc}`.trim() });

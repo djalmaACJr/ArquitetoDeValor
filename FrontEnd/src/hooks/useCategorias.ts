@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import type { Categoria } from '../types'
 
 interface OpResult { ok: boolean; erro: string | null }
@@ -17,8 +17,7 @@ async function fetchCategorias(): Promise<Categoria[]> {
 
 export function useCategorias() {
   const qc = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data: categorias = [], isLoading: loading, error } = useQuery({
     queryKey: qk.categorias(uid),

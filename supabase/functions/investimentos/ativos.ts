@@ -18,7 +18,7 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
   if (m === "GET" && !id) {
     const params = new URL(req.url).searchParams;
     logRequest("GET", "/investimentos/ativos", { params: Object.fromEntries(params) });
-    let q = c.from("inv_ativos").select("*").order("ticker", { ascending: true });
+    let q = c.from("inv_ativos").select("*").eq("user_id", userId).order("ticker", { ascending: true });
     const tipo = params.get("tipo");
     if (tipo && TIPOS_ATIVO.includes(tipo)) q = q.eq("tipo_ativo", tipo);
     const { data, error } = await q;
@@ -27,7 +27,7 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
   }
 
   if (m === "GET" && id) {
-    const { data, error } = await c.from("inv_ativos").select("*").eq("id", id).maybeSingle();
+    const { data, error } = await c.from("inv_ativos").select("*").eq("id", id).eq("user_id", userId).maybeSingle();
     if (error) { logError("Buscar ativo", error); return erro(error.message); }
     if (!data) return erro("Ativo não encontrado", 404);
     return json({ dados: data });
@@ -68,7 +68,7 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
     );
     if (erroIndice) return erro(erroIndice);
 
-    if (body.ativo_pai && !(await ativoExiste(c, body.ativo_pai))) {
+    if (body.ativo_pai && !(await ativoExiste(c, body.ativo_pai, userId))) {
       return erro("ativo_pai não encontrado", 404);
     }
 
@@ -169,7 +169,7 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
     const body = await req.json();
     logRequest("PUT", `/investimentos/ativos/${id}`, body);
 
-    const naoEncontrado = await verificarExistencia(c, "inv_ativos", id, "Ativo não encontrado");
+    const naoEncontrado = await verificarExistencia(c, "inv_ativos", id, "Ativo não encontrado", userId);
     if (naoEncontrado) return naoEncontrado;
 
     // Estado dos campos que DEFINEM o valor de mercado da renda fixa, antes do
@@ -188,7 +188,7 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
     const erroRF = validarCamposRF(body);
     if (erroRF) return erro(erroRF);
     if (body.ativo_pai && (body.ativo_pai === id)) return erro("ativo_pai não pode ser o próprio ativo");
-    if (body.ativo_pai && !(await ativoExiste(c, body.ativo_pai))) return erro("ativo_pai não encontrado", 404);
+    if (body.ativo_pai && !(await ativoExiste(c, body.ativo_pai, userId))) return erro("ativo_pai não encontrado", 404);
 
     const campos = camposParaAtualizar(body, [
       "ticker", "nome", "tipo_ativo", "moeda", "descricao", "nota_usuario",
@@ -290,7 +290,7 @@ export async function rotaAtivos(c: Db, req: Request, m: string, userId: string)
 
   if (m === "DELETE" && id) {
     logRequest("DELETE", `/investimentos/ativos/${id}`);
-    const naoEncontrado = await verificarExistencia(c, "inv_ativos", id, "Ativo não encontrado");
+    const naoEncontrado = await verificarExistencia(c, "inv_ativos", id, "Ativo não encontrado", userId);
     if (naoEncontrado) return naoEncontrado;
 
     // As FKs de posições, operações, dividendos e histórico têm ON DELETE
@@ -444,7 +444,7 @@ export function validarCamposRF(body: Record<string, unknown>): string | null {
 export async function rotaAlocacoes(c: Db, req: Request, m: string, userId: string) {
   if (m === "GET") {
     logRequest("GET", "/investimentos/alocacoes");
-    const { data, error } = await c.from("inv_alocacoes_tipo").select("*").order("tipo_ativo");
+    const { data, error } = await c.from("inv_alocacoes_tipo").select("*").eq("user_id", userId).order("tipo_ativo");
     if (error) { logError("Listar alocacoes", error); return erro(error.message); }
     return json({ dados: data });
   }

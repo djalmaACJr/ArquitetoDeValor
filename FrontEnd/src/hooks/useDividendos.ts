@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import type { InvestimentoDividendo, TipoAtivoInvestimento } from '../types'
 
 export interface CriarDividendoInput {
@@ -51,8 +51,7 @@ async function fetchDividendos(filtros: FiltrosDividendos): Promise<Investimento
 
 export function useDividendos(filtros: FiltrosDividendos = {}, opts: { enabled?: boolean } = {}) {
   const qc  = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data: dividendos = [], isLoading: loading, error } = useQuery({
     queryKey: qk.invDividendos(uid, filtros),

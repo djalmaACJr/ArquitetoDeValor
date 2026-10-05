@@ -12,6 +12,7 @@ import { useTiposDividendo } from '../hooks/useTiposDividendo'
 import { useAvisosDividendos, type AvisoTipoDividendo } from '../hooks/useAvisosDividendos'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useContas } from '../hooks/useContas'
+import { useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAtivo'
 import {
   Drawer, Field, Input, SelectDark, SearchableSelect, BtnSalvar, BtnCancelar,
   Toast, ModalExcluir,
@@ -85,6 +86,10 @@ export default function DividendosPage() {
 
   const { dividendos, loading, excluir, buscarBrl, buscarUsd, buscarTesouro } = useDividendos()
 
+  const emEspacoAgregado = useEmEspacoDeAgregado()
+  const permissaoInvestimentos = usePermissaoModulo('INVESTIMENTOS')
+  const podeEscrever = !emEspacoAgregado || permissaoInvestimentos?.pode_escrever === true
+
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 6000) }
 
   // Busca proventos nas três fontes: B3 (ativos BRL), Polygon (ativos USD) e
@@ -116,7 +121,7 @@ export default function DividendosPage() {
   }
 
   async function confirmarExclusao() {
-    if (!excluindo) return
+    if (!excluindo || !podeEscrever) return
     setSalvando(true)
     const res = await excluir(excluindo.id)
     setSalvando(false)
@@ -161,21 +166,28 @@ export default function DividendosPage() {
           <p className="text-[14px] mt-0.5" style={{ color: MUTED }}>Proventos recebidos, integrados ao extrato</p>
         </div>
         <div className="flex items-center gap-2" data-tutorial="proventos-header">
-          <button onClick={buscarProventos} disabled={buscando}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
-            title="Busca proventos na B3 (ações, ETFs e FIIs em BRL) e na Polygon (ativos internacionais em USD): provisiona os futuros e lança os pagos nos últimos 30 dias">
-            <RefreshCw size={15} className={buscando ? 'animate-spin' : ''} /> {buscando ? 'Buscando…' : 'Buscar proventos'}
-          </button>
-          <button onClick={() => setDrawerNovo(true)} data-tutorial="proventos-novo"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white" style={{ background: '#3b82f6' }}>
-            <Plus size={15} /> Novo dividendo
-          </button>
+          {/* "Buscar proventos" sempre opera sob o usuário autenticado de
+              verdade (nunca sob o espaço do dono) — escondido por completo
+              num espaço de agregado, mesmo caso de InvestimentosPage. */}
+          {!emEspacoAgregado && (
+            <button onClick={buscarProventos} disabled={buscando}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25 disabled:opacity-60"
+              title="Busca proventos na B3 (ações, ETFs e FIIs em BRL) e na Polygon (ativos internacionais em USD): provisiona os futuros e lança os pagos nos últimos 30 dias">
+              <RefreshCw size={15} className={buscando ? 'animate-spin' : ''} /> {buscando ? 'Buscando…' : 'Buscar proventos'}
+            </button>
+          )}
+          {podeEscrever && (
+            <button onClick={() => setDrawerNovo(true)} data-tutorial="proventos-novo"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[13px] font-medium text-white" style={{ background: '#3b82f6' }}>
+              <Plus size={15} /> Novo dividendo
+            </button>
+          )}
         </div>
       </div>
 
       <Toast msg={toast} />
 
-      <AvisoMapeamento />
+      {!emEspacoAgregado && <AvisoMapeamento />}
 
       <div data-tutorial="proventos-resumo">
         <ProventosPorCategoria dividendos={dividendos} />
@@ -194,7 +206,7 @@ export default function DividendosPage() {
             </p>
           </div>
         ) : (
-          <ListaDividendos dividendos={dividendos} onExcluir={setExcluindo} onConfirmar={setConfirmando} />
+          <ListaDividendos dividendos={dividendos} onExcluir={setExcluindo} onConfirmar={setConfirmando} podeEscrever={podeEscrever} />
         )}
       </div>
 
@@ -1218,10 +1230,11 @@ function EvolucaoRecebimentos({ dividendos }: { dividendos: InvestimentoDividend
 
 type DivSortKey = 'ticker' | 'tipo' | 'data' | 'valor'
 
-function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
+function ListaDividendos({ dividendos, onExcluir, onConfirmar, podeEscrever }: {
   dividendos: InvestimentoDividendo[]
   onExcluir: (d: InvestimentoDividendo) => void
   onConfirmar: (d: InvestimentoDividendo) => void
+  podeEscrever: boolean
 }) {
   const [filtroTicker, setFiltroTicker] = useState('')
   const [filtroTipoAtivo, setFiltroTipoAtivo] = useState<'' | TipoAtivoInvestimento>('')
@@ -1354,17 +1367,19 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar }: {
         )}
       </td>
       <td className="px-4 py-2.5 text-right">
-        <div className="flex items-center justify-end gap-1">
-          {d.transacoes?.status === 'PROJECAO' && (
-            <button onClick={() => onConfirmar(d)} title="Confirmar recebimento"
-              className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-emerald-400/40" style={{ color: '#00c896' }}>
-              <CheckCircle2 size={13} />
+        {podeEscrever && (
+          <div className="flex items-center justify-end gap-1">
+            {d.transacoes?.status === 'PROJECAO' && (
+              <button onClick={() => onConfirmar(d)} title="Confirmar recebimento"
+                className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-emerald-400/40" style={{ color: '#00c896' }}>
+                <CheckCircle2 size={13} />
+              </button>
+            )}
+            <button onClick={() => onExcluir(d)} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
+              <Trash2 size={13} />
             </button>
-          )}
-          <button onClick={() => onExcluir(d)} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
-            <Trash2 size={13} />
-          </button>
-        </div>
+          </div>
+        )}
       </td>
     </tr>
   )

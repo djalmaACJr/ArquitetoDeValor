@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import type { InvestimentoOperacao, TipoAtivoInvestimento, TipoOperacaoInvestimento } from '../types'
 
 export interface CriarOperacaoInput {
@@ -50,8 +50,7 @@ async function fetchOperacoes(filtros: FiltrosOperacoes): Promise<InvestimentoOp
 
 export function useInvestimentosOperacoes(filtros: FiltrosOperacoes = {}, opts: { enabled?: boolean } = {}) {
   const qc  = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data: operacoes = [], isLoading: loading, error } = useQuery({
     queryKey: qk.invOperacoes(uid, filtros),

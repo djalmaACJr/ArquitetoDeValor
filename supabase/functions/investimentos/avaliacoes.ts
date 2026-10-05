@@ -74,7 +74,7 @@ export async function rotaQuestionarios(c: Db, req: Request, m: string, userId: 
   // Lista todos os custom
   if (m === "GET" && !tipo) {
     logRequest("GET", "/investimentos/questionarios");
-    const { data, error } = await c.from("inv_questionarios").select("*").order("tipo_ativo");
+    const { data, error } = await c.from("inv_questionarios").select("*").eq("user_id", userId).order("tipo_ativo");
     if (error) { logError("Listar questionarios", error); return erro(error.message); }
     return json({ dados: data });
   }
@@ -93,7 +93,7 @@ export async function rotaQuestionarios(c: Db, req: Request, m: string, userId: 
 
   if (m === "GET" && tipo) {
     const { data, error } = await c.from("inv_questionarios").select("*")
-      .eq("tipo_ativo", tipo).eq("fii_categoria", categoria).maybeSingle();
+      .eq("tipo_ativo", tipo).eq("fii_categoria", categoria).eq("user_id", userId).maybeSingle();
     if (error) { logError("Buscar questionario", error); return erro(error.message); }
     if (!data) return erro("Sem questionário customizado para este tipo", 404);
     return json({ dados: data });
@@ -492,7 +492,7 @@ export async function rotaAvaliacoes(c: Db, req: Request, m: string, userId: str
   // Lista as avaliações salvas
   if (m === "GET") {
     logRequest("GET", "/investimentos/avaliacoes");
-    const { data, error } = await c.from("inv_avaliacoes").select("*").order("gerado_em", { ascending: false });
+    const { data, error } = await c.from("inv_avaliacoes").select("*").eq("user_id", userId).order("gerado_em", { ascending: false });
     if (error) { logError("Listar avaliacoes", error); return erro(error.message); }
     return json({ dados: data });
   }

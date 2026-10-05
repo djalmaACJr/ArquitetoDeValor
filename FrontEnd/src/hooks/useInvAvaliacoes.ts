@@ -12,7 +12,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import type { InvAvaliacao, InvAvaliacaoMentor, PerguntaAvaliacao, PesosCriterio } from '../types'
 
 async function fetchAvaliacoes(): Promise<InvAvaliacao[]> {
@@ -23,8 +23,7 @@ async function fetchAvaliacoes(): Promise<InvAvaliacao[]> {
 
 export function useInvAvaliacoes() {
   const qc = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   const { data: avaliacoes = [], isLoading: loading } = useQuery({
     queryKey: qk.invAvaliacoes(uid),

@@ -8,6 +8,7 @@ import { useInvPesos } from '../hooks/useInvPesos'
 import { useInvQuestionarios, type QuestionarioEfetivo } from '../hooks/useInvQuestionarios'
 import { useInvestimentosAlocacao } from '../hooks/useInvestimentosDashboard'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
 import { Input, ModalExcluir, Toast } from '../components/ui/shared'
 import Mascote from '../components/ui/Mascote'
 import {
@@ -74,6 +75,7 @@ export default function QuestionariosInvestimentosPage() {
   const { questionarios, questionarioEfetivo, salvar, excluir, gerarPorIA } = useInvQuestionarios()
   const { alocacoes } = useInvestimentosAlocacao()
   const { mascote } = useMascotePreferido()
+  const emEspacoAgregado = useEmEspacoDeAgregado()
 
   // Abas: só tipos com Meta de alocação > 0% (um questionário por item alocado).
   const tiposAlocados = useMemo(
@@ -210,6 +212,21 @@ export default function QuestionariosInvestimentosPage() {
   const limparQuestionario = () => { setPerguntas([]); setConfirmarLimpar(false) }
 
   const voltar = () => navigate('/investimentos/configuracoes')
+
+  // Mesmo motivo de ConfiguracoesInvestimentosPage/AvaliacoesInvestimentosPage
+  // — questionário é preferência pessoal do visitante, nunca do dono.
+  if (emEspacoAgregado) {
+    return (
+      <div className="p-5">
+        <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
+          <p className="text-white font-medium">Questionários não disponíveis neste espaço</p>
+          <p className="text-[13px] mt-1" style={{ color: MUTED }}>
+            Volte para "Meus dados" para acessá-los.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-5">

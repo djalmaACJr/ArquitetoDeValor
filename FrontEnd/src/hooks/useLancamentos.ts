@@ -3,7 +3,7 @@ import { useQuery, useQueryClient, keepPreviousData, type QueryClient } from '@t
 import { useEffect, useCallback, useMemo } from 'react'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 
 export interface Lancamento {
   id: string
@@ -32,6 +32,12 @@ export interface Lancamento {
   categoria_icone?: string | null
   categoria_cor?: string | null
   categoria_pai_nome?: string | null
+  // Quem de fato lançou (pode diferir de user_id quando um agregado com
+  // escrita liberada lança numa conta compartilhada — ver Fase 2 de
+  // agregados). `criado_por_nome` só vem preenchido quando é ALGUÉM
+  // DIFERENTE de quem está vendo a tela (ver transacoes/index.ts).
+  criado_por?: string | null
+  criado_por_nome?: string | null
 }
 
 export interface FiltrosLancamento {
@@ -131,8 +137,9 @@ export function prefetchLancamentosVizinhos(qc: QueryClient, uid: string | null,
 
 export function useLancamentos(filtros: FiltrosLancamento) {
   const qc = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  // uid "efetivo" (ver useContas.ts) — Dashboard usa o mesmo uid de contexto
+  // e compartilha esta chave de cache (`qk.transacoesMes`).
+  const uid = useContextoUserId()
 
   // Cache CANÔNICO por mês (compartilhado com o Dashboard). Filtros são
   // aplicados no cliente sobre o mês completo — o mês trafega UMA vez,

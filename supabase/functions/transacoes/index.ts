@@ -4,7 +4,7 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId, extrairAcao,
          verificarExistencia, validarStatus, calcularDataParcela, corsPreFlight, hojeBR,
-         comIdempotencia } from "../_shared/utils.ts";
+         comIdempotencia, resolverContexto } from "../_shared/utils.ts";
 import { comOrigem } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess } from "../_shared/logger.ts";
 
@@ -26,19 +26,47 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
   const escopo = params.get("escopo") ?? "SOMENTE_ESTE";
 
   try {
-        if (m === "GET"    && !id)                       return await listar(c, params, userId);
-    if (m === "GET"    &&  id)                       return await buscarPorId(c, id);
+    // GET aceita o contexto de um agregado com EXTRATO liberado — mesmo
+    // raciocínio de contas/categorias. Escrita continua restrita ao dono
+    // até a Fase 2 (quando `pode_escrever` do módulo passa a valer).
+    if (m === "GET" && !id) {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"]);
+      if (ctx instanceof Response) return ctx;
+      return await listar(c, params, ctx.userId);
+    }
+    if (m === "GET" && id) {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"]);
+      if (ctx instanceof Response) return ctx;
+      return await buscarPorId(c, id, ctx.userId);
+    }
     if (m === "POST"   && !id) {
       // Idempotency-Key opcional (AUD-06) — sem o header, comportamento
       // idêntico a antes. Chave lida ANTES do req.json() pra não depender
-      // de qual promise resolve primeiro.
+      // de qual promise resolve primeiro. A chave é sempre gravada sob o
+      // usuário AUTENTICADO de verdade (userId), nunca sob o contexto/dono
+      // — idempotency_keys tem RLS `user_id = auth.uid()`, então usar
+      // ctx.userId aqui quebraria o INSERT pra um agregado escrevendo.
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"], true);
+      if (ctx instanceof Response) return ctx;
       const chaveIdemp = req.headers.get("Idempotency-Key");
       const body = await req.json();
-      return await comIdempotencia(c, userId, "POST /transacoes", chaveIdemp, () => criar(c, body, userId));
+      return await comIdempotencia(c, userId, "POST /transacoes", chaveIdemp, () => criar(c, body, ctx.userId, userId));
     }
-    if (m === "POST"   &&  id && acao==="antecipar") return await antecipar(c, id, userId);
-    if (m === "PUT"    &&  id)                       return await editar(c, id, await req.json(), escopo);
-    if (m === "DELETE" &&  id)                       return await excluir(c, id, escopo);
+    if (m === "POST"   &&  id && acao==="antecipar") {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"], true);
+      if (ctx instanceof Response) return ctx;
+      return await antecipar(c, id, ctx.userId);
+    }
+    if (m === "PUT"    &&  id) {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"], true);
+      if (ctx instanceof Response) return ctx;
+      return await editar(c, id, await req.json(), escopo, userId);
+    }
+    if (m === "DELETE" &&  id) {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"], true);
+      if (ctx instanceof Response) return ctx;
+      return await excluir(c, id, escopo);
+    }
     return erro("Rota não encontrada", 404);
   } catch (e) {
     logError("Handler principal", e);
@@ -60,10 +88,14 @@ interface ContaInfo { nome: string; icone: string | null; cor: string | null }
 
 function decorarTransacao(
   t: TxRow, catMap: Map<string, CatInfo>, contaMap: Map<string, ContaInfo>,
+  // Opcional: só passado por quem precisa do badge "lançado por" (Extrato).
+  // `undefined` → campo nem aparece na resposta, em vez de null explícito.
+  usuarioMap?: Map<string, string>,
 ) {
   const cat    = t.categoria_id ? catMap.get(t.categoria_id) : undefined;
   const catPai = cat?.id_pai ? catMap.get(cat.id_pai) : undefined;
   const conta  = contaMap.get(t.conta_id);
+  const criadoPor = t.criado_por as string | null | undefined;
   return {
     ...t,
     categoria_nome:     cat?.descricao ?? null,
@@ -73,7 +105,18 @@ function decorarTransacao(
     conta_nome:         conta?.nome ?? null,
     conta_icone:        conta?.icone ?? null,
     conta_cor:          conta?.cor ?? null,
+    ...(usuarioMap ? { criado_por_nome: (criadoPor && usuarioMap.get(criadoPor)) ?? null } : {}),
   };
+}
+
+// Nomes de quem lançou (criado_por) — só busca os ids que de fato aparecem
+// no lote de transações (tipicamente 1-2: o dono e, no máximo, os agregados
+// que escreveram na conta), nunca a tabela usuarios inteira.
+async function mapaUsuarios(c: ReturnType<typeof db>, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const unicos = [...new Set(ids.filter((id): id is string => !!id))];
+  if (unicos.length === 0) return new Map();
+  const { data } = await c.from("usuarios").select("id, nome").in("id", unicos);
+  return new Map((data ?? []).map((u: { id: string; nome: string }) => [u.id, u.nome]));
 }
 
 // GET /transacoes?saldo=true&mes=YYYY-MM — extrato com saldo corrente por
@@ -93,6 +136,10 @@ function decorarTransacao(
 // mento cronológico que a window function usava. Validado comparando os
 // dois caminhos em 5 pontos do histórico (2009→2028) antes de trocar.
 async function listarComSaldo(
+  // `userId` aqui é o CONTEXTO ativo (o próprio chamador, ou o dono cujo
+  // espaço ele visualiza como agregado) — não necessariamente auth.uid().
+  // fn_saldo_total_antes_de já sabe lidar com os dois casos (ver migration
+  // 20261001000002).
   c: ReturnType<typeof db>, params: URLSearchParams, userId: string,
 ) {
   const mes      = params.get("mes")!; // presença garantida pelo chamador
@@ -109,7 +156,13 @@ async function listarComSaldo(
   const mesUlt = mesNum === 12 ? 1 : mesNum + 1;
   const ultimoDia   = `${anoUlt}-${String(mesUlt).padStart(2, '0')}-01`;
 
+  // Filtro explícito por user_id do CONTEXTO ativo em toda consulta — a
+  // policy adicional de agregado faz contas/categorias/transacoes
+  // devolverem a união própria+do dono; sem isso aqui "Meus dados" e
+  // "Conta de Fulano" vazariam um pro outro (mesmo raciocínio de
+  // contas/index.ts::listar()).
   let qTx = c.from("transacoes").select("*")
+    .eq("user_id", userId)
     .gte("data", primeiroDia).lt("data", ultimoDia)
     .order("data", { ascending: true }).order("criado_em", { ascending: true });
   if (contaId) qTx = qTx.eq("conta_id", contaId);
@@ -120,8 +173,8 @@ async function listarComSaldo(
   const [baseRes, txRes, catRes, contaRes] = await Promise.all([
     c.rpc("fn_saldo_total_antes_de", { p_user_id: userId, p_data: primeiroDia }),
     qTx,
-    c.from("categorias").select("id, descricao, icone, cor, id_pai"),
-    c.from("contas").select("id, nome, icone, cor"),
+    c.from("categorias").select("id, descricao, icone, cor, id_pai").eq("user_id", userId),
+    c.from("contas").select("id, nome, icone, cor").eq("user_id", userId),
   ]);
   if (baseRes.error)  { logError("Saldo base do mês", baseRes.error);   return erro(baseRes.error.message); }
   if (txRes.error)    { logError("Listar transações (saldo)", txRes.error); return erro(txRes.error.message); }
@@ -134,11 +187,17 @@ async function listarComSaldo(
   const contaMap = new Map<string, ContaInfo>(
     (contaRes.data ?? []).map((c2) => [c2.id, { nome: c2.nome, icone: c2.icone, cor: c2.cor }]),
   );
+  // "Lançado por" só faz sentido quando é ALGUÉM DIFERENTE do contexto sendo
+  // visto (o próprio dono/usuário não precisa de badge pros seus lançamentos)
+  // — filtra antes de ir ao banco, evita a query de nomes no caso comum.
+  const usuarioMap = await mapaUsuarios(
+    c, (txRes.data ?? []).map((t) => t.criado_por).filter((id) => id && id !== userId),
+  );
 
   let acumulado = Number(baseRes.data) || 0;
   const decoradas = (txRes.data ?? []).map((t) => {
     acumulado += t.tipo === "RECEITA" ? Number(t.valor) : -Number(t.valor);
-    return { ...decorarTransacao(t, catMap, contaMap), saldo_acumulado: Number(acumulado.toFixed(2)) };
+    return { ...decorarTransacao(t, catMap, contaMap, usuarioMap), saldo_acumulado: Number(acumulado.toFixed(2)) };
   });
 
   const offset = (page - 1) * perPage;
@@ -149,6 +208,7 @@ async function listarComSaldo(
 }
 
 async function listar(c: ReturnType<typeof db>, params: URLSearchParams, userId: string) {
+  // `userId` = contexto ativo (ver nota em listarComSaldo acima).
   logRequest("GET", "/transacoes", { params: Object.fromEntries(params) });
 
   const mes      = params.get("mes");
@@ -173,6 +233,7 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams, userId:
   // foi tratado acima — então mes só aparece com !comSaldo (tabela crua).
   const fonte = comSaldo ? "vw_transacoes_com_saldo" : "transacoes";
   let q = c.from(fonte).select("*")
+    .eq("user_id", userId)
     .order("data",      { ascending: true })
     .order("criado_em", { ascending: true })
     .range(offset, offset + perPage - 1);
@@ -198,17 +259,18 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams, userId:
   return json({ dados: data, pagina: page, por_pagina: perPage });
 }
 
-async function buscarPorId(c: ReturnType<typeof db>, id: string) {
+async function buscarPorId(c: ReturnType<typeof db>, id: string, contextoUserId: string) {
   logRequest("GET", `/transacoes/${id}`);
   // Lê da TABELA, não da vw_transacoes_com_saldo: a view roda window function
   // sobre o histórico inteiro do usuário (o gargalo já medido em 349ms) para
   // devolver 1 linha. O consumidor (DrawerLancamento) usa os campos crus +
   // decoração de conta/categoria — sem saldo_acumulado.
-  const { data: t, error } = await c.from("transacoes").select("*").eq("id", id).single();
+  const { data: t, error } = await c.from("transacoes").select("*")
+    .eq("id", id).eq("user_id", contextoUserId).single();
   if (error || !t) { logResponse(404); return erro("Lançamento não encontrado", 404); }
 
   const [catRes, contaRes] = await Promise.all([
-    c.from("categorias").select("id, descricao, icone, cor, id_pai"),
+    c.from("categorias").select("id, descricao, icone, cor, id_pai").eq("user_id", contextoUserId),
     c.from("contas").select("id, nome, icone, cor").eq("id", t.conta_id),
   ]);
   const catMap = new Map<string, CatInfo>(
@@ -217,9 +279,11 @@ async function buscarPorId(c: ReturnType<typeof db>, id: string) {
   const contaMap = new Map<string, ContaInfo>(
     (contaRes.data ?? []).map((c2) => [c2.id, { nome: c2.nome, icone: c2.icone, cor: c2.cor }]),
   );
+  const criadoPor = (t as TxRow).criado_por as string | null;
+  const usuarioMap = await mapaUsuarios(c, criadoPor && criadoPor !== contextoUserId ? [criadoPor] : []);
 
   logResponse(200, { id });
-  return json(decorarTransacao(t as TxRow, catMap, contaMap));
+  return json(decorarTransacao(t as TxRow, catMap, contaMap, usuarioMap));
 }
 
 // ── Vínculo com investimentos (proventos) ────────────────────
@@ -255,7 +319,15 @@ async function ativoPorTicker(
   return data && data.length ? { id: String(data[0].id), tipo_ativo: String(data[0].tipo_ativo) } : null;
 }
 
-async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, userId: string) {
+async function criar(
+  c: ReturnType<typeof db>, body: Record<string, unknown>,
+  // `userId` = contexto ativo (dono, se for agregado escrevendo em conta
+  // compartilhada — ver resolverContexto). `criadoPor` = quem de fato está
+  // autenticado (auth.uid()) — sempre igual a `userId` pro dono normal, e
+  // o id do agregado quando ele é quem está lançando. Nunca lido do body
+  // do cliente (RLS também reforça isso — ver migration da Fase 2).
+  userId: string, criadoPor: string,
+) {
   logRequest("POST", "/transacoes", body);
 
   // ── Validações básicas ──────────────────────────────────────
@@ -352,6 +424,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
       nr_parcela:      null,
       total_parcelas:  null,
       id_recorrencia:  null,
+      criado_por:      criadoPor,
     };
 
     // Com provento: transação + espelho em inv_dividendos numa RPC atômica
@@ -424,6 +497,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
       nr_parcela:       i + 1,
       total_parcelas:   totalParcelas,
       id_recorrencia:   idRecorrencia,
+      criado_por:       criadoPor,
     });
   }
 
@@ -556,7 +630,16 @@ async function sincronizarProventoTransacoes(c: ReturnType<typeof db>, ids: stri
   }
 }
 
-async function editar(c: ReturnType<typeof db>, id: string, body: Record<string, unknown>, escopo: string) {
+async function editar(
+  c: ReturnType<typeof db>, id: string, body: Record<string, unknown>, escopo: string,
+  // Usuário autenticado de verdade — só usado pra marcar `criado_por` nas
+  // parcelas NOVAS criadas por uma expansão de recorrência (ESTE_E_SEGUINTES
+  // aumentando total_parcelas). Sem isso, essas linhas ficariam com
+  // criado_por nulo até o trigger de default preencher com `user_id` (o
+  // dono) — o que FALHARIA a policy de INSERT de agregado (exige
+  // criado_por = auth.uid()) quando quem está editando é o agregado.
+  criadoPor: string,
+) {
   logRequest("PUT", `/transacoes/${id}`, { ...body, escopo });
 
   if (!ESCOPOS.includes(escopo))
@@ -672,6 +755,7 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
             data: novaData,
             observacao: atual.observacao,
             tipo_recorrencia: tipoRecBanco,
+            criado_por: criadoPor,
           });
         }
         

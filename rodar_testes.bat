@@ -19,6 +19,7 @@ echo   6. Lembretes
 echo   7. Assistente de Lancamentos
 echo   8. Objetivos
 echo  18. Investimentos
+echo  19. Agregados (compartilhamento)
 echo.
 echo   --- Seguranca ---
 echo  13. Todos os testes de seguranca
@@ -35,7 +36,7 @@ echo  12. Configurar nivel de logs
 echo.
 echo   0. Sair
 echo.
-set /p OPC="Digite a opcao (0-18): "
+set /p OPC="Digite a opcao (0-19): "
 
 if "%OPC%"=="0"  goto FIM
 if "%OPC%"=="1"  goto OPC1
@@ -56,6 +57,7 @@ if "%OPC%"=="15" goto OPC15
 if "%OPC%"=="16" goto OPC16
 if "%OPC%"=="17" goto OPC17
 if "%OPC%"=="18" goto OPC18
+if "%OPC%"=="19" goto OPC19
 echo Opcao invalida.
 goto MENU
 
@@ -170,6 +172,11 @@ goto PAUSA
 
 :OPC18
 set TESTFILE=tests/12_investimentos.test.ts
+call :RUNMOD
+goto PAUSA
+
+:OPC19
+set TESTFILE=tests/13_agregados.test.ts
 call :RUNMOD
 goto PAUSA
 

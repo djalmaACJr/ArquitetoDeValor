@@ -3,7 +3,8 @@
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { json, erro, db, autenticar, extrairId,
-         verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight } from "../_shared/utils.ts";
+         verificarExistencia, validarCor, camposParaAtualizar, corsPreFlight,
+         resolverContexto } from "../_shared/utils.ts";
 import { comOrigem } from "../_shared/utils.ts";
 import { logDebug, logError, logInfo, logRequest, logResponse, logSuccess, logWarn } from "../_shared/logger.ts";
 
@@ -19,8 +20,19 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
   const url = new URL(req.url);
 
   try {
-    if (m === "GET"    && !id) return await listar(c, url.searchParams);
-    if (m === "GET"    &&  id) return await buscarPorId(c, id);
+    // Mesmo raciocínio de contas/index.ts: GET aceita o contexto de um
+    // agregado com EXTRATO liberado (categorias são visíveis globalmente
+    // pro módulo, sem escopo por conta).
+    if (m === "GET" && !id) {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"]);
+      if (ctx instanceof Response) return ctx;
+      return await listar(c, url.searchParams, ctx.userId);
+    }
+    if (m === "GET" && id) {
+      const ctx = await resolverContexto(req, c, userId, ["EXTRATO"]);
+      if (ctx instanceof Response) return ctx;
+      return await buscarPorId(c, id, ctx.userId);
+    }
     if (m === "POST")          return await criar(c, await req.json(), userId);
     if (m === "PUT"    &&  id) return await editar(c, id, await req.json());
     if (m === "DELETE" &&  id) return await excluir(c, id);
@@ -31,14 +43,17 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
   }
 }));
 
-async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
+async function listar(c: ReturnType<typeof db>, params: URLSearchParams, contextoUserId: string) {
   logRequest("GET", "/categorias", { params: Object.fromEntries(params) });
-  
+
   const hierarquia = params.get("hierarquia") === "true";
   const apenasRaiz = params.get("apenas_pai")  === "true";
   const ativa      = params.get("ativa");
 
-  let q = c.from("categorias").select("*").order("descricao");
+  // Filtro explícito por user_id do contexto ativo — mesmo motivo de
+  // contas/index.ts::listar(): a policy adicional de agregado passou a
+  // devolver a união própria+do dono, sem isso "Meus dados" vazaria.
+  let q = c.from("categorias").select("*").eq("user_id", contextoUserId).order("descricao");
   if (apenasRaiz)     q = q.is("id_pai", null);
   if (ativa !== null) q = q.eq("ativa", ativa === "true");
 
@@ -63,15 +78,16 @@ async function listar(c: ReturnType<typeof db>, params: URLSearchParams) {
   return json({ dados: data });
 }
 
-async function buscarPorId(c: ReturnType<typeof db>, id: string) {
+async function buscarPorId(c: ReturnType<typeof db>, id: string, contextoUserId: string) {
   logRequest("GET", `/categorias/${id}`);
-  
-  const { data, error } = await c.from("categorias").select("*").eq("id", id).single();
+
+  const { data, error } = await c.from("categorias").select("*")
+    .eq("id", id).eq("user_id", contextoUserId).single();
   if (error) {
     logResponse(404);
     return erro("Categoria não encontrada", 404);
   }
-  
+
   if (!data.id_pai) {
     const { data: subs } = await c.from("categorias").select("*").eq("id_pai", id).order("descricao");
     const result = { ...data, subcategorias: subs ?? [] };

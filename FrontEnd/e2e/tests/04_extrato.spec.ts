@@ -304,24 +304,47 @@ test.describe('Extrato (Lançamentos)', () => {
 
   // ── E2E-EX13 ─────────────────────────────────────────────────
   test('E2E-EX13 — limpar lançamentos recorrentes de teste', async ({ page }) => {
+    // A exclusão pela UI só oferece escopo SOMENTE_ESTE / ESTE_E_SEGUINTES
+    // (não existe "TODOS" no drawer — ver DrawerLancamento.tsx, a opção
+    // "Este e os próximos" só aparece quando a parcela editada NÃO é a
+    // última da série). Um `if` único com SOMENTE_ESTE implícito (achado
+    // real, ago/2026) só removia 1 das 3 parcelas por execução, deixando
+    // as demais vazando pra execuções futuras — com o tempo isso acumulou
+    // dezenas de séries fantasmas e quebrou E2E-EX10/11/12 (que usam
+    // `.first()` e passam a pegar uma série velha em vez da recém-criada).
+    // Por isso: `while` até não sobrar mais nenhuma ocorrência (não só a
+    // primeira), e seleciona "Este e os próximos" quando disponível para
+    // varrer a série inteira a partir da primeira parcela restante em vez
+    // de precisar de 1 clique por parcela.
     for (const nome of ['E2E Recorrente Mensal', 'E2E Recorrente Editado']) {
-      const linha = page.getByText(nome, { exact: true }).first()
-      if (await linha.isVisible({ timeout: 2000 }).catch(() => false)) {
+      for (let tentativas = 0; tentativas < 10; tentativas++) {
+        const linha = page.getByText(nome, { exact: true }).first()
+        if (!(await linha.isVisible({ timeout: 2000 }).catch(() => false))) break
+
         const row = linha.locator('../..').first()
         await row.locator('button[title*="ditar"], button:has([data-lucide="pencil"])').first().click()
         const drawer = page.getByRole('dialog').first()
-        if (await drawer.isVisible({ timeout: 3000 }).catch(() => false)) {
-          await drawer.getByRole('button', { name: /excluir/i }).click()
-          const modal = page.getByRole('dialog').last()
-          if (await modal.isVisible({ timeout: 3000 }).catch(() => false)) {
-            await modal.getByRole('button', { name: /confirmar|sim|excluir/i }).click()
-            await expect(modal).not.toBeVisible({ timeout: 10_000 })
-          } else {
-            await page.keyboard.press('Escape')
-          }
+        if (!(await drawer.isVisible({ timeout: 3000 }).catch(() => false))) break
+
+        const esteESeguintes = drawer.getByText(/este e os próximos/i)
+        if (await esteESeguintes.isVisible({ timeout: 1000 }).catch(() => false)) {
+          await esteESeguintes.click()
+        }
+
+        await drawer.getByRole('button', { name: /excluir/i }).click()
+        const modal = page.getByRole('dialog').last()
+        if (await modal.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await modal.getByRole('button', { name: /confirmar|sim|excluir/i }).click()
+          await expect(modal).not.toBeVisible({ timeout: 10_000 })
+        } else {
+          await page.keyboard.press('Escape')
         }
         await page.waitForTimeout(500)
       }
+    }
+    // Garantia final: nenhuma ocorrência deve sobrar na tela.
+    for (const nome of ['E2E Recorrente Mensal', 'E2E Recorrente Editado']) {
+      await expect(page.getByText(nome, { exact: true })).toHaveCount(0)
     }
   })
 })

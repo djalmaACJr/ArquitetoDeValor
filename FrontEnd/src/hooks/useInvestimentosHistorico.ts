@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useAuth } from './useAuth'
+import { useContextoUserId } from './useEspacoAtivo'
 import type { InvestimentoHistoricoMensal } from '../types'
 
 export interface ResumoSnapshotAuto {
@@ -52,8 +52,7 @@ async function fetchHistorico(filtros: FiltrosHistorico): Promise<InvestimentoHi
 
 export function useInvestimentosHistorico(filtros: FiltrosHistorico = {}) {
   const qc  = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
 
   // placeholderData: mantém o histórico anterior visível ao trocar de conta
   // (chave muda) em vez de zerar a tela por um instante — mesmo motivo do
@@ -100,8 +99,7 @@ export function useInvestimentosHistorico(filtros: FiltrosHistorico = {}) {
 // calcula a renda fixa pelo indexador e grava o snapshot do mês.
 export function useAtualizarValoresMes() {
   const qc  = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
   const [executando, setExecutando] = useState(false)
 
   const atualizar = async (mesAno?: string): Promise<OpResult<ResumoSnapshotAuto>> => {
@@ -127,8 +125,7 @@ export function useAtualizarValoresMes() {
 // a renda fixa pelo indexador. Não sobrescreve meses já registrados.
 export function useBackfillHistorico() {
   const qc  = useQueryClient()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
   const [executando, setExecutando] = useState(false)
 
   const invalidar = async () => {

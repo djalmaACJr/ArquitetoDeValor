@@ -82,7 +82,7 @@ export function qtdNaData(chk: CheckpointQtd[] | undefined, alvo: string): numbe
   return val;
 }
 
-export async function dashboard(c: Db, params: URLSearchParams) {
+export async function dashboard(c: Db, params: URLSearchParams, userId: string) {
   logRequest("GET", "/investimentos/dashboard", { params: Object.fromEntries(params) });
   const contaFiltro = params.get("conta_id");
   // agrupar=conta: total de mercado por CONTA (todas de uma vez), usado pelo
@@ -96,18 +96,19 @@ export async function dashboard(c: Db, params: URLSearchParams) {
     (() => {
       let q = c.from("inv_posicoes")
         .select("id, ativo_id, conta_id, quantidade, valor_custo, data_compra, status, inv_ativos(tipo_ativo, moeda)")
+        .eq("user_id", userId)
         .eq("status", "ATIVA");
       if (contaFiltro) q = q.eq("conta_id", contaFiltro);
       return q;
     })(),
-    c.from("inv_alocacoes_tipo").select("tipo_ativo, percentual_ideal"),
-    c.from("vw_inv_ultimo_mercado").select("ativo_id, conta_id, valor_mercado"),
+    c.from("inv_alocacoes_tipo").select("tipo_ativo, percentual_ideal").eq("user_id", userId),
+    c.from("vw_inv_ultimo_mercado").select("ativo_id, conta_id, valor_mercado").eq("user_id", userId),
     // tipo_ativo vem do ativo (join), não da cópia desnormalizada — assim a
     // reclassificação de um ativo reflete na hora no gráfico de proventos.
     // Respeita o mesmo filtro de conta das posições — senão o card filtrado
     // por conta mostraria os dividendos de TODAS as contas.
     (() => {
-      let q = c.from("inv_dividendos").select("valor, inv_ativos(tipo_ativo)");
+      let q = c.from("inv_dividendos").select("valor, inv_ativos(tipo_ativo)").eq("user_id", userId);
       if (contaFiltro) q = q.eq("conta_id", contaFiltro);
       return q;
     })(),
@@ -215,7 +216,7 @@ export async function dashboard(c: Db, params: URLSearchParams) {
 // por rentabilidade; o frontend fatia os destaques.
 // ============================================================
 
-export async function ranking(c: Db, params: URLSearchParams) {
+export async function ranking(c: Db, params: URLSearchParams, userId: string) {
   logRequest("GET", "/investimentos/ranking", { params: Object.fromEntries(params) });
   const contaFiltro = params.get("conta_id");
   const tipoFiltro  = params.get("tipo_ativo");
@@ -238,11 +239,12 @@ export async function ranking(c: Db, params: URLSearchParams) {
     (() => {
       let q = c.from("inv_posicoes")
         .select("id, ativo_id, conta_id, quantidade, valor_custo, data_compra, inv_ativos(ticker, nome, tipo_ativo, nota_usuario, moeda)")
+        .eq("user_id", userId)
         .eq("status", "ATIVA");
       if (contaFiltro) q = q.eq("conta_id", contaFiltro);
       return q;
     })(),
-    c.from("vw_inv_ultimo_mercado").select("ativo_id, conta_id, valor_mercado"),
+    c.from("vw_inv_ultimo_mercado").select("ativo_id, conta_id, valor_mercado").eq("user_id", userId),
     // Janela trailing 12m ATÉ hoje: exclui projeções futuras (PROJECAO/PENDENTE
     // a vencer) do DY/YoC — só conta provento já realizado. Filtro de conta
     // acompanha o das posições: sem ele, dividendos_12m/dy_real somariam
@@ -250,6 +252,7 @@ export async function ranking(c: Db, params: URLSearchParams) {
     // dividiria valor de todas as contas pela quantidade de uma só.
     (() => {
       let q = c.from("inv_dividendos").select("ativo_id, valor, data_pagamento, valor_por_cota, tipo_dividendo_id")
+        .eq("user_id", userId)
         .gte("data_pagamento", corteISO).lte("data_pagamento", hojeRanking);
       if (contaFiltro) q = q.eq("conta_id", contaFiltro);
       return q;
@@ -260,11 +263,13 @@ export async function ranking(c: Db, params: URLSearchParams) {
     // replay determinístico.
     c.from("inv_operacoes")
       .select("posicao_id, tipo_operacao, quantidade, data_operacao")
+      .eq("user_id", userId)
       .order("data_operacao", { ascending: true })
       .order("created_at", { ascending: true }),
     // Cache do histórico do FUNDO (B3): distribuição por cota nos 12m
     // completos, independente de posse — base do DY/YoC projetado para
-    // ativos comprados há menos de 1 ano.
+    // ativos comprados há menos de 1 ano. Tabela compartilhada (sem
+    // user_id) — não precisa (nem pode) ser filtrada por usuário.
     c.from("inv_proventos_fundo").select("ativo_id, data_pagamento, valor_por_cota")
       .gte("data_pagamento", corteISO).lte("data_pagamento", hojeRanking),
   ]);
@@ -404,6 +409,7 @@ export async function ranking(c: Db, params: URLSearchParams) {
       : dataInicioNominal.slice(0, 7);
     let qHist = c.from("inv_historico_mensal")
       .select("ativo_id, conta_id, mes_ano, rentabilidade_mes, variacao_percentual")
+      .eq("user_id", userId)
       .gte("mes_ano", mesInicio)
       .order("mes_ano", { ascending: true });
     if (contaFiltro) qHist = qHist.eq("conta_id", contaFiltro);
@@ -520,7 +526,7 @@ export async function ranking(c: Db, params: URLSearchParams) {
   // fixa de 12m usada por dividendos_12m/dividend_yield_pct acima — aqui é
   // exatamente o intervalo do filtro; periodo=TUDO não tem piso, é o
   // recebido a vida toda).
-  let divPeriodoQ = c.from("inv_dividendos").select("ativo_id, valor").lte("data_pagamento", hojeRanking);
+  let divPeriodoQ = c.from("inv_dividendos").select("ativo_id, valor").eq("user_id", userId).lte("data_pagamento", hojeRanking);
   if (dataInicioNominal) divPeriodoQ = divPeriodoQ.gte("data_pagamento", dataInicioNominal);
   if (contaFiltro) divPeriodoQ = divPeriodoQ.eq("conta_id", contaFiltro);
   const { data: divPeriodoRows, error: divPeriodoErr } = await divPeriodoQ;

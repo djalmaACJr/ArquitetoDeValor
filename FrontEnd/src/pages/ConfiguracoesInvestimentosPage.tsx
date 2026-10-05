@@ -28,6 +28,7 @@ import { TUTORIAL_INVESTIMENTOS_CONFIG } from '../lib/tutoriaisPaginas'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { useContas } from '../hooks/useContas'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
+import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
 import { PERGUNTAS_SUITABILITY, derivarPerfil } from '../lib/perfilInvestidor'
 import {
   TIPOS_ATIVO_INV, TIPO_ATIVO_LABEL, TIPO_ATIVO_COR,
@@ -46,6 +47,7 @@ const AMBAR = '#ffb74d'
 export default function ConfiguracoesInvestimentosPage() {
   const [toast, setToast] = useState<string | null>(null)
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500) }
+  const emEspacoAgregado = useEmEspacoDeAgregado()
 
   // ── Snapshot pra IA ───────────────────────────────────────────────────────
   const { perfil } = useInvPerfil()
@@ -63,6 +65,28 @@ export default function ConfiguracoesInvestimentosPage() {
       pesos_por_criterio: pesos,
     },
   }), [perfil, alocacoes, pesos]))
+
+  // Página de configurações (perfil de investidor, pesos, questionários,
+  // manutenção/migração) mistura preferências pessoais do visitante (que
+  // nunca respeitam o contexto do dono) com ações de manutenção que sempre
+  // operam sob o próprio usuário autenticado — mesmo espírito de "esconder
+  // gestão por completo em espaço de terceiro" já aplicado a contas/
+  // categorias. Mais simples e seguro escondido por inteiro aqui do que
+  // auditar seção a seção.
+  if (emEspacoAgregado) {
+    return (
+      <div className="p-5">
+        <InvestimentosNav />
+        <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
+          <p className="text-white font-medium">Configurações não disponíveis neste espaço</p>
+          <p className="text-[13px] mt-1" style={{ color: MUTED }}>
+            Perfil de investidor, pesos de avaliação e ações de manutenção são sempre pessoais —
+            volte para "Meus dados" para acessá-los.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-5">

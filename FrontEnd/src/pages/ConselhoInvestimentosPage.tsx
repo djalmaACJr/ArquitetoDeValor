@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Send, Trash2, Users, ChevronDown, ChevronUp, Bot, Paperclip, Check, X } from 'lucide-react'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
 import { useIAPreferencia } from '../hooks/useIAPreferencia'
+import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
 import { provedorPorId } from '../lib/iaProvedores'
 import { useChatMentorAtivos, type MentorRespostaConselho } from '../hooks/useChatMentorAtivos'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
@@ -188,6 +189,7 @@ function SeletorMentoresConselho({ mentores, selecionados, onChange }: {
 }
 
 export default function ConselhoInvestimentosPage() {
+  const emEspacoAgregado = useEmEspacoDeAgregado()
   const { configs } = useIAPreferencia()
   const { mensagens, carregando, erro, enviar, limpar } = useChatMentorAtivos()
   const [input, setInput] = useState('')
@@ -300,6 +302,23 @@ export default function ConselhoInvestimentosPage() {
     if (enviaCarteira) { setAnexarCarteira(false); setCarteiraJaEnviada(true) }
     if (enviaExtrato) { setAnexarExtrato(false); setExtratoJaEnviado(true) }
     enviar(t, { contextoTexto, mentorIds: mentorIdsSelecionados })
+  }
+
+  // Mesmo motivo das demais páginas de IA (Configurações/Avaliações/
+  // Questionários) — o Conselho usa a config de IA do visitante, nunca a
+  // do dono.
+  if (emEspacoAgregado) {
+    return (
+      <div className="p-5">
+        <InvestimentosNav />
+        <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
+          <p className="text-white font-medium">Conselho não disponível neste espaço</p>
+          <p className="text-[13px] mt-1" style={{ color: '#8b92a8' }}>
+            O Conselho usa sua própria configuração de IA — volte para "Meus dados" para acessá-lo.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (

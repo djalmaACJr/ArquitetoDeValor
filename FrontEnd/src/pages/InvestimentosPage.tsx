@@ -15,7 +15,7 @@ import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useDividendos } from '../hooks/useDividendos'
 import { useContas } from '../hooks/useContas'
-import { useAuth } from '../hooks/useAuth'
+import { useContextoUserId, useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
 import { useIndicesEconomicos } from '../hooks/useIndicesEconomicos'
 import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
 import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
@@ -621,8 +621,8 @@ export default function InvestimentosPage() {
   const { dividendos } = useDividendos()
   const { contas } = useContas()
   const { ativos: ativosMeta } = useInvestimentosAtivos()
-  const { session } = useAuth()
-  const uid = session?.user?.id ?? null
+  const uid = useContextoUserId()
+  const emEspacoAgregado = useEmEspacoDeAgregado()
   // Só contas de investimento ATIVAS são relevantes na carteira
   const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa)
 
@@ -745,6 +745,11 @@ export default function InvestimentosPage() {
   // (B) Ao abrir: se o mês corrente ainda não tem snapshot, captura uma vez.
   // Trava por sessão+mês para não repetir a cada navegação.
   useEffect(() => {
+    // Nunca dispara automaticamente dentro do espaço de um dono — a rota
+    // (snapshot-auto) sempre grava sob o usuário autenticado de verdade,
+    // nunca sob o contexto ativo; rodar aqui escreveria silenciosamente na
+    // PRÓPRIA carteira do agregado em vez da do dono que ele está vendo.
+    if (emEspacoAgregado) return
     if (loading || histMesLoading || autoDisparado.current) return
     if (!dashboard || dashboard.tipos.length === 0) return
     if (histMes.length > 0) return
@@ -754,7 +759,7 @@ export default function InvestimentosPage() {
     sessionStorage.setItem(flag, '1')
     void atualizarValores(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, histMesLoading, dashboard, histMes.length, uid])
+  }, [loading, histMesLoading, dashboard, histMes.length, uid, emEspacoAgregado])
 
   // Metadado (logo, setor, categoria) por ativo — junta-se ao ranking no quadro
   const metaPorAtivo = useMemo(() => new Map(ativosMeta.map((a) => [a.id, a])), [ativosMeta])
@@ -878,27 +883,35 @@ export default function InvestimentosPage() {
               <option key={c.conta_id} value={c.conta_id}>{c.nome}</option>
             ))}
           </SelectDark>
-          <button onClick={() => atualizarValores(false)} disabled={executando}
-            title="Busca a cotação atual de cada ativo e grava o valor de mercado do mês"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
-              text-[13px] text-white transition-all hover:border-white/25 disabled:opacity-50">
-            <RefreshCw size={15} className={executando ? 'animate-spin' : ''} />
-            {executando ? 'Atualizando…' : 'Atualizar cotação'}
-          </button>
-          {mostrarPreencher && (
-            <button onClick={preencherHistorico} disabled={preenchendo}
-              title={`Há meses faltando no histórico de: ${lacunas.tickers.join(', ')}`}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] text-white transition-all disabled:opacity-50"
-              style={{ borderColor: 'rgba(240,180,41,0.5)', color: '#f0b429' }}>
-              <History size={15} className={preenchendo ? 'animate-spin' : ''} />
-              {preenchendo ? 'Preenchendo…' : 'Preencher histórico'}
-            </button>
+          {/* Atualizar cotação / Preencher histórico / Importar sempre operam
+              sob o usuário autenticado de verdade, nunca sob o espaço do
+              dono — escondidos por completo dentro de um espaço de agregado
+              para não sugerir uma ação que não afeta a carteira em tela. */}
+          {!emEspacoAgregado && (
+            <>
+              <button onClick={() => atualizarValores(false)} disabled={executando}
+                title="Busca a cotação atual de cada ativo e grava o valor de mercado do mês"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
+                  text-[13px] text-white transition-all hover:border-white/25 disabled:opacity-50">
+                <RefreshCw size={15} className={executando ? 'animate-spin' : ''} />
+                {executando ? 'Atualizando…' : 'Atualizar cotação'}
+              </button>
+              {mostrarPreencher && (
+                <button onClick={preencherHistorico} disabled={preenchendo}
+                  title={`Há meses faltando no histórico de: ${lacunas.tickers.join(', ')}`}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[13px] text-white transition-all disabled:opacity-50"
+                  style={{ borderColor: 'rgba(240,180,41,0.5)', color: '#f0b429' }}>
+                  <History size={15} className={preenchendo ? 'animate-spin' : ''} />
+                  {preenchendo ? 'Preenchendo…' : 'Preencher histórico'}
+                </button>
+              )}
+              <Link to="/importexport?import=investimentos"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
+                  text-[13px] text-white transition-all hover:border-white/25">
+                <Upload size={15} /> Importar
+              </Link>
+            </>
           )}
-          <Link to="/importexport?import=investimentos"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10
-              text-[13px] text-white transition-all hover:border-white/25">
-            <Upload size={15} /> Importar
-          </Link>
         </div>
       </div>
 
@@ -963,10 +976,12 @@ export default function InvestimentosPage() {
               style={{ background: '#3b82f6' }}>
               <Wallet size={15} /> Cadastrar ativos
             </Link>
-            <Link to="/importexport?import=investimentos"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30 transition-all">
-              <Upload size={15} /> Importar investimentos
-            </Link>
+            {!emEspacoAgregado && (
+              <Link to="/importexport?import=investimentos"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white border border-white/15 hover:border-white/30 transition-all">
+                <Upload size={15} /> Importar investimentos
+              </Link>
+            )}
           </div>
         </div>
       ) : (

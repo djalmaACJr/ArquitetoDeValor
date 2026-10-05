@@ -105,7 +105,23 @@ export default function LoginPage() {
     biometriaAtiva().then(setDigitalAtiva)
   }, [])
 
-  const irParaApos = (rota: string | null) => navigate(rota ?? '/')
+  // `replace: true` — sem isso, /login ficava no histórico logo atrás da
+  // primeira tela autenticada. No Android, sem um handler de backButton
+  // próprio, o gesto/botão de voltar do sistema faz o WebView voltar no
+  // histórico da SPA; qualquer "voltar" (saindo de uma página ou mesmo o
+  // gesto de troca de mês do Dashboard coincidindo com a zona de borda do
+  // gesto do sistema) caía direto de volta na tela de login, mesmo com a
+  // sessão ainda válida (achado real: "voltar" no app jogava pro login).
+  const irParaApos = (rota: string | null) => navigate(rota ?? '/', { replace: true })
+
+  // `?next=` (setado por PrivateRoute ao redirecionar um link profundo sem
+  // sessão — ex.: /aceitar-convite?token=... — de volta pro login) tem
+  // prioridade sobre o snapshot de pós-expiração: são cenários mutuamente
+  // exclusivos na prática, e um link de convite clicado de propósito deve
+  // vencer um retorno "de onde parei" de uma sessão antiga.
+  const rotaNext = searchParams.get('next')
+  const rotaAposLogin = (userId: string | null): string | null =>
+    rotaNext ? decodeURIComponent(rotaNext) : consumirRotaPosExpiracao(userId)
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault()
@@ -127,7 +143,7 @@ export default function LoginPage() {
       // Logout por inatividade guarda a rota em que o usuário estava —
       // se o snapshot for deste mesmo usuário, retoma de onde parou.
       const { data } = await supabase.auth.getSession()
-      const rotaSalva = consumirRotaPosExpiracao(data.session?.user?.id ?? null)
+      const rotaSalva = rotaAposLogin(data.session?.user?.id ?? null)
 
       // Oferece ativar a digital: só no app Android, com hardware/cadastro
       // de biometria disponível, ainda não ativada neste app, e sem recusa
@@ -172,7 +188,7 @@ export default function LoginPage() {
         return
       }
       const { data } = await supabase.auth.getSession()
-      const rotaSalva = consumirRotaPosExpiracao(data.session?.user?.id ?? null)
+      const rotaSalva = rotaAposLogin(data.session?.user?.id ?? null)
       irParaApos(rotaSalva)
     } catch {
       // Usuário cancelou o prompt do SO ou a biometria falhou — sem drama,

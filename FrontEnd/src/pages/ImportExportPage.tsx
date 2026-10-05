@@ -20,6 +20,7 @@ import { mesAtual as mesAtualLocal, hojeLocal, dataParaYMD } from '../lib/utils'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
 import { useAuth } from '../hooks/useAuth'
+import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
 import { usePtax, usePtaxSerie } from '../hooks/usePtax'
 import { useIndicesEconomicos, type IndiceNome, type PontoIndice } from '../hooks/useIndicesEconomicos'
 import { useBackfillHistorico } from '../hooks/useInvestimentosHistorico'
@@ -4244,6 +4245,31 @@ export default function ImportExportPage() {
     return (['transacoes', 'contas', 'categorias', 'investimentos'] as const).includes(p as ModoImport)
       ? (p as ModoImport) : 'transacoes'
   })
+  const emEspacoAgregado = useEmEspacoDeAgregado()
+
+  // Backup/restore/importação/limpeza são sempre do PRÓPRIO usuário
+  // autenticado — nenhuma dessas rotas aceita X-Contexto-User-Id (mesmo
+  // padrão de /contas e /categorias), mas esta página usa useContas()/
+  // useCategorias() (contexto-aware) só pra popular dropdowns, o que criaria
+  // uma combinação perigosa: mostrar as contas/categorias do DONO como
+  // opção de mapeamento enquanto "Restaurar"/"Limpar dados" na verdade
+  // operam sobre a própria conta do agregado. Escondida por inteiro em
+  // espaço de agregado — ações destrutivas demais pra arriscar confusão.
+  if (emEspacoAgregado) {
+    return (
+      <div className="p-5 max-w-[1200px]">
+        <div className="mb-5">
+          <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100">Gerenciar dados</h1>
+        </div>
+        <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-10 text-center">
+          <p className="font-medium text-gray-800 dark:text-gray-100">Não disponível neste espaço</p>
+          <p className="text-[13px] mt-1 text-gray-400">
+            Backup, importação, restauração e limpeza de dados são sempre pessoais — volte para "Meus dados" para acessá-los.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-5 max-w-[1200px]">

@@ -29,7 +29,7 @@
 //                             usada como benchmark na página Gerenciar dados)
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { erro, db, autenticar, corsPreFlight, executarComLogDeCron } from "../_shared/utils.ts";
+import { erro, db, autenticar, corsPreFlight, executarComLogDeCron, resolverContexto } from "../_shared/utils.ts";
 import { comOrigem } from "../_shared/utils.ts";
 import { logError } from "../_shared/logger.ts";
 
@@ -138,16 +138,63 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
   const userId = auth;
   const c       = db(req);
 
+  // Agregados — Fase 4 (INVESTIMENTOS): escopo deliberadamente reduzido ao
+  // núcleo "ver/lançar a carteira compartilhada" — ativos, posições,
+  // operações, dividendos, tipos de dividendo, alocações, histórico mensal,
+  // questionários/avaliações (só leitura) e dashboard/ranking. Rotas de
+  // manutenção/importação em massa (migrar-conta, importar, restaurar,
+  // atualizar-ativos, normalizar-tesouro, snapshot-auto/backfill,
+  // dividendos-buscar-*, cupom-tesouro-buscar, backfill-rate, diagnóstico,
+  // associar-extrato-massa, rendimento-cripto, chat-mentor) ficam de fora de
+  // propósito — nunca honram X-Contexto-User-Id, sempre operam sob o próprio
+  // usuário autenticado, mesmo dentro do espaço de um dono. cron-execucoes
+  // é admin-only, nunca de agregado.
   try {
     switch (recurso) {
-      case "ativos":          return await rotaAtivos(c, req, m, userId);
-      case "alocacoes":       return await rotaAlocacoes(c, req, m, userId);
-      case "questionarios":   return await rotaQuestionarios(c, req, m, userId);
-      case "avaliacoes":      return await rotaAvaliacoes(c, req, m, userId);
+      case "ativos": {
+        const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"], m !== "GET");
+        if (ctx instanceof Response) return ctx;
+        return await rotaAtivos(c, req, m, ctx.userId);
+      }
+      case "alocacoes": {
+        const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"], m !== "GET");
+        if (ctx instanceof Response) return ctx;
+        return await rotaAlocacoes(c, req, m, ctx.userId);
+      }
+      case "questionarios": {
+        // Só leitura é honrada no contexto do dono — gerar/editar questionário
+        // usa a config de IA de quem estiver autenticado, nunca a do dono.
+        const ctx = m === "GET"
+          ? await resolverContexto(req, c, userId, ["INVESTIMENTOS"])
+          : { userId, isAgregado: false };
+        if (ctx instanceof Response) return ctx;
+        return await rotaQuestionarios(c, req, m, ctx.userId);
+      }
+      case "avaliacoes": {
+        // Mesma razão de questionarios: POST /mentor e /salvar usam a config
+        // de IA de quem estiver autenticado — nunca a do dono.
+        const ctx = m === "GET"
+          ? await resolverContexto(req, c, userId, ["INVESTIMENTOS"])
+          : { userId, isAgregado: false };
+        if (ctx instanceof Response) return ctx;
+        return await rotaAvaliacoes(c, req, m, ctx.userId);
+      }
       case "chat-mentor":     return await rotaChatMentor(c, req, m, userId);
-      case "posicoes":        return await rotaPosicoes(c, req, m, userId);
-      case "operacoes":       return await rotaOperacoes(c, req, m, userId);
-      case "dividendos":      return await rotaDividendos(c, req, m, userId);
+      case "posicoes": {
+        const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"], m !== "GET");
+        if (ctx instanceof Response) return ctx;
+        return await rotaPosicoes(c, req, m, ctx.userId);
+      }
+      case "operacoes": {
+        const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"], m !== "GET");
+        if (ctx instanceof Response) return ctx;
+        return await rotaOperacoes(c, req, m, ctx.userId, userId);
+      }
+      case "dividendos": {
+        const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"], m !== "GET");
+        if (ctx instanceof Response) return ctx;
+        return await rotaDividendos(c, req, m, ctx.userId, userId);
+      }
       case "dividendos-buscar-br": return await rotaDividendosBuscarBr(c, req, m, userId);
       case "dividendos-buscar-usd": return await rotaDividendosBuscarUsd(c, req, m, userId);
       case "cupom-tesouro-buscar": return await rotaCupomTesouroBuscar(c, req, m, userId);
@@ -156,19 +203,45 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
       case "migrar-conta":    return await rotaMigrarConta(c, req, m, userId);
       case "associar-extrato-massa": return await rotaAssociarExtratoMassa(c, m, userId);
       case "rendimento-cripto": return await rotaRendimentoCripto(c, m, userId);
-      case "tipos-dividendo": return await rotaTiposDividendo(c, req, m, userId);
-      case "historico-mensal": return await rotaHistorico(c, req, m, userId);
+      case "tipos-dividendo": {
+        const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"], m !== "GET");
+        if (ctx instanceof Response) return ctx;
+        return await rotaTiposDividendo(c, req, m, ctx.userId);
+      }
+      case "historico-mensal": {
+        const ctx = m === "GET"
+          ? await resolverContexto(req, c, userId, ["INVESTIMENTOS"])
+          : { userId, isAgregado: false };
+        if (ctx instanceof Response) return ctx;
+        return await rotaHistorico(c, req, m, ctx.userId);
+      }
       case "snapshot-auto":   return await rotaSnapshotAuto(c, req, m, userId);
       case "snapshot-backfill": return await rotaSnapshotBackfill(c, req, m, userId);
       case "importar":        return await rotaImportar(c, req, m, userId);
       case "atualizar-ativos": return await rotaAtualizarAtivos(c, req, m, userId);
       case "normalizar-tesouro": return await rotaNormalizarTesouro(c, req, m, userId);
       case "restaurar":       return await rotaRestaurar(c, req, m, userId);
-      case "dashboard":       return m === "GET" ? await dashboard(c, url.searchParams) : erro("Método não permitido", 405);
-      case "ranking":         return m === "GET" ? await ranking(c, url.searchParams) : erro("Método não permitido", 405);
+      case "dashboard": {
+        if (m !== "GET") return erro("Método não permitido", 405);
+        const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"]);
+        if (ctx instanceof Response) return ctx;
+        return await dashboard(c, url.searchParams, ctx.userId);
+      }
+      case "ranking": {
+        if (m !== "GET") return erro("Método não permitido", 405);
+        const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"]);
+        if (ctx instanceof Response) return ctx;
+        return await ranking(c, url.searchParams, ctx.userId);
+      }
       case "busca-externa":   return m === "GET" ? await buscaExterna(url.searchParams) : erro("Método não permitido", 405);
       case "cron-execucoes":  return await rotaCronExecucoes(c, m, userId);
-      case "indicadores":     return await rotaIndicadores(c, req, m, userId);
+      case "indicadores": {
+        const ctx = m === "GET"
+          ? await resolverContexto(req, c, userId, ["INVESTIMENTOS"])
+          : { userId, isAgregado: false };
+        if (ctx instanceof Response) return ctx;
+        return await rotaIndicadores(c, req, m, ctx.userId);
+      }
       case "ptax":
         if (m === "GET")  return await rotaPtax(c, url.searchParams);
         if (m === "POST") return await sincronizarPtaxResposta(c);
