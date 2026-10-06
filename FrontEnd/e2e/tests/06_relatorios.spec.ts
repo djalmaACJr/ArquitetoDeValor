@@ -1,5 +1,6 @@
 // e2e/tests/05_relatorios.spec.ts
 import { test, expect } from '@playwright/test'
+import { vigiarErrosDeRender } from './helpers'
 
 test.describe('Relatórios', () => {
 
@@ -21,6 +22,24 @@ test.describe('Relatórios', () => {
     await expect(page.getByText('Total Receitas')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('Créditos', { exact: true })).toBeVisible()
     await expect(page.getByText('Débitos', { exact: true })).toBeVisible()
+  })
+
+  // Regressão: com /categorias e /contas falhando (ex.: 403 num espaço de agregado
+  // sem permissão), o padrão `data = []` dos hooks virava um array novo a cada
+  // render e a página entrava em loop ("Maximum update depth exceeded").
+  test('E2E-REL08 — APIs de categorias/contas/transações falhando não causam loop de render', async ({ page }) => {
+    const erros = vigiarErrosDeRender(page)
+    for (const rota of ['categorias', 'contas', 'transacoes']) {
+      await page.route(`**/functions/v1/${rota}*`, r =>
+        r.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ erro: 'Sem permissão' }) }))
+    }
+    await page.goto('/relatorios')
+    await expect(page.getByRole('button', { name: /gerar relatório/i })).toBeVisible()
+    await page.getByRole('button', { name: /gerar relatório/i }).click()
+    await page.waitForTimeout(2_000)
+    // A página segue responsiva e sem erro de render
+    await expect(page.getByRole('button', { name: /gerar relatório/i })).toBeVisible()
+    expect(erros()).toEqual([])
   })
 
   test('E2E-REL03 — seção Créditos pode ser recolhida', async ({ page }) => {

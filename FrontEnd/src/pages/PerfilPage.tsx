@@ -1649,6 +1649,18 @@ export default function PerfilPage() {
           </div>
         )}
 
+        {/* ── Compartilhamento (usuários agregados) ──────────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Secao titulo="Compartilhamento" icone={<Users size={15}/>}>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[16px] text-white/50">Convide alguém pra ver/editar seus dados, ou veja os acessos que você concedeu/recebeu.</p>
+              <Link to="/compartilhamento" className={`${btn} bg-white/5 text-white/70 hover:bg-white/10 shrink-0`}>
+                Gerenciar
+              </Link>
+            </div>
+          </Secao>
+        </div>
+
         {/* ── Administração — só usuarios.admin = true (RLS garante o
             isolamento real; esta condição só evita mostrar o link à toa) ── */}
         {isAdmin && (

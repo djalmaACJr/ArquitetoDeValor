@@ -6,6 +6,10 @@ import { qk } from '../lib/queryKeys'
 import { useContextoUserId } from './useEspacoAtivo'
 import type { Categoria } from '../types'
 
+// Referência estável: `data = []` criaria um array novo a cada render quando a
+// query falha/está sem dados, quebrando useMemo/useEffect de quem depende dele.
+const SEM_CATEGORIAS: Categoria[] = []
+
 interface OpResult { ok: boolean; erro: string | null }
 interface OpResultCat extends OpResult { dados: Categoria | null }
 
@@ -19,7 +23,7 @@ export function useCategorias() {
   const qc = useQueryClient()
   const uid = useContextoUserId()
 
-  const { data: categorias = [], isLoading: loading, error } = useQuery({
+  const { data: categorias = SEM_CATEGORIAS, isLoading: loading, error } = useQuery({
     queryKey: qk.categorias(uid),
     queryFn:  fetchCategorias,
     enabled:  !!uid,

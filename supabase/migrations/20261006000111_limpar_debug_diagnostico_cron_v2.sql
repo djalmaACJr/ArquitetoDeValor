@@ -1,0 +1,19 @@
+-- Limpa as linhas de diagnóstico gravadas em cron_execucoes durante a
+-- investigação do self-chaining de dividendos-br-diario e do
+-- WORKER_RESOURCE_LIMIT de cvm-acoes-mensal (out/2026) — achados reais:
+--   1. dispararContinuacaoCron() usava req.url pra se auto-chamar, mas
+--      req.url DENTRO do handler não é a URL pública (o gateway reescreve
+--      pra algo como http://<ref>.supabase.co/<rota>, sem /functions/v1/).
+--      Corrigido reconstruindo a URL a partir de SUPABASE_URL + pathname.
+--      dividendos-cron-br validado em produção: 10 lotes de 15 usuários,
+--      0 erros, chain completo.
+--   2. cvm-acoes-mensal: Promise.all baixando+parseando os 2 ZIPs da CVM
+--      (FCA+DFP) e os 4 CSVs do DFP ao mesmo tempo estourava
+--      WORKER_RESOURCE_LIMIT. Corrigido sequenciando os fetches/parses em
+--      cvmAcoes.ts (fix de performance válido, já deployado).
+--   3. Achado SEPARADO, não resolvido aqui: o ZIP FCA do ano corrente não
+--      tem mais fca_cia_aberta_capital_social_<ANO>.csv — a CVM removeu/
+--      reestruturou essa seção. O cron roda sem erro mas não atualiza
+--      nenhum ativo (sem_dado em todos). Precisa de redesenho da fonte de
+--      "quantidade total de ações" (ver comentário no topo de cvmAcoes.ts).
+DELETE FROM arqvalor.cron_execucoes WHERE job_nome LIKE 'debug-%';

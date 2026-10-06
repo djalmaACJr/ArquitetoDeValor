@@ -38,6 +38,17 @@ function decodeJwtSub(token: string): string | null {
   } catch { return null }
 }
 
+// No projeto `mobile` (viewport Pixel 7, ver playwright.config.ts) a Sidebar
+// fica fora da tela até abrir o menu hambúrguer ("Abrir menu", AppLayout.tsx)
+// — sem isso, qualquer interação com o seletor de espaço ou os links de nav
+// trava esperando um elemento invisível. No desktop (projeto `firefox`) o
+// botão não existe/não fica visível, então isto é um no-op seguro — chamar
+// antes de toda interação com a Sidebar, nos dois projetos.
+async function abrirSidebarSeNecessario(page: import('@playwright/test').Page) {
+  const btn = page.getByRole('button', { name: /abrir menu/i })
+  if (await btn.isVisible().catch(() => false)) await btn.click()
+}
+
 // Timeout maior (90s) — mesma razão de data.setup.ts: a 1ª visita a uma rota
 // pesada (ex.: /lancamentos) num dev server frio pode levar bem mais que o
 // padrão de 30s pra compilar sob demanda, antes mesmo de qualquer asserção.
@@ -243,6 +254,7 @@ test.describe('Seletor de espaço (Agregados)', () => {
     await expect(pageB).toHaveURL(/\/$/, { timeout: 15_000 })
 
     // Default: nenhum vínculo escolhido ainda → mostra "Meus dados".
+    await abrirSidebarSeNecessario(pageB)
     const seletor = pageB.getByRole('button', { name: /meus dados/i })
     await expect(seletor).toBeVisible({ timeout: 10_000 })
 
@@ -272,6 +284,7 @@ test.describe('Seletor de espaço (Agregados)', () => {
     // Sidebar (SPA) em todo o teste, não page.goto() — um reload de página
     // inteira reinicializaria o app do zero, e um usuário real navega pelo
     // menu, não dá F5 a cada troca de espaço.
+    await abrirSidebarSeNecessario(pageB)
     await pageB.getByRole('link', { name: /^extratos$/i }).click()
     await pageB.waitForLoadState('networkidle')
     await expandirFiltros(pageB)
@@ -282,12 +295,14 @@ test.describe('Seletor de espaço (Agregados)', () => {
     await pageB.locator('h1').first().click()
 
     // Troca pra "Conta de <A>".
+    await abrirSidebarSeNecessario(pageB)
     await pageB.getByRole('button', { name: /meus dados/i }).click()
     await pageB.getByText(/^conta de /i).click()
     await expect(pageB).toHaveURL(/\/$/, { timeout: 10_000 })
     await expect(pageB.getByRole('button', { name: /^conta de /i })).toBeVisible()
 
     // Agora o filtro de contas do Extrato mostra a conta liberada pelo dono.
+    await abrirSidebarSeNecessario(pageB)
     await pageB.getByRole('link', { name: /^extratos$/i }).click()
     await pageB.waitForLoadState('networkidle')
     // Pequena folga pra deixar o remount assentar — achado real: navegar
@@ -363,5 +378,159 @@ test.describe('Seletor de espaço (Agregados)', () => {
     await expect(pageB.getByText(contaNomeA)).not.toBeVisible()
 
     await ctxB.close()
+  })
+
+  // ── helpers dos testes SEL05+ ─────────────────────────────────
+  async function entrarComoB(browser: import('@playwright/test').Browser) {
+    const ctxB = await browser.newContext()
+    const pageB = await ctxB.newPage()
+    await pageB.goto('/login')
+    await pageB.getByPlaceholder(/seu@email.com/i).fill(emailB)
+    await pageB.locator('input[type="password"]').fill(passwordB)
+    await pageB.getByRole('button', { name: 'Entrar' }).click()
+    await expect(pageB).toHaveURL(/[/]$/, { timeout: 15_000 })
+    return { ctxB, pageB }
+  }
+  async function irParaContaDoDono(pageB: import('@playwright/test').Page) {
+    await abrirSidebarSeNecessario(pageB)
+    await pageB.getByRole('button', { name: /meus dados/i }).click()
+    await pageB.getByText(/^conta de /i).click()
+    await expect(pageB.getByRole('button', { name: /^conta de /i })).toBeVisible({ timeout: 10_000 })
+  }
+
+  // ── E2E-SEL05 ─────────────────────────────────────────────────
+  // O dono liberou só EXTRATO: Objetivos/Investimentos somem do menu do
+  // agregado em "Conta de <dono>" (e continuam em "Meus dados").
+  test('E2E-SEL05 — menu oculta módulos não liberados no espaço do dono', async ({ browser }) => {
+    if (!PRONTO) { console.warn('[13_seletor_espaco] setup indisponível — E2E-SEL05 pulado.'); return }
+    const { ctxB, pageB } = await entrarComoB(browser)
+
+    await abrirSidebarSeNecessario(pageB)
+    await expect(pageB.getByRole('link', { name: /^objetivos$/i })).toBeVisible({ timeout: 10_000 })
+    await expect(pageB.getByRole('link', { name: /^investimentos$/i })).toBeVisible()
+
+    await irParaContaDoDono(pageB)
+    await abrirSidebarSeNecessario(pageB)
+    await expect(pageB.getByRole('link', { name: /^extratos$/i })).toBeVisible()
+    await expect(pageB.getByRole('link', { name: /^objetivos$/i })).toHaveCount(0)
+    await expect(pageB.getByRole('link', { name: /^investimentos$/i })).toHaveCount(0)
+
+    await ctxB.close()
+  })
+
+  // ── E2E-SEL06 ─────────────────────────────────────────────────
+  test('E2E-SEL06 — faixa avisa que há contas não compartilhadas (só no espaço do dono)', async ({ browser }) => {
+    if (!PRONTO) { console.warn('[13_seletor_espaco] setup indisponível — E2E-SEL06 pulado.'); return }
+    const { ctxB, pageB } = await entrarComoB(browser)
+
+    await expect(pageB.getByText(/não foram compartilhadas/i)).toHaveCount(0)
+    await irParaContaDoDono(pageB)
+    await expect(pageB.getByText(/não foram compartilhadas/i)).toBeVisible({ timeout: 10_000 })
+
+    await ctxB.close()
+  })
+
+  // ── E2E-SEL07 ─────────────────────────────────────────────────
+  test('E2E-SEL07 — abrir direto a URL de um módulo não liberado mostra "Acesso não liberado"', async ({ browser }) => {
+    if (!PRONTO) { console.warn('[13_seletor_espaco] setup indisponível — E2E-SEL07 pulado.'); return }
+    const { ctxB, pageB } = await entrarComoB(browser)
+    await irParaContaDoDono(pageB)
+
+    // Recarga completa: o espaço ativo persiste (localStorage) e o guarda age.
+    await pageB.goto('/objetivos')
+    await expect(pageB.getByRole('heading', { name: /acesso não liberado/i })).toBeVisible({ timeout: 15_000 })
+
+    await ctxB.close()
+  })
+
+  // ── E2E-SEL08 ─────────────────────────────────────────────────
+  // Revogação com o agregado dentro do espaço do dono: ele volta sozinho pra
+  // "Meus dados" (antes ficava preso numa conta zerada, sem o seletor).
+  test('E2E-SEL08 — dono revoga com o agregado no espaço dele: volta sozinho para "Meus dados"', async ({ browser }) => {
+    if (!PRONTO) { console.warn('[13_seletor_espaco] setup indisponível — E2E-SEL08 pulado.'); return }
+    const { ctxB, pageB } = await entrarComoB(browser)
+    await irParaContaDoDono(pageB)
+
+    const r = await fetch(api('/agregados/' + vinculoId + '/revogar'), { method: 'POST', headers: headersA })
+    expect(r.ok).toBe(true)
+
+    await pageB.reload()
+    await expect(pageB.getByRole('button', { name: /^conta de /i })).toHaveCount(0, { timeout: 15_000 })
+    await abrirSidebarSeNecessario(pageB)
+    await expect(pageB.getByRole('link', { name: /^objetivos$/i })).toBeVisible({ timeout: 10_000 })
+    await expect(pageB.getByText(/revogou seu acesso/i)).toBeVisible({ timeout: 10_000 })
+
+    await ctxB.close()
+  })
+
+  // ── E2E-SEL09 ─────────────────────────────────────────────────
+  // Convite novo pra quem JÁ tem conta: aparece no login do convidado com
+  // Aceitar/Recusar; ao aceitar, o dono vê o aviso "Convite aceito".
+  test('E2E-SEL09 — convite pendente aparece no login do convidado e o dono é avisado do aceite', async ({ browser, page }) => {
+    if (!PRONTO) { console.warn('[13_seletor_espaco] setup indisponível — E2E-SEL09 pulado.'); return }
+
+    const rConvite = await fetch(api('/agregados'), {
+      method: 'POST', headers: headersA, body: JSON.stringify({ email: emailB }),
+    })
+    expect(rConvite.status).toBe(201)
+
+    const { ctxB, pageB } = await entrarComoB(browser)
+    await expect(pageB.getByText(/convite para ser agregado/i)).toBeVisible({ timeout: 15_000 })
+    await pageB.getByRole('button', { name: /^aceitar$/i }).first().click()
+    await expect(pageB.getByText(/convite para ser agregado/i)).toHaveCount(0, { timeout: 10_000 })
+    await abrirSidebarSeNecessario(pageB)
+    await expect(pageB.getByRole('button', { name: /meus dados/i })).toBeVisible({ timeout: 10_000 })
+    await ctxB.close()
+
+    // Dono (sessão padrão do Playwright = conta A): aviso de aceite com o e-mail do agregado.
+    await page.goto('/')
+    await expect(page.getByText('Convite aceito')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(emailB).first()).toBeVisible()
+    await page.getByRole('button', { name: /^entendi$/i }).first().click()
+    await expect(page.getByText('Convite aceito')).toHaveCount(0)
+  })
+
+  // ── E2E-SEL10 ─────────────────────────────────────────────────
+  // O agregado deixa de acessar por conta própria (SEL09 deixou o vínculo
+  // ACEITO): sai do espaço, o dono é avisado e pode convidar de novo.
+  test('E2E-SEL10 — agregado deixa de acessar por conta própria; dono é avisado e pode convidar de novo', async ({ browser, page }) => {
+    if (!PRONTO) { console.warn('[13_seletor_espaco] setup indisponível — E2E-SEL10 pulado.'); return }
+    const { ctxB, pageB } = await entrarComoB(browser)
+    // Dispensa o aviso de revogação do SEL08 (revogação REAL do dono, ainda não vista por B):
+    // o que este teste checa é que a SAÍDA voluntária não gera um aviso novo.
+    const avisoAntigo = pageB.getByText(/revogou seu acesso/i)
+    await expect(avisoAntigo).toBeVisible({ timeout: 15_000 })   // SEL08 deixou uma revogação real não vista
+    {
+      // "Entendi" DO CARD de revogação (há outros avisos empilhados com o mesmo botão)
+      // Espera o PATCH que grava "visto até" terminar — o goto abaixo recarregaria a página no meio dele.
+      const gravou = pageB.waitForResponse(r => r.request().method() === 'PATCH' && (r.request().postData() ?? '').includes('agregados_avisos_vistos_em'))
+      await avisoAntigo.locator('xpath=ancestor::div[contains(@class,"rounded-xl")][1]').getByRole('button', { name: /^entendi$/i }).click()
+      await gravou
+      await expect(avisoAntigo).toHaveCount(0)
+    }
+    await irParaContaDoDono(pageB)
+
+    pageB.once('dialog', d => d.accept())
+    await pageB.goto('/compartilhamento')
+    await pageB.getByRole('button', { name: /deixar de acessar/i }).click()
+
+    // Saiu do espaço: volta pra "Meus dados" e sem nenhum aviso de "acesso revogado".
+    await expect(pageB.getByRole('button', { name: /^conta de /i })).toHaveCount(0, { timeout: 15_000 })
+    await expect(pageB.getByRole('button', { name: /deixar de acessar/i })).toHaveCount(0)
+    await expect(pageB.getByText(/revogou seu acesso/i)).toHaveCount(0)
+    await ctxB.close()
+
+    // Dono: aviso "Agregado saiu" e o vínculo aparece como "Saiu" em Compartilhamento.
+    await page.goto('/')
+    await expect(page.getByText('Agregado saiu')).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: /^entendi$/i }).first().click()
+    await page.goto('/compartilhamento')
+    await page.getByRole('button', { name: /^revogados/i }).click()
+    await expect(page.getByText('Saiu', { exact: true }).first()).toBeVisible()
+
+    // Pode convidar o mesmo usuário de novo.
+    await page.getByPlaceholder('email@exemplo.com').fill(emailB)
+    await page.getByRole('button', { name: /^convidar$/i }).click()
+    await expect(page.getByText(new RegExp('Convite enviado para ' + emailB, 'i'))).toBeVisible({ timeout: 10_000 })
   })
 })

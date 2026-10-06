@@ -1,9 +1,13 @@
 // src/hooks/useContas.ts
+import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useContextoUserId } from './useEspacoAtivo'
 import type { Conta, TipoConta, CartaoVirtual } from '../types'
+
+// Referência estável quando a query falha/está sem dados (evita loop de render)
+const SEM_CONTAS: Conta[] = []
 
 interface OpResult { ok: boolean; erro: string | null }
 
@@ -20,7 +24,7 @@ export function useContas() {
   // "Conta de Fulano" nunca compartilhem a mesma entrada de cache.
   const uid = useContextoUserId()
 
-  const { data: contasRaw = [], isLoading: loading, error } = useQuery({
+  const { data: contasRaw = SEM_CONTAS, isLoading: loading, error } = useQuery({
     queryKey: qk.contas(uid),
     queryFn:  fetchContas,
     enabled:  !!uid,
@@ -32,7 +36,7 @@ export function useContas() {
   //     porque saldo de cartão é negativo e o usuário quer ver o mais devido no topo.
   //   • Demais tipos: saldo DESCENDENTE — mais positivo primeiro (comportamento histórico).
   // Tie-break em ambos os casos: nome em pt-BR.
-  const contas = [...contasRaw].sort((a, b) => {
+  const contas = useMemo(() => [...contasRaw].sort((a, b) => {
     const aCartao = a.tipo === 'CARTAO'
     const bCartao = b.tipo === 'CARTAO'
     if (aCartao && bCartao) {
@@ -44,7 +48,7 @@ export function useContas() {
     // Cartão vs não-cartão: cada página agrupa por tipo antes de exibir, então
     // a ordem inter-grupos é irrelevante; mantemos algo estável.
     return a.tipo.localeCompare(b.tipo) || a.nome.localeCompare(b.nome, 'pt-BR')
-  })
+  }), [contasRaw])
 
   const carregar = async () => { await qc.invalidateQueries({ queryKey: qk.contas(uid) }) }
 

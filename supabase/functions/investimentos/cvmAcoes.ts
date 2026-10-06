@@ -5,12 +5,17 @@
 // para o VP de FIIs, mas com datasets diferentes.
 //
 // ⚠️ Assim como em cvm.ts, o ambiente de dev local não alcança
-// dados.cvm.gov.br — a estrutura abaixo segue o formato conhecido e estável
-// destes datasets (usado por bibliotecas open-source de dados CVM), mas a
-// primeira execução real do cron (só possível a partir de uma Edge Function
-// no Supabase) deve ser tratada como verificação ao vivo antes de confiar
-// no resultado em produção. Todo o módulo é best-effort: qualquer falha de
-// rede/parse é engolida e loga, nunca quebra o cadastro do ativo.
+// dados.cvm.gov.br — a estrutura abaixo seguia o formato conhecido e
+// estável destes datasets (usado por bibliotecas open-source de dados CVM).
+// Todo o módulo é best-effort: qualquer falha de rede/parse é engolida e
+// loga, nunca quebra o cadastro do ativo.
+//
+// 🔧 CORRIGIDO (out/2026): o ZIP FCA do ano corrente removeu de vez a seção
+// "Capital Social" (fca_cia_aberta_capital_social_<ANO>.csv não existe mais
+// — confirmado por inspeção direta: nenhum dos CSVs restantes do FCA tem
+// Quantidade_Total_Acoes ou equivalente). O nº total de ações agora vem do
+// FRE (Formulário de Referência) — ver seção "FRE" abaixo. FCA continua
+// servindo só pra ponte ticker→CNPJ (valor_mobiliario).
 //
 // ── FCA (Formulário Cadastral) — ponte ticker → CNPJ ──────────────────────
 //   https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FCA/DADOS/fca_cia_aberta_<ANO>.zip
@@ -18,11 +23,41 @@
 //   Latin-1): CNPJ_Companhia, Data_Referencia, Versao, Codigo_Negociacao,
 //   Mercado. Papel do "Código de Negociação" aqui é o mesmo do ISIN pra FII
 //   (cvm.ts) — é a única ponte pública entre o ticker B3 e o CNPJ_CIA usado
-//   nos demais datasets da CVM. FCA não traz o Nº TOTAL de ações — esse dado
-//   vem do FRE (Formulário de Referência)/dados_cadastrais; como fallback
-//   nesta 1ª versão, usamos a Quantidade_Total_Acoes já presente no próprio
-//   FCA (seção "Capital Social", arquivo fca_cia_aberta_capital_social_<ANO>.csv,
-//   colunas: CNPJ_Companhia, Data_Referencia, Versao, Quantidade_Total_Acoes).
+//   nos demais datasets da CVM.
+//
+// ── FRE (Formulário de Referência) — nº total de ações ────────────────────
+//   https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FRE/DADOS/fre_cia_aberta_<ANO>.zip
+//   ZIP ANUAL (~8MB comprimido, ~33 CSVs — bem menor do que o nome "maior/
+//   mais complexo" sugeria; seguro de baixar por completo numa invocação) →
+//   fre_cia_aberta_capital_social_<ANO>.csv: CNPJ_Companhia, Data_Referencia,
+//   Versao, ID_Documento, Nome_Companhia, ID_Capital_Social, Tipo_Capital,
+//   Data_Autorizacao_Aprovacao, Valor_Capital, Prazo_Integralizacao,
+//   Quantidade_Acoes_Ordinarias, Quantidade_Acoes_Preferenciais,
+//   Quantidade_Total_Acoes. 1 linha por (empresa, Tipo_Capital) — filtramos
+//   Tipo_Capital = "Capital Emitido" (ações realmente em circulação; outros
+//   valores do dataset incluem "Capital Autorizado", um teto estatutário
+//   nunca necessariamente emitido). Confirmado contra o nº real de ações do
+//   Banco do Brasil (~5,73 bi) na 1ª inspeção ao vivo do dataset.
+//
+//   O ZIP do FRE também tem outros CSVs potencialmente úteis, não usados
+//   ainda (avaliar com o usuário antes de expandir o escopo deste módulo):
+//     fre_cia_aberta_distribuicao_capital_<ANO>.csv — free float: nº e % de
+//       ações em circulação fora do controle (ON/PN/total) + nº de
+//       acionistas PF/PJ/institucionais. Sinal de liquidez.
+//     fre_cia_aberta_posicao_acionaria_<ANO>.csv — cada acionista relevante
+//       com % de participação (ON/PN/total) e flag Acionista_Controlador —
+//       concentração de controle, útil como contexto pra avaliação por
+//       mentores de IA.
+//     fre_cia_aberta_transacao_parte_relacionada_<ANO>.csv — transações com
+//       partes relacionadas (controlador, administradores): montante,
+//       natureza, relação — sinal clássico de risco de governança
+//       (autocontratação) se houver volume alto.
+//     fre_cia_aberta_capital_social_classe_acao_<ANO>.csv — quantidade por
+//       classe de ação preferencial (útil só pra empresas com múltiplas
+//       classes de PN, caso raro).
+//   Todos exclusivos de tipo_ativo=ACOES (FRE é só pra companhias abertas —
+//   não existe equivalente pra FII/ETF/renda fixa/tesouro/cripto/stocks
+//   internacionais).
 //
 // ── DFP (Demonstrações Financeiras Padronizadas) — fundamentos anuais ─────
 //   https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/DFP/DADOS/dfp_cia_aberta_<ANO>.zip
@@ -70,12 +105,14 @@ export function calcularValorJustoGraham(lpa: number | null | undefined, vpa: nu
   return Math.sqrt(22.5 * lpa * vpa);
 }
 
-// ── FCA: ticker-raiz → CNPJ_CIA + nº total de ações ───────────────────────
-async function buscarFcaDoAno(ano: number): Promise<{ tickerParaCnpj: Map<string, string>; acoesPorCnpj: Map<string, number> }> {
+// ── FCA: ticker-raiz → CNPJ_CIA ───────────────────────────────────────────
+// Só a ponte ticker→CNPJ — nº de ações vem do FRE (buscarCapitalSocialFre),
+// não mais do FCA (ver nota no topo do arquivo: a CVM removeu a seção
+// "Capital Social" do FCA).
+async function buscarFcaDoAno(ano: number): Promise<{ tickerParaCnpj: Map<string, string> }> {
   const url = `${CVM_FCA_BASE}/fca_cia_aberta_${ano}.zip`;
   const zip = await baixarZip(url);
   const valorMobCsv = await lerCsvDoZip(zip, `fca_cia_aberta_valor_mobiliario_${ano}.csv`, url);
-  const capitalCsv  = await lerCsvDoZip(zip, `fca_cia_aberta_capital_social_${ano}.csv`, url);
 
   // Só ações negociadas em bolsa (Mercado = "Bolsa") — dedup por Código de
   // Negociação, mantendo a linha mais recente (mesma retificação do FII).
@@ -87,14 +124,30 @@ async function buscarFcaDoAno(ano: number): Promise<{ tickerParaCnpj: Map<string
   for (const [ticker, l] of valorMobPorTicker) {
     if (l.CNPJ_Companhia) tickerParaCnpj.set(raizDoTicker(ticker), l.CNPJ_Companhia);
   }
+  return { tickerParaCnpj };
+}
 
-  const capitalPorCnpj = maisRecentePorChave(parseCsv(capitalCsv), "CNPJ_Companhia");
+// ── FRE: CNPJ_CIA → nº total de ações (substitui o capital_social do FCA,
+// removido pela CVM — achado real out/2026, ver nota no topo do arquivo) ──
+// fre_cia_aberta_capital_social_<ANO>.csv tem 1 linha por (empresa,
+// Tipo_Capital) — "Capital Autorizado" é só um teto estatutário nunca
+// necessariamente emitido, "Capital Emitido" é o que reflete as ações
+// realmente em circulação. Confirmado contra o nº real de ações do Banco do
+// Brasil (~5,73 bi) na 1ª inspeção ao vivo do dataset.
+const TIPO_CAPITAL_EMITIDO = "Capital Emitido";
+
+async function buscarCapitalSocialFre(ano: number): Promise<Map<string, number>> {
+  const url = `https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/FRE/DADOS/fre_cia_aberta_${ano}.zip`;
+  const zip = await baixarZip(url);
+  const csv = await lerCsvDoZip(zip, `fre_cia_aberta_capital_social_${ano}.csv`, url);
+  const linhasEmitido = parseCsv(csv).filter((l) => (l.Tipo_Capital ?? "").trim() === TIPO_CAPITAL_EMITIDO);
+  const porCnpj = maisRecentePorChave(linhasEmitido, "CNPJ_Companhia");
   const acoesPorCnpj = new Map<string, number>();
-  for (const [cnpj, l] of capitalPorCnpj) {
+  for (const [cnpj, l] of porCnpj) {
     const qtd = Number(l.Quantidade_Total_Acoes);
     if (Number.isFinite(qtd) && qtd > 0) acoesPorCnpj.set(cnpj, qtd);
   }
-  return { tickerParaCnpj, acoesPorCnpj };
+  return acoesPorCnpj;
 }
 
 // ── DFP: CNPJ_CIA → Patrimônio Líquido (2.03) + Lucro Líquido (3.11) ──────
@@ -117,20 +170,16 @@ function extrairContaPorCnpj(linhas: LinhaCsv[], codigoConta: string): Map<strin
 async function buscarDfpDoAno(ano: number): Promise<{ pl: Map<string, { valor: number; dtFimExercicio: string }>; lucro: Map<string, { valor: number; dtFimExercicio: string }> }> {
   const url = `${CVM_DFP_BASE}/dfp_cia_aberta_${ano}.zip`;
   const zip = await baixarZip(url);
-  // Consolidado primeiro; fallback pra individual quando a empresa não tem
-  // subsidiária (arquivo _ind_ sempre existe no ZIP, ainda que vazio pra
-  // quem só publica consolidado).
-  const [bppCon, breCon, bppInd, dreInd] = await Promise.all([
-    lerCsvDoZip(zip, `dfp_cia_aberta_BPP_con_${ano}.csv`, url).then(parseCsv),
-    lerCsvDoZip(zip, `dfp_cia_aberta_DRE_con_${ano}.csv`, url).then(parseCsv),
-    lerCsvDoZip(zip, `dfp_cia_aberta_BPP_ind_${ano}.csv`, url).then(parseCsv),
-    lerCsvDoZip(zip, `dfp_cia_aberta_DRE_ind_${ano}.csv`, url).then(parseCsv),
-  ]);
-
-  const plCon    = extrairContaPorCnpj(bppCon, "2.03");
-  const lucroCon = extrairContaPorCnpj(breCon, "3.11");
-  const plInd    = extrairContaPorCnpj(bppInd, "2.03");
-  const lucroInd = extrairContaPorCnpj(dreInd, "3.11");
+  // Sequencial, não Promise.all — mesmo motivo de mapasCvmAtual(): os 4 CSVs
+  // cobrem TODAS as companhias abertas: extrai a conta de cada um e descarta
+  // o CSV bruto (parseCsv) antes de decodificar o próximo, em vez de manter
+  // os 4 em memória ao mesmo tempo. Consolidado primeiro; fallback pra
+  // individual quando a empresa não tem subsidiária (arquivo _ind_ sempre
+  // existe no ZIP, ainda que vazio pra quem só publica consolidado).
+  const plCon    = extrairContaPorCnpj(parseCsv(await lerCsvDoZip(zip, `dfp_cia_aberta_BPP_con_${ano}.csv`, url)), "2.03");
+  const lucroCon = extrairContaPorCnpj(parseCsv(await lerCsvDoZip(zip, `dfp_cia_aberta_DRE_con_${ano}.csv`, url)), "3.11");
+  const plInd    = extrairContaPorCnpj(parseCsv(await lerCsvDoZip(zip, `dfp_cia_aberta_BPP_ind_${ano}.csv`, url)), "2.03");
+  const lucroInd = extrairContaPorCnpj(parseCsv(await lerCsvDoZip(zip, `dfp_cia_aberta_DRE_ind_${ano}.csv`, url)), "3.11");
 
   // Funde: consolidado tem prioridade, individual só entra pra CNPJ ausente
   // no consolidado.
@@ -143,23 +192,33 @@ async function buscarDfpDoAno(ano: number): Promise<{ pl: Map<string, { valor: n
 
 // Cache em memória do processo (mesmo TTL/motivo de cvm.ts) — datasets de
 // TODAS as ~450 companhias abertas, não vale a pena rebaixar por ativo.
-let cache: { ano: number; fca: Awaited<ReturnType<typeof buscarFcaDoAno>>; dfp: Awaited<ReturnType<typeof buscarDfpDoAno>>; buscadoEm: number } | null = null;
+let cache: {
+  ano: number;
+  fca: { tickerParaCnpj: Map<string, string>; acoesPorCnpj: Map<string, number> };
+  dfp: Awaited<ReturnType<typeof buscarDfpDoAno>>;
+  buscadoEm: number;
+} | null = null;
 
 async function mapasCvmAtual() {
   const anoAtual = new Date().getUTCFullYear();
   // DFP do exercício ANTERIOR: o exercício corrente só fecha em 31/12 e a
   // empresa tem até ~3 meses (prazo CVM) pra publicar — o DFP do ano
-  // corrente-1 é o mais recente sempre disponível o ano inteiro. FCA (dados
-  // cadastrais) já é do ano corrente, atualizado continuamente.
+  // corrente-1 é o mais recente sempre disponível o ano inteiro. FCA/FRE
+  // (dados cadastrais) já são do ano corrente, atualizados continuamente.
   const anoDfp = anoAtual - 1;
   if (cache && cache.ano === anoAtual && Date.now() - cache.buscadoEm < 3_600_000) {
     return cache;
   }
-  const [fca, dfp] = await Promise.all([
-    buscarFcaDoAno(anoAtual).catch((e) => { logError("CVM FCA — buscar", e); return { tickerParaCnpj: new Map(), acoesPorCnpj: new Map() }; }),
-    buscarDfpDoAno(anoDfp).catch((e) => { logError("CVM DFP — buscar", e); return { pl: new Map(), lucro: new Map() }; }),
-  ]);
-  cache = { ano: anoAtual, fca, dfp, buscadoEm: Date.now() };
+  // Sequencial, não Promise.all — achado real (out/2026): baixar+descompactar
+  // os ZIPs anuais da CVM AO MESMO TEMPO (cada um com múltiplos CSVs
+  // cobrindo TODAS as ~1000+ companhias abertas) estourava o limite de
+  // memória/CPU da Edge Function (WORKER_RESOURCE_LIMIT) antes mesmo de
+  // chegar no loop de ativos, que por si é barato. Processar 1 ZIP por vez
+  // deixa só um conjunto de buffers grande em memória a cada momento.
+  const fcaTickers = await buscarFcaDoAno(anoAtual).catch((e) => { logError("CVM FCA — buscar", e); return { tickerParaCnpj: new Map<string, string>() }; });
+  const acoesPorCnpj = await buscarCapitalSocialFre(anoAtual).catch((e) => { logError("CVM FRE capital social — buscar", e); return new Map<string, number>(); });
+  const dfp = await buscarDfpDoAno(anoDfp).catch((e) => { logError("CVM DFP — buscar", e); return { pl: new Map(), lucro: new Map() }; });
+  cache = { ano: anoAtual, fca: { tickerParaCnpj: fcaTickers.tickerParaCnpj, acoesPorCnpj }, dfp, buscadoEm: Date.now() };
   return cache;
 }
 

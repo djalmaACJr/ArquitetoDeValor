@@ -284,6 +284,60 @@ export function autenticarCron(req: Request, nomeSecretEnv = "CRON_SECRET"): Res
   return null;
 }
 
+// ── Self-chaining de cron em lotes ────────────────────────────────────
+// Achado real (out/2026): jobs que processam "todos os usuários" numa
+// invocação só (ex.: dividendos-br-diario, 1 chamada HTTP + pausa por
+// ativo) crescem com a base de usuários/ativos até estourar o limite de
+// tempo/recursos da Edge Function — e esse tipo de falha (worker morto no
+// meio do processamento) não deixa rastro em cron.job_run_details, então
+// nem cron-saude-diario (que só vê jobs que o Postgres marcou como
+// "failed") consegue detectar. Ver CLAUDE.md/ARCHITECTURE.md.
+//
+// Em vez de 1 invocação gigante, a rota processa um LOTE (ex.: N usuários)
+// e, se sobrar trabalho, dispara esta função pra continuar — uma nova
+// invocação HTTP pra ELA MESMA, com o cursor avançado no body. Cada lote
+// fica bem abaixo do limite; o total do dia acaba em várias invocações
+// curtas e sequenciais em vez de uma só longa.
+//
+// `EdgeRuntime.waitUntil` é global no runtime do Supabase Edge Functions
+// (Deno Deploy) — mantém a invocação ATUAL viva até a Promise resolver,
+// mesmo depois da Response já ter sido devolvida pro chamador original
+// (o pg_cron que iniciou o 1º lote não espera os lotes seguintes; só o
+// disparo do PRÓXIMO lote precisa ficar vivo até sair, não até terminar).
+// Sem isso, um `fetch()` solto (sem await nem waitUntil) arrisca ser
+// cancelado pelo runtime assim que o handler atual retorna. Confirmado via
+// debug (out/2026): `EdgeRuntime.waitUntil` existe e funciona nesse runtime.
+//
+// ⚠️ Achado real (out/2026): `req.url`, DENTRO do handler, NÃO é a URL
+// pública da função — o gateway interno do Supabase reescreve pra algo como
+// `http://<ref>.supabase.co/investimentos/dividendos-cron-br` (sem o
+// prefixo `/functions/v1/`, e em `http://`, não `https://`). Usar `req.url`
+// direto no self-fetch batia 404 silenciosamente — 1º lote processava, mas
+// o 2º nunca disparava e nada ficava registrado (só um `logError` invisível
+// nesta investigação, sem acesso a `supabase functions logs` aqui). A
+// pathname em si (`/investimentos/dividendos-cron-br`) é confiável; só
+// precisa ser recolocada sob `${SUPABASE_URL}/functions/v1`.
+export function dispararContinuacaoCron(
+  req: Request,
+  corpo: Record<string, unknown>,
+  nomeSecretEnv = "CRON_SECRET",
+): void {
+  const secret = Deno.env.get(nomeSecretEnv) ?? "";
+  if (!secret) { logError("dispararContinuacaoCron: secret ausente", { url: req.url }); return; }
+  const baseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  if (!baseUrl) { logError("dispararContinuacaoCron: SUPABASE_URL ausente", {}); return; }
+  const pathname = new URL(req.url).pathname.replace(/^\/+/, "");
+  const url = `${baseUrl}/functions/v1/${pathname}`;
+  const chamada = fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-cron-secret": secret },
+    body: JSON.stringify(corpo),
+  }).catch((e) => logError("dispararContinuacaoCron: falha ao disparar", e));
+  // deno-lint-ignore no-explicit-any
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt?.waitUntil) rt.waitUntil(chamada);
+}
+
 // ── Valida autenticação — retorna userId ou Response 401 ──────
 // Verifica ASSINATURA e EXPIRAÇÃO do JWT (não só decodifica): o payload de
 // um token forjado/expirado não pode virar userId — rotas que usam dbAdmin()

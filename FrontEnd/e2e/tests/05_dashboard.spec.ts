@@ -49,18 +49,16 @@ test.describe('Dashboard', () => {
     await expect(page.getByRole('button', { name: /ocultar/i })).toBeVisible()
   })
 
-  test('E2E-DB04 — filtro de conta altera o gráfico', async ({ page }) => {
-    const selectConta = page.locator('select').first()
-    const options = await selectConta.locator('option').allTextContents()
-
-    if (options.length > 1) {
-      await selectConta.selectOption({ index: 1 })
-      // Aguarda re-render
-      await page.waitForTimeout(1000)
-      await expect(page.getByText('Resultados do mês')).toBeVisible()
-    } else {
-      test.skip()
-    }
+  // Não existe mais "filtro de conta" no Dashboard (o <select> que sobrou é o
+  // "Até hoje / Até fim do mês" do saldo) — o teste antigo era pulado em silêncio.
+  test('E2E-DB04 — alternar "Até fim do mês" mantém o dashboard íntegro', async ({ page }) => {
+    const selectModo = page.locator('select').filter({ has: page.locator('option[value="fim"]') }).first()
+    await expect(selectModo).toBeVisible({ timeout: 10_000 })
+    await selectModo.selectOption('fim')
+    await expect(selectModo).toHaveValue('fim')
+    await expect(page.getByText('Resultados do mês')).toBeVisible()
+    await selectModo.selectOption('hoje')
+    await expect(selectModo).toHaveValue('hoje')
   })
 
   test('E2E-DB05 — botão Novo lançamento abre o drawer', async ({ page }) => {

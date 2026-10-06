@@ -7,8 +7,12 @@ import Sidebar from './Sidebar'
 import NovidadesProventos from '../ui/NovidadesProventos'
 import AvisoDataComProxima from '../ui/AvisoDataComProxima'
 import AvisoRevogacaoAgregado from '../ui/AvisoRevogacaoAgregado'
+import AvisoAgregadoAceitou from '../ui/AvisoAgregadoAceitou'
+import AvisoAgregadoSaiu from '../ui/AvisoAgregadoSaiu'
+import AvisoConviteRecebido from '../ui/AvisoConviteRecebido'
 import AvisosCronAdmin from '../ui/AvisosCronAdmin'
 import AvisoFecharAba from '../ui/AvisoFecharAba'
+import GuardaModuloAgregado from '../ui/GuardaModuloAgregado'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { useAutoLogout } from '../../hooks/useAutoLogout'
@@ -195,7 +199,9 @@ export default function AppLayout() {
       <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
 
       <main ref={mainRef} className="app-main flex-1 overflow-auto min-w-0">
-        <Outlet />
+        <GuardaModuloAgregado>
+          <Outlet />
+        </GuardaModuloAgregado>
       </main>
 
       {/* Avisos de login empilhados no canto inferior direito — wrapper com
@@ -208,10 +214,18 @@ export default function AppLayout() {
         <AvisoDataComProxima />
         {/* Algum dono revogou meu acesso de agregado desde a última vez que vi */}
         <AvisoRevogacaoAgregado />
+        {/* Dono: alguém aceitou meu convite de compartilhamento */}
+        <AvisoAgregadoAceitou />
+        {/* Dono: um agregado saiu por conta própria */}
+        <AvisoAgregadoSaiu />
+        {/* Convidado: convite de agregado pendente de resposta */}
+        <AvisoConviteRecebido />
+        {/* Aviso de login (só admin): cron com falha, inclusive falhas que nem
+            chegaram a invocar a Edge Function (pg_cron/pg_net). Achado real: ficava
+            sozinho em `bottom-4 left-4`, exatamente embaixo da Sidebar (z-[60] vence
+            o z-50 dele) — movido pra dentro da mesma pilha do canto direito. */}
+        <AvisosCronAdmin />
       </div>
-      {/* Aviso de login (só admin): cron com falha, inclusive falhas que nem
-          chegaram a invocar a Edge Function (pg_cron/pg_net) */}
-      <AvisosCronAdmin />
       {/* Modal de decisão ao expirar por inatividade nesta aba (ver useAutoLogout) */}
       <AvisoFecharAba />
     </div>

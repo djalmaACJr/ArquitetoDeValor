@@ -12,6 +12,26 @@
 // A Edge Function nunca confia só nisso — resolverContexto() revalida
 // server-side via fn_agregado_tem_acesso a cada request. O que este store
 // decide é só "qual header mandar", nunca "o que é permitido".
+//
+// Storage por plataforma — mesmo critério de lib/supabase.ts: localStorage
+// no desktop/web, sessionStorage no Android nativo. Achado real (revisão
+// out/2026): este store usava localStorage incondicionalmente, inclusive
+// no Android — onde a sessão em si vive em sessionStorage DE PROPÓSITO
+// ("fechar o app mata o processo = desloga por segurança", ver CLAUDE.md §
+// Sessão + biometria). Sem isso, o espaço ativo sobrevivia ao app ser
+// backgrounded/morto e reaberto: depois do re-login forçado (auto-logout
+// de inatividade em 2º plano, ≥1 min no Android — o caminho COMUM, não só
+// o caso raro de o SO matar o processo por memória), o usuário caía
+// silenciosamente de volta na "Conta de Fulano" sem escolher de novo.
+// Nunca uma falha de RLS (quem decide o que é permitido continua sendo o
+// backend a cada request), mas contradizia o modelo de segurança
+// documentado pro Android, que existe exatamente pra resetar tudo sensível
+// quando a sessão expira.
+import { Capacitor } from '@capacitor/core'
+
+function storageAtivo(): Storage {
+  return Capacitor.isNativePlatform() ? window.sessionStorage : window.localStorage
+}
 
 export interface ModuloPermissao {
   modulo: 'EXTRATO' | 'OBJETIVOS' | 'INVESTIMENTOS'
@@ -46,7 +66,7 @@ export function initEspacoAtivo(uid: string | null): void {
   chaveStorage = uid ? `arqvalor:espaco-ativo:${uid}` : 'arqvalor:espaco-ativo:anon'
   let vinculo: VinculoAgregado | null = null
   try {
-    const raw = localStorage.getItem(chaveStorage)
+    const raw = storageAtivo().getItem(chaveStorage)
     vinculo = raw ? (JSON.parse(raw) as VinculoAgregado) : null
   } catch { /* JSON inválido/storage indisponível — volta pra "Meus dados" */ }
   estado = { vinculo }
@@ -68,8 +88,8 @@ export function setEspacoAtivo(vinculo: VinculoAgregado | null): void {
   if (estado.vinculo?.id === vinculo?.id) return
   estado = { vinculo }
   try {
-    if (vinculo) localStorage.setItem(chaveStorage, JSON.stringify(vinculo))
-    else localStorage.removeItem(chaveStorage)
+    if (vinculo) storageAtivo().setItem(chaveStorage, JSON.stringify(vinculo))
+    else storageAtivo().removeItem(chaveStorage)
   } catch { /* quota cheia ou storage indisponível — segue só em memória */ }
   notificar()
 }

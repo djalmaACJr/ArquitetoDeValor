@@ -579,6 +579,83 @@ describe("Agregados — leitura do Extrato por agregado (Fase 1)", () => {
     expect(negado.error).not.toBeNull();
     expect(negado.error!.message).toMatch(/ACESSO_NEGADO/);
   });
+
+  // ── CA-AGR69 ──────────────────────────────────────────
+  // fn_saldo_total_antes_de virou SECURITY DEFINER (20261006000010, fix do
+  // statement timeout) — sem RLS por baixo, o escopo de conta é só o da própria
+  // função. Antes só se checava "200 OK"; aqui checa o VALOR: só a conta
+  // liberada (saldo_inicial 500) entra, nunca a não-liberada (999).
+  test("CA-AGR69 — fn_saldo_total_antes_de pelo agregado soma só a conta liberada", async () => {
+    if (!TEM_USER_B_LEITURA) { console.warn("[13_agregados] User B indisponível — CA-AGR69 pulado."); return; }
+
+    const dbB = clienteComToken(await getTokenB());
+    const { data, error } = await dbB.rpc("fn_saldo_total_antes_de", { p_user_id: donoId, p_data: "2000-01-01" });
+    expect(error).toBeNull();
+    expect(Number(data)).toBe(500);
+  });
+
+  // ── CA-AGR70 ──────────────────────────────────────────
+  test("CA-AGR70 — fn_saldo_total_antes_de sem vínculo com o dono informado → ACESSO_NEGADO", async () => {
+    if (!TEM_USER_B_LEITURA) { console.warn("[13_agregados] User B indisponível — CA-AGR70 pulado."); return; }
+
+    const dbB = clienteComToken(await getTokenB());
+    const { error } = await dbB.rpc("fn_saldo_total_antes_de", {
+      p_user_id: "00000000-0000-0000-0000-000000000000", p_data: "2000-01-01",
+    });
+    expect(error).not.toBeNull();
+    expect(error!.message).toMatch(/ACESSO_NEGADO/);
+  });
+
+  // ── CA-AGR71 ──────────────────────────────────────────
+  // GET /transacoes?saldo=true é o que a tela do agregado usa — o timeout dele
+  // deixava só o saldo aparecer. O saldo_acumulado parte da base só das contas
+  // liberadas e nenhuma transação da conta não-liberada vaza na lista.
+  test("CA-AGR71 — GET /transacoes?saldo=true como agregado: 200, rápido e só com contas liberadas", async () => {
+    if (!TEM_USER_B_LEITURA) { console.warn("[13_agregados] User B indisponível — CA-AGR71 pulado."); return; }
+
+    const mes = new Date().toISOString().slice(0, 7);
+    const t0 = Date.now();
+    const { status, data } = await api(`/transacoes?saldo=true&mes=${mes}`, { method: "GET",
+      headers: { ...headersB, "X-Contexto-User-Id": donoId } });
+    expect(status).toBe(200);
+    expect(Date.now() - t0).toBeLessThan(5000);
+    const contasVistas = new Set((data.dados as { conta_id: string }[]).map((t) => t.conta_id));
+    expect(contasVistas.has(contaNaoLiberadaId)).toBe(false);
+  });
+
+  // ── CA-AGR72 ──────────────────────────────────────────
+  // Tela de Compartilhamento exibe o NOME do agregado (20261006000011).
+  test("CA-AGR72 — GET /agregados traz agregado_nome por vínculo e fn_nomes_dos_meus_agregados só devolve os do próprio dono", async () => {
+    if (!TEM_USER_B_LEITURA) { console.warn("[13_agregados] User B indisponível — CA-AGR72 pulado."); return; }
+
+    const { status, data } = await api("/agregados", { method: "GET", headers: await authHeaders() });
+    expect(status).toBe(200);
+    const meu = (data.dados as { id: string; agregado_nome?: string | null }[]).find((v) => v.id === vinculoId);
+    expect(meu).toBeDefined();
+    expect("agregado_nome" in meu!).toBe(true);
+
+    // Chamada pelo agregado: não é dono de nenhum vínculo com esse id → vazio pra ele.
+    const dbB = clienteComToken(await getTokenB());
+    const { data: nomesB, error } = await dbB.rpc("fn_nomes_dos_meus_agregados");
+    expect(error).toBeNull();
+    expect((nomesB as { vinculo_id: string }[]).map((n) => n.vinculo_id)).not.toContain(vinculoId);
+  });
+
+  // ── CA-AGR73 ──────────────────────────────────────────
+  // Agregado só LÊ contas/categorias (RLS de agregado) — editar volta 403
+  // (antes: 400 genérico com a mensagem crua do PostgREST, "0 rows").
+  test("CA-AGR73 — PUT /categorias/:id e /contas/:id de um agregado (visíveis, não editáveis) retorna 403", async () => {
+    if (!TEM_USER_B_LEITURA) { console.warn("[13_agregados] User B indisponível — CA-AGR73 pulado."); return; }
+
+    const ctx = { ...headersB, "X-Contexto-User-Id": donoId };
+    const { data: cats } = await api("/categorias", { method: "GET", headers: ctx });
+    const catId = (cats.dados as { id: string; protegida: boolean }[]).find((c) => !c.protegida)!.id;
+
+    const putCat = await api(`/categorias/${catId}`, { method: "PUT", headers: headersB, body: JSON.stringify({ descricao: "hack" }) });
+    expect(putCat.status).toBe(403);
+    const putConta = await api(`/contas/${contaLiberadaId}`, { method: "PUT", headers: headersB, body: JSON.stringify({ nome: "hack" }) });
+    expect(putConta.status).toBe(403);
+  });
 });
 
 // ============================================================
@@ -1622,4 +1699,100 @@ describe("Agregados — Fase 5 (hardening)", () => {
       }
     }
   }, 120000);
+});
+
+// ============================================================
+// O agregado pode deixar de acessar o espaço do dono por conta própria
+// (fn_sair_agregado, 20261006000012) — e o dono pode convidá-lo de novo.
+// ============================================================
+describe("Agregados — sair por conta própria", () => {
+  let TEM_USER_B_SAIR = false;
+  let donoId: string;
+  let emailB: string;
+  let headersA: Record<string, string>;
+  let headersB: Record<string, string>;
+  let vinculoId: string;
+  let novoVinculoId: string | null = null;
+
+  beforeAll(async () => {
+    const tokenB = await tryGetTokenB();
+    TEM_USER_B_SAIR = !!tokenB;
+    if (!TEM_USER_B_SAIR) return;
+
+    donoId = await getUserId();
+    emailB = await getEmailB();
+    headersA = await authHeaders();
+    headersB = await authHeadersB();
+
+    const { data: convite } = await api("/agregados", { method: "POST", headers: headersA, body: JSON.stringify({ email: emailB }) });
+    vinculoId = convite.dados.id;
+    const dbA = clienteComToken(await getToken());
+    const { data: linha } = await dbA.from("agregados").select("token").eq("id", vinculoId).single();
+    await clienteComToken(tokenB!).rpc("fn_aceitar_convite_agregado", { p_token: linha!.token });
+    await api(`/agregados/${vinculoId}/permissoes`, { method: "PUT", headers: headersA,
+      body: JSON.stringify({ modulo: "EXTRATO", liberado: true, pode_escrever: false }) });
+  }, 60000);
+
+  afterAll(async () => {
+    const dbA = clienteComToken(await getToken());
+    for (const id of [vinculoId, novoVinculoId]) {
+      if (id) await dbA.rpc("fn_revogar_agregado", { p_vinculo_id: id });
+    }
+    await limparUserBSeDinamico();
+  }, 60000);
+
+  // ── CA-AGR74 ──────────────────────────────────────────
+  test("CA-AGR74 — o DONO não consegue 'sair' do próprio vínculo (404) e o vínculo segue ACEITO", async () => {
+    if (!TEM_USER_B_SAIR) { console.warn("[13_agregados] User B indisponível — CA-AGR74 pulado."); return; }
+
+    const { status } = await api(`/agregados/${vinculoId}/sair`, { method: "POST", headers: headersA });
+    expect(status).toBe(404);
+    const { data } = await api(`/agregados/${vinculoId}`, { method: "GET", headers: headersA });
+    expect(data.dados.status).toBe("ACEITO");
+  });
+
+  // ── CA-AGR75 ──────────────────────────────────────────
+  test("CA-AGR75 — o agregado sai: vínculo REVOGADO marcado como saída voluntária e o acesso ao dono é cortado", async () => {
+    if (!TEM_USER_B_SAIR) { console.warn("[13_agregados] User B indisponível — CA-AGR75 pulado."); return; }
+
+    // Antes: B lê o espaço do dono.
+    const antes = await api("/categorias", { method: "GET", headers: { ...headersB, "X-Contexto-User-Id": donoId } });
+    expect(antes.status).toBe(200);
+
+    const { status } = await api(`/agregados/${vinculoId}/sair`, { method: "POST", headers: headersB });
+    expect(status).toBe(200);
+
+    // Dono vê REVOGADO + saiu_por_agregado.
+    const { data } = await api(`/agregados/${vinculoId}`, { method: "GET", headers: headersA });
+    expect(data.dados.status).toBe("REVOGADO");
+    expect(data.dados.saiu_por_agregado).toBe(true);
+    expect(data.dados.revogado_em).toBeTruthy();
+
+    // O agregado enxerga a marca (aviso de revogação ignora saídas voluntárias).
+    const { data: recebidos } = await api("/agregados/convites-recebidos", { method: "GET", headers: headersB });
+    const meu = (recebidos.dados as { id: string; saiu_por_agregado: boolean }[]).find((v) => v.id === vinculoId);
+    expect(meu?.saiu_por_agregado).toBe(true);
+
+    // Acesso cortado.
+    const depois = await api("/categorias", { method: "GET", headers: { ...headersB, "X-Contexto-User-Id": donoId } });
+    expect(depois.status).toBe(403);
+  });
+
+  // ── CA-AGR76 ──────────────────────────────────────────
+  test("CA-AGR76 — sair de novo (já REVOGADO) retorna 404, e o dono pode convidar o mesmo usuário de novo", async () => {
+    if (!TEM_USER_B_SAIR) { console.warn("[13_agregados] User B indisponível — CA-AGR76 pulado."); return; }
+
+    const { status } = await api(`/agregados/${vinculoId}/sair`, { method: "POST", headers: headersB });
+    expect(status).toBe(404);
+
+    const { status: stConvite, data } = await api("/agregados", { method: "POST", headers: headersA, body: JSON.stringify({ email: emailB }) });
+    expect(stConvite).toBe(201);
+    expect(data.dados.status).toBe("PENDENTE");
+    expect(data.dados.id).not.toBe(vinculoId);
+    novoVinculoId = data.dados.id;
+
+    // Convite PENDENTE não dá pra "sair" (só ACEITO) — recusar é o caminho.
+    const { status: stSair } = await api(`/agregados/${novoVinculoId}/sair`, { method: "POST", headers: headersB });
+    expect(stSair).toBe(404);
+  });
 });

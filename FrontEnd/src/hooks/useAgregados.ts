@@ -23,6 +23,10 @@ export interface VinculoComoDono {
   dono_id: string
   agregado_id: string | null
   email_convidado: string
+  /** Nome do agregado (usuarios.nome) — null se ele ainda não tem conta. */
+  agregado_nome?: string | null
+  /** true quando o PRÓPRIO agregado encerrou o vínculo (status REVOGADO). */
+  saiu_por_agregado?: boolean
   status: StatusConviteAgregado
   criado_em: string
   atualizado_em: string
@@ -46,6 +50,8 @@ export interface VinculoComoAgregado {
   // login (ver useAvisosRevogacaoAgregado). `null` pra quem nunca foi
   // revogado (PENDENTE/ACEITO/RECUSADO).
   revogado_em: string | null
+  /** true quando o próprio agregado saiu (não conta como revogação do dono). */
+  saiu_por_agregado?: boolean
   // Fase 2: permissões por módulo (inclusive `pode_escrever`) — a Fase 1
   // deixava isto sempre `[]` (vazio) no frontend, já que escrita de
   // agregado não existia ainda.
@@ -148,9 +154,16 @@ export function useConvitesRecebidos() {
     return { ok: res.ok, erro: res.erro, dados: null }
   }
 
+  /** O agregado deixa de acessar o espaço do dono (o dono pode convidar de novo). */
+  const sair = async (id: string): Promise<OpResult> => {
+    const res = await apiMutate(`/agregados/${id}/sair`, 'POST')
+    if (res.ok) await invalidar()
+    return { ok: res.ok, erro: res.erro, dados: null }
+  }
+
   return {
     convites, loading, error: error ? (error as Error).message : null,
-    aceitar, recusar, recarregar: invalidar,
+    aceitar, recusar, sair, recarregar: invalidar,
     // Só os aceitos servem de opção no seletor de espaço.
     aceitos: convites.filter(c => c.status === 'ACEITO'),
   }
@@ -192,7 +205,7 @@ export function useAvisosRevogacaoAgregado() {
   const [seteDiasAtras] = useState(() => new Date(Date.now() - SETE_DIAS_MS))
   const corte = vistosEm ? new Date(vistosEm) : seteDiasAtras
   const avisos = convites.filter(
-    (c) => c.status === 'REVOGADO' && c.revogado_em && new Date(c.revogado_em) > corte,
+    (c) => c.status === 'REVOGADO' && !c.saiu_por_agregado && c.revogado_em && new Date(c.revogado_em) > corte,
   )
 
   const dispensar = async () => {
@@ -204,6 +217,62 @@ export function useAvisosRevogacaoAgregado() {
       .from('usuarios')
       .update({ agregados_avisos_vistos_em: agora })
       .eq('id', uid)
+  }
+
+  return { avisos, dispensar }
+}
+
+/** Aviso de login para o DONO: um convite foi aceito desde a última vez que
+ *  ele dispensou o aviso. "Visto até" fica em localStorage por uid (conveniência
+ *  por navegador — sem coluna nova no banco), com janela inicial de 7 dias. */
+export function useAvisosAgregadoAceitou() {
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
+  const { vinculos } = useAgregadosComoDonos()
+  const chave = `arqvalor:agregado-aceito-visto:${uid}`
+
+  const [vistoEm, setVistoEm] = useState<string | null>(() => {
+    try { return localStorage.getItem(chave) } catch { return null }
+  })
+  const [seteDiasAtras] = useState(() => new Date(Date.now() - SETE_DIAS_MS))
+  const corte = vistoEm ? new Date(vistoEm) : seteDiasAtras
+
+  const avisos = uid
+    ? vinculos.filter(v => v.status === 'ACEITO' && v.aceito_em && new Date(v.aceito_em) > corte)
+    : []
+
+  const dispensar = () => {
+    const agora = new Date().toISOString()
+    setVistoEm(agora)
+    try { localStorage.setItem(chave, agora) } catch { /* storage indisponível — só em memória */ }
+  }
+
+  return { avisos, dispensar }
+}
+
+/** Aviso de login para o DONO: um agregado deixou de acessar por conta própria
+ *  desde a última vez que ele dispensou o aviso (mesmo esquema de
+ *  useAvisosAgregadoAceitou — "visto até" em localStorage por uid). */
+export function useAvisosAgregadoSaiu() {
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
+  const { vinculos } = useAgregadosComoDonos()
+  const chave = `arqvalor:agregado-saiu-visto:${uid}`
+
+  const [vistoEm, setVistoEm] = useState<string | null>(() => {
+    try { return localStorage.getItem(chave) } catch { return null }
+  })
+  const [seteDiasAtras] = useState(() => new Date(Date.now() - SETE_DIAS_MS))
+  const corte = vistoEm ? new Date(vistoEm) : seteDiasAtras
+
+  const avisos = uid
+    ? vinculos.filter(v => v.status === 'REVOGADO' && v.saiu_por_agregado && v.revogado_em && new Date(v.revogado_em) > corte)
+    : []
+
+  const dispensar = () => {
+    const agora = new Date().toISOString()
+    setVistoEm(agora)
+    try { localStorage.setItem(chave, agora) } catch { /* storage indisponível — só em memória */ }
   }
 
   return { avisos, dispensar }

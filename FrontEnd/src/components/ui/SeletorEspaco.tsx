@@ -13,7 +13,7 @@ import { useConvitesRecebidos } from '../../hooks/useAgregados'
 
 export default function SeletorEspaco({ colapsado }: { colapsado: boolean }) {
   const { vinculo, setEspacoAtivo } = useEspacoAtivo()
-  const { aceitos } = useConvitesRecebidos()
+  const { aceitos, loading, recarregar } = useConvitesRecebidos()
   const navigate = useNavigate()
   const [aberto, setAberto] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -23,6 +23,30 @@ export default function SeletorEspaco({ colapsado }: { colapsado: boolean }) {
     document.addEventListener('mousedown', fn)
     return () => document.removeEventListener('mousedown', fn)
   }, [])
+
+  // Revisa os vínculos ao voltar pra aba/janela: se o dono revogou o acesso
+  // enquanto eu estava em "Conta de Fulano", o espaço ativo precisa cair.
+  useEffect(() => {
+    const revisar = () => { if (document.visibilityState === 'visible') void recarregar() }
+    document.addEventListener('visibilitychange', revisar)
+    window.addEventListener('focus', revisar)
+    return () => {
+      document.removeEventListener('visibilitychange', revisar)
+      window.removeEventListener('focus', revisar)
+    }
+  }, [recarregar])
+
+  // Espaço ativo cujo vínculo deixou de estar ACEITO (revogado/removido): volta
+  // sozinho pra "Meus dados". Sem isso o seletor sumia (nenhum vínculo aceito)
+  // e o usuário ficava preso numa conta vazia, sem como sair.
+  const vinculoAtivoId = vinculo?.id
+  const vinculoSumiu = !!vinculoAtivoId && !loading && !aceitos.some(a => a.id === vinculoAtivoId)
+  useEffect(() => {
+    if (vinculoSumiu) {
+      setEspacoAtivo(null)
+      navigate('/')
+    }
+  }, [vinculoSumiu, setEspacoAtivo, navigate])
 
   // Nada pra escolher (nunca aceitou nenhum convite) → não mostra o seletor.
   if (aceitos.length === 0) return null

@@ -14,13 +14,15 @@ function formatDataHora(iso: string): string {
 // falhou desde a última vez que foi visto — inclui falhas que nunca chegaram
 // a invocar a Edge Function (pg_cron/pg_net, ex.: secret ausente do Vault),
 // detectadas por fn_verificar_saude_cron e gravadas em cron_execucoes como
-// uma falha normal. Montado uma vez em AppLayout. Some ao dispensar.
+// uma falha normal. Montado dentro da pilha de avisos do canto inferior
+// direito em AppLayout — sem posicionamento próprio (`fixed`/`bottom`/
+// `z-index`), senão sai da pilha. Some ao dispensar.
 export default function AvisosCronAdmin() {
   const { avisos, dispensar } = useAvisosCron()
   if (avisos.length === 0) return null
 
   return (
-    <div className="fixed bottom-4 left-4 z-50 w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border shadow-2xl"
+    <div className="pointer-events-auto w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border shadow-2xl"
       style={{ borderColor: 'rgba(248,113,113,0.4)', background: '#0f1729' }}>
       <div className="flex items-start gap-3 p-4">
         <span className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(248,113,113,0.15)' }}>

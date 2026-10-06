@@ -92,24 +92,13 @@ test.describe('Navegação e Persistência de Estado', () => {
     await page.goto('/')
     await page.waitForLoadState('domcontentloaded')
 
-    // Localiza a seção "Minhas contas" — pode não existir se não há conta cadastrada
-    const heading = page.getByText('Minhas contas')
-    if (!(await heading.isVisible({ timeout: 8000 }).catch(() => false))) {
-      test.skip()
-      return
-    }
-
-    // Pega o primeiro card de conta dentro do bloco "Minhas contas".
-    // Cards têm "cursor-pointer", "rounded-lg" e contêm um <p> com tipo (CORRENTE, CARTAO, etc.).
-    const primeiraConta = page
-      .locator('div.cursor-pointer.rounded-lg')
-      .filter({ has: page.locator('p:text-matches("CORRENTE|CARTAO|REMUNERACAO|INVESTIMENTO|CARTEIRA", "i")') })
-      .first()
-
-    if (!(await primeiraConta.isVisible({ timeout: 5000 }).catch(() => false))) {
-      test.skip()
-      return
-    }
+    // Bloco "Minhas contas" → primeiro card de conta. (Antes o seletor exigia o
+    // TIPO da conta no 2º <p>, mas o card mostra "% do total" no lugar dele em
+    // vários casos — o teste era pulado em silêncio. Agora falha se não achar.)
+    const bloco = page.locator('div.rounded-xl').filter({ has: page.getByText('Minhas contas', { exact: true }) }).last()
+    await expect(bloco).toBeVisible({ timeout: 10_000 })
+    const primeiraConta = bloco.locator('div.cursor-pointer.rounded-lg').first()
+    await expect(primeiraConta).toBeVisible({ timeout: 10_000 })
 
     await primeiraConta.click()
     await page.waitForLoadState('domcontentloaded')

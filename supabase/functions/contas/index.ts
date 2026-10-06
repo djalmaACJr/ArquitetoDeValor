@@ -230,6 +230,9 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   
   if (error) {
     logError("Editar conta", error);
+    // 0 linhas atualizadas (PGRST116): conta visível a um agregado (leitura via
+    // RLS de agregado) mas editável só pelo dono — 403 em vez de 400 genérico.
+    if (error.code === "PGRST116") return erro("Sem permissão para alterar esta conta.", 403);
     return erro(error.message);
   }
   

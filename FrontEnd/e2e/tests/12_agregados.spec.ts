@@ -54,13 +54,60 @@ test.describe('Compartilhamento (Agregados)', () => {
     await page.getByRole('button', { name: /^convidar$/i }).click()
     await expect(cardVinculo).toBeVisible({ timeout: 10_000 })
 
-    // Expande o card do vínculo recém-criado.
-    await cardVinculo.click()
+    // O card do convite recém-enviado já abre sozinho nas permissões.
+    await expect(page.getByText(/ao aceitar o convite ele não verá nada/i)).toBeVisible()
     await expect(page.getByText(/módulos liberados/i)).toBeVisible()
     await expect(page.getByText(/contas liberadas/i)).toBeVisible()
 
     await page.getByRole('button', { name: /revogar acesso/i }).click()
     // O card continua listado (histórico), mas o badge muda para "Revogado".
     await expect(page.getByText(/revogado/i).first()).toBeVisible({ timeout: 10_000 })
+  })
+
+  // ── E2E-AGR05 ───────────────────────────────────────────────
+  // Regressão: o card tinha overflow-hidden e cortava o dropdown de contas —
+  // era impossível liberar conta pela UI (o click falha se algo cobrir o alvo).
+  test('E2E-AGR05 — "Contas liberadas": dropdown abre inteiro e "Adicionar todos" libera as contas', async ({ page }) => {
+    const email = `e2e-agregado-contas-${Date.now()}@example.com`
+    await page.getByPlaceholder('email@exemplo.com').fill(email)
+    await page.getByRole('button', { name: /^convidar$/i }).click()
+    // (card já aberto — convite recém-enviado)
+    await page.getByRole('button', { name: /nenhuma conta liberada ainda/i }).click()
+    const todos = page.getByRole('button', { name: /adicionar todos/i })
+    await todos.click()   // falha se o dropdown estiver cortado pelo card
+
+    // Após "Adicionar todos", o trigger deixa de mostrar o placeholder
+    await expect(page.getByRole('button', { name: /limpar todos/i })).toBeVisible({ timeout: 10_000 })
+  })
+
+  // ── E2E-AGR06 ───────────────────────────────────────────────
+  test('E2E-AGR06 — agregados agrupados por status em quadros recolhíveis, com contador e datas', async ({ page }) => {
+    const email = `e2e-agregado-grupo-${Date.now()}@example.com`
+    await page.getByPlaceholder('email@exemplo.com').fill(email)
+    await page.getByRole('button', { name: /^convidar$/i }).click()
+    const card = page.getByRole('button', { name: email })
+    await expect(card).toBeVisible({ timeout: 10_000 })
+
+    // Contador no título + datas de convite/aceite/revogação no card
+    await expect(page.getByRole('heading', { name: /meus agregados \(\d+\)/i })).toBeVisible()
+    await expect(card).toContainText(/Convite \d{2}\/\d{2}\/\d{4}/)
+    await expect(card).toContainText(/Aceite —/)
+
+    // Quadro "Aguardando aceite" abre por padrão e pode ser recolhido
+    const quadro = page.getByRole('button', { name: /aguardando aceite/i })
+    await expect(quadro).toHaveAttribute('aria-expanded', 'true')
+    await quadro.click()
+    await expect(quadro).toHaveAttribute('aria-expanded', 'false')
+    await expect(card).not.toBeVisible()
+    await quadro.click()
+    await expect(card).toBeVisible()
+
+    // Revogado vai pro quadro "Revogados" (recolhido por padrão) com data de revogação
+    await page.getByRole('button', { name: /revogar acesso/i }).click()
+    const revogados = page.getByRole('button', { name: /^revogados/i })
+    await expect(revogados).toBeVisible({ timeout: 10_000 })
+    await expect(revogados).toHaveAttribute('aria-expanded', 'false')
+    await revogados.click()
+    await expect(page.getByRole('button', { name: email })).toContainText(/Revogação \d{2}\/\d{2}\/\d{4}/)
   })
 })

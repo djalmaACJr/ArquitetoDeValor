@@ -4,7 +4,7 @@ import {
   LayoutDashboard, List, CreditCard, Tag, Target,
   ArrowLeftRight, FileText, Moon, Sun, LogOut,
   ChevronLeft, ChevronRight, ChevronDown, Settings, GitCompare, Repeat2, TrendingUp, X,
-  Receipt, Users,
+  Receipt,
 } from 'lucide-react'
 import { useTheme } from '../../hooks/useTheme'
 import { useAuth } from '../../hooks/useAuth'
@@ -12,6 +12,8 @@ import { useUsuarioPerfil } from '../../hooks/useUsuarioPerfil'
 import AppVersion from '../ui/AppVersion'
 import ContagemLogout from '../ui/ContagemLogout'
 import SeletorEspaco from '../ui/SeletorEspaco'
+import { useModulosLiberados } from '../../hooks/useModulosLiberados'
+import type { ModuloAgregado } from '../../hooks/useAgregados'
 
 const Logo = () => (
   <svg width="36" height="36" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -74,18 +76,19 @@ interface NavItem {
   children?: NavChild[]
 }
 
-const navPrincipal: NavItem[] = [
-  { to: '/',            icon: <LayoutDashboard size={15}/>, label: 'Painel principal' },
-  { to: '/lancamentos', icon: <List size={15}/>,            label: 'Extratos'         },
-  { to: '/objetivos',   icon: <Target size={15}/>,          label: 'Objetivos'        },
-  { to: '/investimentos', icon: <TrendingUp size={15}/>,    label: 'Investimentos'    },
+// `modulo`: módulo de agregado exigido pelo item — oculto em "Conta de Fulano"
+// quando o dono não liberou (ver useModulosLiberados).
+const navPrincipal: (NavItem & { modulo: ModuloAgregado })[] = [
+  { to: '/',            icon: <LayoutDashboard size={15}/>, label: 'Painel principal', modulo: 'EXTRATO'       },
+  { to: '/lancamentos', icon: <List size={15}/>,            label: 'Extratos',         modulo: 'EXTRATO'       },
+  { to: '/objetivos',   icon: <Target size={15}/>,          label: 'Objetivos',        modulo: 'OBJETIVOS'     },
+  { to: '/investimentos', icon: <TrendingUp size={15}/>,    label: 'Investimentos',    modulo: 'INVESTIMENTOS' },
 ]
 const navCadastros: NavItem[] = [
   { to: '/contas',     icon: <CreditCard size={15}/>, label: 'Contas' },
   { to: '/categorias', icon: <Tag size={15}/>,        label: 'Categorias' },
-  { to: '/compartilhamento', icon: <Users size={15}/>, label: 'Compartilhamento' },
 ]
-const navRelatorios: NavItem[] = [
+const navRelatorios: NavItem[] = [ // todo o grupo exige EXTRATO
   {
     to: '/relatorios',
     icon: <FileText size={15}/>,
@@ -305,6 +308,8 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
   const { nome: nomePerfil, email } = useUsuarioPerfil()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
+  const liberados = useModulosLiberados()
+  const navPrincipalVisivel = navPrincipal.filter(i => !liberados || !i.modulo || liberados.has(i.modulo))
 
   // Fallback final pra UI nunca exibir vazio enquanto o fetch resolve
   const nome = nomePerfil || 'Usuário'
@@ -408,12 +413,16 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
       <SeletorEspaco colapsado={colapsado} />
 
-      <NavGroup label="Principal"   items={navPrincipal}   collapsed={colapsado} />
+      <NavGroup label="Principal"   items={navPrincipalVisivel}   collapsed={colapsado} />
       <div className="h-px bg-blue-400/15 my-2" />
       <NavGroup label="Cadastros"   items={navCadastros}   collapsed={colapsado} />
       <div className="h-px bg-blue-400/15 my-2" />
-      <NavGroup label="Relatórios"  items={navRelatorios}  collapsed={colapsado} />
-      <div className="h-px bg-blue-400/15 my-2" />
+      {(!liberados || liberados.has('EXTRATO')) && (
+        <>
+          <NavGroup label="Relatórios"  items={navRelatorios}  collapsed={colapsado} />
+          <div className="h-px bg-blue-400/15 my-2" />
+        </>
+      )}
       <NavGroup label="Ferramentas" items={navFerramentas} collapsed={colapsado} />
 
       <div className="flex-1" />

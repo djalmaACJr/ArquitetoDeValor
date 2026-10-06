@@ -3,7 +3,7 @@
 // taxas e diagnóstico — extraído de index.ts.
 import {
   json, erro, db, dbAdmin, extrairId, extrairAcao, buscarTodasLinhas,
-  verificarExistencia, camposParaAtualizar, autenticarCron,
+  verificarExistencia, camposParaAtualizar, autenticarCron, dispararContinuacaoCron,
 } from "../_shared/utils.ts";
 import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
 import {
@@ -486,13 +486,29 @@ export async function rotaTiposDividendo(c: Db, req: Request, m: string, userId:
 // preco_medio informado). Backfill recalcula o snapshot seguinte.
 // ============================================================
 
+// Tamanho do lote de ATIVOS por invocação — ver nota em
+// provisionarProventosUsd (sem efeito colateral por-usuário, corte direto
+// por ativo). Mesma motivação do lote BR: achado real out/2026, ver
+// CLAUDE.md/ARCHITECTURE.md § Usuários agregados/cron.
+const LOTE_ATIVOS_DIVIDENDOS_USD = 25;
+
 export async function rotaDividendosCron(req: Request, m: string) {
   if (m !== "POST") return erro("Método não permitido", 405);
   const naoAutorizado = autenticarCron(req);
   if (naoAutorizado) return naoAutorizado;
-  logRequest("POST", "/investimentos/dividendos-cron", {});
-  try { return json({ dados: await provisionarProventosUsd(dbAdmin(), null) }); }
-  catch (e) { logError("dividendos-cron", e); return erro((e as Error).message ?? "Erro interno", 500); }
+  const corpo  = await req.json().catch(() => ({}));
+  const offset = Number((corpo as { offset?: number })?.offset) || 0;
+  logRequest("POST", "/investimentos/dividendos-cron", { offset });
+  try {
+    const resultado = await provisionarProventosUsd(
+      dbAdmin(), null, { offset, limit: LOTE_ATIVOS_DIVIDENDOS_USD },
+    );
+    const temMais = resultado.temMaisNoLote === true;
+    if (temMais) dispararContinuacaoCron(req, { offset: offset + LOTE_ATIVOS_DIVIDENDOS_USD });
+    const lote = { offset, tamanho: LOTE_ATIVOS_DIVIDENDOS_USD, tem_mais: temMais };
+    logSuccess("Dividendos USD cron (lote)", { ...resultado, lote });
+    return json({ dados: { ...resultado, lote } });
+  } catch (e) { logError("dividendos-cron", e); return erro((e as Error).message ?? "Erro interno", 500); }
 }
 
 // Disparo MANUAL pelo usuário logado (mesmo botão "Buscar proventos" da
@@ -517,23 +533,29 @@ export interface ResultadoProvisaoProventos {
 }
 
 // Núcleo compartilhado: provisiona proventos de ativos em USD via Polygon.
-// filtroUserId = null processa TODOS os usuários (cron); um id processa só
-// aquele usuário (disparo manual).
+// filtroUserId = null processa TODOS os usuários (cron, em LOTE quando
+// `faixa` é informado — ver rotaDividendosCron); um id processa só aquele
+// usuário (disparo manual, sem faixa). Sem efeito colateral por-usuário
+// (ao contrário do BR — não chama persistirAvisosENovidades), então o lote
+// pode cortar por ATIVO direto, sem precisar agrupar por usuário.
 export async function provisionarProventosUsd(
-  admin: Db, filtroUserId: string | null,
-): Promise<ResultadoProvisaoProventos> {
+  admin: Db, filtroUserId: string | null, faixa?: { offset: number; limit: number },
+): Promise<ResultadoProvisaoProventos & { temMaisNoLote?: boolean }> {
   const hoje      = hojeISO();
   const dataCorte = recuarDias(hoje, DIAS_RETROATIVOS_PROVENTOS);
 
   // Ativos em USD (Polygon cobre papéis das bolsas americanas)
   let consulta = admin.from("inv_ativos")
-    .select("id, user_id, ticker, nome, tipo_ativo").eq("moeda", "USD");
+    .select("id, user_id, ticker, nome, tipo_ativo").eq("moeda", "USD")
+    .order("id");
   if (filtroUserId) consulta = consulta.eq("user_id", filtroUserId);
+  if (faixa) consulta = consulta.range(faixa.offset, faixa.offset + faixa.limit - 1);
   const { data: ativos, error } = await consulta;
   if (error) { logError("dividendos-usd ativos", error); throw new Error(error.message); }
   if (!ativos || ativos.length === 0) {
-    return { processados: 0, criados: 0, atualizados: 0, pulados: 0, falhas_fonte: 0, fontes_falha: [], erros: 0, erro_exemplo: null };
+    return { processados: 0, criados: 0, atualizados: 0, pulados: 0, falhas_fonte: 0, fontes_falha: [], erros: 0, erro_exemplo: null, temMaisNoLote: false };
   }
+  const temMaisNoLote = faixa ? ativos.length === faixa.limit : undefined;
 
   const apiKey = Deno.env.get("POLYGON_API_KEY") ?? "";
   if (!apiKey) { logError("dividendos-usd", "POLYGON_API_KEY ausente"); throw new Error("POLYGON_API_KEY não configurada"); }
@@ -616,7 +638,10 @@ export async function provisionarProventosUsd(
   }
 
   logSuccess("Dividendos USD", { escopo: filtroUserId ?? "todos", processados, criados, atualizados, pulados, falhasFonte, erros });
-  return { processados, criados, atualizados, pulados, falhas_fonte: falhasFonte, fontes_falha: fontesFalha, erros, erro_exemplo: erroExemplo };
+  return {
+    processados, criados, atualizados, pulados, falhas_fonte: falhasFonte,
+    fontes_falha: fontesFalha, erros, erro_exemplo: erroExemplo, temMaisNoLote,
+  };
 }
 
 // Última PTAX (venda) com data <= alvo (último dia útil). Para datas
@@ -1003,13 +1028,54 @@ export async function buscarDividendosPolygon(
 //   • Reconciliação: reusa upsertDividendoProvisionado (mesma chave
 //     user+ativo+conta+tipo dentro do mês do pay_date).
 // ============================================================
-// JOB (todos os usuários) — protegido pelo x-cron-secret.
+// Tamanho do lote de USUÁRIOS por invocação (não de ativos — ver nota em
+// provisionarProventosBrl sobre por que o corte é por usuário). Cada ativo
+// custa ~250-1250ms de pausa + 1 requisição à B3; um usuário com poucos
+// ativos é barato, mas o LOTE precisa ter uma folga segura mesmo pro
+// usuário com mais ativos da base. Ajustável — comece conservador.
+const LOTE_USUARIOS_DIVIDENDOS_BR = 15;
+
+// Lista os user_id distintos com ao menos 1 ativo BRL elegível, em ordem
+// estável (por isso ORDER BY, não Set — a ordem precisa ser a MESMA em
+// toda invocação do mesmo "dia de trabalho" pro cursor por offset fazer
+// sentido entre lotes disparados em sequência).
+async function listarUserIdsComAtivosBrl(admin: Db): Promise<string[]> {
+  const { data, error } = await admin.from("inv_ativos")
+    .select("user_id")
+    .eq("moeda", "BRL").in("tipo_ativo", ["ACOES", "ETF", "FII"])
+    .order("user_id");
+  if (error) { logError("dividendos-br listar usuarios", error); throw new Error(error.message); }
+  return [...new Set((data ?? []).map((r) => (r as { user_id: string }).user_id))];
+}
+
+// JOB (todos os usuários) — protegido pelo x-cron-secret. Processa em LOTES
+// de usuários (achado real out/2026: 1 invocação pra TODOS os usuários
+// cresceu até estourar o limite de tempo/recursos da Edge Function — ver
+// CLAUDE.md/ARCHITECTURE.md § Usuários agregados/cron). O pg_cron dispara
+// só o 1º lote (offset=0, sem body); lotes seguintes são auto-disparados
+// por dispararContinuacaoCron até cobrir todos os usuários.
 export async function rotaDividendosCronBr(req: Request, m: string) {
   if (m !== "POST") return erro("Método não permitido", 405);
   const naoAutorizado = autenticarCron(req);
   if (naoAutorizado) return naoAutorizado;
-  logRequest("POST", "/investimentos/dividendos-cron-br", {});
-  return json({ dados: await provisionarProventosBrl(dbAdmin(), null) });
+  const corpo = await req.json().catch(() => ({}));
+  const offset = Number((corpo as { offset?: number })?.offset) || 0;
+  logRequest("POST", "/investimentos/dividendos-cron-br", { offset });
+
+  const admin = dbAdmin();
+  const todosUserIds = await listarUserIdsComAtivosBrl(admin);
+  const loteUserIds  = todosUserIds.slice(offset, offset + LOTE_USUARIOS_DIVIDENDOS_BR);
+  const temMais      = offset + LOTE_USUARIOS_DIVIDENDOS_BR < todosUserIds.length;
+
+  const resultado = loteUserIds.length > 0
+    ? await provisionarProventosBrl(admin, loteUserIds)
+    : { processados: 0, criados: 0, atualizados: 0, pulados: 0, falhas_fonte: 0, fontes_falha: [], erros: 0, erro_exemplo: null };
+
+  if (temMais) dispararContinuacaoCron(req, { offset: offset + LOTE_USUARIOS_DIVIDENDOS_BR });
+
+  const lote = { offset, usuarios_no_lote: loteUserIds.length, total_usuarios: todosUserIds.length, tem_mais: temMais };
+  logSuccess("Dividendos BR cron (lote)", { ...resultado, lote });
+  return json({ dados: { ...resultado, lote } });
 }
 
 // Disparo MANUAL pelo usuário logado (botão "Buscar proventos agora").
@@ -1026,10 +1092,21 @@ export async function rotaDividendosBuscarBr(c: Db, _req: Request, m: string, us
   return json({ dados: await provisionarProventosBrl(c, userId) });
 }
 
-// Núcleo compartilhado: provisiona proventos BRL. filtroUserId = null processa
-// TODOS os usuários (cron); um id processa só aquele usuário (disparo manual).
+// Núcleo compartilhado: provisiona proventos BRL.
+//   filtroUserId null        → processa TODOS os usuários (cron, invocação
+//                               única — só usado hoje por rotaDividendosBuscarBr
+//                               indiretamente via lotes, ver abaixo).
+//   filtroUserId string      → só aquele usuário (disparo manual, botão
+//                               "Buscar proventos agora").
+//   filtroUserId string[]    → só os usuários DESSE lote (cron em lotes,
+//                               ver rotaDividendosCronBr) — nunca divide os
+//                               ativos de um mesmo usuário entre lotes
+//                               diferentes: persistirAvisosENovidades
+//                               SOBRESCREVE (não mescla) os avisos por
+//                               usuário a cada chamada, então um usuário
+//                               span dois lotes perderia o aviso do 1º.
 export async function provisionarProventosBrl(
-  admin: Db, filtroUserId: string | null,
+  admin: Db, filtroUserId: string | string[] | null,
 ): Promise<ResultadoProvisaoProventos> {
   const hoje      = hojeISO();
   const dataCorte = recuarDias(hoje, DIAS_RETROATIVOS_PROVENTOS);
@@ -1038,7 +1115,8 @@ export async function provisionarProventosBrl(
   let consulta = admin.from("inv_ativos")
     .select("id, user_id, ticker, nome, tipo_ativo, acoes_subtipo")
     .eq("moeda", "BRL").in("tipo_ativo", ["ACOES", "ETF", "FII"]);
-  if (filtroUserId) consulta = consulta.eq("user_id", filtroUserId);
+  if (Array.isArray(filtroUserId)) consulta = consulta.in("user_id", filtroUserId);
+  else if (filtroUserId) consulta = consulta.eq("user_id", filtroUserId);
   const { data: ativos, error } = await consulta;
   if (error) { logError("dividendos-br ativos", error); throw new Error(error.message); }
 

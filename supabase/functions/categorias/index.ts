@@ -188,6 +188,14 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
       logResponse(400, { erro: "Apenas cor e ícone podem ser alterados" });
       return erro("Apenas cor e ícone podem ser alterados nesta categoria.", 400);
     }
+    // 0 linhas atualizadas (.single() → PGRST116): a categoria é VISÍVEL pra
+    // quem chamou mas não editável — caso de um agregado com Extrato liberado
+    // (leitura via RLS de agregado; escrita só do dono). Antes caía em 400
+    // genérico com a mensagem crua do PostgREST.
+    if (error.code === "PGRST116") {
+      logResponse(403, { erro: "Sem permissão para alterar esta categoria" });
+      return erro("Sem permissão para alterar esta categoria.", 403);
+    }
     return erro(error.message);
   }
 

@@ -15,6 +15,7 @@
 //   POST /agregados          {email}
 //   POST /agregados/:id/reenviar
 //   POST /agregados/:id/revogar
+//   POST /agregados/:id/sair      -- o próprio agregado deixa de acessar o espaço
 //   POST /agregados/aceitar  {token}
 //   POST /agregados/recusar  {token}
 //   PUT  /agregados/:id/permissoes {modulo, liberado, pode_escrever}
@@ -179,6 +180,7 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
     if (m === "POST" && seg1 === "recusar")             return await recusar(c, await req.json());
     if (m === "POST" && id && acao === "reenviar")      return await reenviar(c, id);
     if (m === "POST" && id && acao === "revogar")       return await revogar(c, id);
+    if (m === "POST" && id && acao === "sair")          return await sair(c, id);
     if (m === "POST" && id && acao === "aceitar")       return await aceitarPorId(c, id);
     if (m === "POST" && id && acao === "recusar")       return await recusarPorId(c, id);
     if (m === "PUT"  && id && acao === "permissoes")    return await definirPermissoes(c, id, await req.json());
@@ -198,8 +200,17 @@ async function listarComoDonos(c: Db, userId: string) {
     .eq("dono_id", userId)
     .order("criado_em", { ascending: false });
   if (error) { logError("listarComoDonos", error); return erro(error.message); }
+  // Nome de cada agregado (RPC SECURITY DEFINER — só o nome, ver migration
+  // 20261006000011). Falha aqui não derruba a listagem: a tela cai pro e-mail.
+  const { data: nomes, error: erroNomes } = await c.rpc("fn_nomes_dos_meus_agregados");
+  if (erroNomes) logError("listarComoDonos (nomes)", erroNomes);
+  const nomePorVinculo = new Map<string, string | null>(
+    ((nomes ?? []) as { vinculo_id: string; nome: string | null }[]).map((n) => [n.vinculo_id, n.nome]),
+  );
   logResponse(200, { count: data?.length });
-  return json({ dados: (data ?? []).map(semToken) });
+  return json({
+    dados: (data ?? []).map((v) => ({ ...semToken(v), agregado_nome: nomePorVinculo.get(v.id) ?? null })),
+  });
 }
 
 async function listarComoAgregado(c: Db) {
@@ -259,6 +270,14 @@ async function revogar(c: Db, id: string) {
   if (error) { logResponse(statusDoErroRpc(error.message)); return erro(error.message, statusDoErroRpc(error.message)); }
   logResponse(200);
   return json({ dados: { revogado: true } });
+}
+
+async function sair(c: Db, id: string) {
+  logRequest("POST", `/agregados/${id}/sair`);
+  const { error } = await c.rpc("fn_sair_agregado", { p_vinculo_id: id });
+  if (error) { logResponse(statusDoErroRpc(error.message)); return erro(error.message, statusDoErroRpc(error.message)); }
+  logResponse(200);
+  return json({ dados: { saiu: true } });
 }
 
 async function aceitar(c: Db, body: { token?: string }) {

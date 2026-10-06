@@ -175,3 +175,21 @@ export async function abrirEdicaoLancamento(page: Page, textoLinha: string): Pro
   await drawer.waitFor({ state: 'visible', timeout: 5000 })
   return drawer
 }
+
+/**
+ * Registra erros de render do React (loop "Maximum update depth exceeded") e
+ * exceções não tratadas da página. Playwright não falha em console.error por
+ * conta própria — um loop de render só quebrava a suíte se travasse a tela a
+ * ponto de um seletor estourar timeout. Chame ANTES do page.goto e confira
+ * `erros()` ao final do teste.
+ */
+export function vigiarErrosDeRender(page: Page): () => string[] {
+  const achados: string[] = []
+  page.on('pageerror', e => achados.push(`pageerror: ${e.message}`))
+  page.on('console', m => {
+    if (m.type() === 'error' && /Maximum update depth|Too many re-renders/i.test(m.text())) {
+      achados.push(`console: ${m.text().slice(0, 200)}`)
+    }
+  })
+  return () => achados
+}
