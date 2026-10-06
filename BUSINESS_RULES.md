@@ -30,7 +30,7 @@
 
 - **Saldo atual** = `saldo_inicial` + Σ(`RECEITA`) − Σ(`DESPESA`) — provido pela view `vw_saldo_contas`. ⚠️ **Soma TODAS as transações até a data, independente de status** (`PAGO`, `PENDENTE` e `PROJECAO` contam igual). NÃO filtre por status no cálculo de saldo — isso é regra de negócio canônica e foi violada várias vezes no passado.
 - Saldo nunca é armazenado denormalizado; sempre calculado.
-- A função `arqvalor.fn_saldos_contas_ate_data(p_user_id, p_data)` retorna saldo PAGO por conta até uma data (usada no Dashboard / Extrato). `SECURITY INVOKER`; rejeita chamada se `p_user_id <> auth.uid()` — corrigido em `20260522000002`. Antes era `SECURITY DEFINER` e permitia vazamento entre usuários.
+- A função `arqvalor.fn_saldos_contas_ate_data(p_user_id, p_data)` retorna saldo PAGO por conta até uma data (usada no Dashboard / Extrato). Rejeita chamada se `p_user_id <> auth.uid()` — corrigido em `20260522000002` (antes, sem essa checagem, permitia vazamento entre usuários). Desde `20261006000010` volta a ser `SECURITY DEFINER`, mas agora com autorização explícita: dono, ou agregado com vínculo ACEITO e módulo EXTRATO — e um agregado só recebe as contas liberadas a ele (o conjunto é calculado uma vez, não por linha). `fn_saldo_total_antes_de` segue a mesma regra.
 
 ### Restrições
 
@@ -615,6 +615,9 @@ Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `
 - **E-mail já cadastrado**: link `/aceitar-convite?token=...` → exige login → aceita por token (`fn_aceitar_convite_agregado`) ou, pela tela "Convites que recebi" já logado, por id (`fn_aceitar_convite_agregado_por_id`) — ambos validam o token/vínculo contra o **e-mail da sessão atual** (`usuarios.email`), nunca só posse do link.
 - **E-mail sem cadastro**: link `/cadastro?convite_token=...` → o token viaja em `raw_user_meta_data` do `signUp()` → a trigger de criação de usuário (`fn_sincronizar_usuario`) resolve e aceita o vínculo automaticamente. Falha silenciosa (token inválido/expirado) nunca bloqueia o cadastro.
 - Revogação tem efeito imediato — RLS reavalia a cada query, sem cache de sessão.
+- **Permissões antes do aceite**: o dono pode liberar módulos e contas já com o convite `PENDENTE` (a tela abre o cartão do convidado nas permissões ao enviar). Nada vale até o aceite — o acesso exige `status = 'ACEITO'`.
+- **Sair por conta própria**: o agregado pode deixar de acessar o espaço de um dono (só vínculo `ACEITO`). O vínculo vira `REVOGADO` com `saiu_por_agregado = true`: o dono vê o badge "Saiu" e um aviso; o agregado não recebe o aviso de "acesso revogado" por algo que ele mesmo fez. O dono pode convidar a mesma pessoa de novo (só `PENDENTE`/`ACEITO` bloqueiam um novo convite).
+- **Avisos de login**: convidado com convite pendente vê o card com Aceitar/Recusar; o dono vê "Convite aceito" e "Agregado saiu"; o agregado vê "Acesso revogado" quando o DONO revoga.
 
 ### Escopo por módulo
 
@@ -625,6 +628,14 @@ Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `
   - `SONHO`/`PROJETO` são amarrados a conta(s) (`contas_sonho[]`/`contas_projeto[]`, com fallback pro `conta_id` legado em SONHO) — só ficam visíveis ao agregado se **todas** as contas monitoradas estiverem liberadas.
   - `OBJETIVO`/`CRESCIMENTO` somam por **categoria em todas as contas do dono** — não existe "escopo de categoria" nesta feature. **Nunca ficam visíveis a um agregado**, mesmo com o módulo OBJETIVOS liberado (decisão final, confirmada com o usuário out/2026 — RLS bloqueia incondicionalmente via `fn_agregado_pode_ver_objetivo`, migration `20261006000007`). Motivo: sem escopo de conta possível, se a mesma categoria recebe lançamentos numa conta liberada **e** numa conta não liberada, o total exibido ao agregado somaria as duas — um vazamento parcial (nunca o lançamento individual, mas o efeito agregado dele) de uma conta que o agregado nem deveria saber que existe. A tela de criação de objetivo (`DrawerObjetivo`) já esconde essas 2 opções de tipo quando o espaço ativo é de um agregado, pra não oferecer uma ação que o backend sempre rejeitaria.
   - `POST /objetivos/sincronizar-progresso` (recálculo em massa) exige `pode_escrever` e opera sobre **todos** os objetivos ativos do dono de uma vez — não filtra por tipo/escopo individualmente (é um refresh de valores já existentes, não uma leitura nova).
+
+### O que o agregado enxerga na interface
+
+- **Menu**: módulos não liberados somem (Painel/Extratos/grupo Relatórios dependem de EXTRATO; Objetivos; Investimentos). Abrir a URL direto mostra "Acesso não liberado" — rede de segurança de UX, o bloqueio real é a RLS.
+- **Faixa de contas não compartilhadas**: no espaço do dono, uma faixa avisa que só aparecem as N contas compartilhadas e que as demais não entram em saldos, extratos ou relatórios.
+- **Revogado ou saiu com o espaço aberto**: o app volta sozinho para "Meus dados" (antes ficava numa conta vazia, sem o seletor).
+- **Editar o que só se pode ler**: conta/categoria do dono visível ao agregado (sem escrita) devolve 403 ao tentar editar.
+- **Privacidade do perfil**: o agregado nunca lê o cadastro (`usuarios`) do dono, nem o dono o do agregado — só o nome, por RPC dedicada. Histórico de conversas com a IA, credenciais de IA, perfil de investidor e e-mail ficam fora do compartilhamento (vazamento corrigido em `20261006000013`).
 
 ### Páginas que nunca operam sob o espaço do agregado
 

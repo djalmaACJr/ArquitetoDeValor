@@ -119,7 +119,7 @@ test.describe('Investimentos (E2E)', () => {
 
     await page.getByRole('link', { name: /proventos/i }).click()
     await expect(page).toHaveURL(/\/investimentos\/dividendos/)
-    await expect(page.getByRole('heading', { name: /proventos/i })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: 'Proventos', exact: true })).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('link', { name: /configurações/i }).click()
     await expect(page).toHaveURL(/\/investimentos\/configuracoes/)
@@ -253,7 +253,7 @@ test.describe('Investimentos (E2E)', () => {
   // de Proventos, que agora só tem "Buscar proventos"/"Novo dividendo").
   test('E2E-INV08 — /investimentos/dividendos carrega e "Diagnóstico" (em Configurações) não crasha', async ({ page }) => {
     await page.goto('/investimentos/dividendos')
-    await expect(page.getByRole('heading', { name: /proventos/i })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: 'Proventos', exact: true })).toBeVisible({ timeout: 10_000 })
 
     const cards     = page.getByText(/proventos por categoria/i)
     const vazioText = page.getByText(/nenhum dividendo lançado/i)

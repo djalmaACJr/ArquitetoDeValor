@@ -42,7 +42,7 @@ A aplicação é composta por:
 | App Android | Capacitor 8 (`@capacitor/app`, `@capgo/capacitor-native-biometric`, `@capgo/capacitor-updater`) |
 | Testes API | Jest + ts-jest |
 | Testes E2E | Playwright (Firefox padrão + Chromium/Android opcional) |
-| CI/CD | GitHub Actions (4 workflows) |
+| CI/CD | GitHub Actions (3 workflows) |
 
 ---
 
@@ -99,6 +99,7 @@ ArquitetoDeValor/
 │   │   ├── lembretes/
 │   │   ├── assistente/
 │   │   ├── objetivos/               # CRUD + sincronizar-progresso
+│   │   ├── agregados/               # Compartilhamento (conta conjunta): convidar, aceitar, permissões, sair
 │   │   ├── investimentos/           # Ativos, posições, dividendos, avaliação IA, cron jobs
 │   │   ├── faturas/                 # Importação de fatura (PDF) + parsers/ por emissor
 │   │   ├── filtros/
@@ -299,7 +300,7 @@ npm run preview
 
 ### Testes de API (Jest)
 
-Cobrem as Edge Functions do Supabase — distribuídos em 12 módulos (+ limpeza manual).
+Cobrem as Edge Functions do Supabase — distribuídos em 13 módulos (+ limpeza manual).
 
 **Via menu interativo (Windows):**
 ```bash
@@ -329,11 +330,12 @@ npm run test:contas         # módulo específico
 | `10_seguranca_auth_cors.test.ts` | SEG-AUTH01–03 / SEG-CORS01–03 |
 | `11_objetivos.test.ts` | CA-OBJ01–17 (inclui CRESCIMENTO) |
 | `12_investimentos.test.ts` | CA-INV01–26 |
+| `13_agregados.test.ts` | CA-AGR01–77 — ciclo de vida do vínculo, leitura/escrita por módulo e conta, saldos, saída por conta própria, isolamento de `usuarios`. Se `TEST_EMAIL_B` já é agregada da conta de teste, esvazie `TEST_EMAIL_B`/`TEST_PASSWORD_B` (cria um usuário temporário; precisa de `SUPABASE_SERVICE_ROLE_KEY`) |
 | `99_limpar.test.ts` | Limpeza — somente manual |
 
 ### Testes E2E (Playwright)
 
-Cobrem os fluxos do frontend — 13 suites, rodadas por padrão no Firefox (projeto `firefox`). Há também um projeto `mobile` opcional (Chromium, viewport/toque de Android — `npm run test:e2e:mobile`), que reexecuta a mesma suíte pra pegar regressões de layout responsivo antes de builds do app Android; não cobre trechos que só existem no app nativo de verdade (biometria, swipe, teclado nativo).
+Cobrem os fluxos do frontend — 16 suites, rodadas por padrão no Firefox (projeto `firefox`). Há também um projeto `mobile` opcional (Chromium, viewport/toque de Android — `npm run test:e2e:mobile`), que reexecuta a mesma suíte pra pegar regressões de layout responsivo antes de builds do app Android; não cobre trechos que só existem no app nativo de verdade (biometria, swipe, teclado nativo).
 
 A sessão do Supabase usa `localStorage` no navegador (compartilhada entre abas — `Capacitor.isNativePlatform()` é sempre `false` fora do app Android, mesmo no projeto `mobile`), que é exatamente o que o `storageState` do Playwright persiste entre specs — **não é necessário nenhum modo especial nem variável de ambiente** para rodar localmente:
 
@@ -364,25 +366,28 @@ rodar_testes_e2e.bat
 | `03_navegacao.spec.ts` | E2E-NAV01–05 |
 | `04_extrato.spec.ts` | E2E-EX01–14 |
 | `05_dashboard.spec.ts` | E2E-DB01–07 |
-| `06_relatorios.spec.ts` | E2E-REL01–07 |
+| `06_relatorios.spec.ts` | E2E-REL01–09 (inclui layout dos filtros e API falhando sem loop de render) |
 | `07_transferencias.spec.ts` | Fluxos de transferência |
 | `08_lembretes.spec.ts` | Fluxos de lembretes |
 | `09_assistente.spec.ts` | Sugestões de lançamento |
 | `10_objetivos.spec.ts` | E2E-OBJ01–07 — Objetivos Financeiros |
 | `11_investimentos.spec.ts` | Fluxos de Investimentos (ativos, posições, dividendos) |
+| `12_agregados.spec.ts` | E2E-AGR01–07 — convidar, permissões, "Adicionar todos", quadros por status, convite pelo Perfil |
+| `12_seguranca_sessao.spec.ts` | Modal de "aba inativa" e sessão multi-aba |
+| `13_seletor_espaco.spec.ts` | E2E-SEL01–10 — 2º usuário real: troca de espaço, menu por módulo, convite pendente, revogação, saída por conta própria (precisa de `SUPABASE_SERVICE_ROLE_KEY`) |
+| `14_teclado_mobile.spec.ts` | Rolagem do campo focado (só projeto `mobile`) |
 | `zz_teardown.spec.ts` | Limpeza de dados E2E pós-suite |
 
 ---
 
 ## CI/CD
 
-O projeto usa **4 workflows GitHub Actions**, todos disparados em push ou pull request para `develop`:
+O projeto usa **3 workflows GitHub Actions**, disparados em push ou pull request para `develop` (o `frontend-quality` também em PR para `main`):
 
 | Workflow | O que faz |
 |---|---|
 | `backend-api-tests.yml` | Executa os testes Jest (Edge Functions) |
-| `frontend-lint.yml` | ESLint no código TypeScript/React |
-| `frontend-quality.yml` | Build de produção + verificação TypeScript |
+| `frontend-quality.yml` | ESLint (`npm run lint`) + build de produção com verificação TypeScript (`npm run build`) — o antigo `frontend-lint.yml` foi incorporado aqui |
 | `frontend-e2e.yml` | Testes Playwright Firefox (apenas quando `FrontEnd/**` muda) |
 
 Configure os seguintes **Secrets** no repositório (`Settings → Secrets and variables → Actions`):
@@ -421,4 +426,5 @@ Configure os seguintes **Secrets** no repositório (`Settings → Secrets and va
 - **Cartões Virtuais** — Sub-identificadores organizacionais de um cartão físico (sem limite/saldo próprio), reconhecidos automaticamente na importação de fatura.
 - **Assinaturas, Comparativo Mensal e Projeção de Economia** — Análises adicionais sobre o extrato: detecção de gastos recorrentes, comparação de dois períodos livres e simulação de patrimônio futuro por juros compostos.
 - **Mascotes e Chat com IA** — Assistente conversacional com mentor escolhido pelo usuário, múltiplos provedores de IA (Claude, GPT, Gemini, DeepSeek, OpenRouter, Mistral, Cohere) com credenciais cifradas, e tutorial guiado por página.
-- **App Android** — Mesmo código React empacotado com Capacitor. Login por digital (biometria, credenciais cifradas em repouso no aparelho), sessão mais restritiva que no desktop (`sessionStorage`, auto-logout de 5min vs 15min, detecção de pause/resume nativo), e atualização OTA do bundle direto do Supabase — sem passar pela Play Store a cada release.
+- **Usuários agregados (conta conjunta)** — O dono convida outra pessoa por e-mail e libera, por módulo (Extrato, Objetivos, Investimentos), leitura ou leitura+escrita, e quais contas ela pode ver. O agregado troca entre "Meus dados" e "Conta de <dono>" no seletor de espaço (nunca os dois ao mesmo tempo), vê só os módulos e contas liberados (o menu esconde o resto e uma faixa avisa que há contas não compartilhadas) e pode deixar de acessar por conta própria. O dono pode definir as permissões antes do aceite, é avisado quando o convite é aceito ou o agregado sai, e pode reconvidar. A segurança é por RLS no banco; a tabela de perfil (`usuarios`) nunca é lida pelo outro lado. Telas: **Compartilhamento** (`/compartilhamento`) e o quadro "Convidar um agregado" no Perfil.
+- **App Android** — Mesmo código React empacotado com Capacitor. Login por digital (biometria, credenciais cifradas em repouso no aparelho), sessão mais restritiva que no desktop (`sessionStorage`, auto-logout de 5min vs 15min, detecção de pause/resume nativo), e atualização OTA do bundle direto do Supabase — sem passar pela Play Store a cada release. O teclado virtual redimensiona a WebView (`@capacitor/keyboard` + `adjustResize`) e o campo digitado é trazido pra área visível; essas duas primeiras partes são nativas e exigem reinstalar o APK.

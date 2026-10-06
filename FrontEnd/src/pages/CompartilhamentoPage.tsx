@@ -82,14 +82,15 @@ function GrupoStatus({ status, vinculos, destaqueId }: { status: string; vinculo
 function CardVinculo({ vinculo, destaque }: { vinculo: VinculoComoDono; destaque: boolean }) {
   const { reenviar, revogar, definirPermissao, definirContas } = useAgregadosComoDonos()
   const { contas } = useContas()
-  const [aberto, setAberto] = useState(false)
+  // `null` = o usuário ainda não mexeu: segue `destaque` (convite recém-enviado abre sozinho).
+  // Derivado em vez de setState dentro de efeito (regra react-hooks/set-state-in-effect).
+  const [abertoManual, setAberto] = useState<boolean | null>(null)
+  const aberto = abertoManual ?? destaque
   const [ocupado, setOcupado] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!destaque) return
-    setAberto(true)
-    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (destaque) cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [destaque])
 
   const contasOpcoes = contas.map(c => ({ value: c.conta_id, label: c.nome }))
@@ -100,7 +101,7 @@ function CardVinculo({ vinculo, destaque }: { vinculo: VinculoComoDono; destaque
   return (
     <div ref={cardRef} className={`rounded-lg border ${destaque ? 'border-av-green/60' : 'border-white/10'}`}>
       <button
-        onClick={() => setAberto(v => !v)}
+        onClick={() => setAberto(!aberto)}
         className={`w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-white/[0.03] transition-colors ${aberto ? 'rounded-t-lg' : 'rounded-lg'}`}
       >
         {aberto ? <ChevronDown size={14} className="text-white/40" /> : <ChevronRight size={14} className="text-white/40" />}

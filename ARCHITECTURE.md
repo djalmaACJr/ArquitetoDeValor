@@ -99,6 +99,9 @@ Ambas anexam o header `X-Contexto-User-Id` automaticamente quando há um espaço
 
 Capacitor 8 empacota o MESMO build web (`FrontEnd/dist/`) numa WebView — não há árvore de código nativa separada em React. `Capacitor.isNativePlatform()` decide comportamento por plataforma em vários pontos (storage da sessão, timeout de auto-logout, biometria, calculadora/teclado, swipe de navegação). Detalhe completo (biometria, sessão dual-storage, atualização OTA) em `CLAUDE.md` › "Sessão + biometria (Android)" — não duplicado aqui de propósito, é conteúdo de produto/segurança, não de arquitetura de camadas.
 
+#### Teclado
+`targetSdk 36` = edge-to-edge: sem tratamento, o teclado cobre a WebView e o campo digitado some. Camadas: `android:windowSoftInputMode="adjustResize"` (`AndroidManifest.xml`) + `@capacitor/keyboard` (`resize: 'native'`, `resizeOnFullScreen: true` em `capacitor.config.ts`) + `lib/tecladoMobile.ts` (leva o campo focado pra área visível; chamado em `main.tsx`, só em tela de toque; `Keyboard.addListener(...).catch` pra não quebrar um bundle OTA novo num APK antigo sem o plugin) + `interactive-widget=resizes-content` no viewport (`index.html`, web mobile). As 2 primeiras são **nativas**: exigem reinstalar o APK (OTA só leva o bundle web).
+
 #### Rede: TLS e avaliação de certificate pinning (AUD-08, 06/08/2026)
 
 Estado atual — `android/app/src/main/res/xml/network_security_config.xml`:
@@ -410,7 +413,7 @@ Cache compartilhado (sem `user_id`) de composição de ETF: PK `(etf_ticker, hol
 
 ### 🤝 Tabelas — Usuários agregados
 
-Migrations: `20260930000001_agregados_fundacao.sql` (schema + RPCs + Fase 0) até `20261006000007` (mais recente). Detalhe de negócio completo em `BUSINESS_RULES.md`.
+Migrations: `20260930000001_agregados_fundacao.sql` (schema + RPCs + Fase 0) até `20261006000013` (mais recente) — lista completa em "Migrations de agregados" mais abaixo. Detalhe de negócio completo em `BUSINESS_RULES.md`.
 
 #### `agregados`
 | Coluna | Tipo | Notas |
@@ -423,6 +426,7 @@ Migrations: `20260930000001_agregados_fundacao.sql` (schema + RPCs + Fase 0) at�
 | `token` | UUID | default `gen_random_uuid()` — **nunca** exposto pela API pública (`semToken()` em `agregados/index.ts`) |
 | `token_expira_em` | TIMESTAMPTZ | default `now() + 7 days` |
 | `ultimo_reenvio_em` | TIMESTAMPTZ nullable | `20261006000005` — cooldown de reenvio (60s), separado de `atualizado_em` de propósito (a própria criação também seta `atualizado_em`, o que fazia o 1º reenvio sempre bater no cooldown por engano) |
+| `saiu_por_agregado` | BOOLEAN NOT NULL DEFAULT false | `20261006000012` — `true` quando o PRÓPRIO agregado encerrou o vínculo (`fn_sair_agregado`); o status continua `REVOGADO` (corta o acesso em todas as regras de uma vez), a coluna só distingue "o dono revogou" de "o agregado saiu" pra UI (badge "Saiu", aviso ao dono, sem aviso de revogação ao próprio agregado) |
 | `criado_em` / `atualizado_em` / `aceito_em` / `revogado_em` | TIMESTAMPTZ | |
 | `CHECK chk_agregados_nao_proprio` | | `agregado_id IS NULL OR agregado_id <> dono_id` — não dá pra convidar a própria conta |
 
@@ -436,6 +440,9 @@ Migrations: `20260930000001_agregados_fundacao.sql` (schema + RPCs + Fase 0) at�
 
 #### RLS nas 3 tabelas
 Só `SELECT` para `authenticated` (`dono_id = auth.uid() OR agregado_id = auth.uid()`, com join equivalente nas 2 tabelas filhas). **Nenhuma policy de escrita** — toda mutação passa pelas RPCs `SECURITY DEFINER` listadas na tabela "Funções" acima (mesmo padrão de `fn_excluir_dados_usuario`: checagem manual de `auth.uid()`, `search_path` fixo), porque as transições de estado do convite (só o convidado com e-mail batendo pode aceitar, só enquanto pendente e não expirado, etc.) são difíceis de expressar em RLS puro e ficam mais auditáveis centralizadas.
+
+#### ⚠️ `usuarios` NÃO tem policy de agregado
+`pol_usuarios_agregado_select` (`20261002000002`) liberava `SELECT` da **linha inteira** de `usuarios` entre dono e agregado ACEITO — e RLS não restringe colunas: o agregado lia do dono `chat_mascote_historico`, `ia_configs`, `inv_perfil`, e-mail, `data_nascimento`… (e o dono, o mesmo do agregado). Removida em `20261006000013`. O que a feature precisa (só o `nome`) vem por RPCs `SECURITY DEFINER` que devolvem `id`+`nome` (`fn_nomes_usuarios`, `fn_nomes_dos_meus_agregados`, `fn_meus_vinculos_como_agregado`). **Nunca** criar policy de SELECT em `usuarios` pra outro usuário. Teste: `CA-AGR77`.
 
 #### Policies adicionais nas tabelas de domínio
 Nunca reescreve a policy de dono existente (Postgres faz `OR` entre permissivas do mesmo comando) — sempre uma policy **a mais**, condicionada por `fn_agregado_tem_acesso` (ou `fn_agregado_pode_ver_objetivo`/`fn_agregado_pode_ver_ativo`, que materializam regras mais específicas por não terem como se reduzir a módulo+conta sozinhas):
@@ -455,12 +462,13 @@ Nunca reescreve a policy de dono existente (Postgres faz `OR` entre permissivas 
 #### Edge Function — `supabase/functions/agregados/index.ts`
 Mesmo padrão de handler do resto do repo — thin wrappers chamando as RPCs via `c.rpc(...)`:
 ```
-GET  /agregados                     -- meus vínculos como dono (permissões+contas aninhadas)
+GET  /agregados                     -- meus vínculos como dono (permissões+contas aninhadas + `agregado_nome` via fn_nomes_dos_meus_agregados)
 GET  /agregados/convites-recebidos  -- vínculos onde sou o convidado (base do seletor de espaço)
 GET  /agregados/:id                 -- detalhe pra tela de edição
 POST /agregados {email}             -- convida + envia e-mail (Brevo)
 POST /agregados/:id/reenviar
 POST /agregados/:id/revogar
+POST /agregados/:id/sair          -- o próprio agregado deixa de acessar o espaço (só vínculo ACEITO; RPC fn_sair_agregado)
 POST /agregados/aceitar {token}     -- por token (link de e-mail)
 POST /agregados/recusar {token}
 POST /agregados/:id/aceitar         -- por id (tela "Convites que recebi", já logado)
@@ -472,6 +480,17 @@ Nunca faz `select('*')` em `agregados` — toda resposta passa por `semToken()`.
 
 #### Fluxo de convite + signup
 Convite a um e-mail **sem cadastro** carrega o token em `raw_user_meta_data` do `signUp()` (`?convite_token=` → `CadastroPage.tsx`) — a trigger `fn_sincronizar_usuario` (mesma que já lia `nome` de lá) resolve e aceita o vínculo **dentro da própria trigger**, não via RPC pública (a trigger não roda num contexto de request autenticado). Falha silenciosa (token inválido/expirado) nunca bloqueia o cadastro em si.
+
+#### Frontend — UX do agregado e do dono
+- `hooks/useModulosLiberados.ts`: módulos liberados no espaço ativo, com as permissões ATUAIS do vínculo (`useConvitesRecebidos`) — o snapshot guardado no store pode estar velho se o dono mudou depois de o agregado escolher o espaço. A `Sidebar` esconde os itens/grupos dos módulos não liberados (Painel/Extratos/grupo Relatórios = EXTRATO; Objetivos; Investimentos).
+- `components/ui/GuardaModuloAgregado.tsx` (envolve o `<Outlet/>` em `AppLayout`): no espaço do dono mostra a faixa "só aparecem as N contas compartilhadas… as demais não foram compartilhadas"; ao abrir direto a URL de módulo não liberado mostra "Acesso não liberado" (rede de segurança — pelo menu o item nem existe). Só UX; quem barra é a RLS.
+- `SeletorEspaco`: se o vínculo do espaço ativo deixa de estar ACEITO (revogado/saiu), volta sozinho pra "Meus dados" e recarrega os vínculos ao voltar o foco da janela — sem isso o seletor sumia (nenhum vínculo aceito) e o agregado ficava preso numa conta vazia.
+- Avisos de login (`AppLayout`, canto inferior direito; no celular os de dono são enxutos — 2 linhas, sem rodapé — pra não cobrir/interceptar toques): `AvisoConviteRecebido` (convidado: Aceitar/Recusar), `AvisoAgregadoAceitou` e `AvisoAgregadoSaiu` (dono; "visto até" em `localStorage` por uid, janela inicial de 7 dias — sem coluna no banco, vale por navegador), `AvisoRevogacaoAgregado` (agregado; ignora saídas voluntárias; "visto até" em `usuarios.agregados_avisos_vistos_em`).
+- `CompartilhamentoPage`: agregados agrupados por status em quadros recolhíveis (Ativos/Aguardando aceite abertos, Revogados/saíram e Recusados recolhidos), contador, nome (não e-mail), datas de convite/aceite/revogação; ao enviar um convite o cartão abre já nas permissões (permissões podem ser definidas antes do aceite — valem só com `status = 'ACEITO'`); "Adicionar todos" nas contas; "Deixar de acessar" em "Espaços que tenho acesso".
+- `components/ui/ConvidarAgregadoForm.tsx`: formulário de convite compartilhado entre `CompartilhamentoPage` e o quadro "Convidar um agregado" do Perfil (ao lado de "Convidar amigos", com link "Definir permissões").
+
+#### Migrations de agregados
+`20260930000001` fundação · `20261001000001..4` Fase 1 (leitura do Extrato, `fn_saldo_total_antes_de`, nome do dono, aceitar por id) · `20261002000001..5` Fase 2 (escrita no Extrato, nome entre dono/agregado — **policy removida depois**, permissões nos vínculos, transferência all-or-nothing) · `20261003000001..2` Fase 3 (Objetivos) · `20261004000001..3` Fase 4 (Investimentos) · `20261005000001` fix `fn_excluir_dados_usuario` · `20261006000001..7` Fase 5 (throttling, expurgo, aviso de revogação, cooldown, saldo-base do mês, OBJETIVO/CRESCIMENTO nunca visíveis) · `20261006000009` saldos respeitam o escopo de conta · `20261006000010` saldo sem timeout (`DEFINER` + CTE) · `20261006000011` `fn_nomes_dos_meus_agregados` · `20261006000012` sair por conta própria · `20261006000013` fecha o vazamento de `usuarios`.
 
 #### `fn_excluir_dados_usuario`
 `DELETE FROM agregados WHERE dono_id = p_user_id OR agregado_id = p_user_id` faz parte do bloco `DISABLE/ENABLE TRIGGER USER` já existente — exclusão de conta limpa os vínculos nos dois sentidos (como dono e como agregado). ⚠️ Esta lista de tabelas é fácil de regredir silenciosamente ao copiar a função inteira entre migrations (já aconteceu uma vez, `20260930000001` sobrescreveu uma versão mais completa de `20260929000003` por engano — corrigido em `20261005000001`, que também é a versão atual) — qualquer tabela nova de usuário precisa entrar nesse bloco.
@@ -605,7 +624,7 @@ Padrão parecido, mas o "visto" é um **conjunto de chaves** (`datacom_avisos_vi
 | `fn_excluir_transferencias(p_ids)` | RPC, `SECURITY INVOKER` | Desarma `id_par_transferencia` e apaga as transações do par/série numa única transação |
 | `fn_criar_transacoes_com_dividendos(p_rows, p_dividendo)` | RPC, `SECURITY INVOKER` | Insere transação(ões) de provento e espelha `inv_dividendos` atomicamente |
 | `fn_excluir_transacoes_e_dividendos(p_ids)` | RPC, `SECURITY INVOKER` | Exclusão atômica de transações + dividendos vinculados |
-| `fn_saldo_total_antes_de(p_user_id, p_data)` | RPC, `SECURITY INVOKER` | Saldo **global** (todas as contas ativas) do usuário na véspera de uma data — otimização de `GET /transacoes?saldo=true`, evita window function cara em `vw_transacoes_com_saldo` |
+| `fn_saldo_total_antes_de(p_user_id, p_data)` | RPC, `SECURITY DEFINER` (desde `20261006000010`) | Saldo **global** (todas as contas ativas) do usuário na véspera de uma data — otimização de `GET /transacoes?saldo=true`, evita window function cara em `vw_transacoes_com_saldo`. Dono: soma direto. Agregado: valida `fn_agregado_tem_acesso(…,'EXTRATO')` UMA vez e junta com o conjunto de contas liberadas (CTE). Era `INVOKER` e chamava `fn_agregado_tem_acesso` por linha de transação (+ a RLS repetia por linha) → `statement timeout` (~8s) pro agregado com histórico longo |
 | `fn_calcular_progresso_objetivo(p_objetivo_id)` | SQL stable, `SECURITY INVOKER` | Calcula `valor_atingido`/`percentual`/`status` de um objetivo conforme seu `tipo`. Ramo CRESCIMENTO reconciliado com `ObjetivoDetalhe.tsx` em `20260806000006` (**AUD-03** — uma migration anterior focada em SONHO tinha sobrescrito sem querer a fórmula completa YoY/YTD/NET/COMP_YTD do CRESCIMENTO por uma versão v1 simplificada; ver `BUSINESS_RULES.md` § "Cálculo de CRESCIMENTO") |
 | `fn_atualizar_progresso_objetivo` | trigger `BEFORE I/U` em `objetivos` | Grava o resultado de `fn_calcular_progresso_objetivo` (usa `NEW.*` direto, sem re-SELECT) |
 | `fn_sincronizar_progresso_objetivo(p_user_id)` | RPC, `SECURITY INVOKER` | Recalcula todos os objetivos ativos do usuário em massa + grava snapshot do dia em `objetivos_progresso` (`POST /objetivos/sincronizar-progresso`) |
@@ -622,8 +641,11 @@ Padrão parecido, mas o "visto" é um **conjunto de chaves** (`datacom_avisos_vi
 | `fn_definir_permissoes_agregado(p_vinculo_id, p_modulo, p_liberado, p_pode_escrever)` / `fn_definir_contas_agregado(p_vinculo_id, p_conta_ids)` | RPC, `SECURITY DEFINER` | Dono edita módulos/contas liberadas de um vínculo — `fn_definir_contas_agregado` substitui o conjunto inteiro atomicamente, validando que toda conta é mesmo do dono |
 | `fn_meus_vinculos_como_agregado()` | RPC, `SECURITY DEFINER` | Vínculos onde o chamador é o agregado (inclusive `REVOGADO`, pra alimentar o aviso de revogação) ou um convite `PENDENTE` pro seu e-mail |
 | `fn_expurgar_convites_agregados_expirados()` | RPC, `SECURITY DEFINER`, chamada por `pg_cron` | Convites `PENDENTE` com `token_expira_em` vencido → `REVOGADO`. Job diário 08:30 |
+| `fn_sair_agregado(p_vinculo_id)` | RPC, `SECURITY DEFINER` | `agregado_id = auth.uid()` e `status = 'ACEITO'` → `REVOGADO` + `revogado_em = now()` + `saiu_por_agregado = true`. Qualquer outro caso (inclusive o dono chamando) → `CONVITE_NAO_ENCONTRADO` (404) |
+| `fn_nomes_dos_meus_agregados()` | RPC, `SECURITY DEFINER` | `(vinculo_id, nome)` dos agregados dos vínculos do dono (inclui revogados/recusados) — só o nome, nunca o resto do perfil |
+| `fn_nomes_usuarios(p_ids uuid[])` | RPC, `SECURITY DEFINER` | `(id, nome)` apenas do próprio usuário ou de quem tem vínculo ACEITO com ele (nas 2 direções). Usada por `mapaUsuarios()` em `functions/transacoes` ("lançado por Fulano"). Substitui a policy `pol_usuarios_agregado_select` (removida) |
 | `fn_validar_conta_agregado` | trigger BEFORE INSERT em `agregados_contas` | Defesa em profundidade: a conta liberada precisa pertencer ao dono do vínculo (a RPC já valida; o trigger fecha a garantia independente de quem chame o INSERT) |
-| `fn_saldos_contas_ate_data(p_user_id, p_data)` / `fn_saldo_conta_ate_data(p_conta_id, p_data)` | RPC, `SECURITY INVOKER` | Saldo por conta até uma data — chamadas direto pelo frontend (`useSaldoBaseMes`), sem Edge Function. Aceitam `p_user_id`/dono de uma conta igual a `auth.uid()` OU um agregado com EXTRATO liberado (estendido em `20261006000006` — tinham ficado de fora da Fase 1 por descuido, fazendo o Extrato de um agregado mostrar o PRÓPRIO saldo-base dele em vez do saldo do dono) |
+| `fn_saldos_contas_ate_data(p_user_id, p_data)` (`SECURITY DEFINER` desde `20261006000010`, só devolve contas liberadas ao agregado) / `fn_saldo_conta_ate_data(p_conta_id, p_data)` (`INVOKER`) | RPC | Saldo por conta até uma data — chamadas direto pelo frontend (`useSaldoBaseMes`), sem Edge Function. Aceitam `p_user_id`/dono de uma conta igual a `auth.uid()` OU um agregado com EXTRATO liberado (estendido em `20261006000006` — tinham ficado de fora da Fase 1 por descuido, fazendo o Extrato de um agregado mostrar o PRÓPRIO saldo-base dele em vez do saldo do dono) |
 
 ### Triggers
 
@@ -895,6 +917,11 @@ Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já 
 - **Cartões virtuais sem resolução sufixo→apelido**: o parser Nubank grava `"Cartão final <sufixo>"` na `observacao` do item de fatura com a intenção declarada em comentário de casar com `contas.cartoes_virtuais` para mostrar o apelido — isso não está implementado; a UI hoje mostra a string crua do sufixo.
 - **`hash_match`** em `fatura_import_item` é calculado e persistido mas não é usado em nenhuma query de deduplicação hoje — não assumir que reimportar a mesma fatura é bloqueado automaticamente.
 - **Header customizado novo (`X-Contexto-User-Id` ou outro) sem `Access-Control-Allow-Headers`**: o preflight do navegador barra a requisição ANTES dela sair do cliente, sem log nenhum no backend — e os testes Jest nunca pegam isso (CORS não existe fora do browser). Foi exatamente o que aconteceu com `X-Contexto-User-Id` até out/2026 (ver seção CORS). Qualquer header novo precisa entrar em `_shared/utils.ts::corsHeaders()` E ganhar uma asserção em `tests/10_seguranca_auth_cors.test.ts` (SEG-CORS02).
+- **Nunca criar policy de SELECT em `usuarios` pra outro usuário** — RLS não restringe colunas, vazaria `chat_mascote_historico`/`ia_configs`/`inv_perfil`/e-mail (aconteceu entre dono e agregado, fechado em `20261006000013`). Use RPC `SECURITY DEFINER` devolvendo só as colunas necessárias.
+- **`.update(...).single()` com 0 linhas afetadas dá `PGRST116`** — numa tabela que o chamador pode LER mas não ESCREVER (conta/categoria vista por um agregado) isso virava 400 genérico; `contas`/`categorias` `editar()` agora devolvem 403.
+- **`max_rows = 1000` do PostgREST trunca em silêncio** — `listarComSaldo` (`GET /transacoes?saldo=true&mes=`) agora pagina com `buscarTodasLinhas`; um mês com mais de 1000 lançamentos vinha incompleto e o `saldo_acumulado` (somado em JS) errado, sem erro. Qualquer query nova que possa passar de 1000 linhas precisa paginar.
+- **Função `SECURITY INVOKER` que chama `fn_agregado_tem_acesso` por linha** (no `WHERE` de um `SUM` sobre histórico) multiplica o custo da RLS por linha — vira `statement timeout`. Autorize uma vez no início e junte com o conjunto de contas liberadas (padrão de `20261006000010`).
+- `useQuery({ data = [] })` cria um array novo por render quando a query falha/está sem dados — com isso nas dependências de um `useMemo`/`useEffect` dá "Maximum update depth exceeded" (aconteceu em Relatórios com 403). Use constante estável (`SEM_CONTAS`/`SEM_CATEGORIAS` em `useContas`/`useCategorias`).
 - **Objetivos tipo OBJETIVO/CRESCIMENTO nunca ficam visíveis a um agregado** (`fn_agregado_pode_ver_objetivo` retorna `false` incondicional pros 2 tipos, `20261006000007`) — decisão final confirmada com o usuário, não um bug: somam por categoria em TODAS as contas do dono, sem escopo de conta possível (ver `BUSINESS_RULES.md` → Usuários agregados). Não "corrigir" isso sem reabrir essa decisão com o usuário.
 - **`arqvalor:ultima-atividade` só pode ser zerado num login de verdade, nunca numa restauração de sessão** (`main.tsx`, flag `primeiroEventoAuth`) — o SDK do supabase-js dispara `SIGNED_IN` em todo carregamento com sessão já persistida (F5, reabrir aba), não só num login interativo; sem o guard de "1º evento", um reload numa sessão esquecida apagava o timestamp vencido e destruía a defesa de "sessão esquecida em PC compartilhado" do `useAutoLogout`. Achado real via E2E (`12_seguranca_sessao.spec.ts`), out/2026.
 
@@ -906,8 +933,8 @@ Convenção de pasta: `supabase/migrations/Aplicados/` guarda as migrations já 
 - Suite `99_limpar` chama `functions/limpar` para zerar dados ao fim.
 - E2E roda no Firefox via Playwright (`npm run test:e2e`, projeto `firefox`); em CI o `playwright.config.ts` sobe o Vite dev server automaticamente (`webServer`). Projeto extra `mobile` (`npm run test:e2e:mobile`, engine Chromium + `devices['Pixel 7']`) reexecuta a mesma suíte em viewport/toque de Android — não roda por padrão, cobre layout responsivo mas não os trechos gateados por `Capacitor.isNativePlatform()`.
 - Auth state em `FrontEnd/e2e/fixtures/auth.json` é gerado por `auth.setup.ts` (não commitar).
-- CI usa 4 workflows GitHub Actions:
-  - `.github/workflows/backend-api-tests.yml` — testes Jest (push/PR develop)
-  - `.github/workflows/frontend-lint.yml` — ESLint (push/PR develop)
-  - `.github/workflows/frontend-quality.yml` — build + TypeScript (push/PR develop)
+- **Higiene dos testes de agregados**: `TEST_EMAIL_B` que já é agregada do usuário de teste A faz o `beforeAll` de `13_agregados` falhar com `JA_AGREGADO` — rode com `TEST_EMAIL_B=`/`TEST_PASSWORD_B=` vazias (cada arquivo cria um B temporário, precisa de `SUPABASE_SERVICE_ROLE_KEY`) ou use uma B dedicada. `13_agregados` e o `zz_teardown` E2E apagam ao final os vínculos `@example.com` do dono de teste. `14_teclado_mobile` roda só no projeto `mobile` e cobre a rolagem do campo focado (o redimensionamento nativo do teclado só se valida no aparelho). Layout: `E2E-REL09` (filtros do Relatório não estouram nem se sobrepõem) e `E2E-REL08` (APIs falhando não causam loop de render) rodam nos dois projetos.
+- CI usa 3 workflows GitHub Actions:
+  - `.github/workflows/backend-api-tests.yml` — testes Jest (`--runInBand`, push/PR develop). ⚠️ `11_objetivos` costuma estourar o timeout de 150s do `beforeAll` no runner (compute do Supabase esgota o burst de CPU depois das suítes pesadas) — ver nota em `CLAUDE.md`; não é bug de código
+  - `.github/workflows/frontend-quality.yml` — ESLint + build/TypeScript (push/PR develop e PR main). Substitui o antigo `frontend-lint.yml`, que não existe mais
   - `.github/workflows/frontend-e2e.yml` — Playwright Firefox (push/PR develop, mudanças em `FrontEnd/**`)
