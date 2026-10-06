@@ -5,15 +5,15 @@
 // liberados), e responder convites recebidos de outras pessoas.
 
 import { useState, useEffect, useRef } from 'react'
-import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Mail, Send, Trash2, RefreshCw, ChevronDown, ChevronRight, Check, X, Users } from 'lucide-react'
+import { Mail, Trash2, RefreshCw, ChevronDown, ChevronRight, Check, X, Users } from 'lucide-react'
 import {
   useAgregadosComoDonos, useConvitesRecebidos,
   type VinculoComoDono, type ModuloAgregado,
 } from '../hooks/useAgregados'
 import { useContas } from '../hooks/useContas'
 import { MultiSelect } from '../components/ui/MultiSelect'
+import ConvidarAgregadoForm from '../components/ui/ConvidarAgregadoForm'
 import { Toggle } from '../components/ui/shared'
 import { setEspacoAtivo } from '../lib/espacoAtivo'
 
@@ -194,29 +194,13 @@ function CardVinculo({ vinculo, destaque }: { vinculo: VinculoComoDono; destaque
 }
 
 export default function CompartilhamentoPage() {
-  const { vinculos, loading, convidar } = useAgregadosComoDonos()
+  const { vinculos, loading } = useAgregadosComoDonos()
   const { convites, aceitos, aceitar, recusar, sair } = useConvitesRecebidos()
   const navigate = useNavigate()
 
-  const [email, setEmail]       = useState('')
-  const [enviando, setEnviando] = useState(false)
-  const [erro, setErro]         = useState('')
-  const [sucesso, setSucesso]   = useState('')
   const [destaqueId, setDestaqueId] = useState<string | null>(null)
 
   const pendentesRecebidos = convites.filter(c => c.status === 'PENDENTE')
-
-  const handleConvidar = async (e: FormEvent) => {
-    e.preventDefault()
-    setErro(''); setSucesso('')
-    setEnviando(true)
-    const res = await convidar(email)
-    setEnviando(false)
-    if (!res.ok) { setErro(res.erro ?? 'Não foi possível enviar o convite.'); return }
-    setSucesso(`Convite enviado para ${email}. Agora defina o que ele poderá acessar: libere os módulos e as contas no cartão logo abaixo — sem isso, ao aceitar ele não verá nada.`)
-    setDestaqueId(res.dados?.id ?? null)
-    setEmail('')
-  }
 
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto flex flex-col gap-5">
@@ -234,21 +218,7 @@ export default function CompartilhamentoPage() {
         <h2 className="text-[15px] font-semibold text-white/80 mb-3 flex items-center gap-2">
           <Mail size={15} className="text-av-blue" /> Convidar um agregado
         </h2>
-        <form onSubmit={handleConvidar} className="flex flex-col sm:flex-row gap-2">
-          <input
-            type="email" required value={email} onChange={e => setEmail(e.target.value)}
-            placeholder="email@exemplo.com"
-            className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[15px] text-white placeholder-white/30 focus:outline-none focus:border-av-green/70 transition-colors"
-          />
-          <button
-            type="submit" disabled={enviando}
-            className="flex items-center justify-center gap-2 bg-av-green text-av-dark font-semibold rounded-lg px-4 py-2.5 text-[15px] hover:bg-av-green/90 disabled:opacity-50 transition-colors"
-          >
-            <Send size={15} /> {enviando ? 'Enviando...' : 'Convidar'}
-          </button>
-        </form>
-        {erro && <p className="text-[13px] text-red-400 mt-2">{erro}</p>}
-        {sucesso && <p className="text-[13px] text-av-green mt-2">{sucesso}</p>}
+        <ConvidarAgregadoForm onConvidado={setDestaqueId} />
       </section>
 
       {/* Meus agregados */}

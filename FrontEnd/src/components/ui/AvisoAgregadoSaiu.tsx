@@ -19,13 +19,14 @@ export default function AvisoAgregadoSaiu() {
   return (
     <div className="pointer-events-auto w-[340px] max-w-[calc(100vw-2rem)] rounded-xl border shadow-2xl"
       style={{ borderColor: 'rgba(240,180,41,0.4)', background: '#0f1729' }}>
-      <div className="flex items-start gap-3 p-4">
+      {/* Celular: card enxuto (texto em 2 linhas, sem rodapé — o X dispensa) pra não cobrir/interceptar toques na página */}
+      <div className="flex items-start gap-3 p-3 sm:p-4">
         <span className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(240,180,41,0.15)' }}>
           <UserMinus size={16} style={{ color: LARANJA }} />
         </span>
         <div className="flex-1 min-w-0">
           <p className="text-[14px] font-semibold text-white">Agregado saiu</p>
-          <p className="text-[13px] mt-0.5" style={{ color: MUTED }}>
+          <p className="text-[13px] mt-0.5 line-clamp-2 sm:line-clamp-none" style={{ color: MUTED }}>
             {avisos.length === 1
               ? `${avisos[0].agregado_nome || avisos[0].email_convidado} deixou de acessar a sua conta por conta própria. Você pode convidar de novo quando quiser.`
               : `${avisos.length} pessoas deixaram de acessar a sua conta por conta própria.`}
@@ -51,7 +52,7 @@ export default function AvisoAgregadoSaiu() {
         </ul>
       )}
 
-      <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-white/10">
+      <div className="hidden sm:flex items-center justify-end gap-2 px-4 py-3 border-t border-white/10">
         <button onClick={dispensar} className="px-3 py-1.5 rounded-lg text-[13px] font-medium"
           style={{ background: LARANJA, color: '#0a0f1a' }}>
           Entendi

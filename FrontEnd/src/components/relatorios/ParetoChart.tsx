@@ -206,13 +206,13 @@ function TabelaParetto({
                   {modoComparativo && (
                     <td className="px-4 py-3 text-right">
                       <span className="text-[15px]" style={{ color: '#8b92a8' }}>
-                        {oculto ? '??????' : (valorAnt > 0 ? formatBRL(valorAnt) : '—')}
+                        {oculto ? '••••••' : (valorAnt > 0 ? formatBRL(valorAnt) : '—')}
                       </span>
                     </td>
                   )}
                   <td className="px-4 py-3 text-right">
                     <span className="text-[15px] font-semibold" style={{ color: dentro80 ? cor : '#8b92a8' }}>
-                      {oculto ? '??????' : formatBRL(item.total)}
+                      {oculto ? '••••••' : formatBRL(item.total)}
                     </span>
                   </td>
                   {modoComparativo && (
@@ -307,13 +307,13 @@ function TabelaParetto({
                         {modoComparativo && (
                           <td className="px-4 py-2 text-right">
                             <span className="text-[14px]" style={{ color: '#8b92a8' }}>
-                              {oculto ? '??????' : (sAnt > 0 ? formatBRL(sAnt) : '—')}
+                              {oculto ? '••••••' : (sAnt > 0 ? formatBRL(sAnt) : '—')}
                             </span>
                           </td>
                         )}
                         <td className="px-4 py-2 text-right">
                           <span className="text-[14px]" style={{ color: '#8b92a8' }}>
-                            {oculto ? '??????' : formatBRL(s.total)}
+                            {oculto ? '••••••' : formatBRL(s.total)}
                           </span>
                         </td>
                         {modoComparativo && (
@@ -355,13 +355,13 @@ function TabelaParetto({
               {modoComparativo && (
                 <td className="px-4 py-2.5 text-right">
                   <span className="text-[15px] font-bold" style={{ color: '#8b92a8' }}>
-                    {oculto ? '??????' : formatBRL(totalAnterior ?? 0)}
+                    {oculto ? '••••••' : formatBRL(totalAnterior ?? 0)}
                   </span>
                 </td>
               )}
               <td className="px-4 py-2.5 text-right">
                 <span className="text-[16px] font-bold" style={{ color: cor }}>
-                  {oculto ? '??????' : formatBRL(resumo.total)}
+                  {oculto ? '••••••' : formatBRL(resumo.total)}
                 </span>
               </td>
               {modoComparativo && (() => {
@@ -451,7 +451,7 @@ function CardResumoParetto({
           Valor 80%
         </p>
         <p className="text-[18px] font-bold" style={{ color: cor }}>
-          {oculto ? '??????' : formatBRL(resumo.itensAte80.reduce((s, i) => s + i.total, 0))}
+          {oculto ? '••••••' : formatBRL(resumo.itensAte80.reduce((s, i) => s + i.total, 0))}
         </p>
         <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>
           ~80% do volume
@@ -478,7 +478,7 @@ function CardResumoParetto({
           Valor 20%
         </p>
         <p className="text-[18px] font-bold" style={{ color: '#4a5168' }}>
-          {oculto ? '??????' : formatBRL(resumo.itensAlem80.reduce((s, i) => s + i.total, 0))}
+          {oculto ? '••••••' : formatBRL(resumo.itensAlem80.reduce((s, i) => s + i.total, 0))}
         </p>
         <p className="text-[14px] mt-1" style={{ color: '#8b92a8' }}>
           ~20% do volume

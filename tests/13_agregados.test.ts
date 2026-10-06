@@ -641,6 +641,23 @@ describe("Agregados — leitura do Extrato por agregado (Fase 1)", () => {
     expect((nomesB as { vinculo_id: string }[]).map((n) => n.vinculo_id)).not.toContain(vinculoId);
   });
 
+  // ── CA-AGR77 ──────────────────────────────────────────
+  // Furo corrigido em 20261006000013: a policy antiga deixava o agregado ler a
+  // LINHA INTEIRA de `usuarios` do dono (chat da IA, ia_configs, e-mail...).
+  test("CA-AGR77 — agregado NÃO lê a linha de usuarios do dono; só id+nome via fn_nomes_usuarios", async () => {
+    if (!TEM_USER_B_LEITURA) { console.warn("[13_agregados] User B indisponível — CA-AGR77 pulado."); return; }
+
+    const dbB = clienteComToken(await getTokenB());
+    const { data: linha } = await dbB.from("usuarios").select("*").eq("id", donoId);
+    expect(linha ?? []).toHaveLength(0);
+
+    const { data: nomes, error } = await dbB.rpc("fn_nomes_usuarios", { p_ids: [donoId, "00000000-0000-0000-0000-000000000000"] });
+    expect(error).toBeNull();
+    const lista = nomes as { id: string; nome: string }[];
+    expect(lista.map((n) => n.id)).toEqual([donoId]);        // só o dono (vínculo ACEITO), nunca um id qualquer
+    expect(Object.keys(lista[0]).sort()).toEqual(["id", "nome"]);
+  });
+
   // ── CA-AGR73 ──────────────────────────────────────────
   // Agregado só LÊ contas/categorias (RLS de agregado) — editar volta 403
   // (antes: 400 genérico com a mensagem crua do PostgREST, "0 rows").
@@ -1796,3 +1813,15 @@ describe("Agregados — sair por conta própria", () => {
     expect(stSair).toBe(404);
   });
 });
+
+// Limpeza final: os testes só REVOGAM os vínculos que criam (fn_revogar_agregado) —
+// com e-mails descartáveis @example.com isso acumulava centenas de linhas na conta
+// de teste (achado: 373 vínculos, tela de Compartilhamento enorme). Apaga de vez,
+// só os de teste (@example.com, nunca um e-mail real) do dono de teste.
+afterAll(async () => {
+  const admin = clienteServiceRole();
+  if (!admin) return;
+  const { error } = await admin.from("agregados").delete()
+    .eq("dono_id", await getUserId()).ilike("email_convidado", "%@example.com");
+  if (error) console.warn(`[13_agregados] falha ao apagar vínculos de teste: ${error.message}`);
+}, 60000);

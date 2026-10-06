@@ -42,6 +42,27 @@ test.describe('Relatórios', () => {
     expect(erros()).toEqual([])
   })
 
+  // Regressão de layout (visto no celular): o seletor "Até" estourava a borda do cartão
+  // e os 3 selects de filtro (larguras fixas) se sobrepunham. Vale p/ os dois projetos.
+  test('E2E-REL09 — filtros não estouram o cartão nem se sobrepõem', async ({ page }) => {
+    await expect(page.getByRole('button', { name: /gerar relatório/i })).toBeVisible()
+    const largura = page.viewportSize()!.width
+    const periodo = await page.locator('[data-tutorial="relatorios-periodo"]').boundingBox()
+    expect(periodo!.x + periodo!.width).toBeLessThanOrEqual(largura)
+
+    const caixas = await page.locator('[data-tutorial="relatorios-filtros"] button').evaluateAll(els =>
+      els.map(e => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, r: b.right, b: b.bottom, w: b.width } })
+         .filter(c => c.w > 0))
+    for (const c of caixas) expect(c.r).toBeLessThanOrEqual(largura)
+    for (let i = 0; i < caixas.length; i++) {
+      for (let j = i + 1; j < caixas.length; j++) {
+        const A = caixas[i], B = caixas[j]
+        const sobrepoe = A.x < B.r - 1 && B.x < A.r - 1 && A.y < B.b - 1 && B.y < A.b - 1
+        expect(sobrepoe, `controles ${i} e ${j} se sobrepõem`).toBe(false)
+      }
+    }
+  })
+
   test('E2E-REL03 — seção Créditos pode ser recolhida', async ({ page }) => {
     await page.getByRole('button', { name: /gerar relatório/i }).click()
 

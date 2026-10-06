@@ -10,6 +10,7 @@ import {
   biometriaAtiva, biometriaDisponivelNoAparelho, ativarBiometria, desativarBiometria,
 } from '../lib/biometria'
 import ChatMascote from '../components/ui/ChatMascote'
+import ConvidarAgregadoForm from '../components/ui/ConvidarAgregadoForm'
 import { useTheme } from '../hooks/useTheme'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import Mascote, { type MascoteNome, type MascotePose } from '../components/ui/Mascote'
@@ -570,21 +571,22 @@ function SecaoConvite() {
       <p className="text-[15px] mb-3 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
         Conhece alguém que também precisa organizar as finanças? Envie um convite por e-mail ou compartilhe pelo WhatsApp.
       </p>
-      <form onSubmit={enviarPorEmail} className="flex flex-col sm:flex-row gap-2">
+      {/* flex-wrap: no cartão de meia largura (desktop) os 3 controles não cabem numa linha — quebram em vez de estourar a borda */}
+      <form onSubmit={enviarPorEmail} className="flex flex-wrap gap-2">
         <input
           type="email"
           value={emailConvite}
           onChange={e => { setEmailConvite(e.target.value); setFb(null) }}
           disabled={enviando}
           placeholder="e-mail do seu amigo"
-          className="flex-1 rounded-lg px-3 py-2.5 text-[16px] focus:outline-none disabled:opacity-50"
+          className="flex-1 min-w-[12rem] rounded-lg px-3 py-2.5 text-[16px] focus:outline-none disabled:opacity-50"
           style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)' }}
           autoComplete="off"
         />
         <button
           type="submit"
           disabled={enviando || !emailConvite.trim()}
-          className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-colors disabled:opacity-50"
+          className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-colors disabled:opacity-50 whitespace-nowrap"
           style={{ background: '#00c896', color: '#0a0f1a' }}
         >
           <Mail size={14}/> {enviando ? 'Enviando…' : 'Enviar convite'}
@@ -592,13 +594,29 @@ function SecaoConvite() {
         <button
           type="button"
           onClick={compartilharWhatsapp}
-          className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-colors"
+          className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-[15px] font-semibold transition-colors whitespace-nowrap"
           style={{ background: 'rgba(0,200,150,0.10)', color: '#00c896', border: '1px solid rgba(0,200,150,0.3)' }}
         >
           <Share2 size={14}/> WhatsApp
         </button>
       </form>
       <Alerta fb={fb}/>
+    </Secao>
+  )
+}
+
+/** Convidar um AGREGADO (conta conjunta) — mesmo formulário da tela de Compartilhamento,
+ *  ao lado de "Convidar amigos" (convite de cadastro). Quem aceitar passa a ver os dados que
+ *  o dono liberar; as permissões se definem em Compartilhamento. */
+function SecaoConviteAgregado() {
+  return (
+    <Secao titulo="Convidar um agregado" icone={<Users size={15}/>}>
+      <p className="text-[15px] mb-3 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+        Quer dividir suas contas com alguém (conta conjunta)? Convide por e-mail e escolha quais módulos e contas ela poderá ver.
+      </p>
+      <ConvidarAgregadoForm
+        aposSucesso={<> <Link to="/compartilhamento" className="underline font-semibold">Definir permissões</Link></>}
+      />
     </Secao>
   )
 }
@@ -1530,7 +1548,7 @@ export default function PerfilPage() {
   const btn   = 'px-4 py-2 rounded-lg text-[16px] font-semibold transition-colors disabled:opacity-50'
 
   return (
-    <div className="p-5 max-w-5xl mx-auto">
+    <div className="p-5">
       <div className="mb-6">
         <h1 className="text-[21px] font-bold text-white">Meu Perfil</h1>
         <p className="text-[16px] text-white/40 mt-0.5">{emailAtual}</p>
@@ -1645,39 +1663,6 @@ export default function PerfilPage() {
                 </form>
               )}
               <Alerta fb={fbDigital}/>
-            </Secao>
-          </div>
-        )}
-
-        {/* ── Compartilhamento (usuários agregados) ──────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Secao titulo="Compartilhamento" icone={<Users size={15}/>}>
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[16px] text-white/50">Convide alguém pra ver/editar seus dados, ou veja os acessos que você concedeu/recebeu.</p>
-              <Link to="/compartilhamento" className={`${btn} bg-white/5 text-white/70 hover:bg-white/10 shrink-0`}>
-                Gerenciar
-              </Link>
-            </div>
-          </Secao>
-        </div>
-
-        {/* ── Administração — só usuarios.admin = true (RLS garante o
-            isolamento real; esta condição só evita mostrar o link à toa) ── */}
-        {isAdmin && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Secao titulo="Administração" icone={<Activity size={15}/>}>
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[16px] text-white/50">Histórico de execução dos cron jobs do sistema.</p>
-                <Link to="/admin/crons" className={`${btn} bg-white/5 text-white/70 hover:bg-white/10 shrink-0`}>
-                  Ver execuções
-                </Link>
-              </div>
-              <div className="flex items-center justify-between gap-3 mt-3">
-                <p className="text-[16px] text-white/50">Trilha de auditoria (quem mudou o quê, quando).</p>
-                <Link to="/admin/auditoria" className={`${btn} bg-white/5 text-white/70 hover:bg-white/10 shrink-0`}>
-                  Ver auditoria
-                </Link>
-              </div>
             </Secao>
           </div>
         )}
@@ -1966,8 +1951,24 @@ export default function PerfilPage() {
           )}
         </div>
 
-        {/* ── Convidar amigos (largura cheia) ─────────────────── */}
-        <SecaoConvite/>
+        {/* ── Convidar amigos + Convidar agregado (lado a lado no desktop, empilhados no celular) ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SecaoConvite/>
+          <SecaoConviteAgregado/>
+        </div>
+
+        {/* ── Compartilhamento (usuários agregados) ──────────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Secao titulo="Compartilhamento" icone={<Users size={15}/>}>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[16px] text-white/50">Convide alguém pra ver/editar seus dados, ou veja os acessos que você concedeu/recebeu.</p>
+              <Link to="/compartilhamento" className={`${btn} bg-white/5 text-white/70 hover:bg-white/10 shrink-0`}>
+                Gerenciar
+              </Link>
+            </div>
+          </Secao>
+        </div>
+
 
         {/* ── Sobre o app ───────────────────────────────────────── */}
         <Secao titulo="Sobre o app" icone={<Info size={15}/>}>
@@ -1981,6 +1982,28 @@ export default function PerfilPage() {
             </button>
           </div>
         </Secao>
+
+
+        {/* ── Administração — só usuarios.admin = true (RLS garante o
+            isolamento real; esta condição só evita mostrar o link à toa) ── */}
+        {isAdmin && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Secao titulo="Administração" icone={<Activity size={15}/>}>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[16px] text-white/50">Histórico de execução dos cron jobs do sistema.</p>
+                <Link to="/admin/crons" className={`${btn} bg-white/5 text-white/70 hover:bg-white/10 shrink-0`}>
+                  Ver execuções
+                </Link>
+              </div>
+              <div className="flex items-center justify-between gap-3 mt-3">
+                <p className="text-[16px] text-white/50">Trilha de auditoria (quem mudou o quê, quando).</p>
+                <Link to="/admin/auditoria" className={`${btn} bg-white/5 text-white/70 hover:bg-white/10 shrink-0`}>
+                  Ver auditoria
+                </Link>
+              </div>
+            </Secao>
+          </div>
+        )}
 
       </div>{/* fim space-y-4 */}
 

@@ -1117,7 +1117,7 @@ export default function RelatoriosPage() {
       <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5">
         <div className="flex flex-wrap gap-3 items-end">
           {/* Periodo */}
-          <div className="flex gap-3 items-end" data-tutorial="relatorios-periodo">
+          <div className="flex flex-wrap gap-3 items-end" data-tutorial="relatorios-periodo">
             <div>
               <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>De</p>
               <MonthPicker value={inicio} onChange={setInicio} />
@@ -1132,12 +1132,14 @@ export default function RelatoriosPage() {
           <div className="flex gap-3 items-end flex-wrap" data-tutorial="relatorios-filtros">
             <div>
               <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Filtros</p>
-              <div className="flex gap-2">
+              {/* Celular: coluna (conta+categoria lado a lado, status embaixo); larguras fixas só de sm pra cima —
+                  mesmo padrão do Extrato. Antes w-44/w-48/w-40 somavam mais que o cartão e os selects se sobrepunham. */}
+              <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
                 <FiltrosLancamentos
                   pagina="relatorios"
                   filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
                   setFiltContas={setFiltContas} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
-                  classNameContas="w-44" classNameCats="w-48" classNameStatus="w-40"
+                  classNameContas="w-full sm:w-44" classNameCats="w-full sm:w-48" classNameStatus="w-full sm:w-40"
                   extras={{ incluirTransf }}
                   extrasFiltroAtivo={incluirTransf}
                   onAplicarExtras={d => {
@@ -1232,7 +1234,7 @@ export default function RelatoriosPage() {
             ].map(c => (
               <div key={c.label} className="bg-[#1a1f2e] border border-white/10 rounded-xl px-4 py-3">
                 <p className="text-[14px] font-semibold uppercase tracking-wide mb-1" style={{ color: '#8b92a8' }}>{c.label}</p>
-                <p className="text-[22px] font-bold" style={{ color: c.cor }}>{oculto ? '??????' : formatBRL(c.valor)}</p>
+                <p className="text-[22px] font-bold" style={{ color: c.cor }}>{oculto ? '••••••' : formatBRL(c.valor)}</p>
               </div>
             ))}
           </div>

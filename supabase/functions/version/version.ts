@@ -1,7 +1,7 @@
 // SISTEMA DE VERSÃO - Backend
 // Mantido sincronizado com o frontend (mesma versão do arquivo raiz)
 
-export const BACKEND_VERSION = "1.5"
+export const BACKEND_VERSION = "1.6"
 
 export const getVersionInfo = () => ({
   version: BACKEND_VERSION,
@@ -12,7 +12,7 @@ export const getVersionInfo = () => ({
   },
   current: {
     level: "minor",
-    description: "Correções em edição de recorrências e rolagem automática"
+    description: "Usuários agregados (convites, permissões, saída), saldo sem timeout para agregados, paginação do extrato com saldo e fechamento de vazamento da tabela usuarios"
   }
 })
 

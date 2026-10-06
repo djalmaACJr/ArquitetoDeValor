@@ -91,5 +91,21 @@ test('ZZ-TEARDOWN — apaga todos os dados E2E remanescentes', async ({ page, re
     (c) => (c.conta_id ?? c.id) as string)
   console.log(`  • ${nCnt} conta(s) E2E removida(s)`)
 
+  // Vínculos de agregado criados pelos E2E (12_agregados/13_seletor_espaco): só são
+  // revogados pela UI/API; com e-mail @example.com acumulavam na conta de teste.
+  const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+  if (SERVICE_ROLE) {
+    const idUsuario = (() => {
+      try { return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf-8')).sub as string } catch { return '' }
+    })()
+    if (idUsuario) {
+      const r = await request.delete(
+        `${SUPABASE_URL}/rest/v1/agregados?dono_id=eq.${idUsuario}&email_convidado=ilike.*@example.com`,
+        { headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}`, 'Content-Profile': 'arqvalor' } },
+      )
+      console.log(`  • vínculos de agregado E2E (@example.com) removidos: HTTP ${r.status()}`)
+    }
+  }
+
   console.log('✅ Teardown concluído')
 })

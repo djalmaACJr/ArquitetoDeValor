@@ -11,6 +11,16 @@ test.describe('Compartilhamento (Agregados)', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/compartilhamento')
+    // Avisos de login (ex.: "Convite aceito" de um vínculo real recente) ficam fixos por cima da
+    // página e interceptam toques no celular — dispensa antes de interagir.
+    // Espera a lista carregar: os avisos dependem dos mesmos vínculos e só aparecem depois.
+    await expect(page.getByRole('heading', { name: /meus agregados \(\d+\)/i })).toBeVisible({ timeout: 10_000 })
+    for (const nome of ['Convite aceito', 'Agregado saiu']) {
+      const aviso = page.getByText(nome, { exact: true })
+      if (await aviso.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await page.getByRole('button', { name: 'Fechar' }).first().click()
+      }
+    }
     await expect(page.getByRole('heading', { name: /compartilhamento/i })).toBeVisible({ timeout: 10_000 })
   })
 
@@ -109,5 +119,31 @@ test.describe('Compartilhamento (Agregados)', () => {
     await expect(revogados).toHaveAttribute('aria-expanded', 'false')
     await revogados.click()
     await expect(page.getByRole('button', { name: email })).toContainText(/Revogação \d{2}\/\d{2}\/\d{4}/)
+  })
+
+  // ── E2E-AGR07 ───────────────────────────────────────────────
+  // "Convidar um agregado" fica ao lado de "Convidar amigos" no Perfil (lado a lado no
+  // desktop, empilhado no celular) e convida do mesmo jeito que em Compartilhamento.
+  test('E2E-AGR07 — Perfil: "Convidar um agregado" ao lado de "Convidar amigos" e convida de lá', async ({ page }) => {
+    await page.goto('/perfil')
+    const amigos = page.getByRole('heading', { name: 'Convidar amigos' })
+    const agregado = page.getByRole('heading', { name: 'Convidar um agregado' })
+    await expect(amigos).toBeVisible({ timeout: 10_000 })
+    await expect(agregado).toBeVisible()
+
+    const a = (await amigos.boundingBox())!
+    const g = (await agregado.boundingBox())!
+    if (page.viewportSize()!.width >= 1024) {
+      expect(Math.abs(a.y - g.y)).toBeLessThan(8)   // mesma linha
+      expect(g.x).toBeGreaterThan(a.x)              // agregado à direita
+    } else {
+      expect(g.y).toBeGreaterThan(a.y)              // celular: empilhado
+    }
+
+    const email = `e2e-agregado-perfil-${Date.now()}@example.com`
+    await page.getByPlaceholder('email@exemplo.com').fill(email)
+    await page.getByRole('button', { name: /^convidar$/i }).click()
+    await expect(page.getByText(new RegExp(`Convite enviado para ${email}`, 'i'))).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('link', { name: /definir permissões/i })).toBeVisible()
   })
 })

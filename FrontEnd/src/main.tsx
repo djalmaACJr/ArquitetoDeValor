@@ -8,6 +8,7 @@ import { supabase } from './lib/supabase'
 import { limparEstadoCliente } from './lib/clientCache'
 import { LS_ULTIMA_ATIVIDADE } from './hooks/useAutoLogout'
 import { initEspacoAtivo } from './lib/espacoAtivo'
+import { iniciarTecladoMobile } from './lib/tecladoMobile'
 import './styles/globals.css'
 
 // Confirma pro plugin de OTA (@capgo/capacitor-updater) que o bundle atual
@@ -17,6 +18,9 @@ import './styles/globals.css'
 if (Capacitor.isNativePlatform()) {
   CapacitorUpdater.notifyAppReady()
 }
+
+// Campo digitado sempre visível acima do teclado (só celular/toque).
+iniciarTecladoMobile()
 
 const queryClient = new QueryClient({
   defaultOptions: {

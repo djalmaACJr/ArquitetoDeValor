@@ -2,7 +2,7 @@
 // Arquiteto de Valor — Edge Function: transacoes v9
 
 import "@supabase/functions-js/edge-runtime.d.ts";
-import { json, erro, db, autenticar, extrairId, extrairAcao,
+import { json, erro, db, autenticar, extrairId, extrairAcao, buscarTodasLinhas,
          verificarExistencia, validarStatus, calcularDataParcela, corsPreFlight, hojeBR,
          comIdempotencia, resolverContexto } from "../_shared/utils.ts";
 import { comOrigem } from "../_shared/utils.ts";
@@ -115,7 +115,9 @@ function decorarTransacao(
 async function mapaUsuarios(c: ReturnType<typeof db>, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
   const unicos = [...new Set(ids.filter((id): id is string => !!id))];
   if (unicos.length === 0) return new Map();
-  const { data } = await c.from("usuarios").select("id, nome").in("id", unicos);
+  // RPC que devolve SÓ id+nome (20261006000013) — a policy antiga de agregado expunha
+  // a linha inteira de `usuarios` (histórico de chat, ia_configs, perfil...).
+  const { data } = await c.rpc("fn_nomes_usuarios", { p_ids: unicos });
   return new Map((data ?? []).map((u: { id: string; nome: string }) => [u.id, u.nome]));
 }
 
@@ -161,18 +163,25 @@ async function listarComSaldo(
   // devolverem a união própria+do dono; sem isso aqui "Meus dados" e
   // "Conta de Fulano" vazariam um pro outro (mesmo raciocínio de
   // contas/index.ts::listar()).
-  let qTx = c.from("transacoes").select("*")
-    .eq("user_id", userId)
-    .gte("data", primeiroDia).lt("data", ultimoDia)
-    .order("data", { ascending: true }).order("criado_em", { ascending: true });
-  if (contaId) qTx = qTx.eq("conta_id", contaId);
-  if (catId)   qTx = qTx.eq("categoria_id", catId);
-  if (status)  qTx = qTx.eq("status", status);
-  if (idRecorrencia) qTx = qTx.eq("id_recorrencia", idRecorrencia);
+  // Paginado (buscarTodasLinhas): o PostgREST corta em max_rows=1000 — um mês com
+  // mais lançamentos que isso vinha TRUNCADO sem erro, e o saldo acumulado por
+  // linha (somado em JS, abaixo) ficava errado. Ordem estável (data, criado_em, id).
+  const montarTx = (de: number, ate: number) => {
+    let q = c.from("transacoes").select("*")
+      .eq("user_id", userId)
+      .gte("data", primeiroDia).lt("data", ultimoDia)
+      .order("data", { ascending: true }).order("criado_em", { ascending: true }).order("id", { ascending: true })
+      .range(de, ate);
+    if (contaId) q = q.eq("conta_id", contaId);
+    if (catId)   q = q.eq("categoria_id", catId);
+    if (status)  q = q.eq("status", status);
+    if (idRecorrencia) q = q.eq("id_recorrencia", idRecorrencia);
+    return q;
+  };
 
   const [baseRes, txRes, catRes, contaRes] = await Promise.all([
     c.rpc("fn_saldo_total_antes_de", { p_user_id: userId, p_data: primeiroDia }),
-    qTx,
+    buscarTodasLinhas<TxRow>(montarTx),
     c.from("categorias").select("id, descricao, icone, cor, id_pai").eq("user_id", userId),
     c.from("contas").select("id, nome, icone, cor").eq("user_id", userId),
   ]);
@@ -191,7 +200,7 @@ async function listarComSaldo(
   // visto (o próprio dono/usuário não precisa de badge pros seus lançamentos)
   // — filtra antes de ir ao banco, evita a query de nomes no caso comum.
   const usuarioMap = await mapaUsuarios(
-    c, (txRes.data ?? []).map((t) => t.criado_por).filter((id) => id && id !== userId),
+    c, (txRes.data ?? []).map((t) => t.criado_por as string | null | undefined).filter((id) => id && id !== userId),
   );
 
   let acumulado = Number(baseRes.data) || 0;

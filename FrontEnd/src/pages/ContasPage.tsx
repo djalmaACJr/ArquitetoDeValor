@@ -114,7 +114,7 @@ function LinhaConta({ conta, oculto, onEditar, onExcluir }: {
       <div className="text-right flex-shrink-0 mr-1">
         <p className="text-[16px] font-bold"
           style={{ color: conta.saldo_atual >= 0 ? '#00c896' : '#f87171' }}>
-          {oculto ? '??????' : formatBRL(conta.saldo_atual)}
+          {oculto ? '••••••' : formatBRL(conta.saldo_atual)}
         </p>
         <p className="text-[13px]" style={{ color: '#8b92a8' }}>saldo atual</p>
       </div>
@@ -337,7 +337,7 @@ export default function ContasPage() {
                       style={{ color: '#8b92a8' }}>▶</button>
                     <span className="text-[15px] font-bold ml-1"
                       style={{ color: total >= 0 ? g.cor : '#f87171' }}>
-                      {oculto ? '??????' : formatBRL(total)}
+                      {oculto ? '••••••' : formatBRL(total)}
                     </span>
                   </div>
                 </div>

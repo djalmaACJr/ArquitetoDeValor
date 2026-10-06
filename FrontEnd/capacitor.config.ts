@@ -8,6 +8,13 @@ const config: CapacitorConfig = {
     androidScheme: 'https'
   },
   plugins: {
+    // Teclado: com targetSdk 35+ o app é edge-to-edge (ocupa a tela inteira) e, sem isto,
+    // o teclado COBRE a página em vez de redimensionar a WebView — o campo digitado some
+    // atrás dele. `resizeOnFullScreen` faz a WebView encolher junto com o teclado.
+    Keyboard: {
+      resize: 'native',
+      resizeOnFullScreen: true
+    },
     CapacitorUpdater: {
       updateUrl: 'https://ftpelncgrakpphytfrfo.supabase.co/functions/v1/app_updates',
       statsUrl: '',

@@ -65,7 +65,7 @@ function IconeConta({ icone, cor, size = 'md' }: {
   )
 }
 
-const OCULTO = '??????'
+const OCULTO = '••••••'
 
 // -- Card de resultado do mes -----------------------------
 const CardResultados = memo(function CardResultados({
