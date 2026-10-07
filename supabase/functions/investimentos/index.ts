@@ -234,7 +234,7 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
         return await ranking(c, url.searchParams, ctx.userId);
       }
       case "busca-externa":   return m === "GET" ? await buscaExterna(url.searchParams) : erro("Método não permitido", 405);
-      case "cron-execucoes":  return await rotaCronExecucoes(c, m, userId);
+      case "cron-execucoes":  return await rotaCronExecucoes(c, m, userId, url.searchParams);
       case "indicadores": {
         const ctx = m === "GET"
           ? await resolverContexto(req, c, userId, ["INVESTIMENTOS"])

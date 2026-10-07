@@ -38,6 +38,7 @@ const RECURSOS_EMAIL = [
   { emoji: "📈", titulo: "Relatórios",    texto: "Receitas e despesas por categoria, em qualquer período." },
   { emoji: "💹", titulo: "Investimentos", texto: "Ativos, dividendos e evolução da carteira num só lugar." },
   { emoji: "🤖", titulo: "Mentor com IA", texto: "Converse com um mentor financeiro escolhido por você." },
+  { emoji: "👥", titulo: "Conta conjunta", texto: "Convide alguém como agregado e escolha quais módulos e contas ela pode ver ou editar." },
 ];
 
 Deno.serve((req: Request) => comOrigem(req, async () => {

@@ -237,3 +237,37 @@ describe("Segurança — RPCs SECURITY INVOKER", () => {
     }
   });
 });
+
+// ============================================================
+// Limpeza do histórico de cron (fn_limpar_cron_execucoes, 20261007000001)
+// Admin-only e NUNCA apaga menos de 30 dias. O usuário de teste não é admin,
+// então aqui só se prova o que ele NÃO pode (o caminho de admin foi verificado
+// direto no banco: simulação conta 30+ dias; 10 dias → PERIODO_MINIMO).
+// ============================================================
+describe("Segurança — limpeza de cron_execucoes (admin-only)", () => {
+  test("SEG-RPC-CRON01 — usuário comum chamando a RPC → ACESSO_NEGADO", async () => {
+    const db = clientWithToken(await getToken());
+    const { error } = await db.rpc("fn_limpar_cron_execucoes", { p_dias: 30, p_simular: true });
+    expect(error).not.toBeNull();
+    expect(error!.message).toMatch(/ACESSO_NEGADO/);
+  });
+
+  test("SEG-RPC-CRON02 — DELETE /investimentos/cron-execucoes por usuário comum → 403", async () => {
+    const { status } = await api("/investimentos/cron-execucoes?dias=30&simular=true", "DELETE");
+    expect(status).toBe(403);
+  });
+
+  test("SEG-RPC-CRON03 — período < 30 dias é recusado com 400 antes de qualquer coisa", async () => {
+    for (const dias of ["10", "0", "-5", "abc", "29"]) {
+      const { status } = await api(`/investimentos/cron-execucoes?dias=${dias}`, "DELETE");
+      expect(status).toBe(400);
+    }
+  });
+
+  test("SEG-RPC-CRON04 — sem autenticação → 401", async () => {
+    const res = await fetch(`${process.env.SUPABASE_URL}/functions/v1/investimentos/cron-execucoes?dias=30`, {
+      method: "DELETE", headers: { apikey: SUPABASE_ANON_KEY },
+    });
+    expect(res.status).toBe(401);
+  });
+});

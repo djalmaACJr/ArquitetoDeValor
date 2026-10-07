@@ -560,7 +560,8 @@ function SecaoConvite() {
       `🎯 Metas e objetivos\n` +
       `📈 Relatórios inteligentes\n` +
       `💹 Investimentos e carteira\n` +
-      `🤖 Mentor com IA de graça\n\n` +
+      `🤖 Mentor com IA de graça\n` +
+      `👥 Conta conjunta: compartilhe contas e módulos com quem você quiser\n\n` +
       `Migrei minhas finanças pra lá e tá valendo muito. Bora?\n` +
       `👉 ${linkCadastro}`
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank', 'noopener,noreferrer')
