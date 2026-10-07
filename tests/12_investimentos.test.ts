@@ -699,7 +699,7 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     const { data: posAll } = await api(`/investimentos/posicoes?ativo_id=${aId}`);
     for (const pp of posAll?.dados ?? []) await api(`/investimentos/posicoes/${pp.id}`, "DELETE");
     await api(`/investimentos/ativos/${aId}`, "DELETE");
-  }, 60000); // snapshot-auto sem conta_id recalcula TODAS as posições ATIVA do usuário
+  }, 180000); // snapshot-auto sem conta_id recalcula TODAS as posições ATIVA do usuário (3 min: tolera o compute throttled da CI)
              // (cotação real via brapi por ticker) — custo varia com a API externa.
 
   // O DELETE de ativo passou a excluir EM CASCATA (FKs ON DELETE CASCADE

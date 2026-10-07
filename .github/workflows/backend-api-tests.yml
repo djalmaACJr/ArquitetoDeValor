@@ -15,9 +15,16 @@ concurrency:
   group: backend-api-tests-shared-db
   cancel-in-progress: false
 
+# Dois jobs em sequência (out/2026). O compute do Supabase é compartilhado
+# (burstable): numa rodada única de ~20 min o crédito de CPU esgota no meio e as
+# suítes pesadas do fim estouram timeout sem nenhum bug (CA-INV26, hooks de
+# 11_objetivos). Dividir em dois grupos com uma PAUSA entre eles devolve parte do
+# crédito antes das suítes que mais consomem. `needs` garante a ordem (mesmo banco/
+# usuário de teste: nunca em paralelo); `!cancelled()` faz o 2º job rodar mesmo se o
+# 1º falhar, pra um único push mostrar todas as falhas de uma vez.
 jobs:
-  test:
-    name: Rodar testes automatizados
+  api-base:
+    name: Testes da API — base e segurança (01–10)
     runs-on: ubuntu-latest
 
     steps:
@@ -33,8 +40,8 @@ jobs:
       - name: Instalar dependências
         run: npm install
 
-      - name: Rodar testes
-        run: npm test -- --runInBand --verbose
+      - name: Rodar testes (01 a 10)
+        run: npm test -- --runInBand --verbose "tests/(0[1-9]|10)_"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
@@ -50,6 +57,49 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: resultado-testes-${{ github.run_number }}
+          name: resultado-testes-base-${{ github.run_number }}
+          path: test-results/
+          if-no-files-found: ignore
+
+  api-pesados:
+    name: Testes da API — suítes pesadas (11–13)
+    runs-on: ubuntu-latest
+    needs: api-base
+    if: ${{ !cancelled() }}
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4.2.2
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm install
+
+      # Pausa pra o crédito de CPU do banco recuperar depois do job anterior.
+      # Se ainda estourar timeout, aumente (segundos) ou considere um Compute
+      # Instance pago no Supabase (Settings → Compute and Disk).
+      - name: Pausa para o banco recuperar CPU (5 min)
+        run: sleep 300
+
+      - name: Rodar testes (11 a 13)
+        run: npm test -- --runInBand --verbose "tests/1[123]_"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+          TEST_EMAIL_B: ${{ secrets.TEST_EMAIL_B }}
+          TEST_PASSWORD_B: ${{ secrets.TEST_PASSWORD_B }}
+
+      - name: Salvar resultado dos testes
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: resultado-testes-pesados-${{ github.run_number }}
           path: test-results/
           if-no-files-found: ignore

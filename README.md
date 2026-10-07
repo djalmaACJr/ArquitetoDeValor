@@ -386,7 +386,7 @@ O projeto usa **3 workflows GitHub Actions**, disparados em push ou pull request
 
 | Workflow | O que faz |
 |---|---|
-| `backend-api-tests.yml` | Executa os testes Jest (Edge Functions) |
+| `backend-api-tests.yml` | Executa os testes Jest (Edge Functions) em 2 jobs em sequência: suítes 01–10 e, após uma pausa de 5 min para o banco de testes recuperar CPU, as pesadas 11–13 |
 | `frontend-quality.yml` | ESLint (`npm run lint`) + build de produção com verificação TypeScript (`npm run build`) — o antigo `frontend-lint.yml` foi incorporado aqui |
 | `frontend-e2e.yml` | Testes Playwright Firefox (apenas quando `FrontEnd/**` muda) |
 

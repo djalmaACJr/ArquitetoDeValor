@@ -14,6 +14,11 @@ module.exports = {
   // estourar 30s mesmo sem nenhum bug (ex.: CA-INV22/24 no GitHub Actions,
   // ago/2026) — rodando localmente e na suíte inteira, tudo passa em bem
   // menos da metade desse tempo.
-  testTimeout: 60000,
+  //
+  // Subiu pra 120s (out/2026): o compute do Supabase é compartilhado (burstable) e, no fim
+  // de uma rodada longa em CI, o burst de CPU esgota — chamadas triviais passam de 60s sem
+  // nenhum bug (CA-INV26). Ver também `testSequencer` abaixo.
+  testTimeout: 120000,
+  testSequencer: '<rootDir>/tests/sequencer.js',
   verbose: true,
 };
