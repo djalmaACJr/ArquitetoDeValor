@@ -4,32 +4,44 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0FrontEnd"
 
 :MENU
+rem :RUNTEST termina com "goto PAUSA" (nao retorna ao chamador), entao um "set MOBILE=" depois do
+rem "call" nunca roda - zera aqui pra um run mobile nao vazar pra proxima opcao do menu.
+set MOBILE=
 echo.
 echo ================================================
 echo   ARQUITETO DE VALOR - TESTES E2E (PLAYWRIGHT)
 echo ================================================
 echo.
-echo   1. Todos os testes
-echo   2. Cadastro
-echo   3. Contas
-echo   4. Categorias
-echo   5. Navegacao e Persistencia
-echo   6. Extrato (Lancamentos)
-echo   7. Dashboard
-echo   8. Relatorios
-echo   9. Transferencias
-echo  10. Lembretes
-echo  11. Assistente de Lancamentos
-echo  12. Objetivos
-echo  13. Investimentos
-echo  14. Compartilhamento (Agregados)
-echo  15. Seletor de espaco (Agregados)
-echo  16. Sessao (aba inativa / seguranca)
-echo  17. Abrir relatorio HTML do ultimo run
-echo  18. Modo visual (--ui)
+echo   --- Execucao completa ---
+echo   1. Todos web (Firefox)
+echo   2. Todos mobile (Chromium, viewport/toque do Pixel 7)
+echo.
+echo   --- Por area (web / Firefox) ---
+echo   3. Cadastro
+echo   4. Contas
+echo   5. Categorias
+echo   6. Navegacao e Persistencia
+echo   7. Extrato (Lancamentos)
+echo   8. Dashboard
+echo   9. Relatorios
+echo  10. Transferencias
+echo  11. Lembretes
+echo  12. Assistente de Lancamentos
+echo  13. Objetivos
+echo  14. Investimentos
+echo  15. Compartilhamento (Agregados)
+echo  16. Seletor de espaco (Agregados)
+echo  17. Sessao (aba inativa / seguranca)
+echo.
+echo   --- Por area (mobile) ---
+echo  18. Teclado (campo focado visivel)
+echo.
+echo   --- Ferramentas ---
+echo  19. Abrir relatorio HTML do ultimo run
+echo  20. Modo visual (--ui)
 echo   0. Sair
 echo.
-set /p OPC="Digite a opcao (0-18): "
+set /p OPC="Digite a opcao (0-20): "
 
 if "%OPC%"=="0"  goto FIM
 if "%OPC%"=="1"  goto OPC1
@@ -50,6 +62,8 @@ if "%OPC%"=="15" goto OPC15
 if "%OPC%"=="16" goto OPC16
 if "%OPC%"=="17" goto OPC17
 if "%OPC%"=="18" goto OPC18
+if "%OPC%"=="19" goto OPC19
+if "%OPC%"=="20" goto OPC20
 echo Opcao invalida.
 goto MENU
 
@@ -59,87 +73,99 @@ call :RUNTEST
 goto PAUSA
 
 :OPC2
-set TESTFILE=e2e/tests/00_cadastro.spec.ts
+set MOBILE=1
+set TESTFILE=
 call :RUNTEST
 goto PAUSA
 
 :OPC3
-set TESTFILE=e2e/tests/01_contas.spec.ts
+set TESTFILE=e2e/tests/00_cadastro.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC4
-set TESTFILE=e2e/tests/02_categorias.spec.ts
+set TESTFILE=e2e/tests/01_contas.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC5
-set TESTFILE=e2e/tests/03_navegacao.spec.ts
+set TESTFILE=e2e/tests/02_categorias.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC6
-set TESTFILE=e2e/tests/04_extrato.spec.ts
+set TESTFILE=e2e/tests/03_navegacao.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC7
-set TESTFILE=e2e/tests/05_dashboard.spec.ts
+set TESTFILE=e2e/tests/04_extrato.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC8
-set TESTFILE=e2e/tests/06_relatorios.spec.ts
+set TESTFILE=e2e/tests/05_dashboard.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC9
-set TESTFILE=e2e/tests/07_transferencias.spec.ts
+set TESTFILE=e2e/tests/06_relatorios.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC10
-set TESTFILE=e2e/tests/08_lembretes.spec.ts
+set TESTFILE=e2e/tests/07_transferencias.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC11
-set TESTFILE=e2e/tests/09_assistente.spec.ts
+set TESTFILE=e2e/tests/08_lembretes.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC12
-set TESTFILE=e2e/tests/10_objetivos.spec.ts
+set TESTFILE=e2e/tests/09_assistente.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC13
-set TESTFILE=e2e/tests/11_investimentos.spec.ts
+set TESTFILE=e2e/tests/10_objetivos.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC14
-set TESTFILE=e2e/tests/12_agregados.spec.ts
+set TESTFILE=e2e/tests/11_investimentos.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC15
-set TESTFILE=e2e/tests/13_seletor_espaco.spec.ts
+set TESTFILE=e2e/tests/12_agregados.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC16
-set TESTFILE=e2e/tests/12_seguranca_sessao.spec.ts
+set TESTFILE=e2e/tests/13_seletor_espaco.spec.ts
 call :RUNTEST
 goto PAUSA
 
 :OPC17
+set TESTFILE=e2e/tests/12_seguranca_sessao.spec.ts
+call :RUNTEST
+goto PAUSA
+
+:OPC18
+set MOBILE=1
+set TESTFILE=e2e/tests/14_teclado_mobile.spec.ts
+call :RUNTEST
+goto PAUSA
+
+:OPC19
 echo.
 echo Abrindo relatorio HTML...
 call npm run test:e2e:report
 goto PAUSA
 
-:OPC18
+:OPC20
 echo.
 echo Iniciando modo visual (--ui)...
 echo Verificando dependencias...
@@ -173,10 +199,16 @@ echo.
 echo Salvando resultado em: %ARQ%
 echo.
 
-if "%TESTFILE%"=="" (
-    npm run test:e2e 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQ%'"
+rem MOBILE=1 -> projeto mobile (test:e2e:mobile); vazio -> projeto firefox (test:e2e).
+if "%MOBILE%"=="1" (
+    set SCRIPT=test:e2e:mobile
 ) else (
-    npm run test:e2e -- %TESTFILE% 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQ%'"
+    set SCRIPT=test:e2e
+)
+if "%TESTFILE%"=="" (
+    npm run %SCRIPT% 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQ%'"
+) else (
+    npm run %SCRIPT% -- %TESTFILE% 2>&1 | powershell -Command "$input | Tee-Object -FilePath '%ARQ%'"
 )
 goto PAUSA
 

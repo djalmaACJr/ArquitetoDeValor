@@ -17,6 +17,7 @@
 - [Configuração do ambiente](#configuração-do-ambiente)
 - [Rodando o projeto](#rodando-o-projeto)
 - [Testes automatizados](#testes-automatizados)
+- [Scripts de automação (.bat)](#scripts-de-automação-bat--windows)
 - [CI/CD](#cicd)
 - [Funcionalidades](#funcionalidades)
 
@@ -126,10 +127,15 @@ ArquitetoDeValor/
 │   ├── 10_seguranca_auth_cors.test.ts # Auth + CORS
 │   ├── 11_objetivos.test.ts         # Objetivos Financeiros (CA-OBJ01..17)
 │   ├── 12_investimentos.test.ts     # Investimentos (CA-INV01..26)
+│   ├── 13_agregados.test.ts         # Usuários agregados / compartilhamento (CA-AGR01..77)
 │   └── 99_limpar.test.ts            # Limpeza pós-suite (execução manual)
 │
+├── deploy.bat                       # Menu de deploy das Edge Functions (Windows)
 ├── rodar_testes.bat                 # Menu de testes de API (Windows)
 ├── rodar_testes_e2e.bat             # Menu de testes E2E (Windows)
+├── backup.bat / restore.bat         # Backup/restauração dos dados do usuário de teste
+├── limpar_test.bat                  # Limpeza do usuário de teste (99_limpar) — com cuidado
+├── executa Site modo dev.bat        # Sobe o frontend em dev e abre no Firefox
 ├── instalar_android.bat             # Build + instala o APK debug via USB
 ├── version.ts                       # APP_VERSION — versão única do app (web + Android)
 ├── CLAUDE.md                        # Contexto principal para assistentes de IA
@@ -304,7 +310,7 @@ Cobrem as Edge Functions do Supabase — distribuídos em 13 módulos (+ limpeza
 
 **Via menu interativo (Windows):**
 ```bash
-rodar_testes.bat   # opções 1–17: domínio, segurança, manutenção
+rodar_testes.bat   # opções 0–19: domínio, segurança, manutenção
 ```
 
 **Via linha de comando:**
@@ -377,6 +383,24 @@ rodar_testes_e2e.bat
 | `13_seletor_espaco.spec.ts` | E2E-SEL01–10 — 2º usuário real: troca de espaço, menu por módulo, convite pendente, revogação, saída por conta própria (precisa de `SUPABASE_SERVICE_ROLE_KEY`) |
 | `14_teclado_mobile.spec.ts` | Rolagem do campo focado (só projeto `mobile`) |
 | `zz_teardown.spec.ts` | Limpeza de dados E2E pós-suite |
+
+---
+
+## Scripts de automação (.bat — Windows)
+
+Na raiz do repositório há `.bat` que reúnem as tarefas repetitivas do dia a dia. Todos são para **Windows** (rodar com duplo clique ou pelo terminal, a partir da raiz) e mostram um menu numerado quando têm mais de uma opção.
+
+| Script | Para que serve |
+|---|---|
+| `executa Site modo dev.bat` | Sobe o frontend em modo desenvolvimento (`npm run dev`, numa nova janela) e abre `http://localhost:5173/` no Firefox. Se o Firefox estiver instalado em outro caminho, ajuste a variável `FIREFOX` no arquivo. |
+| `deploy.bat` | Menu de **deploy das Edge Functions** do Supabase. `1` = todos os módulos; `2`–`19` = um módulo por vez (contas, categorias, transações, …, investimentos, convite, auditoria, **agregados**). As opções `20`–`22` são de **configuração**, destacadas no menu: nível de logs, chave de criptografia das API keys de IA (`IA_KEYS_ENCRYPTION_KEY`) e deploy com `--debug`. O submenu `--debug` lista os módulos de 1 a 19. |
+| `rodar_testes.bat` | Menu dos **testes de API (Jest)**: todos os módulos, cada módulo de domínio (contas, categorias, transações, transferências, lembretes, assistente, objetivos, investimentos, **agregados**), os testes de segurança (RLS, triggers, RPCs, auth + CORS), e manutenção: limpeza com backup e restore, backup manual, restore manual e nível de logs. Salva o resultado em `test-results/` (na raiz). |
+| `rodar_testes_e2e.bat` | Menu dos **testes E2E (Playwright)**: **1 = Todos web** (Firefox) e **2 = Todos mobile** (Chromium, viewport/toque do Pixel 7); depois, por área no Firefox (cadastro, contas, categorias, navegação, extrato, dashboard, relatórios, transferências, lembretes, assistente, objetivos, investimentos, **compartilhamento**, **seletor de espaço**, sessão), a área mobile (**teclado**) e as ferramentas (abrir o relatório HTML do último run e o modo visual `--ui`). Sobe o Vite sozinho se a porta 5173 estiver livre e salva o resultado em `FrontEnd/e2e/test-results/`. |
+| `backup.bat` / `restore.bat` | Backup e restauração dos dados do **usuário de teste** (`tests/backup.ts` e `tests/restore.ts`). São chamados pelo `rodar_testes.bat` na limpeza, mas podem ser usados direto. |
+| `limpar_test.bat` | Roda a suíte `99_limpar` (**apaga os dados do usuário de teste**) e salva o resultado em `test-results/`. Não rode sozinho sem backup — prefira a opção de limpeza do `rodar_testes.bat`, que faz backup antes e restore depois. |
+| `instalar_android.bat` | Compila o frontend, sincroniza com o Capacitor (`cap sync`, que também registra plugins nativos novos) e instala o **APK debug no celular via USB**, abrindo o app em seguida. Necessário quando muda algo **nativo** (plugins, manifesto, `versionCode`) — atualizações só do bundle web podem ir por `npm run publish:ota`, sem reinstalar. |
+
+> Os `.bat` assumem a pasta do projeto em `C:\Pessoal\ArquitetoDeValor` (alguns têm esse caminho fixo no início). Se clonar em outro lugar, ajuste a linha `cd /d ...` de cada um.
 
 ---
 
