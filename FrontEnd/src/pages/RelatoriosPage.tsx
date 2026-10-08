@@ -88,11 +88,14 @@ function gerarMeses(inicio: string, fim: string): string[] {
 
 // -- Linha expansivel -------------------------------------------
 function LinhaGrupo({
-  grupo, meses, oculto, onCelulaClick,
+  grupo, meses, divisor, oculto, onCelulaClick,
   aberto, onToggleAberto, expandidosSubs, onToggleSub, larguraCategoria,
 }: {
   grupo: GrupoPai
+  /** Chaves das colunas de período (mês `YYYY-MM` e/ou ano `YYYY`). */
   meses: string[]
+  /** Divisor da coluna Média (nº de meses ou de anos, conforme o modo). */
+  divisor: number
   oculto: boolean
   onCelulaClick: (catId: string | null, catNome: string, mes: string | null, titulo: string) => void
   aberto: boolean
@@ -136,7 +139,7 @@ function LinhaGrupo({
         </td>
         <td className="px-3 py-2.5 text-right border-l border-white/5">
           <span className="text-[15px] font-semibold" style={{ color: cor, opacity: 0.65 }}>
-            {oculto ? '????' : formatBRL(grupo.total / meses.length)}
+            {oculto ? '????' : formatBRL(grupo.total / divisor)}
           </span>
         </td>
         {meses.map(m => (
@@ -192,7 +195,7 @@ function LinhaGrupo({
               </td>
               <td className="px-3 py-2 text-right border-l border-white/5">
                 <span className="text-[15px]" style={{ color: '#8b92a8' }}>
-                  {oculto ? '????' : formatBRL(sub.total / meses.length)}
+                  {oculto ? '????' : formatBRL(sub.total / divisor)}
                 </span>
               </td>
               {meses.map(m => (
@@ -230,7 +233,7 @@ function LinhaGrupo({
                   </td>
                   <td className="px-3 py-1.5 text-right border-l border-white/5">
                     <span className="text-[14px]" style={{ color: '#4a5168' }}>
-                      {oculto ? '????' : formatBRL(d.total / meses.length)}
+                      {oculto ? '????' : formatBRL(d.total / divisor)}
                     </span>
                   </td>
                   {meses.map(m => (
@@ -261,7 +264,7 @@ function LinhaGrupo({
           </td>
           <td className="px-3 py-2 text-right border-l border-white/5">
             <span className="text-[15px] font-bold" style={{ color: cor, opacity: 0.65 }}>
-              {oculto ? '????' : formatBRL(grupo.total / meses.length)}
+              {oculto ? '????' : formatBRL(grupo.total / divisor)}
             </span>
           </td>
           {meses.map(m => (
@@ -449,6 +452,19 @@ export default function RelatoriosPage() {
     return [...new Set(meses.map(m => m.slice(0, 4)))]
   }, [meses, agruparPorAno])
 
+  // Anos abertos (estilo tabela dinâmica): o ano mostra seus meses ao lado.
+  const [anosExpandidos, setAnosExpandidos] = useState<Set<string>>(new Set())
+  const toggleAno = useCallback((ano: string) => setAnosExpandidos(prev => {
+    const n = new Set(prev); if (n.has(ano)) n.delete(ano); else n.add(ano); return n
+  }), [])
+  // Colunas efetivamente exibidas (tabela e exportação): no modo anual, cada
+  // ano expandido vem seguido dos seus meses. Os valores de ano e de mês
+  // coexistem em `porMes` (chaves `YYYY` e `YYYY-MM`).
+  const colunas = useMemo(() => {
+    if (!agruparPorAno) return meses
+    return periodos.flatMap(a => anosExpandidos.has(a) ? [a, ...meses.filter(m => m.startsWith(a))] : [a])
+  }, [meses, periodos, agruparPorAno, anosExpandidos])
+
   // -- Buscar dados ---------------------------------------------
   const buscar = useCallback(async (contasOverride?: string[]) => {
     const contas = contasOverride ?? filtContas
@@ -532,7 +548,8 @@ export default function RelatoriosPage() {
         })
       }
       const cel = mapa.get(key)!
-      cel.porMes[periodoLanc] = (cel.porMes[periodoLanc] ?? 0) + l.valor
+      cel.porMes[mesLanc] = (cel.porMes[mesLanc] ?? 0) + l.valor
+      if (agruparPorAno) cel.porMes[periodoLanc] = (cel.porMes[periodoLanc] ?? 0) + l.valor
       cel.total              += l.valor
 
       // 3º nível inline: agregar por descrição
@@ -542,7 +559,8 @@ export default function RelatoriosPage() {
         dRow = { descricao: desc, porMes: {}, total: 0 }
         cel.porDescricao.push(dRow)
       }
-      dRow.porMes[periodoLanc] = (dRow.porMes[periodoLanc] ?? 0) + l.valor
+      dRow.porMes[mesLanc] = (dRow.porMes[mesLanc] ?? 0) + l.valor
+      if (agruparPorAno) dRow.porMes[periodoLanc] = (dRow.porMes[periodoLanc] ?? 0) + l.valor
       dRow.total              += l.valor
     }
 
@@ -593,7 +611,7 @@ export default function RelatoriosPage() {
 
     // Totais por período (mes ou ano, conforme agruparPorAno)
     const totaisMes: Record<string, { entradas: number; despesas: number }> = {}
-    for (const m of periodos) {
+    for (const m of agruparPorAno ? [...meses, ...periodos] : meses) {
       totaisMes[m] = { entradas: 0, despesas: 0 }
       for (const g of grupos) {
         if (g.tipo === 'RECEITA') totaisMes[m].entradas += g.totalPorMes[m] ?? 0
@@ -845,22 +863,22 @@ export default function RelatoriosPage() {
       { key: 'cat',   label: 'Categoria',  type: 'text',     width: 38 },
       { key: 'total', label: 'Total',      type: 'currency', width: 16, destaque: true },
       { key: 'media', label: agruparPorAno ? 'Média/ano' : 'Média/mês',  type: 'currency', width: 14, destaque: true },
-      ...periodos.map(m => ({ key: `m_${m}`, label: mesLabel(m), type: 'currency' as const, width: 14 })),
+      ...colunas.map(m => ({ key: `m_${m}`, label: mesLabel(m), type: 'currency' as const, width: 14 })),
     ]
 
     const linhaMes = (extra: Record<string, number>) =>
-      Object.fromEntries(periodos.map(m => [`m_${m}`, extra[m] ?? 0]))
+      Object.fromEntries(colunas.map(m => [`m_${m}`, extra[m] ?? 0]))
 
     const rows: import('../lib/exportUtils').ExportRow[] = []
 
     if (nivel === 1) {
       rows.push({ cat: 'TOTAL RECEITAS', total: grandTotalEntradas,  media: media(grandTotalEntradas),
-        ...linhaMes(Object.fromEntries(periodos.map(m => [m, totaisMes[m]?.entradas ?? 0]))), _style: 'subtotal' })
+        ...linhaMes(Object.fromEntries(colunas.map(m => [m, totaisMes[m]?.entradas ?? 0]))), _style: 'subtotal' })
       rows.push({ cat: 'TOTAL DESPESAS', total: grandTotalDespesas,  media: media(grandTotalDespesas),
-        ...linhaMes(Object.fromEntries(periodos.map(m => [m, totaisMes[m]?.despesas ?? 0]))), _style: 'subtotal' })
+        ...linhaMes(Object.fromEntries(colunas.map(m => [m, totaisMes[m]?.despesas ?? 0]))), _style: 'subtotal' })
       const resultado = grandTotalEntradas - grandTotalDespesas
       rows.push({ cat: 'RESULTADO', total: resultado, media: media(resultado),
-        ...linhaMes(Object.fromEntries(periodos.map(m => [m, (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0)]))), _style: 'total' })
+        ...linhaMes(Object.fromEntries(colunas.map(m => [m, (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0)]))), _style: 'total' })
     } else {
       for (const grupo of grupos) {
         const grupoAberto = gruposAbertos.has(`${grupo.tipo}:${grupo.nome}`)
@@ -886,12 +904,12 @@ export default function RelatoriosPage() {
       }
       // Totais gerais
       rows.push({ cat: 'TOTAL RECEITAS', total: grandTotalEntradas, media: media(grandTotalEntradas),
-        ...linhaMes(Object.fromEntries(periodos.map(m => [m, totaisMes[m]?.entradas ?? 0]))), _style: 'subtotal' })
+        ...linhaMes(Object.fromEntries(colunas.map(m => [m, totaisMes[m]?.entradas ?? 0]))), _style: 'subtotal' })
       rows.push({ cat: 'TOTAL DESPESAS', total: grandTotalDespesas, media: media(grandTotalDespesas),
-        ...linhaMes(Object.fromEntries(periodos.map(m => [m, totaisMes[m]?.despesas ?? 0]))), _style: 'subtotal' })
+        ...linhaMes(Object.fromEntries(colunas.map(m => [m, totaisMes[m]?.despesas ?? 0]))), _style: 'subtotal' })
       const resultado = grandTotalEntradas - grandTotalDespesas
       rows.push({ cat: 'RESULTADO', total: resultado, media: media(resultado),
-        ...linhaMes(Object.fromEntries(periodos.map(m => [m, (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0)]))), _style: 'total' })
+        ...linhaMes(Object.fromEntries(colunas.map(m => [m, (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0)]))), _style: 'total' })
     }
 
     const sufixoNivel = nivel === 1 ? 'resumo' : nivel === 2 ? 'categorias' : 'completo'
@@ -905,7 +923,7 @@ export default function RelatoriosPage() {
         rows,
       }],
     })
-  }, [buscado, grupos, meses, periodos, agruparPorAno, totaisMes, grandTotalEntradas, grandTotalDespesas, inicio, fim, nivel, gruposAbertos, subsExpandidos])
+  }, [buscado, grupos, meses, periodos, colunas, agruparPorAno, totaisMes, grandTotalEntradas, grandTotalDespesas, inicio, fim, nivel, gruposAbertos, subsExpandidos])
 
   /**
    * Exporta os dados da análise PARETO em 2 abas (Receitas / Despesas),
@@ -1406,14 +1424,22 @@ export default function RelatoriosPage() {
                         {agruparPorAno ? 'Média/ano' : 'Média/mês'}
                       </span>
                     </th>
-                    {periodos.map(m => (
-                      <th key={m} className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
-                        style={{ width: 100, background: '#1a1f2e' }}>
-                        <span className="text-[14px] font-bold uppercase tracking-widest" style={{ color: '#4a5168' }}>
-                          {mesLabel(m)}
-                        </span>
-                      </th>
-                    ))}
+                    {colunas.map(m => {
+                      const ehAno = agruparPorAno && m.length === 4
+                      const aberto = ehAno && anosExpandidos.has(m)
+                      return (
+                        <th key={m} className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
+                          onClick={ehAno ? () => toggleAno(m) : undefined}
+                          title={ehAno ? (aberto ? 'Recolher meses' : 'Expandir meses') : undefined}
+                          style={{ width: 100, background: ehAno ? '#222a3d' : '#1a1f2e', cursor: ehAno ? 'pointer' : undefined }}>
+                          <span className="inline-flex items-center justify-end gap-1 text-[14px] font-bold uppercase tracking-widest"
+                            style={{ color: ehAno ? '#00c896' : '#4a5168' }}>
+                            {ehAno && (aberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>)}
+                            {mesLabel(m)}
+                          </span>
+                        </th>
+                      )
+                    })}
                   </tr>
                 </thead>
 
@@ -1423,7 +1449,7 @@ export default function RelatoriosPage() {
                     className="cursor-pointer hover:bg-white/[0.02] transition-colors"
                     onClick={() => setCredAberto(a => !a)}
                   >
-                    <td colSpan={3 + periodos.length} className="px-4 pt-4 pb-2">
+                    <td colSpan={3 + colunas.length} className="px-4 pt-4 pb-2">
                       <div className="flex items-center gap-2">
                         <span style={{ color: '#00c896' }}>
                           {credAberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
@@ -1436,7 +1462,7 @@ export default function RelatoriosPage() {
                   {credAberto && grupos.filter(g => g.tipo === 'RECEITA').map((g, i) => (
                     <LinhaGrupo
                       key={`${i}-${nivel}`}
-                      grupo={g} meses={periodos} oculto={oculto} larguraCategoria={larguraCategoria}
+                      grupo={g} meses={colunas} divisor={periodos.length} oculto={oculto} larguraCategoria={larguraCategoria}
                       aberto={gruposAbertos.has(`${g.tipo}:${g.nome}`)}
                       onToggleAberto={() => toggleGrupo(`${g.tipo}:${g.nome}`)}
                       expandidosSubs={subsExpandidos}
@@ -1467,7 +1493,7 @@ export default function RelatoriosPage() {
                         {oculto ? '????' : formatBRL(grandTotalEntradas / periodos.length)}
                       </span>
                     </td>
-                    {periodos.map(m => (
+                    {colunas.map(m => (
                       <td key={m} className="px-3 text-right"
                         style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
                         <span className={`font-bold ${nivel === 1 ? 'text-[16px]' : 'text-[15px]'}`}
@@ -1483,7 +1509,7 @@ export default function RelatoriosPage() {
                     className="cursor-pointer hover:bg-white/[0.02] transition-colors"
                     onClick={() => setDebAberto(a => !a)}
                   >
-                    <td colSpan={3 + periodos.length} className="px-4 pt-5 pb-2">
+                    <td colSpan={3 + colunas.length} className="px-4 pt-5 pb-2">
                       <div className="flex items-center gap-2">
                         <span style={{ color: '#f87171' }}>
                           {debAberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
@@ -1496,7 +1522,7 @@ export default function RelatoriosPage() {
                   {debAberto && grupos.filter(g => g.tipo === 'DESPESA').map((g, i) => (
                     <LinhaGrupo
                       key={`${i}-${nivel}`}
-                      grupo={g} meses={periodos} oculto={oculto} larguraCategoria={larguraCategoria}
+                      grupo={g} meses={colunas} divisor={periodos.length} oculto={oculto} larguraCategoria={larguraCategoria}
                       aberto={gruposAbertos.has(`${g.tipo}:${g.nome}`)}
                       onToggleAberto={() => toggleGrupo(`${g.tipo}:${g.nome}`)}
                       expandidosSubs={subsExpandidos}
@@ -1526,7 +1552,7 @@ export default function RelatoriosPage() {
                         {oculto ? '????' : formatBRL(grandTotalDespesas / periodos.length)}
                       </span>
                     </td>
-                    {periodos.map(m => (
+                    {colunas.map(m => (
                       <td key={m} className="px-3 text-right"
                         style={{ paddingTop: nivel === 1 ? '12px' : '10px', paddingBottom: nivel === 1 ? '12px' : '10px' }}>
                         <span className={`font-bold ${nivel === 1 ? 'text-[16px]' : 'text-[15px]'}`}
@@ -1554,7 +1580,7 @@ export default function RelatoriosPage() {
                         {oculto ? '????' : formatBRL(resultado / periodos.length)}
                       </span>
                     </td>
-                    {periodos.map(m => {
+                    {colunas.map(m => {
                       const res = (totaisMes[m]?.entradas ?? 0) - (totaisMes[m]?.despesas ?? 0)
                       return (
                         <td key={m} className="px-3 py-3 text-right border-t-2" style={{ borderColor: 'rgba(0,200,150,0.2)' }}>

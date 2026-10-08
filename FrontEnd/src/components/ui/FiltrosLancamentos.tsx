@@ -12,6 +12,12 @@ import { MultiSelect } from './MultiSelect'
 import { FiltrosSalvosBtn } from './FiltrosSalvosBtn'
 import { STATUS_OPCOES } from '../../lib/utils'
 
+const TIPO_OPCOES = [
+  { value: 'RECEITA',       label: 'Receita' },
+  { value: 'DESPESA',       label: 'Despesa' },
+  { value: 'TRANSFERENCIA', label: 'Transferência' },
+]
+
 interface Props {
   pagina: 'dashboard' | 'extrato' | 'relatorios'
   filtContas: string[]
@@ -20,6 +26,9 @@ interface Props {
   setFiltContas: (v: string[]) => void
   setFiltCats:   (v: string[]) => void
   setFiltStatus: (v: string[]) => void
+  /** Filtro de tipo (Receita/Despesa/Transferência) — só renderiza se ambos forem passados. */
+  filtTipo?:    string[]
+  setFiltTipo?: (v: string[]) => void
   /** Campos extras a salvar/restaurar no FiltroSalvo (ex.: comSaldo, incluirTransf). */
   extras?: Record<string, unknown>
   /** Callback quando um filtro salvo é aplicado — recebe o objeto `dados` inteiro. */
@@ -39,6 +48,7 @@ export function FiltrosLancamentos({
   pagina,
   filtContas, filtCats, filtStatus,
   setFiltContas, setFiltCats, setFiltStatus,
+  filtTipo, setFiltTipo,
   extras, onAplicarExtras, onLimparExtras, extrasFiltroAtivo,
   classNameContas = 'w-40',
   classNameCats   = 'w-44',
@@ -113,27 +123,40 @@ export function FiltrosLancamentos({
           options={STATUS_OPCOES}
         />
 
+        {setFiltTipo && (
+          <MultiSelect
+            placeholder="Todos os tipos"
+            className="flex-1 min-w-0 sm:flex-none sm:w-40"
+            values={filtTipo ?? []}
+            onChange={setFiltTipo}
+            options={TIPO_OPCOES}
+          />
+        )}
+
         {slotAposStatus}
 
         <FiltrosSalvosBtn
           pagina={pagina}
-          filtAtual={{ filtContas, filtCats, filtStatus, ...(extras ?? {}) }}
+          filtAtual={{ filtContas, filtCats, filtStatus, ...(setFiltTipo ? { filtTipo } : {}), ...(extras ?? {}) }}
           temFiltroAtivo={
             filtContas.length > 0 ||
             filtCats.length   > 0 ||
             filtStatus.length > 0 ||
+            (filtTipo?.length ?? 0) > 0 ||
             !!extrasFiltroAtivo
           }
           onAplicar={d => {
             setFiltContas((d.filtContas as string[]) ?? [])
             setFiltCats((d.filtCats   as string[]) ?? [])
             setFiltStatus((d.filtStatus as string[]) ?? [])
+            setFiltTipo?.((d.filtTipo as string[]) ?? [])
             onAplicarExtras?.(d)
           }}
           onLimpar={() => {
             setFiltContas([])
             setFiltCats([])
             setFiltStatus([])
+            setFiltTipo?.([])
             onLimparExtras?.()
           }}
         />

@@ -215,8 +215,10 @@ export default function LancamentosPage() {
   const filtContas  = pgState.filtContas
   const filtCats    = pgState.filtCats
   const filtStatus  = pgState.filtStatus
+  const filtTipo    = pgState.filtTipo
   const comSaldo    = pgState.comSaldo
-  const setMes         = (v: string)   => setPgState({ mes: v })
+  const setFiltTipo = (v: string[]) => setPgState({ filtTipo: v })
+  const setMes        = (v: string)   => setPgState({ mes: v })
   const setFiltContas  = (v: string[]) => setPgState({ filtContas: v })
   const setFiltCats    = (v: string[]) => setPgState({ filtCats: v })
   const setFiltStatus  = (v: string[]) => setPgState({ filtStatus: v })
@@ -680,16 +682,23 @@ export default function LancamentosPage() {
 
   // lancamentosParaExibir: aplica filtro de texto + escopo de busca (deve vir após lancamentosComSaldoCorrigido)
   const lancamentosParaExibir = useMemo(() => {
-    if (buscaMultiMes) return buscaResultados
-    if (!pesquisa) return lancamentosComSaldoCorrigido
+    const porTipo = (lista: Lancamento[]) => {
+      if (filtTipo.length === 0) return lista
+      return lista.filter(l => {
+        const t = l.id_par_transferencia ? 'TRANSFERENCIA' : l.tipo
+        return filtTipo.includes(t)
+      })
+    }
+    if (buscaMultiMes) return porTipo(buscaResultados)
+    if (!pesquisa) return porTipo(lancamentosComSaldoCorrigido)
     const term = pesquisa.toLowerCase()
     const match = (l: Lancamento) =>
       l.descricao?.toLowerCase().includes(term) ||
       l.categoria_nome?.toLowerCase().includes(term) ||
       l.conta_nome?.toLowerCase().includes(term) ||
       l.observacao?.toLowerCase().includes(term)
-    return lancamentosComSaldoCorrigido.filter(match)
-  }, [buscaMultiMes, pesquisa, lancamentosComSaldoCorrigido, buscaResultados])
+    return porTipo(lancamentosComSaldoCorrigido.filter(match))
+  }, [buscaMultiMes, pesquisa, lancamentosComSaldoCorrigido, buscaResultados, filtTipo])
 
   // Totais do mês/busca — exclui transferências
   const totais = useMemo(() => {
@@ -879,14 +888,14 @@ export default function LancamentosPage() {
             aria-expanded={filtrosExpandidos}
             className="flex items-center gap-1.5 px-2.5 h-9 rounded-lg border text-[15px] font-medium transition-all flex-shrink-0"
             style={{
-              borderColor: temFiltroAtivo || !comSaldo ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.12)',
-              color: temFiltroAtivo || !comSaldo ? '#4da6ff' : '#8b92a8',
-              background: temFiltroAtivo || !comSaldo ? 'rgba(77,166,255,0.08)' : 'rgba(255,255,255,0.03)',
+              borderColor: temFiltroAtivo || filtTipo.length > 0 || !comSaldo ? 'rgba(77,166,255,0.5)' : 'rgba(255,255,255,0.12)',
+              color: temFiltroAtivo || filtTipo.length > 0 || !comSaldo ? '#4da6ff' : '#8b92a8',
+              background: temFiltroAtivo || filtTipo.length > 0 || !comSaldo ? 'rgba(77,166,255,0.08)' : 'rgba(255,255,255,0.03)',
             }}
           >
             <Filter size={13} />
             Filtros
-            {(temFiltroAtivo || !comSaldo) && !filtrosExpandidos && (
+            {(temFiltroAtivo || filtTipo.length > 0 || !comSaldo) && !filtrosExpandidos && (
               <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: '#4da6ff' }} />
             )}
             {filtrosExpandidos ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
@@ -938,6 +947,7 @@ export default function LancamentosPage() {
             pagina="extrato"
             filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
             setFiltContas={setFiltContas} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
+            filtTipo={filtTipo} setFiltTipo={setFiltTipo}
             classNameContas="w-full sm:w-40"
             classNameCats="w-full sm:w-44"
             classNameStatus="w-full sm:w-36"

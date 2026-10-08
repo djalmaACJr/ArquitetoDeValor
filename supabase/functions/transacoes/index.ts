@@ -359,8 +359,10 @@ async function criar(
   if (erroStatus || !body.status)
     return erro(erroStatus ?? "RV-007: status deve ser PAGO, PENDENTE ou PROJECAO");
 
-  // Categoria: se informada, deve existir e estar ativa
-  if (body.categoria_id) {
+  // Categoria: obrigatória, deve existir e estar ativa
+  if (!body.categoria_id)
+    return erro("RV-005: categoria é obrigatória", 422);
+  {
     const { data: cat } = await c.from("categorias")
       .select("ativa").eq("id", String(body.categoria_id)).maybeSingle();
     if (!cat)       return erro("RV-005: categoria não encontrada", 422);
@@ -674,9 +676,10 @@ async function editar(
   if (body.status === "PROJECAO" && dataEfetiva <= hoje)
     return erro("RV-008: status PROJECAO só é permitido para datas futuras", 422);
 
-  // Categoria: se está sendo alterada, a nova deve estar ativa
-  if (body.categoria_id !== undefined && body.categoria_id !== null
-      && body.categoria_id !== atual.categoria_id) {
+  // Categoria: não pode ser removida; se está sendo alterada, a nova deve estar ativa
+  if (body.categoria_id !== undefined && !body.categoria_id)
+    return erro("categoria é obrigatória", 422);
+  if (body.categoria_id !== undefined && body.categoria_id !== atual.categoria_id) {
     const { data: cat } = await c.from("categorias")
       .select("ativa").eq("id", String(body.categoria_id)).maybeSingle();
     if (!cat)       return erro("categoria não encontrada", 422);

@@ -463,7 +463,6 @@ export default function DrawerLancamento({
     c.ativa || (!!editando && c.id === form.categoria_id)
 
   const opcoesCategorias = [
-    { id: '', label: 'Sem categoria', icone: '' },
     ...catsPai
       .filter(p => {
         const temSubIncluida = catsSub.some(s => s.id_pai === p.id && deveIncluirCat(s))
@@ -524,6 +523,7 @@ export default function DrawerLancamento({
     if (!form.valor || Number(form.valor) <= 0) { mostrarErro('Valor deve ser maior que zero.'); return }
     if (!form.data) { mostrarErro('Data é obrigatória.'); return }
     if (!form.conta_id) { mostrarErro('Conta é obrigatória.'); return }
+    if (form.tipo !== 'TRANSFERENCIA' && !form.categoria_id) { mostrarErro('Categoria é obrigatória.'); return }
 
     // Verificar alteração de total_parcelas em recorrências
     if (editando?.id_recorrencia && escopo === 'ESTE_E_SEGUINTES') {
@@ -1024,12 +1024,12 @@ export default function DrawerLancamento({
         {/* Categoria — depois da Descrição: o assistente preenche a categoria a
             partir da descrição digitada */}
         {form.tipo !== 'TRANSFERENCIA' && (
-          <Field label="Categoria" data-tutorial="drawer-categoria">
+          <Field label="Categoria *" data-tutorial="drawer-categoria">
             <SearchableSelect
               opcoes={opcoesCategorias}
               value={form.categoria_id}
               onChange={id => set({ categoria_id: id })}
-              placeholder="Sem categoria"
+              placeholder="Selecione a categoria"
               className="focus:ring-1 focus:ring-av-green/50"
             />
           </Field>

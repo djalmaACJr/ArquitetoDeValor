@@ -601,6 +601,23 @@ describe("Transações — CA-TX01 a CA-TX28", () => {
     for (const id of ids) await limparTransacao(id).catch(() => {});
   });
 
+  // ── CA-TX36 — Categoria obrigatória ──────────────────────
+  test("CA-TX36 — POST sem categoria_id e PUT removendo a categoria são rejeitados (422)", async () => {
+    const { categoria_id: _omitida, ...semCategoria } = TX_VALIDA();
+    const post = await api("/transacoes", "POST", semCategoria) as { status: number; data: Record<string, unknown> };
+    expect(post.status).toBe(422);
+
+    const criada = await api("/transacoes", "POST", TX_VALIDA()) as { status: number; data: Record<string, unknown> };
+    expect(criada.status).toBe(201);
+    const id = criada.data.id as string;
+    try {
+      const put = await api(`/transacoes/${id}`, "PUT", { categoria_id: null }) as { status: number; data: Record<string, unknown> };
+      expect(put.status).toBe(422);
+    } finally {
+      await limparTransacao(id).catch(() => {});
+    }
+  });
+
   // ── CA-TX35 — Lançamento em conta inativa ────────────────
   test("CA-TX35 — POST /transacoes rejeita lançamento em conta inativa", async () => {
     const { data: criada } = await api("/contas", "POST", {

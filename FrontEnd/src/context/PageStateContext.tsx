@@ -12,6 +12,8 @@ interface LancamentosState {
   filtContas: string[]
   filtCats:   string[]
   filtStatus: string[]
+  /** 'RECEITA' | 'DESPESA' | 'TRANSFERENCIA' — filtro só do Extrato (client-side) */
+  filtTipo:   string[]
   comSaldo:   boolean
 }
 
@@ -55,6 +57,7 @@ const LANCAMENTOS_INICIAL: LancamentosState = {
   filtContas: [],
   filtCats:   [],
   filtStatus: [],
+  filtTipo:   [],
   comSaldo:   true,
 }
 
