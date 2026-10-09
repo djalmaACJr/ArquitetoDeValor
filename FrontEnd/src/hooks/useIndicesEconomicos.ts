@@ -16,14 +16,19 @@ interface IndicesResposta {
 }
 
 // `indices`: quais séries buscar (default: ambas). `desde`: competência
-// mínima 'YYYY-MM' (default e mínimo: 2020-01).
+// mínima 'YYYY-MM' (default e mínimo: 2020-01). `historico`: libera o mínimo
+// de 2006-01 (a tabela guarda desde lá) — usado pelos relatórios que corrigem
+// valores antigos pelo IPCA; os demais consumidores seguem limitados a 2020.
 export function useIndicesEconomicos(
   indices: IndiceNome[] = ['IPCA', 'SELIC', 'CDI'],
-  desde = '2020-01',
+  desdePedido = '2020-01',
   enabled = true,
+  historico = false,
 ) {
   const nomes = [...new Set(indices)].sort()
   const chave = nomes.join(',')
+  const minimo = historico ? '2006-01' : '2020-01'
+  const desde = desdePedido > minimo ? desdePedido : minimo
 
   const { data, isLoading } = useQuery({
     queryKey: ['indices-economicos', chave, desde],

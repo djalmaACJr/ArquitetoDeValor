@@ -29,6 +29,10 @@ import { registrarResetCliente } from '../lib/clientCache'
 import { falaComparativoPeriodos } from '../lib/conteudoMascotes'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { TUTORIAL_COMPARATIVO } from '../lib/tutoriaisPaginas'
+import { useIndicesEconomicos } from '../hooks/useIndicesEconomicos'
+import { criarCorretorIpca } from '../lib/ipcaReal'
+import AjudaModoValor from '../components/ui/AjudaModoValor'
+import { isTransf, parseApiRes, type Lancamento } from '../lib/lancamentosRelatorio'
 
 ChartJS.register(
   CategoryScale, LinearScale, BarElement, LineElement,
@@ -36,19 +40,6 @@ ChartJS.register(
 )
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-interface Lancamento {
-  id: string
-  tipo: 'RECEITA' | 'DESPESA'
-  status: 'PAGO' | 'PENDENTE' | 'PROJECAO'
-  valor: number
-  data: string
-  descricao: string
-  categoria_id: string | null
-  categoria_nome: string | null
-  categoria_pai_nome: string | null
-  id_par_transferencia: string | null
-}
-
 interface ResumoPeriodo {
   totalReceitas: number
   totalDespesas: number
@@ -68,6 +59,15 @@ interface CatComparativo {
 }
 
 type SortCol = 'nome' | 'atual' | 'anterior' | 'diferenca' | 'variacao'
+
+// Como os valores são exibidos: nominais, como % da receita do próprio período
+// (isola a inflação sem precisar de índice) ou corrigidos pelo IPCA.
+type ModoValor = 'valores' | 'pct' | 'ipca'
+const MODOS_VALOR: { id: ModoValor; label: string; title: string }[] = [
+  { id: 'valores', label: 'Valores',        title: 'Valores nominais, como lançados' },
+  { id: 'pct',     label: '% da receita',   title: 'Cada categoria como % da receita total do próprio período — compara períodos distantes sem a distorção da inflação' },
+  { id: 'ipca',    label: 'Corrigido IPCA', title: 'Todos os valores levados para os preços de hoje pelo IPCA' },
+]
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
 function diffDays(inicio: string, fim: string): number {
@@ -129,14 +129,6 @@ function calcVariacao(atual: number, anterior: number): number | null {
   return ((atual - anterior) / anterior) * 100
 }
 
-function isTransf(l: Lancamento): boolean {
-  return (
-    !!l.id_par_transferencia ||
-    !!l.descricao?.startsWith('[Transf.') ||
-    l.categoria_nome === 'Transferências'
-  )
-}
-
 function processarPeriodo(lancamentos: Lancamento[]): ResumoPeriodo {
   let totalReceitas = 0
   let totalDespesas = 0
@@ -152,15 +144,6 @@ function processarPeriodo(lancamentos: Lancamento[]): ResumoPeriodo {
     porCategoria.get(key)!.net += l.tipo === 'RECEITA' ? l.valor : -l.valor
   }
   return { totalReceitas, totalDespesas, resultado: totalReceitas - totalDespesas, porCategoria }
-}
-
-function parseApiRes(r: unknown): Lancamento[] {
-  const res = r as { dados?: unknown }
-  const d = res?.dados
-  if (Array.isArray(d)) return d as Lancamento[]
-  const inner = (d as { dados?: unknown })?.dados
-  if (Array.isArray(inner)) return inner as Lancamento[]
-  return []
 }
 
 function abbrBRL(v: number): string {
@@ -196,6 +179,7 @@ interface PageState {
   tendencia: { mes: string; receitas: number; despesas: number }[]
   tendPeriodo: string; buscado: boolean
   busca: string; sortCat: { col: SortCol; dir: 1 | -1 }
+  modo: ModoValor
 }
 let _saved: PageState | null = null
 // Limpa este cache em troca de usuário — evita vazamento de lançamentos
@@ -204,7 +188,7 @@ registrarResetCliente(() => { _saved = null })
 
 // ── KPI Card ───────────────────────────────────────────────────────────────────
 function KpiCard({
-  label, valor, valorAnterior, variacao, corPositiva = 'green', subtitulo, oculto = false,
+  label, valor, valorAnterior, variacao, corPositiva = 'green', subtitulo, oculto = false, emPct = false,
 }: {
   label: string
   valor: number
@@ -213,7 +197,10 @@ function KpiCard({
   corPositiva?: 'green' | 'red'
   subtitulo?: string
   oculto?: boolean
+  /** valor/valorAnterior são % (não R$) e `variacao` é a diferença em pontos percentuais. */
+  emPct?: boolean
 }) {
+  const fmt = (v: number) => emPct ? `${v.toFixed(1)}%` : (oculto ? '••••' : formatBRL(v))
   const cor =
     variacao == null    ? '#8b92a8'
     : variacao === 0    ? '#f0b429'
@@ -229,7 +216,7 @@ function KpiCard({
     <div className="bg-[#1a1f2e] border border-white/10 rounded-xl px-4 py-4 flex flex-col gap-2">
       <p className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{label}</p>
       <p className="text-[24px] font-bold leading-tight truncate" style={{ color: '#e8eaf0' }}>
-        {oculto ? '••••••' : formatBRL(valor)}
+        {emPct ? fmt(valor) : (oculto ? '••••••' : formatBRL(valor))}
       </p>
       {variacao !== undefined && (
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -237,11 +224,11 @@ function KpiCard({
           <span className="text-[15px] font-semibold" style={{ color: cor }}>
             {variacao === null ? 'Novo'
               : variacao === 0  ? 'Estável'
-              : `${variacao > 0 ? '+' : ''}${variacao.toFixed(1)}%`}
+              : `${variacao > 0 ? '+' : ''}${variacao.toFixed(1)}${emPct ? ' pp' : '%'}`}
           </span>
           {valorAnterior !== undefined && (
             <span className="text-[14px]" style={{ color: '#4a5168' }}>
-              vs {oculto ? '••••' : formatBRL(valorAnterior)}
+              vs {fmt(valorAnterior)}
             </span>
           )}
         </div>
@@ -282,11 +269,12 @@ export default function ComparativoMensalPage() {
   const [loading,     setLoading]     = useState(false)
   const [lancA,       setLancA]       = useState<Lancamento[]>(() => _saved?.lancA ?? [])
   const [lancB,       setLancB]       = useState<Lancamento[]>(() => _saved?.lancB ?? [])
-  const [tendencia,   setTendencia]   = useState<{ mes: string; receitas: number; despesas: number }[]>(() => _saved?.tendencia ?? [])
+  const [tendenciaBruta, setTendencia] = useState<{ mes: string; receitas: number; despesas: number }[]>(() => _saved?.tendencia ?? [])
   const [tendPeriodo, setTendPeriodo] = useState(() => _saved?.tendPeriodo ?? '')
   const [buscado,     setBuscado]     = useState(() => _saved?.buscado ?? false)
   const [busca,       setBusca]       = useState(() => _saved?.busca ?? '')
   const [sortCat,     setSortCat]     = useState<{ col: SortCol; dir: 1 | -1 }>(() => _saved?.sortCat ?? { col: 'variacao', dir: -1 })
+  const [modo, setModo] = useState<ModoValor>(() => _saved?.modo ?? 'valores')
   // drill-down: não persiste — o usuário clica novamente; os dados ficam em cache
   const [drillDown,   setDrillDown]   = useState<{ catKey: string; nome: string; periodo: 'inicial' | 'final' } | null>(null)
   const [editandoId,  setEditandoId]  = useState<string | null>(null)
@@ -317,8 +305,8 @@ export default function ComparativoMensalPage() {
 
   // Persiste estado ao navegar para outra página
   useEffect(() => {
-    _saved = { inicioA, fimA, inicioB, fimB, lancA, lancB, tendencia, tendPeriodo, buscado, busca, sortCat }
-  }, [inicioA, fimA, inicioB, fimB, lancA, lancB, tendencia, tendPeriodo, buscado, busca, sortCat])
+    _saved = { inicioA, fimA, inicioB, fimB, lancA, lancB, tendencia: tendenciaBruta, tendPeriodo, buscado, busca, sortCat, modo }
+  }, [inicioA, fimA, inicioB, fimB, lancA, lancB, tendenciaBruta, tendPeriodo, buscado, busca, sortCat, modo])
 
   const diasA   = useMemo(() => diffDays(inicioA, fimA),   [inicioA, fimA])
   const diasB   = useMemo(() => diffDays(inicioB, fimB),   [inicioB, fimB])
@@ -383,8 +371,38 @@ export default function ComparativoMensalPage() {
   }, [inicioA, fimA, inicioB, fimB])
 
   // ── Computed ───────────────────────────────────────────────────────────────
-  const resumoA = useMemo(() => processarPeriodo(lancA), [lancA])
-  const resumoB = useMemo(() => processarPeriodo(lancB), [lancB])
+  // IPCA só é buscado quando o modo corrigido está ativo.
+  const ipcaQ = useIndicesEconomicos(['IPCA'], '2006-01', modo === 'ipca', true)
+  const serieIpca = ipcaQ.series['IPCA']
+  const corretor = useMemo(() => criarCorretorIpca(serieIpca ?? []), [serieIpca])
+  const corrigindo = modo === 'ipca' && corretor.disponivel
+  const pctMode = modo === 'pct'
+
+  // Lançamentos com o valor levado aos preços de hoje (só no modo IPCA). Os
+  // originais (lancA/lancB) seguem nominais — usados no drill-down.
+  const corrigir = useCallback(
+    (ls: Lancamento[]) => corrigindo
+      ? ls.map(l => ({ ...l, valor: l.valor * corretor.fator(l.data.slice(0, 7)) }))
+      : ls,
+    [corrigindo, corretor],
+  )
+  const lancAj = useMemo(() => corrigir(lancA), [corrigir, lancA])
+  const lancBj = useMemo(() => corrigir(lancB), [corrigir, lancB])
+  const foraDaSerieIpca = useMemo(
+    () => corrigindo ? [...lancA, ...lancB].filter(l => !corretor.cobre(l.data.slice(0, 7))).length : 0,
+    [corrigindo, corretor, lancA, lancB],
+  )
+  // `tendencia` (usada nos gráficos/tabela de tendência) já sai corrigida no modo IPCA.
+  const tendencia = useMemo(
+    () => corrigindo ? tendenciaBruta.map(t => {
+      const f = corretor.fator(t.mes)
+      return { ...t, receitas: t.receitas * f, despesas: t.despesas * f }
+    }) : tendenciaBruta,
+    [corrigindo, corretor, tendenciaBruta],
+  )
+
+  const resumoA = useMemo(() => processarPeriodo(lancAj), [lancAj])
+  const resumoB = useMemo(() => processarPeriodo(lancBj), [lancBj])
 
   // A = Período inicial (base) · B = Período final (atual)
   // net é assinado: positivo = líquido receita, negativo = líquido despesa
@@ -429,6 +447,22 @@ export default function ComparativoMensalPage() {
     })
   }, [resumoA, resumoB])
 
+  // Modo "% da receita": cada categoria vira % da receita total do PRÓPRIO
+  // período (receitas = composição da renda; despesas = quanto da renda foi
+  // pra cada item). Linear, então o agrupamento por pai abaixo continua
+  // somando certo. Só a tabela/Resumo usam esta lista — gráficos e insights
+  // seguem em valores.
+  const baseReceitaA = resumoA.totalReceitas
+  const baseReceitaB = resumoB.totalReceitas
+  const comparativoTab = useMemo((): CatComparativo[] => {
+    if (!pctMode) return comparativo
+    return comparativo.map(c => {
+      const anterior = baseReceitaA > 0 ? (c.anterior / baseReceitaA) * 100 : 0
+      const atual    = baseReceitaB > 0 ? (c.atual    / baseReceitaB) * 100 : 0
+      return { ...c, anterior, atual, diferenca: atual - anterior, variacao: calcVariacao(atual, anterior) }
+    })
+  }, [pctMode, comparativo, baseReceitaA, baseReceitaB])
+
   // ── Agrupamento "Resumo" (por categoria pai) ─────────────────────────────
   // Mapa categoria_id (leaf) -> nome do pai. Quando o leaf é o próprio pai
   // (categoria_pai_nome === null), aponta para o próprio nome.
@@ -452,11 +486,11 @@ export default function ComparativoMensalPage() {
    * usado tanto para expansão da tabela quanto para o ParetoChart.
    */
   const comparativoPaiData = useMemo(() => {
-    if (agrupCat !== 'pai' || comparativo.length === 0) {
+    if (agrupCat !== 'pai' || comparativoTab.length === 0) {
       return { lista: [] as CatComparativo[], subsPorPai: new Map<string, CatComparativo[]>(), paisComSub: new Set<string>() }
     }
     const byPai = new Map<string, CatComparativo[]>()
-    for (const c of comparativo) {
+    for (const c of comparativoTab) {
       const paiNome = paiNomePorCatKey.get(c.catKey) ?? c.nome
       const k = `pai:${paiNome}`
       if (!byPai.has(k)) byPai.set(k, [])
@@ -497,10 +531,18 @@ export default function ComparativoMensalPage() {
       })
     }
     return { lista, subsPorPai: byPai, paisComSub }
-  }, [agrupCat, comparativo, paiNomePorCatKey])
+  }, [agrupCat, comparativoTab, paiNomePorCatKey])
 
   // Lista efetiva renderizada: leaf (cat) ou consolidada por pai (pai).
-  const comparativoExibido = agrupCat === 'pai' ? comparativoPaiData.lista : comparativo
+  const comparativoExibido = agrupCat === 'pai' ? comparativoPaiData.lista : comparativoTab
+
+  // Formatação das células da tabela: R$ (oculta com o botão do olho) ou % / pp.
+  const fmtVal = (v: number) => pctMode ? `${v.toFixed(1)}%` : (oculto ? '••••' : formatBRL(v))
+  const fmtDif = (v: number) => pctMode
+    ? `${v >= 0 ? '+' : ''}${v.toFixed(1)} pp`
+    : (oculto ? '••••' : `${v >= 0 ? '+' : ''}${formatBRL(v)}`)
+  // Pareto trabalha em R$ — no modo % da receita fica só a tabela.
+  const vistaEfetiva = pctMode ? 'tabela' : vistaCat
 
   const topAumento = useMemo(() =>
     comparativo.filter(c => c.tipo === 'DESPESA' && c.variacao !== null && c.variacao > 0)
@@ -569,6 +611,7 @@ export default function ComparativoMensalPage() {
       titulo:    `Comparativo: ${inicioA} a ${fimA} vs ${inicioB} a ${fimB}`,
       descricao: 'Comparativo entre dois períodos com insights pré-calculados',
       dados: {
+        modo_valores: corrigindo ? 'corrigido pelo IPCA (preços de hoje)' : 'nominal',
         periodoA: { inicio: inicioA, fim: fimA, dias: diasA, resumo: { receitas: resumoA.totalReceitas, despesas: resumoA.totalDespesas, resultado: resumoA.resultado } },
         periodoB: { inicio: inicioB, fim: fimB, dias: diasB, resumo: { receitas: resumoB.totalReceitas, despesas: resumoB.totalDespesas, resultado: resumoB.resultado } },
         insights: insights.map(i => ({ tipo: i.tipo, texto: i.texto })),
@@ -579,7 +622,7 @@ export default function ComparativoMensalPage() {
           .map(c => ({ categoria: c.nome, tipo: c.tipo, valorA: c.anterior, valorB: c.atual, variacao_pct: c.variacao })),
       },
     }
-  }, [buscado, inicioA, fimA, inicioB, fimB, diasA, diasB, resumoA, resumoB, insights, comparativo]))
+  }, [buscado, corrigindo, inicioA, fimA, inicioB, fimB, diasA, diasB, resumoA, resumoB, insights, comparativo]))
 
   // ── Table (sorted + filtered) ─────────────────────────────────────────────
   // Opera sobre `comparativoExibido` para refletir o agrupamento atual.
@@ -644,12 +687,15 @@ export default function ComparativoMensalPage() {
     type Col = import('../lib/exportUtils').ExportColumn
     type Row = import('../lib/exportUtils').ExportRow
 
+    // Modo % da receita: as colunas viram percentuais (fração, como 'var').
+    const tipoNum = pctMode ? 'percent' : 'currency'
+    const e = (v: number) => pctMode ? v / 100 : v
     const columns: Col[] = [
       { key: 'cat',  label: 'Categoria',  type: 'text',     width: 32 },
       { key: 'tipo', label: 'Tipo',       type: 'text',     width: 10 },
-      { key: 'pA',   label: lA,           type: 'currency', width: 16 },
-      { key: 'pB',   label: lB,           type: 'currency', width: 16 },
-      { key: 'dif',  label: 'Diferença',  type: 'currency', width: 16 },
+      { key: 'pA',   label: lA,           type: tipoNum,    width: 16 },
+      { key: 'pB',   label: lB,           type: tipoNum,    width: 16 },
+      { key: 'dif',  label: pctMode ? 'Diferença (pp)' : 'Diferença', type: tipoNum, width: 16 },
       { key: 'var',  label: '% Variação', type: 'percent',  width: 14 },
     ]
     if (keysDestaque) columns.push({ key: 'mark', label: 'Destacado', type: 'text', width: 12, align: 'center' })
@@ -661,9 +707,9 @@ export default function ComparativoMensalPage() {
       const linha: Row = {
         cat:  c.nome,
         tipo: c.tipo === 'RECEITA' ? 'Receita' : 'Despesa',
-        pA:   c.anterior,
-        pB:   c.atual,
-        dif:  c.diferenca,
+        pA:   e(c.anterior),
+        pB:   e(c.atual),
+        dif:  e(c.diferenca),
         var:  c.variacao !== null ? c.variacao / 100 : 'Novo',
       }
       if (keysDestaque) linha.mark = keysDestaque.has(c.catKey) ? '★' : ''
@@ -677,7 +723,7 @@ export default function ComparativoMensalPage() {
       const sB = rowsGrupo.reduce((s, c) => s + c.atual,    0)
       const vVar = calcVariacao(sB, sA)
       const linha: Row = {
-        cat: label, tipo: '', pA: sA, pB: sB, dif: sB - sA,
+        cat: label, tipo: '', pA: e(sA), pB: e(sB), dif: e(sB - sA),
         var: vVar !== null ? vVar / 100 : 'N/A',
         _style: 'subtotal',
       }
@@ -692,9 +738,9 @@ export default function ComparativoMensalPage() {
       const linha: Row = {
         cat:  `   └ ${s.nome}`,
         tipo: s.tipo === 'RECEITA' ? 'Receita' : 'Despesa',
-        pA:   s.anterior,
-        pB:   s.atual,
-        dif:  s.diferenca,
+        pA:   e(s.anterior),
+        pB:   e(s.atual),
+        dif:  e(s.diferenca),
         var:  s.variacao !== null ? s.variacao / 100 : 'Novo',
       }
       if (keysDestaque) linha.mark = keysDestaque.has(s.catKey) ? '★' : ''
@@ -728,7 +774,7 @@ export default function ComparativoMensalPage() {
       const sB = receitas.reduce((s, c) => s + c.atual,    0) - despesas.reduce((s, c) => s + c.atual,    0)
       const vVar = calcVariacao(sB, sA)
       const linhaR: Row = {
-        cat: 'Resultado', tipo: '', pA: sA, pB: sB, dif: sB - sA,
+        cat: pctMode ? 'Resultado (taxa de poupança)' : 'Resultado', tipo: '', pA: e(sA), pB: e(sB), dif: e(sB - sA),
         var: vVar !== null ? vVar / 100 : 'N/A',
         _style: 'total',
       }
@@ -745,12 +791,13 @@ export default function ComparativoMensalPage() {
       sheets: [{
         name:     'Comparativo',
         title:    'Comparativo Períodos',
-        subtitle: `${lA}  →  ${lB}`,
+        subtitle: `${lA}  →  ${lB}` + (pctMode ? '  ·  % da receita do período'
+          : corrigindo && corretor.refCompetencia ? `  ·  valores corrigidos pelo IPCA (preços de ${mesLabel(corretor.refCompetencia)})` : ''),
         columns,
         rows,
       }],
     })
-  }, [buscado, tableCats, inicioA, fimA, inicioB, fimB, insightAtivo, insights, agrupCat, expandidosCat, comparativoPaiData])
+  }, [buscado, tableCats, inicioA, fimA, inicioB, fimB, insightAtivo, insights, agrupCat, expandidosCat, comparativoPaiData, pctMode, corrigindo, corretor])
 
   // ── Chart data ─────────────────────────────────────────────────────────────
   const chartBarComp = useMemo((): ChartData<'bar'> => ({
@@ -968,6 +1015,50 @@ export default function ComparativoMensalPage() {
             {' '}({diasA} dias cada)
           </p>
         )}
+
+        {/* Modo de exibição dos valores */}
+        <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-3 flex-wrap" data-tutorial="comparativo-modo">
+          <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>Exibir</span>
+          <AjudaModoValor unidade="período" />
+          <div className="flex rounded-lg overflow-hidden border border-white/10 text-[14px] font-semibold">
+            {MODOS_VALOR.map(({ id, label, title }, idx) => (
+              <button key={id} title={title} onClick={() => setModo(id)}
+                className="px-3 py-1 transition-colors"
+                style={{
+                  background:  modo === id ? 'rgba(0,200,150,0.15)' : 'transparent',
+                  color:       modo === id ? '#00c896' : '#8b92a8',
+                  borderRight: idx < MODOS_VALOR.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {pctMode && (
+            <span className="text-[14px]" style={{ color: '#8b92a8' }}>
+              Cada categoria como % da receita total do próprio período · diferenças em pontos percentuais (pp)
+            </span>
+          )}
+          {modo === 'ipca' && (
+            <span className="text-[14px]" style={{
+              color: ipcaQ.loading || corretor.disponivel ? '#8b92a8' : '#f0b429' }}>
+              {ipcaQ.loading ? 'Carregando IPCA…'
+                : corretor.disponivel && corretor.refCompetencia
+                  ? `Todos os valores em preços de ${mesLabel(corretor.refCompetencia)} (IPCA)`
+                  : 'Série do IPCA indisponível — exibindo valores nominais'}
+            </span>
+          )}
+        </div>
+        {buscado && foraDaSerieIpca > 0 && (
+          <p className="text-[14px] mt-2" style={{ color: '#f0b429' }}>
+            O IPCA disponível começa em {corretor.primeiraCompetencia ? mesLabel(corretor.primeiraCompetencia) : '2020'}:{' '}
+            {foraDaSerieIpca} lançamento{foraDaSerieIpca !== 1 ? 's' : ''} anterior{foraDaSerieIpca !== 1 ? 'es' : ''} ficou sem correção.
+          </p>
+        )}
+        {buscado && pctMode && (baseReceitaA <= 0 || baseReceitaB <= 0) && (
+          <p className="text-[14px] mt-2" style={{ color: '#f0b429' }}>
+            {baseReceitaA <= 0 ? 'O Período inicial' : 'O Período final'} não tem receitas — os percentuais dele não podem ser calculados (aparecem como 0%).
+          </p>
+        )}
       </div>
 
       {/* Loading enquanto busca */}
@@ -995,14 +1086,33 @@ export default function ComparativoMensalPage() {
               valor={resumoB.totalReceitas} valorAnterior={resumoA.totalReceitas}
               variacao={calcVariacao(resumoB.totalReceitas, resumoA.totalReceitas)}
               corPositiva="green" oculto={oculto} />
-            <KpiCard label="Despesa Total"
-              valor={resumoB.totalDespesas} valorAnterior={resumoA.totalDespesas}
-              variacao={calcVariacao(resumoB.totalDespesas, resumoA.totalDespesas)}
-              corPositiva="red" oculto={oculto} />
-            <KpiCard label="Resultado Líquido"
-              valor={resumoB.resultado} valorAnterior={resumoA.resultado}
-              variacao={calcVariacao(resumoB.resultado, resumoA.resultado)}
-              corPositiva="green" oculto={oculto} />
+            {pctMode ? (() => {
+              const despA = baseReceitaA > 0 ? (resumoA.totalDespesas / baseReceitaA) * 100 : 0
+              const despB = baseReceitaB > 0 ? (resumoB.totalDespesas / baseReceitaB) * 100 : 0
+              const poupA = baseReceitaA > 0 ? (resumoA.resultado / baseReceitaA) * 100 : 0
+              const poupB = baseReceitaB > 0 ? (resumoB.resultado / baseReceitaB) * 100 : 0
+              return (
+                <>
+                  <KpiCard label="Despesa / Receita" emPct
+                    valor={despB} valorAnterior={despA} variacao={despB - despA}
+                    corPositiva="red" oculto={oculto} />
+                  <KpiCard label="Taxa de poupança" emPct
+                    valor={poupB} valorAnterior={poupA} variacao={poupB - poupA}
+                    corPositiva="green" oculto={oculto} />
+                </>
+              )
+            })() : (
+              <>
+                <KpiCard label="Despesa Total"
+                  valor={resumoB.totalDespesas} valorAnterior={resumoA.totalDespesas}
+                  variacao={calcVariacao(resumoB.totalDespesas, resumoA.totalDespesas)}
+                  corPositiva="red" oculto={oculto} />
+                <KpiCard label="Resultado Líquido"
+                  valor={resumoB.resultado} valorAnterior={resumoA.resultado}
+                  variacao={calcVariacao(resumoB.resultado, resumoA.resultado)}
+                  corPositiva="green" oculto={oculto} />
+              </>
+            )}
             <KpiCard label="Δ Despesas"
               valor={resumoB.totalDespesas - resumoA.totalDespesas}
               variacao={calcVariacao(resumoB.totalDespesas, resumoA.totalDespesas)}
@@ -1179,15 +1289,17 @@ export default function ComparativoMensalPage() {
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   {/* Toggle Tabela / Pareto */}
-                  <div className="flex rounded-lg overflow-hidden border border-white/10 text-[14px] font-semibold">
+                  <div className="flex rounded-lg overflow-hidden border border-white/10 text-[14px] font-semibold"
+                    title={pctMode ? 'O Pareto trabalha em R$ — volte para Valores ou Corrigido IPCA' : undefined}>
                     {(['tabela', 'pareto'] as const).map((v, idx) => (
                       <button
                         key={v}
                         onClick={() => setVistaCat(v)}
-                        className="px-2.5 py-1 transition-colors"
+                        disabled={pctMode && v === 'pareto'}
+                        className="px-2.5 py-1 transition-colors disabled:opacity-40"
                         style={{
-                          background:  vistaCat === v ? 'rgba(0,200,150,0.15)' : 'transparent',
-                          color:       vistaCat === v ? '#00c896' : '#8b92a8',
+                          background:  vistaEfetiva === v ? 'rgba(0,200,150,0.15)' : 'transparent',
+                          color:       vistaEfetiva === v ? '#00c896' : '#8b92a8',
                           borderRight: idx === 0 ? '1px solid rgba(255,255,255,0.1)' : 'none',
                         }}
                       >
@@ -1225,7 +1337,7 @@ export default function ComparativoMensalPage() {
                         : expCat.expandirTodas(comparativoPaiData.paisComSub)}
                     />
                   )}
-                  {vistaCat === 'tabela' && (
+                  {vistaEfetiva === 'tabela' && (
                     <input type="text" placeholder="Buscar categoria…" value={busca}
                       onChange={e => setBusca(e.target.value)}
                       className="px-3 py-1.5 rounded-lg text-[15px] border outline-none"
@@ -1233,7 +1345,7 @@ export default function ComparativoMensalPage() {
                   )}
                 </div>
               </div>
-              {vistaCat === 'pareto' ? (
+              {vistaEfetiva === 'pareto' ? (
                 <div className="p-4 overflow-auto" style={{ maxHeight: 600 }}>
                   <ParetoChart
                     receitas={comparativoExibido
@@ -1362,7 +1474,7 @@ export default function ComparativoMensalPage() {
                                   color: ativoAnterior ? '#4da6ff' : '#8b92a8',
                                   background: ativoAnterior ? 'rgba(77,166,255,0.12)' : 'transparent',
                                 }}>
-                                {oculto ? '••••' : formatBRL(c.anterior)}
+                                {fmtVal(c.anterior)}
                               </span>
                             </td>
                             <td className="px-4 py-2.5 text-right cursor-pointer"
@@ -1373,12 +1485,12 @@ export default function ComparativoMensalPage() {
                                   color: ativoAtual ? '#4da6ff' : '#c5cad8',
                                   background: ativoAtual ? 'rgba(77,166,255,0.12)' : 'transparent',
                                 }}>
-                                {oculto ? '••••' : formatBRL(c.atual)}
+                                {fmtVal(c.atual)}
                               </span>
                             </td>
                             <td className="px-4 py-2.5 text-right">
                               <span className="text-[15px] font-medium" style={{ color: cor }}>
-                                {oculto ? '••••' : `${c.diferenca >= 0 ? '+' : ''}${formatBRL(c.diferenca)}`}
+                                {fmtDif(c.diferenca)}
                               </span>
                             </td>
                             <td className="px-4 py-2.5 text-right">
@@ -1419,17 +1531,17 @@ export default function ComparativoMensalPage() {
                             </td>
                             <td className="px-4 py-2 text-right">
                               <span className="text-[15px] font-bold" style={{ color: cor }}>
-                                {oculto ? '••••' : formatBRL(sA)}
+                                {fmtVal(sA)}
                               </span>
                             </td>
                             <td className="px-4 py-2 text-right">
                               <span className="text-[15px] font-bold" style={{ color: cor }}>
-                                {oculto ? '••••' : formatBRL(sB)}
+                                {fmtVal(sB)}
                               </span>
                             </td>
                             <td className="px-4 py-2 text-right">
                               <span className="text-[15px] font-bold" style={{ color: corDif }}>
-                                {oculto ? '••••' : `${dif >= 0 ? '+' : ''}${formatBRL(dif)}`}
+                                {fmtDif(dif)}
                               </span>
                             </td>
                             <td className="px-4 py-2 text-right">
@@ -1512,17 +1624,17 @@ export default function ComparativoMensalPage() {
                               <tr style={{ background: 'rgba(77,166,255,0.10)', borderTop: '2px solid rgba(77,166,255,0.35)' }}>
                                 <td className="px-4 py-2.5">
                                   <span className="text-[15px] font-bold uppercase tracking-wider" style={{ color: '#4da6ff' }}>
-                                    Resultado
+                                    {pctMode ? 'Resultado (taxa de poupança)' : 'Resultado'}
                                   </span>
                                 </td>
                                 <td className="px-4 py-2.5 text-right">
-                                  <span className="text-[15px] font-bold" style={{ color: '#4da6ff' }}>{oculto ? '••••' : formatBRL(sA)}</span>
+                                  <span className="text-[15px] font-bold" style={{ color: '#4da6ff' }}>{fmtVal(sA)}</span>
                                 </td>
                                 <td className="px-4 py-2.5 text-right">
-                                  <span className="text-[15px] font-bold" style={{ color: '#4da6ff' }}>{oculto ? '••••' : formatBRL(sB)}</span>
+                                  <span className="text-[15px] font-bold" style={{ color: '#4da6ff' }}>{fmtVal(sB)}</span>
                                 </td>
                                 <td className="px-4 py-2.5 text-right">
-                                  <span className="text-[15px] font-bold" style={{ color: corR }}>{oculto ? '••••' : `${dif >= 0 ? '+' : ''}${formatBRL(dif)}`}</span>
+                                  <span className="text-[15px] font-bold" style={{ color: corR }}>{fmtDif(dif)}</span>
                                 </td>
                                 <td className="px-4 py-2.5 text-right">
                                   {vVar === null
@@ -1642,6 +1754,7 @@ export default function ComparativoMensalPage() {
                   <p className="text-[14px] mt-0.5" style={{ color: '#4a5168' }}>
                     {drillDown.periodo === 'inicial' ? periodoLabelLongo(inicioA, fimA) : periodoLabelLongo(inicioB, fimB)}
                     {' · '}{drillDownLancamentos.length} lançamento{drillDownLancamentos.length !== 1 ? 's' : ''}
+                    {corrigindo && ' · valores nominais, como lançados (sem correção IPCA)'}
                   </p>
                 </div>
                 <button onClick={() => setDrillDown(null)}

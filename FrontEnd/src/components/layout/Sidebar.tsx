@@ -96,6 +96,7 @@ const navRelatorios: NavItem[] = [ // todo o grupo exige EXTRATO
     children: [
       { to: '/relatorios',   icon: <FileText size={13}/>,   label: 'Resumo geral' },
       { to: '/comparativo',  icon: <GitCompare size={13}/>, label: 'Comparativo Períodos' },
+      { to: '/progressao',   icon: <TrendingUp size={13}/>, label: 'Progressão Anual' },
       { to: '/assinaturas',  icon: <Repeat2 size={13}/>,    label: 'Gastos Recorrentes' },
       { to: '/projecao',     icon: <TrendingUp size={13}/>, label: 'Projeção de Economia' },
     ],

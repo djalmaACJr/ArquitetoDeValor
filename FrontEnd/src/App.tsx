@@ -22,6 +22,7 @@ const LancamentosPage        = lazy(() => import('./pages/LancamentosPage'))
 const ImportExportPage       = lazy(() => import('./pages/ImportExportPage'))
 const ImportarFaturaPage     = lazy(() => import('./pages/ImportarFaturaPage'))
 const ComparativoMensalPage  = lazy(() => import('./pages/ComparativoMensalPage'))
+const ProgressaoAnualPage    = lazy(() => import('./pages/ProgressaoAnualPage'))
 const AssinaturasPage        = lazy(() => import('./pages/AssinaturasPage'))
 const ProjecaoEconomiaPage   = lazy(() => import('./pages/ProjecaoEconomiaPage'))
 const ApresentacaoMascotes   = lazy(() => import('./pages/ApresentacaoMascotes'))
@@ -112,6 +113,7 @@ export default function App() {
             <Route path="categorias"  element={<CategoriasPage/>}/>
             <Route path="relatorios"   element={<RelatoriosPage/>}/>
             <Route path="comparativo"  element={<ComparativoMensalPage/>}/>
+            <Route path="progressao"   element={<ProgressaoAnualPage/>}/>
             <Route path="assinaturas" element={<AssinaturasPage/>}/>
             <Route path="projecao"    element={<ProjecaoEconomiaPage/>}/>
             <Route path="importexport" element={<ImportExportPage/>}/>

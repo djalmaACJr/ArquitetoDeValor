@@ -3760,12 +3760,12 @@ function PeriodoSeg<T extends string>({ value, onChange, opcoes, cor }: {
   value: T; onChange: (v: T) => void; opcoes: { value: T; label: string }[]; cor: string
 }) {
   return (
-    <div className="inline-flex rounded-lg border border-gray-200 dark:border-white/10 overflow-hidden text-[12px]">
+    <div className="inline-flex max-w-full rounded-lg border border-gray-200 dark:border-white/10 overflow-x-auto text-[12px]">
       {opcoes.map((o) => {
         const ativo = o.value === value
         return (
           <button key={o.value} onClick={() => onChange(o.value)}
-            className={`px-2.5 py-1 font-medium transition-colors ${ativo ? 'text-white' : 'text-gray-400 hover:text-gray-200'}`}
+            className={`px-2.5 py-1 font-medium whitespace-nowrap transition-colors ${ativo ? 'text-white' : 'text-gray-400 hover:text-gray-200'}`}
             style={ativo ? { background: cor } : undefined}>
             {o.label}
           </button>
@@ -3817,10 +3817,12 @@ function recuarDiasISO(iso: string, n: number): string {
 }
 
 // ── Quadro do dólar (PTAX) — período 7 dias / 1 mês / ano ────────
-type PeriodoPtax = '7d' | '1m' | 'ano'
+type PeriodoPtax = '7d' | '1m' | 'ano' | '2anos' | '5anos'
 const PERIODOS_PTAX: { value: PeriodoPtax; label: string }[] = [
-  { value: '7d', label: '7 dias' }, { value: '1m', label: '1 mês' }, { value: 'ano', label: 'Ano' },
+  { value: '7d', label: '7 dias' }, { value: '1m', label: '1 mês' }, { value: 'ano', label: '1 ano' },
+  { value: '2anos', label: '2 anos' }, { value: '5anos', label: '5 anos' },
 ]
+const DIAS_PERIODO_PTAX: Record<PeriodoPtax, number> = { '7d': 7, '1m': 31, ano: 366, '2anos': 731, '5anos': 1827 }
 
 // Conversor USD ⇄ BRL pela cotação PTAX de uma data escolhida (<= hoje).
 // A taxa vem de `usePtax([data])`: o backend resolve o dia útil <= data,
@@ -3876,13 +3878,18 @@ function ConversorPtax() {
 
 function CardPtax() {
   const [periodo, setPeriodo] = useState<PeriodoPtax>('1m')
-  const desdeAno = useMemo(() => recuarDiasISO(hojeLocal(), 366), [])  // busca 1 ano; fatia no cliente
-  const { serie, atual, atualData } = usePtaxSerie(desdeAno)
+  // Busca a maior janela (5 anos; o histórico guardado começa em 2021) uma vez e fatia no cliente.
+  const desdeMax = useMemo(() => recuarDiasISO(hojeLocal(), DIAS_PERIODO_PTAX['5anos']), [])
+  const { serie, atual, atualData } = usePtaxSerie(desdeMax)
 
-  const dias = periodo === '7d' ? 7 : periodo === '1m' ? 31 : 366
+  const dias = DIAS_PERIODO_PTAX[periodo]
   const corte = recuarDiasISO(hojeLocal(), dias)
   const pts = serie.filter((p) => p.data >= corte)
-  const labels = pts.map((p) => p.data.slice(5).split('-').reverse().join('/'))  // DD/MM
+  // Acima de 1 ano o rótulo precisa do ano (DD/MM sozinho fica ambíguo).
+  const labels = pts.map((p) => {
+    const [y, m, d] = p.data.split('-')
+    return dias > 366 ? `${d}/${m}/${y.slice(2)}` : `${d}/${m}`
+  })
   const valores = pts.map((p) => p.valor)
 
   const fmtBRL = (v: number) => `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`
@@ -3911,6 +3918,14 @@ type PeriodoIndice = 'tri' | 'ano' | '5anos'
 const PERIODOS_INDICE: { value: PeriodoIndice; label: string }[] = [
   { value: 'tri', label: 'Trimestre' }, { value: 'ano', label: '1 ano' }, { value: '5anos', label: '5 anos' },
 ]
+// IPCA/SELIC/CDI têm história desde 2006 (arqvalor.indices_economicos), então
+// ganham 10 anos e "Máx." e perdem o Trimestre (curto demais pra uma série de 12 meses
+// acumulados); os ETFs do usuário mantêm a lista acima.
+type PeriodoIndiceMacro = Exclude<PeriodoIndice, 'tri'> | '10anos' | 'max'
+const PERIODOS_INDICE_MACRO: { value: PeriodoIndiceMacro; label: string }[] = [
+  ...PERIODOS_INDICE.filter((o): o is { value: Exclude<PeriodoIndice, 'tri'>; label: string } => o.value !== 'tri'),
+  { value: '10anos', label: '10 anos' }, { value: 'max', label: 'Máx.' },
+]
 const MESES_LABEL = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
 const labelComp = (comp: string) => {
   const [y, m] = comp.split('-')
@@ -3933,13 +3948,14 @@ function acumulado12m(pts: PontoIndice[]): PontoIndice[] {
 function CardIndice({ indice, titulo, subtitulo, cor, icon }: {
   indice: IndiceNome; titulo: string; subtitulo: string; cor: string; icon: React.ElementType
 }) {
-  const [periodo, setPeriodo] = useState<PeriodoIndice>('ano')
-  // Os cards compartilham a mesma query (dedup pelo React Query).
-  const { serie, loading } = useIndicesEconomicos(['IPCA', 'SELIC', 'CDI'])
+  const [periodo, setPeriodo] = useState<PeriodoIndiceMacro>('ano')
+  // Os cards compartilham a mesma query (dedup pelo React Query). `historico`
+  // libera a série completa (desde 2006) em vez do mínimo padrão de 2020.
+  const { serie, loading } = useIndicesEconomicos(['IPCA', 'SELIC', 'CDI'], '2006-01', true, true)
 
   // Exibe o VALOR (taxa acumulada 12 meses), não a variação mensal.
   const serie12m = acumulado12m(serie(indice))
-  const n = periodo === 'tri' ? 3 : periodo === 'ano' ? 12 : 60
+  const n = periodo === 'ano' ? 12 : periodo === '5anos' ? 60 : periodo === '10anos' ? 120 : serie12m.length
   const pts = serie12m.slice(-n)
   const labels = pts.map((p) => labelComp(p.competencia))
   const valores = pts.map((p) => p.valor)
@@ -3957,7 +3973,7 @@ function CardIndice({ indice, titulo, subtitulo, cor, icon }: {
           {atual && <p className="text-[12px] text-gray-400">Até {labelComp(atual.competencia)}</p>}
         </div>
         <div className="flex justify-end">
-          <PeriodoSeg value={periodo} onChange={setPeriodo} opcoes={PERIODOS_INDICE} cor={cor} />
+          <PeriodoSeg value={periodo} onChange={setPeriodo} opcoes={PERIODOS_INDICE_MACRO} cor={cor} />
         </div>
         <LinhaEvolucao labels={labels} valores={valores} cor={cor} fmt={fmtPct} />
       </div>
@@ -4207,7 +4223,7 @@ function SecaoIndicadores() {
         <Btn onClick={() => setModalAberto(true)} cor="#8b5cf6"><Plus size={14} /> Adicionar indicador</Btn>
         {msg && <span className="text-[14px]" style={{ color: msg.startsWith('Erro') ? '#f87171' : '#10b981' }}>{msg}</span>}
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
         <CardPtax />
         <CardIndice indice="IPCA"  titulo="IPCA (inflação)" subtitulo="Acum. 12 meses · IBGE/BCB" cor="#f59e0b" icon={TrendingUp} />
         <CardIndice indice="SELIC" titulo="SELIC"           subtitulo="Acum. 12 meses · BCB"      cor="#3b82f6" icon={Landmark} />

@@ -274,6 +274,27 @@ export async function metaCripto(tickers: string[]): Promise<Map<string, { nome?
   return out;
 }
 
+// Cotações PTAX em ordem crescente de data, de `desdeISO` até `ateISO` (ou sem
+// teto). Pagina em blocos de 1000: o PostgREST corta respostas em 1000 linhas e,
+// como a ordem é crescente, o que se perde são as cotações MAIS RECENTES — a
+// tabela passou disso em 2025 (1 linha por dia útil desde 2021). Toda leitura
+// de janela longa deve passar por aqui.
+export async function lerCotacoesPtax(
+  c: Db, desdeISO: string, ateISO?: string,
+): Promise<{ data: string; cotacao_venda: number }[]> {
+  const rows: { data: string; cotacao_venda: number }[] = [];
+  for (let from = 0; ; from += 1000) {
+    let q = c.from("cotacoes_ptax")
+      .select("data, cotacao_venda").gte("data", desdeISO);
+    if (ateISO) q = q.lte("data", ateISO);
+    const { data } = await q.order("data", { ascending: true }).range(from, from + 999);
+    const bloco = (data ?? []) as { data: string; cotacao_venda: number }[];
+    rows.push(...bloco);
+    if (bloco.length < 1000) break;
+  }
+  return rows;
+}
+
 // Última PTAX (venda) — converte ativos em moeda estrangeira para BRL
 export async function ptaxAtual(c: Db): Promise<number> {
   const { data } = await c.from("cotacoes_ptax")
@@ -305,11 +326,7 @@ export async function conversorCustoBRL(c: Db, posicoes: PosicaoCusto[]): Promis
   if (datas.length > 0) {
     // Uma query só: da compra mais antiga (−15 dias p/ cobrir fds/feriado) até
     // hoje; cada data resolve para a última cotação <= data (como na rotaPtax).
-    const { data } = await c.from("cotacoes_ptax")
-      .select("data, cotacao_venda")
-      .gte("data", recuarDias(datas[0], 15)).lte("data", hojeISO())
-      .order("data", { ascending: true });
-    const rows = (data ?? []) as { data: string; cotacao_venda: number }[];
+    const rows = await lerCotacoesPtax(c, recuarDias(datas[0], 15), hojeISO());
     for (const d of datas) {
       let aplicavel = 0;
       for (const r of rows) { if (r.data <= d) aplicavel = Number(r.cotacao_venda); else break; }
@@ -805,9 +822,7 @@ export async function resolverHistoricoCripto(c: Db, ticker: string, inicio: str
 // PTAX (venda) por mês (último dia útil do mês), a partir de desdeISO
 export async function ptaxPorMesMap(c: Db, desdeISO: string): Promise<Map<string, number>> {
   const out = new Map<string, number>();
-  const { data } = await c.from("cotacoes_ptax")
-    .select("data, cotacao_venda").gte("data", desdeISO).order("data", { ascending: true });
-  for (const r of data ?? []) out.set(String(r.data).slice(0, 7), Number(r.cotacao_venda));
+  for (const r of await lerCotacoesPtax(c, desdeISO)) out.set(String(r.data).slice(0, 7), Number(r.cotacao_venda));
   return out;
 }
 
@@ -1327,11 +1342,9 @@ export async function rotaPtax(c: Db, params: URLSearchParams) {
   const baseIni    = recuarDias(lista[0], 15);
   const janelaIni  = RE_DATA.test(desdeSerie) ? menorData(desdeSerie, baseIni) : baseIni;
 
-  const { data } = await c.from("cotacoes_ptax")
-    .select("data, cotacao_venda")
-    .gte("data", janelaIni).lte("data", hoje)
-    .order("data", { ascending: true });
-  const rows = (data ?? []) as { data: string; cotacao_venda: number }[];
+  // Paginado (ver lerCotacoesPtax): 5 anos de série passam de 1000 linhas e o
+  // corte removeria a "cotação atual" (última linha).
+  const rows = await lerCotacoesPtax(c, janelaIni, hoje);
 
   const byDate: Record<string, number> = {};
   for (const d of lista) {
@@ -1382,7 +1395,14 @@ export async function sincronizarPtaxResposta(c: Db) {
 // Leitura via JWT do usuário; gravação via service_role.
 // ============================================================
 
-export const INDICES_DATA_CORTE = "2020-01"; // competência mínima (YYYY-MM)
+// Dois limites distintos (não unificar sem revisar a renda fixa):
+//  • INDICES_DATA_INICIAL — até onde a tabela guarda/serve história (sync com o
+//    SGS e piso do GET). Alimenta relatórios que corrigem valores pelo IPCA.
+//  • INDICES_DATA_CORTE — janela usada pelo cálculo de RENDA FIXA (snapshot/
+//    rebuild). Meses sem dado caem na taxa atual; mexer aqui muda o patrimônio
+//    gravado de RF comprada antes do corte.
+export const INDICES_DATA_INICIAL = "2006-01"; // competência mínima guardada (YYYY-MM)
+export const INDICES_DATA_CORTE = "2020-01";   // início da janela de cálculo de RF
 export const RE_COMP = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const SGS_SERIES = { IPCA: 433, SELIC: 4390, CDI: 4391 } as const;
 export type IndiceNome = keyof typeof SGS_SERIES;
@@ -1465,9 +1485,9 @@ export async function garantirIndicesSincronizados(c: Db): Promise<void> {
   const compAtual = hoje.slice(0, 7);
   for (const indice of INDICES_NOMES) {
     const ultima = await ultimaCompetencia(c, indice);
-    if (!ultima) { await sincronizarIndice(indice, INDICES_DATA_CORTE, hoje); continue; }
+    if (!ultima) { await sincronizarIndice(indice, INDICES_DATA_INICIAL, hoje); continue; }
     if (ultima < compAtual) {
-      await sincronizarIndice(indice, maiorComp(INDICES_DATA_CORTE, recuarMeses(ultima, 1)), hoje);
+      await sincronizarIndice(indice, maiorComp(INDICES_DATA_INICIAL, recuarMeses(ultima, 1)), hoje);
     }
   }
 }
@@ -1481,7 +1501,9 @@ export async function rotaIndices(c: Db, params: URLSearchParams) {
   const nomes = pedidos.length ? [...new Set(pedidos)] : INDICES_NOMES;
 
   const dParam = (params.get("desde") ?? "").trim();
-  const desde  = RE_COMP.test(dParam) ? maiorComp(dParam, INDICES_DATA_CORTE) : INDICES_DATA_CORTE;
+  // Sem `desde` explícito o padrão continua sendo 2020-01 (compatibilidade com
+  // os consumidores existentes); quem quer a história completa pede `desde`.
+  const desde  = RE_COMP.test(dParam) ? maiorComp(dParam, INDICES_DATA_INICIAL) : INDICES_DATA_CORTE;
 
   const { data } = await c.from("indices_economicos")
     .select("indice, competencia, valor")
@@ -1507,10 +1529,10 @@ export async function sincronizarIndicesResposta(c: Db) {
   const hoje = hojeISO();
   const detalhe: Record<string, number> = {};
   let total = 0;
-  // POST explícito sempre rebaixa do corte (série mensal pequena, upsert
+  // POST explícito sempre rebaixa desde o início (série mensal pequena, upsert
   // idempotente) — garante a história completa e fecha eventuais buracos.
   for (const indice of INDICES_NOMES) {
-    const n = await sincronizarIndice(indice, INDICES_DATA_CORTE, hoje);
+    const n = await sincronizarIndice(indice, INDICES_DATA_INICIAL, hoje);
     detalhe[indice] = n; total += n;
   }
   logSuccess("Índices sincronizados", detalhe);

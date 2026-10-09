@@ -20,7 +20,7 @@ const NOME_MODULO: Record<ModuloAgregado, string> = {
 }
 
 function moduloDaRota(pathname: string): ModuloAgregado | null {
-  if (pathname === '/' || /^\/(lancamentos|relatorios|comparativo|assinaturas|projecao)(\/|$)/.test(pathname)) return 'EXTRATO'
+  if (pathname === '/' || /^\/(lancamentos|relatorios|comparativo|progressao|assinaturas|projecao)(\/|$)/.test(pathname)) return 'EXTRATO'
   if (/^\/objetivos(\/|$)/.test(pathname)) return 'OBJETIVOS'
   if (/^\/investimentos(\/|$)/.test(pathname)) return 'INVESTIMENTOS'
   return null

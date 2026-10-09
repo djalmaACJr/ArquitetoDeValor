@@ -23,6 +23,7 @@ import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_INVESTIMENTOS_PROVENTOS } from '../lib/tutoriaisPaginas'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { MonthPicker } from '../components/ui/MonthPicker'
+import { MultiSelect } from '../components/ui/MultiSelect'
 import { formatBRL, formatData, hojeLocal, mesAtual, mesLabel, MESES_ABREV } from '../lib/utils'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPO_OBJETIVO_LABEL } from '../lib/constants'
 import type { InvestimentoDividendo, TipoAtivoInvestimento, PeriodoRanking } from '../types'
@@ -865,11 +866,14 @@ function ObjetivosAtivos() {
 
 // ── Quadro "Histórico mensal" (ano × mês, com média e total) ────
 
+// Cor do valor provisionado (a receber) nos quadros de proventos
+const COR_A_RECEBER = '#f5a524'
+
 const fmtNum = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 interface HintResumo {
   titulo: string                                          // "04/2026"
-  itens: { tipo: TipoAtivoInvestimento; valor: number }[] // só tipos com valor
+  itens: { tipo: TipoAtivoInvestimento; valor: number; receber: number }[] // só tipos com valor (valor = total; receber = parte a receber)
   x: number
   y: number
   acima: boolean
@@ -889,18 +893,44 @@ function ResumoMensal({ dividendos: todosDividendos }: { dividendos: Investiment
   const mesCorrente = hoje.getMonth() + 1
   const [periodo, setPeriodo] = useState<PeriodoResumo>('recebidos')
   const [hint, setHint] = useState<HintResumo | null>(null)
+  const [filtroTipos, setFiltroTipos] = useState<string[]>([])
+  const [filtroAtivo, setFiltroAtivo] = useState('')
+  const ymCorrente = `${anoAtual}-${String(mesCorrente).padStart(2, '0')}`
+
+  const tiposDisponiveis = useMemo(
+    () => [...new Set(todosDividendos.map((d) => d.tipo_ativo))]
+      .sort((a, b) => TIPO_ATIVO_LABEL[a].localeCompare(TIPO_ATIVO_LABEL[b], 'pt-BR')),
+    [todosDividendos])
+
+  // Ativos (tickers) correlatos aos tipos marcados
+  const tickersDisponiveis = useMemo(() => {
+    const t = new Set<string>()
+    for (const d of todosDividendos) {
+      if (filtroTipos.length > 0 && !filtroTipos.includes(d.tipo_ativo)) continue
+      if (d.inv_ativos?.ticker) t.add(d.inv_ativos.ticker)
+    }
+    return [...t].sort()
+  }, [todosDividendos, filtroTipos])
 
   const dividendos = useMemo(() => {
     // Recebidos vs Futuros agora se baseia no status da projeção (PROJECAO),
     // não na data — uma projeção do mês corrente também conta como futura.
+    // Em "Recebidos", o mês corrente também traz o que ainda falta receber
+    // (exibido à parte na célula, em outra cor).
     return todosDividendos.filter((d) =>
-      periodo === 'todos' ? true
-      : periodo === 'futuros' ? ehProvisionado(d)
-      : !ehProvisionado(d))
-  }, [todosDividendos, periodo])
+      (filtroTipos.length === 0 || filtroTipos.includes(d.tipo_ativo)) &&
+      (!filtroAtivo || d.inv_ativos?.ticker === filtroAtivo) && (
+        periodo === 'todos' ? true
+        : periodo === 'futuros' ? ehProvisionado(d)
+        : !ehProvisionado(d) || d.data_pagamento.slice(0, 7) === ymCorrente))
+  }, [todosDividendos, periodo, filtroTipos, filtroAtivo, ymCorrente])
 
-  const { linhas, totalGeral, porMes } = useMemo(() => {
+  const { linhas, totalGeral, porMes, porMesReceber, aReceberCorrente } = useMemo(() => {
     const porAno = new Map<number, number[]>()
+    // a receber do mês corrente (só no período "Recebidos")
+    let aReceberCorrente = 0
+    // "ano-mes" → parte a receber (provisionada) por tipo, p/ separar no hint
+    const porMesReceber = new Map<string, Map<TipoAtivoInvestimento, number>>()
     // "ano-mes" → soma por tipo de ativo (alimenta o hint da célula)
     const porMes = new Map<string, Map<TipoAtivoInvestimento, number>>()
     let totalGeral = 0
@@ -911,6 +941,12 @@ function ResumoMensal({ dividendos: todosDividendos }: { dividendos: Investiment
       porAno.get(ano)![mes - 1] += d.valor
       totalGeral += d.valor
       const k = `${ano}-${mes}`
+      if (periodo === 'recebidos' && ehProvisionado(d)) {
+        aReceberCorrente += d.valor
+        if (!porMesReceber.has(k)) porMesReceber.set(k, new Map())
+        const r = porMesReceber.get(k)!
+        r.set(d.tipo_ativo, (r.get(d.tipo_ativo) ?? 0) + d.valor)
+      }
       if (!porMes.has(k)) porMes.set(k, new Map())
       const m = porMes.get(k)!
       m.set(d.tipo_ativo, (m.get(d.tipo_ativo) ?? 0) + d.valor)
@@ -926,17 +962,17 @@ function ResumoMensal({ dividendos: todosDividendos }: { dividendos: Investiment
           : Math.max(1, meses.filter((v) => v > 0).length)
         return { ano, meses, total, media: total / divisor, parcial: ano >= anoAtual }
       })
-    return { linhas, totalGeral, porMes }
-  }, [dividendos, anoAtual, mesCorrente])
+    return { linhas, totalGeral, porMes, porMesReceber, aReceberCorrente }
+  }, [dividendos, anoAtual, mesCorrente, periodo])
 
   const mostrarHint = (ano: number, mesIdx: number, el: HTMLElement) => {
     const itens = [...(porMes.get(`${ano}-${mesIdx + 1}`)?.entries() ?? [])]
       .filter(([, v]) => v > 0)
       .sort((a, b) => b[1] - a[1])
-      .map(([tipo, valor]) => ({ tipo, valor }))
+      .map(([tipo, valor]) => ({ tipo, valor, receber: porMesReceber.get(`${ano}-${mesIdx + 1}`)?.get(tipo) ?? 0 }))
     if (itens.length === 0) return
     const r = el.getBoundingClientRect()
-    const altura = 40 + itens.length * 46 // estimativa p/ decidir abrir acima
+    const altura = 80 + itens.length * 46 // estimativa p/ decidir abrir acima
     const acima  = r.bottom + altura + 8 > window.innerHeight
     setHint({
       titulo: `${String(mesIdx + 1).padStart(2, '0')}/${ano}`,
@@ -950,14 +986,27 @@ function ResumoMensal({ dividendos: todosDividendos }: { dividendos: Investiment
   if (todosDividendos.length === 0) return null
 
   return (
-    <div className="rounded-xl border border-white/10 mb-4 overflow-hidden">
-      <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3 border-b border-white/10 bg-white/[0.02]">
+    <div className="rounded-xl border border-white/10 mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3 border-b border-white/10 bg-white/[0.02] rounded-t-xl">
         <h2 className="text-[15px] font-semibold text-white">Histórico mensal</h2>
         <div className="flex items-center gap-3">
           <span className="text-[13px]" style={{ color: MUTED }}>
             Total <span className="font-semibold text-[14px]" style={{ color: '#00c896' }}>{formatBRL(totalGeral)}</span>
           </span>
-          <SelectDark value={periodo} onChange={(e) => setPeriodo(e.target.value as PeriodoResumo)} className="!py-1.5 !text-[13px] min-w-[120px]">
+          <MultiSelect
+            className="w-[240px] [&>button]:!text-[13px]"
+            placeholder="Todos os tipos de ativo"
+            selecionarTodos
+            options={tiposDisponiveis.map((t) => ({ value: t, label: TIPO_ATIVO_LABEL[t], cor: TIPO_ATIVO_COR[t] }))}
+            values={filtroTipos}
+            onChange={(v) => { setFiltroTipos(v); setFiltroAtivo('') }}
+          />
+          <SelectDark value={filtroAtivo} onChange={(e) => setFiltroAtivo(e.target.value)}
+            style={{ width: 'auto' }} className="!h-9 !py-0 !text-[13px] min-w-[150px]">
+            <option value="">Todos os ativos</option>
+            {tickersDisponiveis.map((t) => <option key={t} value={t}>{t}</option>)}
+          </SelectDark>
+          <SelectDark value={periodo} onChange={(e) => setPeriodo(e.target.value as PeriodoResumo)} className="!h-9 !py-0 !text-[13px] min-w-[120px]">
             {PERIODOS_RESUMO.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
           </SelectDark>
         </div>
@@ -998,12 +1047,17 @@ function ResumoMensal({ dividendos: todosDividendos }: { dividendos: Investiment
           </tbody>
         </table>
       </div>
+      {periodo === 'recebidos' && aReceberCorrente > 0 && (
+        <p className="text-[12px] px-4 py-2 border-t border-white/5" style={{ color: MUTED }}>
+          O mês corrente inclui o valor <span style={{ color: COR_A_RECEBER }}>a receber</span>; passe o mouse para ver a separação.
+        </p>
+      )}
 
       {hint && (
         <div className="fixed z-50 pointer-events-none rounded-xl border border-white/10 shadow-2xl px-4 py-3 min-w-[180px]"
           style={{ left: hint.x, top: hint.y, transform: `translate(-50%, ${hint.acima ? '-100%' : '0'})`, background: '#1a1f2e' }}>
           <p className="text-[13px] font-semibold text-white">{hint.titulo}</p>
-          {hint.itens.map((it) => (
+          {!hint.itens.some((it) => it.receber > 0) && hint.itens.map((it) => (
             <div key={it.tipo} className="border-t border-white/5 mt-2 pt-2">
               <div className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: TIPO_ATIVO_COR[it.tipo] }} />
@@ -1012,6 +1066,39 @@ function ResumoMensal({ dividendos: todosDividendos }: { dividendos: Investiment
               <p className="text-[13px] font-semibold text-white mt-0.5">{formatBRL(it.valor)}</p>
             </div>
           ))}
+          {hint.itens.some((it) => it.receber > 0) && (
+            <table className="w-full text-[12px] mt-2 border-t border-white/5">
+              <thead>
+                <tr className="text-right" style={{ color: MUTED }}>
+                  <th className="py-1.5 pr-3 font-medium text-left">Tipo</th>
+                  <th className="py-1.5 px-2 font-medium">Recebido</th>
+                  <th className="py-1.5 px-2 font-medium" style={{ color: COR_A_RECEBER }}>A receber</th>
+                  <th className="py-1.5 pl-2 font-medium">Soma</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hint.itens.map((it) => (
+                  <tr key={it.tipo} className="text-right border-t border-white/5">
+                    <td className="py-1.5 pr-3 text-left" style={{ color: MUTED }}>
+                      <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: TIPO_ATIVO_COR[it.tipo] }} />
+                      {TIPO_ATIVO_LABEL[it.tipo]}
+                    </td>
+                    <td className="py-1.5 px-2 text-white">{formatBRL(it.valor - it.receber)}</td>
+                    <td className="py-1.5 px-2" style={{ color: COR_A_RECEBER }}>{it.receber > 0 ? formatBRL(it.receber) : '—'}</td>
+                    <td className="py-1.5 pl-2 font-semibold text-white">{formatBRL(it.valor)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="text-right border-t border-white/10 font-semibold">
+                  <td className="py-1.5 pr-3 text-left text-white">Total</td>
+                  <td className="py-1.5 px-2 text-white">{formatBRL(hint.itens.reduce((s, it) => s + it.valor - it.receber, 0))}</td>
+                  <td className="py-1.5 px-2" style={{ color: COR_A_RECEBER }}>{formatBRL(hint.itens.reduce((s, it) => s + it.receber, 0))}</td>
+                  <td className="py-1.5 pl-2 text-white">{formatBRL(hint.itens.reduce((s, it) => s + it.valor, 0))}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
         </div>
       )}
     </div>
@@ -1064,6 +1151,10 @@ const pluginValorBarra: Plugin<'bar'> = {
 
 function EvolucaoRecebimentos({ dividendos }: { dividendos: InvestimentoDividendo[] }) {
   const dark = useModoEscuro()
+  const ymCorrente = useMemo(() => {
+    const h = new Date()
+    return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, '0')}`
+  }, [])
   const [granularidade, setGranularidade] = useState<GranularidadeEvolucao>('mensal')
   const [porTipo, setPorTipo] = useState(false)
   // Mesmo controle de período do quadro "Ativos por categoria" (PERIODOS/
@@ -1088,14 +1179,23 @@ function EvolucaoRecebimentos({ dividendos }: { dividendos: InvestimentoDividend
   const porMesDetalhado = useMemo(() => {
     const mapa = new Map<string, Map<TipoAtivoInvestimento, number>>()
     for (const d of dividendosNoPeriodo) {
-      if (ehProvisionado(d)) continue
       const ym = d.data_pagamento.slice(0, 7)
+      if (ehProvisionado(d)) {
+        // só o mês corrente entra (como "a receber"); garante a coluna existir
+        if (ym === ymCorrente && !mapa.has(ym)) mapa.set(ym, new Map())
+        continue
+      }
       if (!mapa.has(ym)) mapa.set(ym, new Map())
       const m = mapa.get(ym)!
       m.set(d.tipo_ativo, (m.get(d.tipo_ativo) ?? 0) + d.valor)
     }
     return [...mapa.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-  }, [dividendosNoPeriodo])
+  }, [dividendosNoPeriodo, ymCorrente])
+
+  // A receber (provisionado) do mês corrente
+  const aReceber = useMemo(() => dividendosNoPeriodo
+    .filter((d) => ehProvisionado(d) && d.data_pagamento.slice(0, 7) === ymCorrente)
+    .reduce((s, d) => s + d.valor, 0), [dividendosNoPeriodo, ymCorrente])
 
   const serieDetalhada = useMemo(() => {
     if (granularidade === 'mensal') return porMesDetalhado
@@ -1123,9 +1223,16 @@ function EvolucaoRecebimentos({ dividendos }: { dividendos: InvestimentoDividend
       .sort((a, b) => TIPO_ATIVO_LABEL[a].localeCompare(TIPO_ATIVO_LABEL[b], 'pt-BR'))
   }, [serieDetalhada])
 
-  const totais = useMemo(() =>
+  const recebidos = useMemo(() =>
     serieDetalhada.map(([, porTipoNoPeriodo]) => [...porTipoNoPeriodo.values()].reduce((s, v) => s + v, 0)),
   [serieDetalhada])
+
+  // a receber por coluna: só a do mês corrente (ou do ano corrente, no anual)
+  const provisionados = useMemo(() => serieDetalhada.map(([chave]) =>
+    (granularidade === 'mensal' ? chave === ymCorrente : chave === ymCorrente.slice(0, 4)) ? aReceber : 0),
+  [serieDetalhada, granularidade, ymCorrente, aReceber])
+
+  const totais = useMemo(() => recebidos.map((v, i) => v + provisionados[i]), [recebidos, provisionados])
 
   const corTick  = dark ? '#8b92a8' : '#6b7280'
   const corGrid  = dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.08)'
@@ -1175,7 +1282,7 @@ function EvolucaoRecebimentos({ dividendos }: { dividendos: InvestimentoDividend
           plugins={[pluginValorBarra]}
           data={{
             labels,
-            datasets: porTipo
+            datasets: [...(porTipo
               ? tiposPresentes.map((tipo) => ({
                   label: TIPO_ATIVO_LABEL[tipo],
                   data: serieDetalhada.map(([, porTipoNoPeriodo]) => Number((porTipoNoPeriodo.get(tipo) ?? 0).toFixed(2))),
@@ -1185,12 +1292,21 @@ function EvolucaoRecebimentos({ dividendos }: { dividendos: InvestimentoDividend
                 }))
               : [{
                   label: 'Recebido',
-                  data: totais.map((v) => Number(v.toFixed(2))),
+                  data: recebidos.map((v) => Number(v.toFixed(2))),
                   backgroundColor: '#00c896aa',
                   borderRadius: 4,
                   stack: 'total',
                   maxBarThickness: espessura,
-                }],
+                }]),
+              ...(aReceber > 0 ? [{
+                label: 'A receber',
+                data: provisionados.map((v) => Number(v.toFixed(2))),
+                backgroundColor: COR_A_RECEBER + 'cc',
+                borderRadius: 4,
+                stack: 'total',
+                maxBarThickness: espessura,
+              }] : []),
+            ],
           }}
           options={{
             responsive: true,
@@ -1198,7 +1314,7 @@ function EvolucaoRecebimentos({ dividendos }: { dividendos: InvestimentoDividend
             layout: { padding: { top: 20 } },
             interaction: { mode: 'index', intersect: false },
             plugins: {
-              legend: porTipo
+              legend: porTipo || aReceber > 0
                 ? { display: true, position: 'bottom', labels: { color: corTick, boxWidth: 12, padding: 12 } }
                 : { display: false },
               tooltip: {
@@ -1236,41 +1352,12 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar, podeEscrever }: {
   onConfirmar: (d: InvestimentoDividendo) => void
   podeEscrever: boolean
 }) {
-  const [filtroTicker, setFiltroTicker] = useState('')
-  const [filtroTipoAtivo, setFiltroTipoAtivo] = useState<'' | TipoAtivoInvestimento>('')
   const [agrupar, setAgrupar] = useState(true)
   const [sort, setSort] = useState<{ key: DivSortKey; dir: 'asc' | 'desc' }>({ key: 'data', dir: 'desc' })
 
   const tipoLabel = (d: InvestimentoDividendo) => d.inv_tipos_dividendo?.nome ?? TIPO_DEFAULT_LABEL(d.tipo_ativo)
 
-  // Tickers correlatos ao tipo de ativo selecionado (tipo vem antes do ativo)
-  const tickers = useMemo(() => {
-    const s = new Set<string>()
-    for (const d of dividendos) {
-      if (filtroTipoAtivo && d.tipo_ativo !== filtroTipoAtivo) continue
-      if (d.inv_ativos?.ticker) s.add(d.inv_ativos.ticker)
-    }
-    return [...s].sort()
-  }, [dividendos, filtroTipoAtivo])
-  const tiposAtivo = useMemo(() => {
-    const s = new Set<TipoAtivoInvestimento>()
-    for (const d of dividendos) s.add(d.tipo_ativo)
-    return [...s]
-  }, [dividendos])
-
-  const mudarTipoAtivo = (t: '' | TipoAtivoInvestimento) => {
-    setFiltroTipoAtivo(t)
-    setFiltroTicker('') // ticker pode não pertencer ao novo tipo
-  }
-
-  // Recorte por tipo/ativo — alimenta o quadro de resumo (que tem período próprio)
-  // e o extrato (paginado por mês, sem filtro de período).
-  const filtradosBase = useMemo(() => dividendos.filter((d) =>
-    (!filtroTipoAtivo || d.tipo_ativo === filtroTipoAtivo) &&
-    (!filtroTicker || d.inv_ativos?.ticker === filtroTicker)
-  ), [dividendos, filtroTicker, filtroTipoAtivo])
-
-  const filtrados = filtradosBase
+  const filtrados = dividendos
 
   const valorOrd = (d: InvestimentoDividendo): string | number => {
     switch (sort.key) {
@@ -1386,28 +1473,8 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar, podeEscrever }: {
 
   return (
     <>
-      {/* Filtros — tipo de ativo → ativo (valem p/ quadro e extrato) */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <SelectDark value={filtroTipoAtivo} onChange={(e) => mudarTipoAtivo(e.target.value as '' | TipoAtivoInvestimento)}
-          style={{ width: 'auto' }} className="!py-1.5 !text-[13px] min-w-[130px]">
-          <option value="">Todos os tipos</option>
-          {tiposAtivo.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t]}</option>)}
-        </SelectDark>
-        <SelectDark value={filtroTicker} onChange={(e) => setFiltroTicker(e.target.value)}
-          style={{ width: 'auto' }} className="!py-1.5 !text-[13px] min-w-[130px]">
-          <option value="">Todos os ativos</option>
-          {tickers.map((t) => <option key={t} value={t}>{t}</option>)}
-        </SelectDark>
-        {(filtroTicker || filtroTipoAtivo) && (
-          <button onClick={() => { setFiltroTicker(''); setFiltroTipoAtivo('') }}
-            className="text-[13px] px-2.5 py-1.5 rounded-lg border border-white/10 hover:border-white/25" style={{ color: MUTED }}>
-            Limpar
-          </button>
-        )}
-      </div>
-
-      <ResumoMensal dividendos={filtradosBase} />
-      <EvolucaoRecebimentos dividendos={filtradosBase} />
+      <ResumoMensal dividendos={dividendos} />
+      <EvolucaoRecebimentos dividendos={dividendos} />
 
       {/* Extrato — mês escolhido pelo calendário padrão (MonthPicker), centralizado */}
       <div className="flex items-center gap-2 mb-3">

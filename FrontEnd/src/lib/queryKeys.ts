@@ -38,6 +38,9 @@ export const qk = {
   // diretamente via Studio/SQL)
   usuarioPerfil: (uid: Uid) => ['usuario-perfil', uid] as const,
 
+  // Ano do lançamento mais antigo (limite inferior dos relatórios multi-ano)
+  primeiroLancamento: (uid: Uid) => ['primeiro-lancamento', uid] as const,
+
   // Admin — flag e telas restritas a usuarios.admin = true (RLS garante o
   // isolamento real; ver migration 20260806000002_cron_execucoes.sql)
   usuarioAdmin: (uid: Uid) => ['usuario-admin', uid] as const,
