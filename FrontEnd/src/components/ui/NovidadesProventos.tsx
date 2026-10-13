@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Coins, X } from 'lucide-react'
 import { useNovidadesProventos, type NovidadeProventoItem } from '../../hooks/useNovidadesProventos'
-import { formatBRL, formatData } from '../../lib/utils'
+import { formatBRL, formatData, hojeLocal } from '../../lib/utils'
 import { Drawer } from './shared'
 
 // Novos antes de atualizados; dentro de cada grupo, por ticker.
@@ -13,6 +13,9 @@ function ordenarItens(itens: NovidadeProventoItem[]): NovidadeProventoItem[] {
 }
 
 const MUTED = '#8b92a8'
+
+// Data COM só interessa enquanto ainda dá tempo de comprar com direito ao provento.
+const comFutura = (it: NovidadeProventoItem) => !!it.data_com && it.data_com >= hojeLocal()
 
 // Card de notificação exibido no login quando o job de proventos BRL criou
 // ou atualizou lançamentos. Montado uma vez em AppLayout. Some ao descartar.
@@ -55,8 +58,8 @@ export default function NovidadesProventos() {
             {itens.slice(0, 6).map((it, i) => (
               <li key={i} className="flex items-center justify-between gap-2 text-[12px]">
                 <span className="text-white truncate">
-                  {it.ticker} <span style={{ color: MUTED }}>· {formatData(it.data_pagamento)}</span>
-                  {it.data_com && <span style={{ color: '#eab308' }}> · Data COM {formatData(it.data_com)}</span>}
+                  {it.ticker} <span style={{ color: MUTED }}>· paga em {formatData(it.data_pagamento)}</span>
+                  {comFutura(it) && <span style={{ color: '#eab308' }}> · COM {formatData(it.data_com!)}</span>}
                 </span>
                 <span className="shrink-0 font-medium" style={{ color: it.acao === 'criado' ? '#4ade80' : '#ffb74d' }}>
                   {formatBRL(it.valor)}
@@ -94,8 +97,8 @@ export default function NovidadesProventos() {
               <div className="min-w-0">
                 <p className="text-[13px] font-medium text-white truncate">{it.ticker}</p>
                 <p className="text-[12px]" style={{ color: MUTED }}>
-                  {it.tipo} · {formatData(it.data_pagamento)}
-                  {it.data_com && <span style={{ color: '#eab308' }}> · Data COM {formatData(it.data_com)}</span>}
+                  {it.tipo} · paga em {formatData(it.data_pagamento)}
+                  {comFutura(it) && <span style={{ color: '#eab308' }}> · COM {formatData(it.data_com!)}</span>}
                 </p>
               </div>
               <div className="text-right shrink-0">

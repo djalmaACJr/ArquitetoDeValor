@@ -183,6 +183,8 @@ export default function ProjecaoEconomiaPage() {
   const taxa            = rendimento / 100
   const economiaAtual   = Math.max(0, medias.economia)
   const economiaOtimista = economiaAtual + medias.despesas * (reducaoPerc / 100)
+  // Pessimista: espelho do otimista — as despesas sobem no mesmo percentual (pode ficar negativo)
+  const economiaPessimista = economiaAtual - medias.despesas * (reducaoPerc / 100)
 
   const pvAtual    = fvAnnuity(economiaAtual,    taxa, horizonte)
   const pvOtimista = fvAnnuity(economiaOtimista, taxa, horizonte)
@@ -194,8 +196,9 @@ export default function ProjecaoEconomiaPage() {
       labels,
       atual:    serieMensal(economiaAtual,    taxa, horizonte),
       otimista: serieMensal(economiaOtimista, taxa, horizonte),
+      pessimista: serieMensal(economiaPessimista, taxa, horizonte),
     }
-  }, [economiaAtual, economiaOtimista, taxa, horizonte])
+  }, [economiaAtual, economiaOtimista, economiaPessimista, taxa, horizonte])
 
   const hLabel = horizonte < 24
     ? `${horizonte} meses`
@@ -381,7 +384,7 @@ export default function ProjecaoEconomiaPage() {
             <div className="bg-[#1a1f2e] border border-white/10 rounded-xl p-4">
               <p className="text-[17px] font-semibold text-white mb-0.5">Evolução Patrimonial Projetada</p>
               <p className="text-[14px] mb-3" style={{ color: '#8b92a8' }}>
-                Juros compostos · {rendimento}% a.m. · economia reinvestida mensalmente
+                Juros compostos · {rendimento}% a.m. · economia reinvestida mensalmente · pessimista: despesas +{reducaoPerc}%
               </p>
               <div className="h-56">
                 <Line
@@ -400,6 +403,13 @@ export default function ProjecaoEconomiaPage() {
                         data: chartData.otimista,
                         borderColor: '#00c896',
                         backgroundColor: 'rgba(0,200,150,0.07)',
+                        borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true,
+                      },
+                      {
+                        label: 'Cenário Pessimista',
+                        data: chartData.pessimista,
+                        borderColor: '#ff5c7a',
+                        backgroundColor: 'rgba(255,92,122,0.07)',
                         borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true,
                       },
                     ],
