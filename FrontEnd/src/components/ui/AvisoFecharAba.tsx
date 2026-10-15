@@ -16,8 +16,23 @@ import {
 } from '../../lib/avisoFecharAba'
 
 export default function AvisoFecharAba() {
-  const { mostrando, segundos, fechando } = useSyncExternalStore(subscribeAvisoFecharAba, getAvisoFecharAbaSnapshot)
+  const { mostrando, segundos, fechando, motivo = 'inatividade', podeContinuar = true } = useSyncExternalStore(subscribeAvisoFecharAba, getAvisoFecharAbaSnapshot)
   if (!mostrando) return null
+
+  if (motivo === 'encerrada') {
+    return (
+      <div role="alertdialog" aria-modal="true" aria-live="assertive"
+        className="fixed inset-0 z-[400] flex items-center justify-center p-6" style={{ background: '#0f1320' }}>
+        <div className="max-w-[440px] text-center flex flex-col gap-3">
+          <span className="text-[18px] font-semibold" style={{ color: '#e8eaf0' }}>Aba encerrada por inatividade</span>
+          <p className="text-[15px]" style={{ color: '#c2c7d6' }}>
+            Esta aba foi bloqueada por falta de uso. A sessão continua ativa na outra aba — pode fechar esta.
+          </p>
+        </div>
+      </div>
+    )
+  }
+  const principalFechada = motivo === 'principal-fechada'
 
   return (
     <>
@@ -33,19 +48,23 @@ export default function AvisoFecharAba() {
         <div className="flex items-center gap-2 px-5 py-4 border-b border-white/10">
           <LogOut size={15} className="text-red-300" />
           <span className="text-[18px] font-semibold" style={{ color: '#e8eaf0' }}>
-            Aba inativa
+            {principalFechada ? 'Aba principal fechada' : 'Aba inativa'}
           </span>
         </div>
 
         <div className="p-5 flex flex-col gap-4">
           <p className="text-[15px] leading-relaxed" style={{ color: '#c2c7d6' }}>
-            {fechando
+            {principalFechada
+              ? 'A aba principal do sistema foi fechada. Esta aba continua conectada — feche-a também se não for mais usá-la.'
+              : fechando
               ? 'Tentando fechar esta aba automaticamente… Se o navegador não permitir (só funciona em abas abertas por um link dentro do sistema), a sessão será encerrada em todas as abas em instantes.'
               : 'Esta aba ficou muito tempo sem uso. Se você tem outras abas do sistema abertas, feche apenas esta para mantê-las conectadas.'}
           </p>
           {!fechando && (
             <p className="text-[13px]" style={{ color: '#8b92a8' }}>
-              Sem uma ação sua, a sessão será encerrada em todas as abas em {segundos}s. Se o navegador não deixar esta aba se fechar sozinha (abas abertas manualmente costumam não deixar), o botão abaixo vai encerrar a sessão em todas as abas em poucos segundos, mais rápido que esperar.
+              {podeContinuar
+                ? `Sem uma ação sua em ${segundos}s, esta aba será encerrada (a sessão continua nas outras abas em uso).`
+                : `Sem uma ação sua em ${segundos}s, a sessão será encerrada em todas as abas.`}
             </p>
           )}
         </div>
@@ -60,14 +79,14 @@ export default function AvisoFecharAba() {
               <X size={15} />
               Fechar esta aba
             </button>
-            <button
+            {podeContinuar && <button
               onClick={continuarNestaAba}
               className="flex-1 rounded-lg border border-white/10 px-3 py-2.5 text-[15px] font-semibold
                 hover:border-white/30 transition-colors"
               style={{ color: '#e8eaf0' }}
             >
               Continuar aqui
-            </button>
+            </button>}
           </div>
         )}
       </div>

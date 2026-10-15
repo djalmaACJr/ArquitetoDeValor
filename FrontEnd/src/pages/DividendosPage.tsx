@@ -887,13 +887,16 @@ const PERIODOS_RESUMO: { value: PeriodoResumo; label: string }[] = [
   { value: 'todos',     label: 'Todos (Recebidos e Futuros)' },
 ]
 
-function ResumoMensal({ dividendos: todosDividendos }: { dividendos: InvestimentoDividendo[] }) {
+function ResumoMensal({ dividendos: todosDividendos, filtroTipos, setFiltroTipos }: {
+  dividendos: InvestimentoDividendo[]
+  filtroTipos: string[]
+  setFiltroTipos: (v: string[]) => void
+}) {
   const hoje        = new Date()
   const anoAtual    = hoje.getFullYear()
   const mesCorrente = hoje.getMonth() + 1
   const [periodo, setPeriodo] = useState<PeriodoResumo>('recebidos')
   const [hint, setHint] = useState<HintResumo | null>(null)
-  const [filtroTipos, setFiltroTipos] = useState<string[]>([])
   const [filtroAtivo, setFiltroAtivo] = useState('')
   const ymCorrente = `${anoAtual}-${String(mesCorrente).padStart(2, '0')}`
 
@@ -1149,7 +1152,14 @@ const pluginValorBarra: Plugin<'bar'> = {
   },
 }
 
-function EvolucaoRecebimentos({ dividendos }: { dividendos: InvestimentoDividendo[] }) {
+function EvolucaoRecebimentos({ dividendos: todosDividendos, filtroTipos }: {
+  dividendos: InvestimentoDividendo[]
+  filtroTipos: string[]
+}) {
+  // Obedece o filtro de tipo de ativo do quadro "Histórico mensal"
+  const dividendos = useMemo(
+    () => filtroTipos.length === 0 ? todosDividendos : todosDividendos.filter((d) => filtroTipos.includes(d.tipo_ativo)),
+    [todosDividendos, filtroTipos])
   const dark = useModoEscuro()
   const ymCorrente = useMemo(() => {
     const h = new Date()
@@ -1386,6 +1396,8 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar, podeEscrever }: {
   // lançamentos são opcionalmente agrupados por tipo de ativo.
   // Subgrupos de tipo recolhidos, por chave "YYYY-MM|TIPO"
   const [tiposFechados, setTiposFechados] = useState<Set<string>>(new Set())
+  // Filtro de tipo do "Histórico mensal", compartilhado com "Evolução dos recebimentos"
+  const [filtroTiposResumo, setFiltroTiposResumo] = useState<string[]>([])
   const toggleTipo = (ym: string, tipo: TipoAtivoInvestimento) => setTiposFechados((s) => {
     const k = `${ym}|${tipo}`
     const n = new Set(s)
@@ -1473,8 +1485,8 @@ function ListaDividendos({ dividendos, onExcluir, onConfirmar, podeEscrever }: {
 
   return (
     <>
-      <ResumoMensal dividendos={dividendos} />
-      <EvolucaoRecebimentos dividendos={dividendos} />
+      <ResumoMensal dividendos={dividendos} filtroTipos={filtroTiposResumo} setFiltroTipos={setFiltroTiposResumo} />
+      <EvolucaoRecebimentos dividendos={dividendos} filtroTipos={filtroTiposResumo} />
 
       {/* Extrato — mês escolhido pelo calendário padrão (MonthPicker), centralizado */}
       <div className="flex items-center gap-2 mb-3">

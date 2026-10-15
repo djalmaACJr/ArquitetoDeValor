@@ -767,6 +767,7 @@ describe("Agregados — escrita no Extrato por agregado (Fase 2)", () => {
   let contaLiberadaId: string;
   let contaLiberada2Id: string;
   let contaNaoLiberadaId: string;
+  let categoriaId: string;
   let headersA: Record<string, string>;
   let headersB: Record<string, string>;
   let lancamentoId: string;
@@ -793,6 +794,11 @@ describe("Agregados — escrita no Extrato por agregado (Fase 2)", () => {
     const { data: contaNaoLib } = await api("/contas", { method: "POST", headers: headersA,
       body: JSON.stringify({ nome: `AGR-W-NaoLiberada-${TS}`, tipo: "CORRENTE", saldo_inicial: 999, icone: "🔒", cor: "#ff0000" }) });
     contaNaoLiberadaId = contaNaoLib.id;
+
+    // categoria_id é obrigatório em POST /transacoes (v7.1)
+    const { data: cats } = await api("/categorias", { method: "GET", headers: headersA });
+    categoriaId = (cats.dados as { id: string; protegida?: boolean; ativa?: boolean }[])
+      .find((c) => !c.protegida && c.ativa !== false)!.id;
 
     const { data: convite } = await api("/agregados", { method: "POST", headers: headersA, body: JSON.stringify({ email: emailB }) });
     vinculoId = convite.dados.id;
@@ -827,7 +833,7 @@ describe("Agregados — escrita no Extrato por agregado (Fase 2)", () => {
       headers: { ...headersB, "X-Contexto-User-Id": donoId },
       body: JSON.stringify({
         descricao: `AGR Lanc Bloqueado ${TS}`, valor: 10, data: hoje,
-        conta_id: contaLiberadaId, tipo: "DESPESA", status: "PAGO",
+        conta_id: contaLiberadaId, categoria_id: categoriaId, tipo: "DESPESA", status: "PAGO",
       }) });
     expect(status).toBe(403);
   });
@@ -843,7 +849,7 @@ describe("Agregados — escrita no Extrato por agregado (Fase 2)", () => {
       headers: { ...headersB, "X-Contexto-User-Id": donoId },
       body: JSON.stringify({
         descricao: `AGR Lanc Escrito ${TS}`, valor: 42, data: hoje,
-        conta_id: contaLiberadaId, tipo: "DESPESA", status: "PAGO",
+        conta_id: contaLiberadaId, categoria_id: categoriaId, tipo: "DESPESA", status: "PAGO",
       }) });
     expect(status).toBe(201);
     expect(data.user_id).toBe(donoId);
@@ -892,7 +898,7 @@ describe("Agregados — escrita no Extrato por agregado (Fase 2)", () => {
       headers: { ...headersB, "X-Contexto-User-Id": donoId },
       body: JSON.stringify({
         descricao: `AGR Lanc Conta Bloqueada ${TS}`, valor: 10, data: hoje,
-        conta_id: contaNaoLiberadaId, tipo: "DESPESA", status: "PAGO",
+        conta_id: contaNaoLiberadaId, categoria_id: categoriaId, tipo: "DESPESA", status: "PAGO",
       }) });
     expect(status).toBe(422);
   });

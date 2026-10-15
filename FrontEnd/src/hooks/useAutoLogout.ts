@@ -52,6 +52,7 @@ import { salvarRetornoPosExpiracao } from '../lib/retornoPosExpiracao'
 import { temOperacaoLongaAtiva } from '../lib/operacaoLonga'
 import { setAviso, registrarResetInatividade } from '../lib/autoLogoutAviso'
 import { setAvisoFecharAba, registrarAcoesFecharAba } from '../lib/avisoFecharAba'
+import { registrarInteracaoAba, outraAbaAtiva, iniciarCoordenacaoAbas } from '../lib/abasSessao'
 
 // IMPORTANTE: `mousemove` foi DELIBERADAMENTE removido. Em setups
 // multi-monitor, o cursor apenas CRUZANDO a janela visível (no outro
@@ -182,6 +183,7 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
         if (ke.key === 'Tab' || ke.key === 'Alt' || ke.key === 'Meta' || ke.altKey || ke.metaKey) return
       }
       lastActivityRef.current = Date.now()
+      registrarInteracaoAba() // outras abas usam isto pra saber que ESTA está em uso
       // Rearma a tentativa de auto-fechamento (ver checarExpiracao) — sem
       // isso, uma aba secundária que já tentou se fechar sozinha uma vez
       // (e o navegador recusou) nunca mais tentava de novo em episódios de
@@ -237,33 +239,64 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
     // fechar (aba não aberta via window.open — caso comum), cai no signOut
     // normal mesmo assim (defesa de segurança: não dá pra deixar a aba
     // pendurada pra sempre esperando alguém decidir).
-    function iniciarAvisoFecharAba() {
+    function iniciarAvisoFecharAba(motivo: 'inatividade' | 'principal-fechada' = 'inatividade') {
       if (aguardandoDecisaoRef.current) return
       aguardandoDecisaoRef.current = true
 
+      const inicioAviso = Date.now()
+      let fechouPeloBotao = false
+      // "Continuar aqui" só quando esta aba pode ser isolada: fecha por script
+      // (tem opener) E há outra aba em uso. Senão o signOut seria global e
+      // manter a aba aberta não faz sentido. No aviso "principal fechada" é só
+      // um aviso, o botão sempre existe.
+      const podeContinuar = motivo === 'principal-fechada'
+        || (!!window.opener && outraAbaAtiva(limiteMs))
+      const mostrar = (segundos: number, fechando = false) =>
+        setAvisoFecharAba({ mostrando: true, segundos, fechando, motivo, podeContinuar })
+
+      // Fim do prazo sem resposta. Nunca derruba a aba em uso:
+      //  - houve interação nesta aba desde o aviso → só dispensa o aviso;
+      //  - outra aba está em uso → bloqueia/fecha SÓ esta, sessão intacta;
+      //  - ninguém em uso → signOut global (sessão esquecida).
+      function decidirEncerramento() {
+        if (!fechouPeloBotao && lastActivityRef.current > inicioAviso) {
+          pararDecisaoFecharAba()
+          return
+        }
+        if (outraAbaAtiva(limiteMs)) {
+          if (intervalDecisaoRef.current !== null) { window.clearInterval(intervalDecisaoRef.current); intervalDecisaoRef.current = null }
+          if (timeoutFallbackFecharRef.current !== null) { window.clearTimeout(timeoutFallbackFecharRef.current); timeoutFallbackFecharRef.current = null }
+          window.close() // só funciona se aberta via script; senão fica o bloqueio
+          setAvisoFecharAba({ mostrando: true, segundos: 0, fechando: false, motivo: 'encerrada', podeContinuar: false })
+          return
+        }
+        efetuarLogoutReal()
+      }
+
       let restante = JANELA_DECISAO_FECHAR_S
-      setAvisoFecharAba({ mostrando: true, segundos: restante, fechando: false })
+      mostrar(restante)
 
       intervalDecisaoRef.current = window.setInterval(() => {
         restante -= 1
         if (restante <= 0) {
-          efetuarLogoutReal()
+          decidirEncerramento()
           return
         }
-        setAvisoFecharAba({ mostrando: true, segundos: restante, fechando: false })
+        mostrar(restante)
       }, 1_000)
 
       registrarAcoesFecharAba({
         fechar() {
           if (intervalDecisaoRef.current !== null) { window.clearInterval(intervalDecisaoRef.current); intervalDecisaoRef.current = null }
-          setAvisoFecharAba({ mostrando: true, segundos: 0, fechando: true })
+          fechouPeloBotao = true
+          mostrar(0, true)
           window.close()
           // Se a aba realmente fechou, nenhum código abaixo roda — o
           // processo/tab morreu. Se continuar rodando após o prazo, o
           // navegador recusou fechar (não foi aberta via script): cai no
           // signOut normal, agora com uma explicação prévia em vez de ser
           // instantâneo e sem aviso.
-          timeoutFallbackFecharRef.current = window.setTimeout(() => { efetuarLogoutReal() }, FALLBACK_FECHAR_MS)
+          timeoutFallbackFecharRef.current = window.setTimeout(() => { decidirEncerramento() }, FALLBACK_FECHAR_MS)
         },
         continuar() {
           pararDecisaoFecharAba()
@@ -325,8 +358,20 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
     // ultrapassou o limite, desloga IMEDIATAMENTE ao montar — sem isso, o
     // app Android reaberto depois do tempo de inatividade continuava logado
     // até o próximo tick "perceber" (e um tick só roda com o app já aberto).
+    //
+    // Em aba VISÍVEL no desktop, vai direto pro signOut (sem o modal "Aba
+    // inativa"): uma aba ativa em qualquer outra janela re-persiste este
+    // timestamp a cada 1s, então um valor vencido NO MOUNT significa que
+    // nenhuma aba estava em uso — não há aba ativa pra proteger, e mostrar o
+    // modal deixaria a sessão esquecida decidível em vez de cair na tela de
+    // login. O modal fica só pra expiração AO VIVO.
     if (persistida > 0 && Date.now() - persistida >= limiteMs) {
-      checarExpiracao(true)
+      if (!Capacitor.isNativePlatform() && document.visibilityState === 'visible'
+          && !temOperacaoLongaAtiva()) {
+        efetuarLogoutReal()
+      } else {
+        checarExpiracao(true)
+      }
     }
 
     // Tick de 1s: atualiza a contagem regressiva (último minuto) e dispara a
@@ -427,7 +472,15 @@ export function useAutoLogout(timeoutMinutos: number = 15): void {
       }).then(h => { if (cancelado) h.remove(); else handleResume = h })
     }
 
+    // Aba principal fechada → só avisa as demais (sem fechar/deslogar nada).
+    const limparAbas = Capacitor.isNativePlatform()
+      ? () => {}
+      : iniciarCoordenacaoAbas(() => {
+          if (!expiradoRef.current) iniciarAvisoFecharAba('principal-fechada')
+        })
+
     return () => {
+      limparAbas()
       cancelado = true
       handlePause?.remove()
       handleResume?.remove()

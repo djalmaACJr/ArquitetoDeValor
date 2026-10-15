@@ -57,7 +57,7 @@ async function userIdDaSessao(page: Page): Promise<string> {
 }
 
 test.describe('Sessão — aba inativa multi-tab (E2E)', () => {
-  test('E2E-SEC01 — timer expirado em primeiro plano mostra o modal; "Continuar aqui" mantém a sessão', async ({ page }) => {
+  test('E2E-SEC01 — sessão esquecida (timestamp vencido ao abrir) vai direto pro login, sem modal', async ({ page }) => {
     await page.goto('/')
     await expect(page.getByRole('button', { name: /novo lançamento/i }).first()).toBeVisible({ timeout: 8_000 })
     const uid = await userIdDaSessao(page)
@@ -68,37 +68,10 @@ test.describe('Sessão — aba inativa multi-tab (E2E)', () => {
     }, { uid, expirado: Date.now() - LIMITE_MS - 10_000 })
     await page.reload()
 
-    const modal = page.getByRole('alertdialog')
-    await expect(modal).toBeVisible({ timeout: 8_000 })
-    await expect(modal.getByText(/aba inativa/i)).toBeVisible()
-    await expect(modal.getByRole('button', { name: /fechar esta aba/i })).toBeVisible()
-
-    await modal.getByRole('button', { name: /continuar aqui/i }).click()
-
-    await expect(modal).not.toBeVisible({ timeout: 3_000 })
-    // Sessão intacta: continua na página protegida, não foi pro /login.
-    await expect(page.getByRole('button', { name: /novo lançamento/i }).first()).toBeVisible({ timeout: 8_000 })
-    await expect(page).not.toHaveURL(/\/login/)
-  })
-
-  test('E2E-SEC02 — sem resposta ao modal, a sessão é encerrada e redireciona pro login', async ({ page }) => {
-    test.setTimeout(50_000)
-    await page.goto('/')
-    await expect(page.getByRole('button', { name: /novo lançamento/i }).first()).toBeVisible({ timeout: 8_000 })
-    const uid = await userIdDaSessao(page)
-
-    await page.addInitScript(({ uid, expirado }) => {
-      localStorage.setItem('arqv-lc', JSON.stringify({ data: {}, savedAt: Date.now(), userId: uid }))
-      localStorage.setItem('arqvalor:ultima-atividade', String(expirado))
-    }, { uid, expirado: Date.now() - LIMITE_MS - 10_000 })
-    await page.reload()
-
-    const modal = page.getByRole('alertdialog')
-    await expect(modal).toBeVisible({ timeout: 8_000 })
-
-    // JANELA_DECISAO_FECHAR_S = 20s sem clicar em nada → signOut global +
-    // redirect com o banner de expiração.
-    await expect(page).toHaveURL(/\/login\?expirado=1/, { timeout: 30_000 })
+    // Nenhuma aba estava ativa (o timestamp vencido prova isso): não há o
+    // que proteger com o modal — cai direto no login com o banner.
+    await expect(page).toHaveURL(//login?expirado=1/, { timeout: 10_000 })
+    await expect(page.getByRole('alertdialog')).not.toBeVisible()
   })
 
   test('E2E-SEC03 — aba secundária inativa e escondida nunca desloga sozinha (não derruba a aba ativa)', async ({ page, context }) => {

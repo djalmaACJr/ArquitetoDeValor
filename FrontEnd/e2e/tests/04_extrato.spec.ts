@@ -1,6 +1,6 @@
 // e2e/tests/02_extrato.spec.ts
 import { test, expect } from '@playwright/test'
-import { abrirNovoLancamento, preencherValor, abrirEdicaoLancamento, expandirFiltros } from './helpers'
+import { abrirNovoLancamento, preencherValor, selecionarCategoria, abrirEdicaoLancamento, expandirFiltros } from './helpers'
 
 test.describe('Extrato (Lançamentos)', () => {
 
@@ -116,6 +116,7 @@ test.describe('Extrato (Lançamentos)', () => {
     await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
+    await selecionarCategoria(page, drawer)
 
     // Salvar
     await drawer.getByRole('button', { name: /^salvar$/i }).click()
@@ -231,6 +232,7 @@ test.describe('Extrato (Lançamentos)', () => {
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
     await page.waitForTimeout(200)
+    await selecionarCategoria(page, drawer)
 
     // Ativar recorrência via Toggle
     const toggle = drawer.getByText(/lançamento único/i)

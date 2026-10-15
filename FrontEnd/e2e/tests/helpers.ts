@@ -24,6 +24,18 @@ export async function abrirNovoLancamento(page: Page, tipo: TipoLancamento = 'De
 }
 
 /**
+ * Seleciona a 1ª categoria disponível no drawer de lançamento (categoria é
+ * obrigatória desde a v7.1). Chamar depois de preencher a conta.
+ */
+export async function selecionarCategoria(page: Page, drawer: Locator) {
+  await drawer.getByRole('button', { name: /selecione a categoria/i }).first().click()
+  await drawer.getByPlaceholder('Buscar...').waitFor({ state: 'visible', timeout: 3000 })
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(200)
+}
+
+/**
  * Expande a barra de filtros do Extrato (Conta/Categoria/Status/Saldo
  * anterior) — desde a v6.1.0 ela vem RECOLHIDA por padrão (botão "Filtros"
  * na barra superior), então qualquer teste que precise desses controles tem

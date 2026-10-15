@@ -16,9 +16,16 @@ export interface AvisoFecharAba {
   // true após o clique em "Fechar esta aba": se o navegador não fechar em
   // poucos segundos (aba não aberta via script), cai no signOut normal.
   fechando: boolean
+  // 'inatividade' (timer desta aba expirou) | 'principal-fechada' (a aba
+  // principal foi fechada — só aviso) | 'encerrada' (esta aba foi bloqueada
+  // por inatividade; a sessão segue nas outras abas).
+  motivo?: 'inatividade' | 'principal-fechada' | 'encerrada'
+  // "Continuar aqui" só existe quando esta aba pode ser isolada (fechada por
+  // script E há outra aba em uso) — senão o signOut seria global.
+  podeContinuar?: boolean
 }
 
-let estado: AvisoFecharAba = { mostrando: false, segundos: 0, fechando: false }
+let estado: AvisoFecharAba = { mostrando: false, segundos: 0, fechando: false, motivo: 'inatividade', podeContinuar: true }
 const listeners = new Set<() => void>()
 
 export function subscribeAvisoFecharAba(cb: () => void): () => void {
@@ -34,7 +41,8 @@ export function getAvisoFecharAbaSnapshot(): AvisoFecharAba {
 
 export function setAvisoFecharAba(next: AvisoFecharAba): void {
   const e = estado
-  if (e.mostrando === next.mostrando && e.segundos === next.segundos && e.fechando === next.fechando) return
+  if (e.mostrando === next.mostrando && e.segundos === next.segundos && e.fechando === next.fechando
+      && e.motivo === next.motivo && e.podeContinuar === next.podeContinuar) return
   estado = next
   for (const l of listeners) l()
 }
