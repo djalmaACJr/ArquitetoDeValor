@@ -41,6 +41,12 @@ import DrawerLancamento from '../components/ui/DrawerLancamento'
 import BotaoNovoLancamento from '../components/ui/BotaoNovoLancamento'
 import CalendarioDashboard from '../components/ui/CalendarioDashboard'
 import ModalLembrete from '../components/ui/ModalLembrete'
+import ModalConfirmarProjecao from '../components/ui/ModalConfirmarProjecao'
+import { Toast } from '../components/ui/shared'
+import { useQueryClient } from '@tanstack/react-query'
+import { apiMutate } from '../lib/api'
+import { qk } from '../lib/queryKeys'
+import { useContextoUserId } from '../hooks/useEspacoAtivo'
 import { useLembretes } from '../hooks/useLembretes'
 import { useDividendos } from '../hooks/useDividendos'
 import { useOcultarValores } from '../hooks/useOcultarValores'
@@ -185,13 +191,17 @@ const CardSaldo = memo(function CardSaldo({ contas, oculto, mes, historico, modo
 
 // -- Grupo de conta dentro do card de alertas -------------
 function GrupoConta({
-  nomeConta, icone, cor, total, itens, corTotal, onEditar,
+  nomeConta, icone, cor, total, itens, corTotal, onEditar, onPagar,
 }: {
   nomeConta: string; icone: string | null; cor: string | null
   total: number; itens: Transacao[]; corTotal: string
   onEditar: (tx: Transacao) => void
+  onPagar?: (tx: Transacao) => void
 }) {
   const [aberto, setAberto] = useState(false)
+  const colsLinha = onPagar
+    ? 'grid-cols-[minmax(0,1fr)_76px_96px_28px]'
+    : 'grid-cols-[minmax(0,1fr)_76px_96px]'
 
   return (
     <div className="border-b border-gray-100 dark:border-gray-700 last:border-0">
@@ -221,14 +231,14 @@ function GrupoConta({
       {/* Lancamentos expandidos */}
       {aberto && (
         <div className="bg-gray-50/50 dark:bg-gray-700/30">
-          <div className="grid grid-cols-[minmax(0,1fr)_76px_96px] gap-2 px-6 py-1 text-[14px] font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-700">
-            <span>Transação</span><span className="text-center">Data</span><span className="text-right">Valor</span>
+          <div className={`grid ${colsLinha} gap-2 px-6 py-1 text-[14px] font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100 dark:border-gray-700`}>
+            <span>Transação</span><span className="text-center">Data</span><span className="text-right">Valor</span>{onPagar && <span />}
           </div>
           {itens.map(tx => (
             <div
               key={tx.id}
               onClick={() => onEditar(tx)}
-              className="grid grid-cols-[minmax(0,1fr)_76px_96px] gap-2 items-center px-6 py-[5px] border-b border-gray-100 dark:border-gray-700 last:border-0 cursor-pointer hover:bg-white/5 transition-colors"
+              className={`grid ${colsLinha} gap-2 items-center px-6 py-[5px] border-b border-gray-100 dark:border-gray-700 last:border-0 cursor-pointer hover:bg-white/5 transition-colors`}
             >
               <span className="text-[16px] text-gray-700 dark:text-gray-200 truncate flex items-center gap-1 min-w-0">
                 {tx.id_recorrencia && (
@@ -243,6 +253,20 @@ function GrupoConta({
               <span className={`text-[16px] font-semibold text-right whitespace-nowrap ${tx.tipo === 'RECEITA' ? 'text-av-green' : 'text-red-400'}`}>
                 {tx.tipo === 'RECEITA' ? '+' : '-'}{formatBRL(tx.valor)}
               </span>
+              {onPagar && (
+                // Transferência não tem baixa avulsa (mesma regra do Extrato)
+                tx.id_par_transferencia ? <span /> : (
+                  <button
+                    onClick={e => { e.stopPropagation(); onPagar(tx) }}
+                    title="Pagar"
+                    aria-label={`Pagar ${tx.descricao}`}
+                    className="w-6 h-6 rounded-md border border-white/10 flex items-center justify-center hover:border-av-green/60 hover:bg-av-green/10 transition-colors"
+                    style={{ color: '#00c896' }}
+                  >
+                    <Check size={12} />
+                  </button>
+                )
+              )}
             </div>
           ))}
         </div>
@@ -253,10 +277,11 @@ function GrupoConta({
 
 // -- Card de alertas agrupado por conta -------------------
 const CardAlertas = memo(function CardAlertas({
-  titulo, cor, total, itens, contas, onVerTodos, onEditar, filtravel, mes,
+  titulo, cor, total, itens, contas, onVerTodos, onEditar, onPagar, filtravel, mes,
 }: {
   titulo: string; cor: string; total: number
   itens: Transacao[]; contas: Conta[]; onVerTodos: () => void; onEditar: (tx: Transacao) => void
+  onPagar?: (tx: Transacao) => void
   filtravel?: boolean; mes?: string
 }) {
   const [aberto, setAberto] = useState(true)
@@ -347,6 +372,7 @@ const CardAlertas = memo(function CardAlertas({
               itens={txs}
               corTotal={corTotal}
               onEditar={onEditar}
+              onPagar={onPagar}
             />
           )
         })}
@@ -1640,6 +1666,27 @@ export default function DashboardPage() {
   const { contas, pendentes, proximas, doMesRaw, ultimaTxPorConta, resumo, despesasCat, receitasCat, historico, pagos, pendentesStatus, projecoes, loading, loadingHistorico, error, refetch, prefetchMesSeguinte, prefetchMesAnterior } = useDashboard(mes, contasFiltro, filtCats, filtStatus)
   const { mascote } = useMascotePreferido()
 
+  // ── Baixa (Pagar) direto do quadro "Vencidos Não Confirmados" ──────────
+  // Mesma regra do botão Pagar do Extrato: PENDENTE vira PAGO na hora;
+  // PROJEÇÃO pede o valor real antes (preserva valor_projetado).
+  const qc = useQueryClient()
+  const uidCtx = useContextoUserId()
+  const [feedback, setFeedback] = useState<string | null>(null)
+  const [confirmandoProjecao, setConfirmandoProjecao] = useState<Transacao | null>(null)
+  const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
+
+  const baixar = async (tx: Transacao, extra: Record<string, unknown> = {}) => {
+    const res = await apiMutate(`/transacoes/${tx.id}?escopo=SOMENTE_ESTE`, 'PUT', { status: 'PAGO', ...extra })
+    if (!res.ok) { toast(res.erro ?? 'Erro ao pagar.'); return }
+    await qc.invalidateQueries({ queryKey: qk.transacoesMesPref(uidCtx) })
+    refetch()
+    toast(extra.valor !== undefined ? 'Lançamento confirmado como pago!' : 'Pago!')
+  }
+  const pagarVencido = (tx: Transacao) => {
+    if (tx.status === 'PROJECAO') setConfirmandoProjecao(tx)
+    else void baixar(tx)
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName
@@ -1987,6 +2034,7 @@ export default function DashboardPage() {
                 contas={contas}
                 onVerTodos={() => navigate('/lancamentos', { state: { filtroStatus: ['PENDENTE', 'PROJECAO'], mes, limparOutrosFiltros: true } })}
                 onEditar={abrirEdicao}
+                onPagar={pagarVencido}
               />
             </div>
             <div data-tutorial="dashboard-proximas">
@@ -2045,6 +2093,20 @@ export default function DashboardPage() {
         </div>
       )}
       {/* Drawer de edicao de lancamento */}
+      <Toast msg={feedback} />
+      {confirmandoProjecao && (
+        <ModalConfirmarProjecao
+          lancamento={confirmandoProjecao}
+          contaNome={contas.find(c => c.conta_id === confirmandoProjecao.conta_id)?.nome}
+          onCancelar={() => setConfirmandoProjecao(null)}
+          onConfirmar={valorReal => {
+            const tx = confirmandoProjecao
+            if (isNaN(valorReal) || valorReal <= 0) { toast('Valor inválido.'); return }
+            setConfirmandoProjecao(null)
+            void baixar(tx, { valor: valorReal, valor_projetado: tx.valor })
+          }}
+        />
+      )}
       {lancamentoEditando && (
         <DrawerLancamento
           lancamento={lancamentoEditando}

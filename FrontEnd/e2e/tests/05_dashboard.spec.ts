@@ -102,4 +102,61 @@ test.describe('Dashboard', () => {
     await headerPainel.locator('button').last().click()
     await expect(page.getByRole('button', { name: 'A partir de hoje' })).not.toBeVisible({ timeout: 3_000 })
   })
+  test('E2E-DB16 — "Vencidos Não Confirmados": botão Pagar dá baixa no lançamento', async ({ page, request }) => {
+    const hoje = new Date()
+    test.skip(hoje.getDate() < 2, 'sem dia anterior dentro do mês corrente para criar um vencido')
+
+    const token = await page.evaluate(() => {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (!k || !k.includes('-auth-token')) continue
+        try {
+          const v = JSON.parse(localStorage.getItem(k) ?? 'null')
+          return v?.access_token ?? v?.currentSession?.access_token ?? null
+        } catch { /* próxima chave */ }
+      }
+      return null
+    })
+    test.skip(!token, 'JWT não encontrado')
+    const base = (process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '') + '/functions/v1'
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      apikey: process.env.VITE_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY ?? '',
+      'Content-Type': 'application/json',
+    }
+
+    const contas = (await (await request.get(`${base}/contas`, { headers })).json()).dados as { conta_id?: string; id?: string; nome: string }[]
+    const conta = contas.find(c => c.nome === 'E2E Conta Corrente') ?? contas[0]
+    const cats = (await (await request.get(`${base}/categorias`, { headers })).json()).dados as { id: string; protegida?: boolean; ativa?: boolean }[]
+    const cat = cats.find(c => !c.protegida && c.ativa !== false)!
+
+    const ym = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`
+    const desc = `E2E Vencido ${Date.now()}`
+    const criado = await request.post(`${base}/transacoes`, {
+      headers,
+      data: { descricao: desc, valor: 12.34, data: `${ym}-01`, conta_id: conta.conta_id ?? conta.id, categoria_id: cat.id, tipo: 'DESPESA', status: 'PENDENTE' },
+    })
+    expect(criado.ok()).toBeTruthy()
+    const id = (await criado.json()).id as string
+
+    try {
+      await page.reload()
+      const card = page.locator('[data-tutorial="dashboard-vencidos"]')
+      await expect(card).toBeVisible({ timeout: 10_000 })
+      // Expande o grupo da conta e acha a linha do lançamento
+      await card.getByText(conta.nome, { exact: true }).first().click()
+      await expect(card.getByText(desc)).toBeVisible({ timeout: 8_000 })
+
+      await card.getByRole('button', { name: new RegExp(`pagar ${desc}`, 'i') }).click()
+
+      await expect(page.getByText('Pago!')).toBeVisible({ timeout: 8_000 })
+      await expect(card.getByText(desc)).not.toBeVisible({ timeout: 8_000 })
+
+      const tx = await (await request.get(`${base}/transacoes/${id}`, { headers })).json()
+      expect((tx.dados ?? tx).status).toBe('PAGO')
+    } finally {
+      await request.delete(`${base}/transacoes/${id}?escopo=SOMENTE_ESTE`, { headers })
+    }
+  })
+
 })
