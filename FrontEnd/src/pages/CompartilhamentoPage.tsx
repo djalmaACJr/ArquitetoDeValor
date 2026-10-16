@@ -14,6 +14,7 @@ import {
 import { useContas } from '../hooks/useContas'
 import { MultiSelect } from '../components/ui/MultiSelect'
 import ConvidarAgregadoForm from '../components/ui/ConvidarAgregadoForm'
+import AtividadeAgregados from '../components/ui/AtividadeAgregados'
 import { Toggle } from '../components/ui/shared'
 import { setEspacoAtivo } from '../lib/espacoAtivo'
 
@@ -247,6 +248,9 @@ export default function CompartilhamentoPage() {
           </div>
         )}
       </section>
+
+      {/* O que os agregados fizeram nos dados do dono */}
+      <AtividadeAgregados />
 
       {/* Convites recebidos — pendentes de resposta */}
       {pendentesRecebidos.length > 0 && (

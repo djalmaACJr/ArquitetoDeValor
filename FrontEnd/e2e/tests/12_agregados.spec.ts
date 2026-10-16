@@ -31,6 +31,12 @@ test.describe('Compartilhamento (Agregados)', () => {
     await expect(page.getByRole('heading', { name: /meus agregados/i })).toBeVisible()
   })
 
+  // ── E2E-AGR08 ───────────────────────────────────────────────
+  test('E2E-AGR08 — quadro "Atividade dos agregados" aparece para o dono', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: /atividade dos agregados/i })).toBeVisible()
+    await expect(page.getByTestId('atividade-agregados')).toBeVisible()
+  })
+
   // ── E2E-AGR02 ───────────────────────────────────────────────
   test('E2E-AGR02 — convidar por e-mail mostra confirmação e lista o vínculo pendente', async ({ page }) => {
     const email = `e2e-agregado-${Date.now()}@example.com`

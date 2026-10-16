@@ -11,6 +11,7 @@
 // Rotas:
 //   GET  /agregados                     -- meus vínculos como dono
 //   GET  /agregados/convites-recebidos  -- vínculos onde sou o convidado
+//   GET  /agregados/atividade           -- o que os agregados criaram/alteraram/excluíram nos dados do dono
 //   GET  /agregados/:id                 -- detalhe (só o dono)
 //   POST /agregados          {email}
 //   POST /agregados/:id/reenviar
@@ -174,6 +175,7 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
   try {
     if (m === "GET"  && !seg1)                         return await listarComoDonos(c, userId);
     if (m === "GET"  && seg1 === "convites-recebidos")  return await listarComoAgregado(c);
+    if (m === "GET"  && seg1 === "atividade")           return await atividade(c, req);
     if (m === "GET"  && id)                             return await detalhar(c, userId, id);
     if (m === "POST" && !seg1)                          return await convidar(c, userId, await req.json());
     if (m === "POST" && seg1 === "aceitar")             return await aceitar(c, await req.json());
@@ -191,6 +193,21 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
     return erro("Erro interno", 500);
   }
 }));
+
+// Atividade dos agregados nos dados do DONO (criar/alterar/excluir). Vem da
+// trilha de auditoria (trigger grava ator_id = auth.uid()); a RPC é SECURITY
+// DEFINER mas só devolve linhas do próprio chamador (user_id = auth.uid()) e
+// só o nome do ator — nunca a linha de usuarios.
+async function atividade(c: Db, req: Request) {
+  const limit = Number(new URL(req.url).searchParams.get("limit"));
+  logRequest("GET", "/agregados/atividade", { limit });
+  const { data, error } = await c.rpc("fn_atividade_agregados", {
+    p_limit: Number.isFinite(limit) && limit > 0 ? limit : 100,
+  });
+  if (error) { logError("atividade", error); return erro("Erro ao buscar atividade dos agregados"); }
+  logResponse(200, { count: data?.length });
+  return json({ dados: data ?? [] });
+}
 
 async function listarComoDonos(c: Db, userId: string) {
   logRequest("GET", "/agregados");

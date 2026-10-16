@@ -58,6 +58,19 @@ export interface VinculoComoAgregado {
   permissoes: PermissaoAgregado[]
 }
 
+/** Uma operação feita por um agregado nos dados do dono (GET /agregados/atividade). */
+export interface AtividadeAgregado {
+  id: string
+  tabela: string
+  operacao: 'INSERT' | 'UPDATE' | 'DELETE'
+  registro_id: string
+  alterado_em: string
+  ator_id: string
+  ator_nome: string | null
+  dados_antigos: Record<string, unknown> | null
+  dados_novos: Record<string, unknown> | null
+}
+
 interface OpResult<T = void> { ok: boolean; erro: string | null; dados: T | null }
 
 export function useAgregadosComoDonos() {
@@ -115,6 +128,21 @@ export function useAgregadosComoDonos() {
     vinculos, loading, error: error ? (error as Error).message : null,
     convidar, reenviar, revogar, definirPermissao, definirContas, recarregar: invalidar,
   }
+}
+
+export function useAtividadeAgregados(habilitado = true) {
+  const { session } = useAuth()
+  const uid = session?.user?.id ?? null
+  const { data: atividades = [], isLoading: loading } = useQuery({
+    queryKey: ['agregados-atividade', uid] as const,
+    queryFn: async () => {
+      const res = await apiFetch<AtividadeAgregado[]>('/agregados/atividade?limit=50')
+      if (!res.ok) throw new Error(res.erro ?? 'Erro ao carregar atividade')
+      return res.dados ?? []
+    },
+    enabled: !!uid && habilitado,
+  })
+  return { atividades, loading }
 }
 
 export function useConvitesRecebidos() {

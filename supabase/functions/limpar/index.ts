@@ -43,7 +43,8 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
     if (entidade === "categorias")      return await limparCategorias(c, userId);
     if (entidade === "contas")          return await limparContas(c, userId);
     if (entidade === "investimentos")   return await limparInvestimentos(c, userId);
-    return erro("entidade inválida: use transacoes | categorias | contas | investimentos", 422);
+    if (entidade === "objetivos")       return await limparObjetivos(c, userId);
+    return erro("entidade inválida: use transacoes | categorias | contas | investimentos | objetivos", 422);
   } catch (e) {
     logError("[limpar] Erro inesperado", e);
     return erro("Erro interno", 500);
@@ -155,6 +156,34 @@ async function excluirDadosInvestimentos(
   return logs;
 }
 
+// Objetivos: o DELETE da API é soft-delete (ativo=false/CANCELADO), então os
+// cancelados se acumulam para sempre — inclusive os criados pelos testes.
+// Aqui é a exclusão física (progresso → objetivos), só do próprio usuário.
+async function excluirObjetivos(c: ReturnType<typeof db>, userId: string): Promise<number> {
+  const { data: ids, error: eIds } = await c.from("objetivos").select("id").eq("user_id", userId);
+  if (eIds) throw new Error(`objetivos: ${eIds.message}`);
+  const lista = (ids ?? []).map((o: { id: string }) => o.id);
+  for (let i = 0; i < lista.length; i += 100) {
+    const { error: eP } = await c.from("objetivos_progresso").delete().in("objetivo_id", lista.slice(i, i + 100));
+    if (eP) throw new Error(`objetivos_progresso: ${eP.message}`);
+  }
+  const { count, error } = await c.from("objetivos").delete({ count: "exact" }).eq("user_id", userId);
+  if (error) throw new Error(`objetivos: ${error.message}`);
+  return count ?? 0;
+}
+
+async function limparObjetivos(c: ReturnType<typeof db>, userId: string) {
+  logInfo("[limpar] Iniciando limpeza de objetivos", { userId });
+  try {
+    const excluidos = await excluirObjetivos(c, userId);
+    logSuccess("[limpar] objetivos", { excluidos });
+    return json({ ok: true, excluidos, entidade: "objetivos" });
+  } catch (e) {
+    logError("[limpar] objetivos", JSON.stringify(e));
+    return erro((e as Error).message ?? "Erro ao limpar objetivos");
+  }
+}
+
 async function limparInvestimentos(c: ReturnType<typeof db>, userId: string) {
   logInfo("[limpar] Iniciando limpeza de investimentos", { userId });
   try {
@@ -189,6 +218,14 @@ async function limparTudo(c: ReturnType<typeof db>, userId: string) {
   } catch (e) {
     logError("[limpar] tudo — investimentos", JSON.stringify(e));
     return erro((e as Error).message ?? "Erro ao limpar investimentos");
+  }
+
+  // 0b. Objetivos — antes das contas/categorias que eles referenciam
+  try {
+    logs.push({ entidade: "objetivos", excluidos: await excluirObjetivos(c, userId) });
+  } catch (e) {
+    logError("[limpar] tudo — objetivos", JSON.stringify(e));
+    return erro((e as Error).message ?? "Erro ao limpar objetivos");
   }
 
   // 1. Transações — desvincular transferências antes de deletar

@@ -70,7 +70,7 @@ test.describe('Sessão — aba inativa multi-tab (E2E)', () => {
 
     // Nenhuma aba estava ativa (o timestamp vencido prova isso): não há o
     // que proteger com o modal — cai direto no login com o banner.
-    await expect(page).toHaveURL(//login?expirado=1/, { timeout: 10_000 })
+    await expect(page).toHaveURL(/\/login\?expirado=1/,{ timeout: 10_000 })
     await expect(page.getByRole('alertdialog')).not.toBeVisible()
   })
 

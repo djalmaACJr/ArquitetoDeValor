@@ -1820,6 +1820,132 @@ describe("Agregados — sair por conta própria", () => {
   });
 });
 
+// ============================================================
+// Atividade dos agregados visível ao dono (CA-AGR78..83)
+// trilha_auditoria.ator_id + GET /agregados/atividade.
+// ============================================================
+describe("Agregados — atividade dos agregados visível ao dono", () => {
+  let ok = false;
+  let donoId: string;
+  let agregadoId: string;
+  let vinculoId: string;
+  let contaId: string;
+  let categoriaId: string;
+  let headersA: Record<string, string>;
+  let headersB: Record<string, string>;
+  let ctxB: Record<string, string>;
+  let lancId: string;
+  let lancDonoId: string;
+  const hoje = new Date().toISOString().slice(0, 10);
+
+  const atividadeDoDono = async (): Promise<any[]> => {
+    const { status, data } = await api("/agregados/atividade?limit=200", { method: "GET", headers: headersA });
+    expect(status).toBe(200);
+    return data.dados as any[];
+  };
+
+  beforeAll(async () => {
+    const tokenB = await tryGetTokenB();
+    if (!tokenB) return;
+    ok = true;
+    donoId = await getUserId();
+    agregadoId = await getUserIdB();
+    const emailB = await getEmailB();
+    headersA = await authHeaders();
+    headersB = await authHeadersB();
+    ctxB = { ...headersB, "X-Contexto-User-Id": donoId };
+
+    const { data: conta } = await api("/contas", { method: "POST", headers: headersA,
+      body: JSON.stringify({ nome: `AGR-ATV-${TS}`, tipo: "CORRENTE", saldo_inicial: 100, icone: "🏦", cor: "#00c896" }) });
+    contaId = conta.id;
+    const { data: cats } = await api("/categorias", { method: "GET", headers: headersA });
+    categoriaId = (cats.dados as { id: string; protegida?: boolean; ativa?: boolean }[])
+      .find((c) => !c.protegida && c.ativa !== false)!.id;
+
+    const { data: convite } = await api("/agregados", { method: "POST", headers: headersA, body: JSON.stringify({ email: emailB }) });
+    vinculoId = convite.dados.id;
+    const dbA = clienteComToken(await getToken());
+    const { data: linha } = await dbA.from("agregados").select("token").eq("id", vinculoId).single();
+    await clienteComToken(tokenB!).rpc("fn_aceitar_convite_agregado", { p_token: linha!.token });
+    await api(`/agregados/${vinculoId}/contas`, { method: "PUT", headers: headersA, body: JSON.stringify({ conta_ids: [contaId] }) });
+    await api(`/agregados/${vinculoId}/permissoes`, { method: "PUT", headers: headersA,
+      body: JSON.stringify({ modulo: "EXTRATO", liberado: true, pode_escrever: true }) });
+  }, 120000);
+
+  afterAll(async () => {
+    if (!ok) return;
+    await api(`/agregados/${vinculoId}/revogar`, { method: "POST", headers: headersA }).catch(() => {});
+  }, 60000);
+
+  test("CA-AGR78 — criação feita pelo agregado aparece na atividade do dono (INSERT, com nome do ator)", async () => {
+    if (!ok) { console.warn("[13_agregados] User B indisponível — CA-AGR78 pulado."); return; }
+    const { status, data } = await api("/transacoes", { method: "POST", headers: ctxB,
+      body: JSON.stringify({ descricao: `AGR Atv ${TS}`, valor: 31, data: hoje, conta_id: contaId,
+        categoria_id: categoriaId, tipo: "DESPESA", status: "PAGO" }) });
+    expect(status).toBe(201);
+    lancId = data.id;
+
+    const ev = (await atividadeDoDono()).find((a) => a.registro_id === lancId && a.operacao === "INSERT");
+    expect(ev).toBeTruthy();
+    expect(ev.ator_id).toBe(agregadoId);
+    expect(ev.ator_nome).toBeTruthy();
+    expect(ev.tabela).toBe("transacoes");
+    expect(ev.dados_novos.descricao).toBe(`AGR Atv ${TS}`);
+  });
+
+  test("CA-AGR79 — edição feita pelo agregado aparece (UPDATE, com valores antigo e novo)", async () => {
+    if (!ok) { console.warn("[13_agregados] User B indisponível — CA-AGR79 pulado."); return; }
+    const { status } = await api(`/transacoes/${lancId}`, { method: "PUT", headers: ctxB,
+      body: JSON.stringify({ valor: 77 }) });
+    expect(status).toBe(200);
+
+    const ev = (await atividadeDoDono()).find((a) => a.registro_id === lancId && a.operacao === "UPDATE");
+    expect(ev).toBeTruthy();
+    expect(ev.ator_id).toBe(agregadoId);
+    expect(Number(ev.dados_antigos.valor)).toBe(31);
+    expect(Number(ev.dados_novos.valor)).toBe(77);
+  });
+
+  test("CA-AGR80 — exclusão feita pelo agregado aparece (DELETE, com o que foi excluído)", async () => {
+    if (!ok) { console.warn("[13_agregados] User B indisponível — CA-AGR80 pulado."); return; }
+    const { status } = await api(`/transacoes/${lancId}`, { method: "DELETE", headers: ctxB });
+    expect(status).toBe(200);
+
+    const ev = (await atividadeDoDono()).find((a) => a.registro_id === lancId && a.operacao === "DELETE");
+    expect(ev).toBeTruthy();
+    expect(ev.ator_id).toBe(agregadoId);
+    expect(ev.dados_antigos.descricao).toBe(`AGR Atv ${TS}`);
+    expect(ev.dados_novos).toBeNull();
+  });
+
+  test("CA-AGR81 — ações do próprio dono NÃO entram na atividade dos agregados", async () => {
+    if (!ok) { console.warn("[13_agregados] User B indisponível — CA-AGR81 pulado."); return; }
+    const { status, data } = await api("/transacoes", { method: "POST", headers: headersA,
+      body: JSON.stringify({ descricao: `AGR Atv Dono ${TS}`, valor: 5, data: hoje, conta_id: contaId,
+        categoria_id: categoriaId, tipo: "DESPESA", status: "PAGO" }) });
+    expect(status).toBe(201);
+    lancDonoId = data.id;
+    await api(`/transacoes/${lancDonoId}`, { method: "PUT", headers: headersA, body: JSON.stringify({ valor: 6 }) });
+
+    expect((await atividadeDoDono()).some((a) => a.registro_id === lancDonoId)).toBe(false);
+    await api(`/transacoes/${lancDonoId}`, { method: "DELETE", headers: headersA });
+  });
+
+  test("CA-AGR82 — o agregado NÃO enxerga a atividade do dono (só vê o que é dele como dono)", async () => {
+    if (!ok) { console.warn("[13_agregados] User B indisponível — CA-AGR82 pulado."); return; }
+    // Mesmo com o header de contexto do dono: a RPC usa auth.uid() = B.
+    const { status, data } = await api("/agregados/atividade?limit=200", { method: "GET", headers: ctxB });
+    expect(status).toBe(200);
+    expect((data.dados as any[]).some((a) => a.registro_id === lancId)).toBe(false);
+    expect((data.dados as any[]).every((a) => a.ator_id !== agregadoId || a.registro_id !== lancId)).toBe(true);
+  });
+
+  test("CA-AGR83 — sem autenticação retorna 401", async () => {
+    const { status } = await api("/agregados/atividade", { method: "GET", headers: {} });
+    expect([401, 403]).toContain(status);
+  });
+});
+
 // Limpeza final: os testes só REVOGAM os vínculos que criam (fn_revogar_agregado) —
 // com e-mails descartáveis @example.com isso acumulava centenas de linhas na conta
 // de teste (achado: 373 vínculos, tela de Compartilhamento enorme). Apaga de vez,
