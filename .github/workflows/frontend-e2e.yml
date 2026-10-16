@@ -14,7 +14,7 @@ on:
 # O E2E loga com um usuário fixo (convidado@arquitetodevalor.com) e mexe nos
 # dados dele — duas execuções simultâneas se atropelam. Uma por vez, na fila.
 concurrency:
-  group: frontend-e2e-shared-user
+  group: supabase-conta-de-teste
   cancel-in-progress: false
 
 jobs:

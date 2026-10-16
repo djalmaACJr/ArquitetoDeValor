@@ -9,10 +9,12 @@ on:
 # Os testes rodam contra UM banco/usuário de teste compartilhado — duas
 # execuções simultâneas (ex.: push na branch + merge na develop) colidem:
 # o 99_limpar de uma apaga os dados que a outra está contando. Grupo único
-# serializa: uma execução por vez, na fila; a mais antiga pendente é
+# serializa (mesmo grupo do E2E: API e E2E usam a MESMA conta de teste, e a
+# 13_agregados falha com JA_AGREGADO se o E2E/outra rodada tem a conta B como
+# agregada ao mesmo tempo): uma execução por vez, na fila; a mais antiga pendente é
 # cancelada quando chega commit mais novo.
 concurrency:
-  group: backend-api-tests-shared-db
+  group: supabase-conta-de-teste
   cancel-in-progress: false
 
 # Dois jobs em sequência (out/2026). O compute do Supabase é compartilhado
