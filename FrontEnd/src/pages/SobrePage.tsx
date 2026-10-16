@@ -19,6 +19,42 @@ interface VersaoAnterior {
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.1',
+    titulo: 'Progressão Anual, Comparativo e ajuda no app',
+    icone:  <TrendingUp size={16} />,
+    itens: [
+      { t: '📈 Progressão Anual', d: 'nova tela pra acompanhar como suas receitas, despesas e patrimônio evoluem ano a ano.' },
+      { t: '🔀 Comparativo Mensal mais completo', d: 'comparações lado a lado com mais detalhes e leitura mais clara.' },
+      { t: '💹 Rentabilidade real', d: 'índices econômicos considerando a inflação (IPCA) para você ver o ganho de verdade.' },
+      { t: '❓ Botão de ajuda', d: 'explicações rápidas dentro das telas, sem precisar sair delas.' },
+      { t: '🏷️ Categoria obrigatória nos lançamentos', d: 'todo lançamento agora precisa de uma categoria, o que deixa relatórios e objetivos mais confiáveis.' },
+      { t: '💸 Proventos', d: 'ajustes de exibição e filtros no quadro de proventos.' },
+    ],
+  },
+  {
+    versao: '7.0',
+    titulo: 'Conta conjunta (usuários agregados)',
+    icone:  <ShieldCheck size={16} />,
+    itens: [
+      { t: '👥 Compartilhamento', d: 'convide outra pessoa por e-mail e libere só o que quiser: Extrato, Objetivos ou Investimentos, só leitura ou também edição, e quais contas ela enxerga.' },
+      { t: '🔀 Seletor de espaço', d: 'quem é convidado alterna entre "Meus dados" e "Conta de fulano" sem nunca misturar os dois.' },
+      { t: '🚪 Sair por conta própria', d: 'o convidado pode deixar de acessar quando quiser, e o dono é avisado.' },
+      { t: '🔐 Segurança e desempenho', d: 'correções de segurança, telas mais rápidas e ajustes de layout no celular.' },
+      { t: '⌨️ Teclado no app Android', d: 'o campo digitado não fica mais escondido atrás do teclado.' },
+    ],
+  },
+  {
+    versao: '6.5',
+    titulo: 'Fatura do Itaú e novo tipo de conta',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '🧾 Importação de fatura do Itaú', d: 'suba o PDF da fatura do cartão Itaú e o sistema reconhece os lançamentos, como já fazia com Nubank, Inter e C6.' },
+      { t: '🗂️ Novo tipo de conta "Outros"', d: 'pra contas que não se encaixam em corrente, cartão, investimento ou carteira.' },
+      { t: '🔒 Aviso de sessão corrigido', d: 'a mensagem de "aba inativa" não aparece mais por engano logo depois de entrar.' },
+      { t: '🖱️ Dropdown de tipo de conta mais confiável', d: 'no Windows, a opção "Investimento" ficava ilegível ao passar o mouse — corrigido.' },
+    ],
+  },
+  {
     versao: '6.4',
     titulo: 'Fundos Imobiliários mais completos e mais segurança',
     icone:  <ShieldCheck size={16} />,
@@ -222,13 +258,15 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (6.5.0) */}
+        {/* Detalhe das novidades desta versão (7.2.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🧾 Importação de fatura do Itaú', d: 'mais um banco na lista — suba o PDF da fatura do cartão Itaú e o sistema já reconhece os lançamentos, igual já fazia com Nubank, Inter e C6.' },
-            { t: '🗂️ Novo tipo de conta "Outros"', d: 'pra cadastrar contas que não se encaixam em corrente, cartão, investimento ou carteira — tipo vale-refeição ou uma conta de terceiros.' },
-            { t: '🔒 Aviso de sessão corrigido', d: 'a mensagem de "aba inativa" não aparece mais por engano logo depois de você acabar de entrar.' },
-            { t: '🖱️ Dropdown de tipo de conta mais confiável', d: 'no Windows, a opção "Investimento" às vezes ficava com o texto ilegível ao passar o mouse — corrigido.' },
+            { t: '👀 Atividade dos agregados', d: 'em Compartilhamento, o dono vê quem criou, alterou ou excluiu lançamentos e outros dados dele, com o nome da pessoa e o que mudou.' },
+            { t: '✅ Pagar direto no Dashboard', d: 'o quadro "Vencidos Não Confirmados" ganhou o botão de baixa — o mesmo do Extrato, inclusive a confirmação do valor real nas projeções.' },
+            { t: '🔒 Sessão esquecida vai direto pro login', d: 'ao abrir o sistema depois de muito tempo parado, você cai na tela de login em vez de um aviso de aba inativa.' },
+            { t: '🗂️ Aviso de aba principal fechada', d: 'se você fechar a aba principal, as outras abas avisam; sem resposta em 20s, só a aba sem uso é encerrada — a que você está usando nunca é deslogada.' },
+            { t: '⚡ Muito mais rápido pra quem compartilha dados', d: 'consultas de lançamentos para contas conjuntas deixaram de travar com muitos dados.' },
+            { t: '🏷️ Categoria obrigatória e testes mais estáveis', d: 'ajustes de validação e limpeza de objetivos de teste acumulados.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

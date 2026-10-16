@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "7.0.0"
+export const APP_VERSION = "7.2.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -16,7 +16,7 @@ export const getVersionInfo = () => ({
   },
   current: {
     level: "major",
-    description: "Usuários agregados (conta conjunta): convites, permissões por módulo e conta, seletor de espaço e saída por conta própria; correções de segurança, desempenho e layout no celular; teclado no app Android"
+    description: "O dono vê o que os agregados criaram, alteraram ou excluíram nos dados dele; botão Pagar nos vencidos do Dashboard; avisos de sessão e de abas mais seguros; consultas muito mais rápidas para quem compartilha dados"
   }
 })
 

@@ -229,6 +229,10 @@ Criação, edição e exclusão do par (ou série, se recorrente) são atômicas
 - `vw_despesas_por_categoria` — total e percentual por **categoria pai** por mês.
 - `vw_transacoes_com_saldo` — extrato com saldo acumulado por conta (window function `OVER PARTITION BY conta_id ORDER BY data, criado_em`).
 
+### Baixa (Pagar) no Dashboard
+
+- O quadro **Vencidos Não Confirmados** tem o botão **Pagar** por lançamento — a mesma baixa do Extrato: `PENDENTE` → `PAGO` na hora; `PROJECAO` abre "Confirmar valor real" (o valor projetado é preservado em `valor_projetado`). Pernas de transferência não têm baixa avulsa (não há botão).
+
 ### Regras de apresentação
 
 - Sempre baseados em **período** (mês/ano).
@@ -628,6 +632,12 @@ Mesma estratégia em `executarRestore` (backup JSON). Em `limpar` (backend), o `
   - `SONHO`/`PROJETO` são amarrados a conta(s) (`contas_sonho[]`/`contas_projeto[]`, com fallback pro `conta_id` legado em SONHO) — só ficam visíveis ao agregado se **todas** as contas monitoradas estiverem liberadas.
   - `OBJETIVO`/`CRESCIMENTO` somam por **categoria em todas as contas do dono** — não existe "escopo de categoria" nesta feature. **Nunca ficam visíveis a um agregado**, mesmo com o módulo OBJETIVOS liberado (decisão final, confirmada com o usuário out/2026 — RLS bloqueia incondicionalmente via `fn_agregado_pode_ver_objetivo`, migration `20261006000007`). Motivo: sem escopo de conta possível, se a mesma categoria recebe lançamentos numa conta liberada **e** numa conta não liberada, o total exibido ao agregado somaria as duas — um vazamento parcial (nunca o lançamento individual, mas o efeito agregado dele) de uma conta que o agregado nem deveria saber que existe. A tela de criação de objetivo (`DrawerObjetivo`) já esconde essas 2 opções de tipo quando o espaço ativo é de um agregado, pra não oferecer uma ação que o backend sempre rejeitaria.
   - `POST /objetivos/sincronizar-progresso` (recálculo em massa) exige `pode_escrever` e opera sobre **todos** os objetivos ativos do dono de uma vez — não filtra por tipo/escopo individualmente (é um refresh de valores já existentes, não uma leitura nova).
+
+### O dono vê o que os agregados fizeram
+
+- A trilha de auditoria grava `ator_id` (= `auth.uid()` de quem executou). Quando `ator_id` ≠ `user_id` (dono), a operação foi de um agregado — criar, **alterar** ou **excluir**; antes só a criação deixava rastro (`criado_por`), edição e exclusão não.
+- `GET /agregados/atividade` (RPC `fn_atividade_agregados`) devolve ao dono só as operações dos agregados nos dados dele (nunca as dele próprias nem as de outros donos), com o nome do ator e os snapshots antes/depois. Aparece em **Compartilhamento → Atividade dos agregados**. Um agregado que chama a rota só enxerga o que é dele como dono.
+- A retenção segue a da trilha (`config_auditoria.retencao_dias`, padrão 365 dias).
 
 ### O que o agregado enxerga na interface
 

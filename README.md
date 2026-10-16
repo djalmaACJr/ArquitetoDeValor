@@ -127,7 +127,7 @@ ArquitetoDeValor/
 │   ├── 10_seguranca_auth_cors.test.ts # Auth + CORS
 │   ├── 11_objetivos.test.ts         # Objetivos Financeiros (CA-OBJ01..17)
 │   ├── 12_investimentos.test.ts     # Investimentos (CA-INV01..26)
-│   ├── 13_agregados.test.ts         # Usuários agregados / compartilhamento (CA-AGR01..77)
+│   ├── 13_agregados.test.ts         # Usuários agregados / compartilhamento (CA-AGR01..83)
 │   └── 99_limpar.test.ts            # Limpeza pós-suite (execução manual)
 │
 ├── deploy.bat                       # Menu de deploy das Edge Functions (Windows)
@@ -336,7 +336,7 @@ npm run test:contas         # módulo específico
 | `10_seguranca_auth_cors.test.ts` | SEG-AUTH01–03 / SEG-CORS01–03 |
 | `11_objetivos.test.ts` | CA-OBJ01–17 (inclui CRESCIMENTO) |
 | `12_investimentos.test.ts` | CA-INV01–26 |
-| `13_agregados.test.ts` | CA-AGR01–77 — ciclo de vida do vínculo, leitura/escrita por módulo e conta, saldos, saída por conta própria, isolamento de `usuarios`. Se `TEST_EMAIL_B` já é agregada da conta de teste, esvazie `TEST_EMAIL_B`/`TEST_PASSWORD_B` (cria um usuário temporário; precisa de `SUPABASE_SERVICE_ROLE_KEY`) |
+| `13_agregados.test.ts` | CA-AGR01–83 — ciclo de vida do vínculo, leitura/escrita por módulo e conta, saldos, saída por conta própria, isolamento de `usuarios`, atividade dos agregados visível ao dono. Se `TEST_EMAIL_B` já é agregada da conta de teste, esvazie `TEST_EMAIL_B`/`TEST_PASSWORD_B` (cria um usuário temporário; precisa de `SUPABASE_SERVICE_ROLE_KEY`) |
 | `99_limpar.test.ts` | Limpeza — somente manual |
 
 ### Testes E2E (Playwright)
@@ -378,7 +378,7 @@ rodar_testes_e2e.bat
 | `09_assistente.spec.ts` | Sugestões de lançamento |
 | `10_objetivos.spec.ts` | E2E-OBJ01–07 — Objetivos Financeiros |
 | `11_investimentos.spec.ts` | Fluxos de Investimentos (ativos, posições, dividendos) |
-| `12_agregados.spec.ts` | E2E-AGR01–07 — convidar, permissões, "Adicionar todos", quadros por status, convite pelo Perfil |
+| `12_agregados.spec.ts` | E2E-AGR01–08 — convidar, permissões, "Adicionar todos", quadros por status, convite pelo Perfil, quadro "Atividade dos agregados" |
 | `12_seguranca_sessao.spec.ts` | Modal de "aba inativa" e sessão multi-aba |
 | `13_seletor_espaco.spec.ts` | E2E-SEL01–10 — 2º usuário real: troca de espaço, menu por módulo, convite pendente, revogação, saída por conta própria (precisa de `SUPABASE_SERVICE_ROLE_KEY`) |
 | `14_teclado_mobile.spec.ts` | Rolagem do campo focado (só projeto `mobile`) |
@@ -441,7 +441,7 @@ Configure os seguintes **Secrets** no repositório (`Settings → Secrets and va
 - **Assistente de Lançamentos** — Sugestão automática de categoria, conta e tipo ao digitar uma descrição, com base em lançamentos anteriores.
 - **Filtros Salvos** — Conjuntos nomeados de filtros por página (Dashboard, Extrato, Relatórios), reapliáveis a qualquer momento.
 - **Ocultar Valores** — Mascara todos os valores monetários na tela com persistência por usuário no banco.
-- **Dashboard** — Resumo mensal, vencidos, próximos a vencer, evolução mensal em gráfico, saldo por conta, calendário de lembretes.
+- **Dashboard** — Resumo mensal, vencidos (com botão **Pagar**, a mesma baixa do Extrato — projeções pedem o valor real), próximos a vencer, evolução mensal em gráfico, saldo por conta, calendário de lembretes.
 - **Relatórios** — Análise por categoria e período, exportação para Excel (.xlsx).
 - **Importação/Exportação** — Importação via planilha Excel e exportação completa dos dados.
 - **Objetivos Financeiros** — Criação e acompanhamento de metas com 4 tipos: **Sonho** (saldo-alvo em conta), **Objetivo** (meta recorrente por categoria), **Projeto** (orçamento por conta) e **Crescimento** (% de crescimento anual por categoria). Dashboard com gráficos de progresso, evolução mensal/anual, comparativo ano a ano e histórico de revisões.
@@ -450,5 +450,5 @@ Configure os seguintes **Secrets** no repositório (`Settings → Secrets and va
 - **Cartões Virtuais** — Sub-identificadores organizacionais de um cartão físico (sem limite/saldo próprio), reconhecidos automaticamente na importação de fatura.
 - **Assinaturas, Comparativo Mensal e Projeção de Economia** — Análises adicionais sobre o extrato: detecção de gastos recorrentes, comparação de dois períodos livres e simulação de patrimônio futuro por juros compostos.
 - **Mascotes e Chat com IA** — Assistente conversacional com mentor escolhido pelo usuário, múltiplos provedores de IA (Claude, GPT, Gemini, DeepSeek, OpenRouter, Mistral, Cohere) com credenciais cifradas, e tutorial guiado por página.
-- **Usuários agregados (conta conjunta)** — O dono convida outra pessoa por e-mail e libera, por módulo (Extrato, Objetivos, Investimentos), leitura ou leitura+escrita, e quais contas ela pode ver. O agregado troca entre "Meus dados" e "Conta de <dono>" no seletor de espaço (nunca os dois ao mesmo tempo), vê só os módulos e contas liberados (o menu esconde o resto e uma faixa avisa que há contas não compartilhadas) e pode deixar de acessar por conta própria. O dono pode definir as permissões antes do aceite, é avisado quando o convite é aceito ou o agregado sai, e pode reconvidar. A segurança é por RLS no banco; a tabela de perfil (`usuarios`) nunca é lida pelo outro lado. Telas: **Compartilhamento** (`/compartilhamento`) e o quadro "Convidar um agregado" no Perfil.
+- **Usuários agregados (conta conjunta)** — O dono convida outra pessoa por e-mail e libera, por módulo (Extrato, Objetivos, Investimentos), leitura ou leitura+escrita, e quais contas ela pode ver. O agregado troca entre "Meus dados" e "Conta de <dono>" no seletor de espaço (nunca os dois ao mesmo tempo), vê só os módulos e contas liberados (o menu esconde o resto e uma faixa avisa que há contas não compartilhadas) e pode deixar de acessar por conta própria. O dono pode definir as permissões antes do aceite, é avisado quando o convite é aceito ou o agregado sai, e pode reconvidar. A segurança é por RLS no banco; a tabela de perfil (`usuarios`) nunca é lida pelo outro lado. O dono acompanha, em **Compartilhamento → Atividade dos agregados**, tudo que os agregados criaram, alteraram ou excluíram nos dados dele (quem, quando e o que mudou). Telas: **Compartilhamento** (`/compartilhamento`) e o quadro "Convidar um agregado" no Perfil.
 - **App Android** — Mesmo código React empacotado com Capacitor. Login por digital (biometria, credenciais cifradas em repouso no aparelho), sessão mais restritiva que no desktop (`sessionStorage`, auto-logout de 5min vs 15min, detecção de pause/resume nativo), e atualização OTA do bundle direto do Supabase — sem passar pela Play Store a cada release. O teclado virtual redimensiona a WebView (`@capacitor/keyboard` + `adjustResize`) e o campo digitado é trazido pra área visível; essas duas primeiras partes são nativas e exigem reinstalar o APK.
