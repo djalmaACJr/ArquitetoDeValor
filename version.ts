@@ -16,6 +16,10 @@ export const getVersionInfo = () => ({
   },
   current: {
     level: "major",
+    // Data de lançamento (AAAA-MM-DD) — exibida em Sobre › Versão atual.
+    // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
+    // em FrontEnd/src/pages/SobrePage.tsx.
+    date: "2026-10-16",
     description: "O dono vê o que os agregados criaram, alteraram ou excluíram nos dados dele; botão Pagar nos vencidos do Dashboard; avisos de sessão e de abas mais seguros; consultas muito mais rápidas para quem compartilha dados"
   }
 })

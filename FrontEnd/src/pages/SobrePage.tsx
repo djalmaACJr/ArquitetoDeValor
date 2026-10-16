@@ -12,14 +12,20 @@ import { APP_VERSION, getVersionInfo } from '../config/version'
 // por padrão) em vez de descartado ao trocar o destaque da versão corrente.
 interface VersaoAnterior {
   versao: string
+  /** Data de lançamento, AAAA-MM-DD. */
+  data:   string
   titulo: string
   icone:  React.ReactNode
   itens:  { t: string; d: string }[]
 }
 
+// AAAA-MM-DD → DD/MM/AAAA (sem passar por Date: evita virar o dia por fuso)
+const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
+
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
     versao: '7.1',
+    data:   '2026-10-09',
     titulo: 'Progressão Anual, Comparativo e ajuda no app',
     icone:  <TrendingUp size={16} />,
     itens: [
@@ -33,6 +39,7 @@ const VERSOES_ANTERIORES: VersaoAnterior[] = [
   },
   {
     versao: '7.0',
+    data:   '2026-10-06',
     titulo: 'Conta conjunta (usuários agregados)',
     icone:  <ShieldCheck size={16} />,
     itens: [
@@ -45,6 +52,7 @@ const VERSOES_ANTERIORES: VersaoAnterior[] = [
   },
   {
     versao: '6.5',
+    data:   '2026-09-30',
     titulo: 'Fatura do Itaú e novo tipo de conta',
     icone:  <FileText size={16} />,
     itens: [
@@ -56,6 +64,7 @@ const VERSOES_ANTERIORES: VersaoAnterior[] = [
   },
   {
     versao: '6.4',
+    data:   '2026-09-28',
     titulo: 'Fundos Imobiliários mais completos e mais segurança',
     icone:  <ShieldCheck size={16} />,
     itens: [
@@ -72,6 +81,7 @@ const VERSOES_ANTERIORES: VersaoAnterior[] = [
   },
   {
     versao: '6.3',
+    data:   '2026-09-18',
     titulo: 'Fundos Imobiliários com dados automáticos',
     icone:  <Wallet size={16} />,
     itens: [
@@ -83,6 +93,7 @@ const VERSOES_ANTERIORES: VersaoAnterior[] = [
   },
   {
     versao: '6.1',
+    data:   '2026-08-31',
     titulo: 'Ajustes na fatura e no Extrato',
     icone:  <FileText size={16} />,
     itens: [
@@ -93,6 +104,7 @@ const VERSOES_ANTERIORES: VersaoAnterior[] = [
   },
   {
     versao: '6.0',
+    data:   '2026-07-23',
     titulo: 'Chegada do módulo de Investimentos',
     icone:  <Wallet size={16} />,
     itens: [
@@ -108,6 +120,7 @@ const VERSOES_ANTERIORES: VersaoAnterior[] = [
   },
   {
     versao: '5.0',
+    data:   '2026-06-09',
     titulo: 'Chegada dos Objetivos Financeiros',
     icone:  <Target size={16} />,
     itens: [
@@ -253,6 +266,9 @@ export default function SobrePage() {
           <span className="text-[12px] px-2 py-0.5 rounded-full bg-av-amber/15 text-av-amber">
             {descNivel}
           </span>
+          <span className="text-[12px]" style={{ color: '#8b92a8' }}>
+            Lançada em {fmtDataVersao(info.current.date)}
+          </span>
         </div>
         <p className="text-[13px] leading-relaxed mb-3" style={{ color: '#8b92a8' }}>
           {info.current.description}
@@ -293,6 +309,7 @@ export default function SobrePage() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="text-[13.5px] font-medium text-white/85">v{v.versao} — {v.titulo}</span>
+                    <span className="block text-[12px]" style={{ color: '#8b92a8' }}>Lançada em {fmtDataVersao(v.data)}</span>
                   </span>
                 </button>
                 {aberta && (
