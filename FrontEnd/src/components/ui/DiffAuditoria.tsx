@@ -34,6 +34,20 @@ function formatCampo(campo: string, valor: unknown, nomePorConta: Map<string, st
 }
 
 export default function DiffAuditoria({ item, contas }: Props) {
+  const lancadoPor = item.criado_por_nome
+  return (
+    <>
+      <DiffCorpo item={item} contas={contas} />
+      {lancadoPor && (
+        <p className="text-[12px] mt-2" style={{ color: MUTED_AUDITORIA }}>
+          lançado por <span style={{ color: '#c5cbd3' }}>{lancadoPor}</span>
+        </p>
+      )}
+    </>
+  )
+}
+
+function DiffCorpo({ item, contas }: Props) {
   const nomePorConta = new Map((contas ?? []).map(c => [c.conta_id, c.nome]))
 
   if (item.operacao === 'INSERT') {

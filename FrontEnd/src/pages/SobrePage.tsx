@@ -24,6 +24,19 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.2',
+    data:   '2026-10-16',
+    titulo: 'Atividade dos agregados e Pagar no Dashboard',
+    icone:  <ShieldCheck size={16} />,
+    itens: [
+      { t: '👀 Atividade dos agregados', d: 'em Compartilhamento, o dono vê quem criou, alterou ou excluiu lançamentos e outros dados dele, com o nome da pessoa e o que mudou.' },
+      { t: '✅ Pagar direto no Dashboard', d: 'o quadro "Vencidos Não Confirmados" ganhou o botão de baixa — o mesmo do Extrato, inclusive a confirmação do valor real nas projeções.' },
+      { t: '🔒 Sessão esquecida vai direto pro login', d: 'ao abrir o sistema depois de muito tempo parado, você cai na tela de login em vez de um aviso de aba inativa.' },
+      { t: '🗂️ Aviso de aba principal fechada', d: 'se você fechar a aba principal, as outras abas avisam; sem resposta em 20s, só a aba sem uso é encerrada.' },
+      { t: '⚡ Muito mais rápido pra quem compartilha dados', d: 'consultas de lançamentos para contas conjuntas deixaram de travar com muitos dados.' },
+    ],
+  },
+  {
     versao: '7.1',
     data:   '2026-10-09',
     titulo: 'Progressão Anual, Comparativo e ajuda no app',
@@ -274,15 +287,13 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.2.0) */}
+        {/* Detalhe das novidades desta versão (7.2.1) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '👀 Atividade dos agregados', d: 'em Compartilhamento, o dono vê quem criou, alterou ou excluiu lançamentos e outros dados dele, com o nome da pessoa e o que mudou.' },
-            { t: '✅ Pagar direto no Dashboard', d: 'o quadro "Vencidos Não Confirmados" ganhou o botão de baixa — o mesmo do Extrato, inclusive a confirmação do valor real nas projeções.' },
-            { t: '🔒 Sessão esquecida vai direto pro login', d: 'ao abrir o sistema depois de muito tempo parado, você cai na tela de login em vez de um aviso de aba inativa.' },
-            { t: '🗂️ Aviso de aba principal fechada', d: 'se você fechar a aba principal, as outras abas avisam; sem resposta em 20s, só a aba sem uso é encerrada — a que você está usando nunca é deslogada.' },
-            { t: '⚡ Muito mais rápido pra quem compartilha dados', d: 'consultas de lançamentos para contas conjuntas deixaram de travar com muitos dados.' },
-            { t: '🏷️ Categoria obrigatória e testes mais estáveis', d: 'ajustes de validação e limpeza de objetivos de teste acumulados.' },
+            { t: '🔐 "Últimas alterações" só com os seus dados', d: 'o quadro do Dashboard deixou de mostrar alterações de outras contas; a rota de auditoria passou a devolver só a própria trilha, e a visão de todos fica restrita à tela de administração.' },
+            { t: '👤 Nomes no lugar de códigos', d: 'em contas compartilhadas, o detalhe da alteração mostra "lançado por" com o nome da pessoa, não o identificador.' },
+            { t: '⚡ Quadro abre mais rápido, com "Ver mais"', d: 'a lista carrega 20 itens e pagina sob demanda; novo índice no banco acelera a consulta.' },
+            { t: '🔄 Lista aparece na primeira abertura', d: 'corrigido o "Nenhuma alteração" que só sumia depois de clicar em Atualizar.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

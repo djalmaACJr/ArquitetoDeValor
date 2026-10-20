@@ -142,6 +142,7 @@ export default function AdminAuditoriaPage() {
   const { itens, loading, recarregar } = useTrilhaAuditoria({
     tabela: tabela === 'todas' ? undefined : tabela,
     operacao: operacao === 'todas' ? undefined : operacao,
+    escopo: 'todos',
     limit: 200,
   }, isAdmin)
 

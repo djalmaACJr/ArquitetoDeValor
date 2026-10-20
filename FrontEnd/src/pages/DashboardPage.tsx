@@ -1129,8 +1129,14 @@ const CardUltimasAlteracoes = memo(function CardUltimasAlteracoes({ contas, onEd
 
   const contasOrdenadas = [...contas].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
 
+  // user_id explícito: admin enxerga a trilha de TODOS por RLS, e sem este
+  // filtro o card mostrava alterações de outros usuários. No espaço de um
+  // dono (agregado) o uid de contexto é o do dono, dono dos registros.
+  const uidCtx = useContextoUserId()
+  // Paginação: começa com 20 e cada "Ver mais" soma 20 (teto 500 do backend).
+  const [limite, setLimite] = useState(20)
   const { itens: itensBrutos, loading, recarregar } = useTrilhaAuditoria(
-    { tabela: 'transacoes', conta_id: contaFiltro === 'todas' ? undefined : contaFiltro, limit: 50 },
+    { tabela: 'transacoes', user_id: uidCtx ?? undefined, conta_id: contaFiltro === 'todas' ? undefined : contaFiltro, limit: limite },
     aberto,
   )
 
@@ -1170,7 +1176,7 @@ const CardUltimasAlteracoes = memo(function CardUltimasAlteracoes({ contas, onEd
             </div>
             <select
               value={contaFiltro}
-              onChange={e => setContaFiltro(e.target.value)}
+              onChange={e => { setContaFiltro(e.target.value); setLimite(20) }}
               className="text-[14px] bg-blue-400/10 border border-blue-400/30 rounded-md text-av-blue px-2 py-1 cursor-pointer"
               style={{ colorScheme: 'auto' }}
             >
@@ -1230,6 +1236,12 @@ const CardUltimasAlteracoes = memo(function CardUltimasAlteracoes({ contas, onEd
                   </div>
                 )
               })}
+              {itensBrutos.length >= limite && limite < 500 && (
+                <button onClick={() => setLimite(l => l + 20)}
+                  className="w-full text-[14px] text-av-blue hover:underline py-1.5">
+                  Ver mais
+                </button>
+              )}
             </div>
           )}
         </div>
