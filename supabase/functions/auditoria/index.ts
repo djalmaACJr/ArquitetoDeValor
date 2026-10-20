@@ -81,7 +81,12 @@ async function listarTrilha(c: ReturnType<typeof db>, req: Request, userId: stri
   if (tabela)       q = q.eq("tabela", tabela);
   if (operacao)     q = q.eq("operacao", operacao);
   if (registroId)   q = q.eq("registro_id", registroId);
-  if (filtroUserId) q = q.eq("user_id", filtroUserId);
+  // Escopo padrão = só a PRÓPRIA trilha. A RLS deixa admin ler a de todos, mas
+  // isso só vale quando a tela de admin pede (?escopo=todos) — qualquer outra
+  // tela (ex.: card do Dashboard) nunca deve exibir dados de outros usuários.
+  // Pra não-admin, escopo=todos é inofensivo: a RLS já restringe à própria.
+  if (filtroUserId)                     q = q.eq("user_id", filtroUserId);
+  else if (params.get("escopo") !== "todos") q = q.eq("user_id", userId);
   if (desde)        q = q.gte("alterado_em", desde);
   if (ate)          q = q.lte("alterado_em", `${ate}T23:59:59.999`);
   // Casa contra QUALQUER um dos dois snapshots — um DELETE não tem
@@ -91,8 +96,27 @@ async function listarTrilha(c: ReturnType<typeof db>, req: Request, userId: stri
   const { data, error } = await q;
   if (error) { logError("Listar trilha de auditoria", error); return erro("Erro ao buscar auditoria"); }
 
-  logResponse(200, { count: data?.length });
-  return json({ dados: data ?? [] });
+  // criado_por vem cru (UUID) nos snapshots. Só vale mostrar nome quando quem
+  // lançou NÃO é o dono do registro (conta compartilhada) — senão o campo é ruído.
+  type Snap = { criado_por?: string | null } | null;
+  const quemLancou = (i: { user_id: string; dados_novos: Snap; dados_antigos: Snap }) => {
+    const cp = (i.dados_novos ?? i.dados_antigos)?.criado_por;
+    return cp && cp !== i.user_id ? cp : null;
+  };
+  const itens = data ?? [];
+  const ids = [...new Set(itens.map(quemLancou).filter((x): x is string => !!x))];
+  let nomes = new Map<string, string>();
+  if (ids.length > 0) {
+    const { data: us } = await c.rpc("fn_nomes_usuarios", { p_ids: ids });
+    nomes = new Map((us ?? []).map((u: { id: string; nome: string }) => [u.id, u.nome]));
+  }
+  const dados = itens.map((i) => {
+    const cp = quemLancou(i);
+    return { ...i, criado_por_nome: cp ? (nomes.get(cp) ?? null) : null };
+  });
+
+  logResponse(200, { count: dados.length });
+  return json({ dados });
 }
 
 async function obterConfig(c: ReturnType<typeof db>, userId: string) {

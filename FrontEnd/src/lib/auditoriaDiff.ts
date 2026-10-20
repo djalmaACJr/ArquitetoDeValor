@@ -11,12 +11,14 @@ export interface ItemDiffAuditoria {
   operacao:      OperacaoAuditoriaDiff
   dados_antigos: Record<string, unknown> | null
   dados_novos:   Record<string, unknown> | null
+  // Preenchido pelo backend só quando quem lançou não é o dono (conta compartilhada)
+  criado_por_nome?: string | null
 }
 
 export const MUTED_AUDITORIA = '#8b92a8'
 
 // Campos internos que não ajudam a entender "o que mudou" — poluem o diff.
-export const CAMPOS_OMITIDOS_AUDITORIA = new Set(['id', 'user_id', 'criado_em', 'atualizado_em', 'ano_tx', 'mes_tx'])
+export const CAMPOS_OMITIDOS_AUDITORIA = new Set(['id', 'user_id', 'criado_em', 'atualizado_em', 'ano_tx', 'mes_tx', 'criado_por'])
 
 // Nome do campo cru (coluna do banco) → rótulo amigável no diff. Sem
 // entrada aqui, mostra o nome cru mesmo (fallback).
