@@ -85,8 +85,16 @@ async function listarTrilha(c: ReturnType<typeof db>, req: Request, userId: stri
   // isso só vale quando a tela de admin pede (?escopo=todos) — qualquer outra
   // tela (ex.: card do Dashboard) nunca deve exibir dados de outros usuários.
   // Pra não-admin, escopo=todos é inofensivo: a RLS já restringe à própria.
-  if (filtroUserId)                     q = q.eq("user_id", filtroUserId);
-  else if (params.get("escopo") !== "todos") q = q.eq("user_id", userId);
+  // Não-admin com escopo=todos cai no escopo próprio: além de inofensivo, evita
+  // a varredura global (a policy `user_id = uid OR admin` não usa índice sem
+  // filtro de user_id e estourava o timeout — erro 400 no CA-AUD02).
+  let escopoTodos = params.get("escopo") === "todos";
+  if (escopoTodos && !filtroUserId) {
+    const { data: eu } = await c.from("usuarios").select("admin").eq("id", userId).maybeSingle();
+    escopoTodos = eu?.admin === true;
+  }
+  if (filtroUserId)       q = q.eq("user_id", filtroUserId);
+  else if (!escopoTodos)  q = q.eq("user_id", userId);
   if (desde)        q = q.gte("alterado_em", desde);
   if (ate)          q = q.lte("alterado_em", `${ate}T23:59:59.999`);
   // Casa contra QUALQUER um dos dois snapshots — um DELETE não tem
