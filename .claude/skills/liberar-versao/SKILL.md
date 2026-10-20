@@ -9,7 +9,21 @@ argument-hint: "<X.Y.Z> [resumo das mudanças]"
 Argumento: a nova versão (`X.Y.Z`). Se faltar, pergunte. Formato: X = features, Y = correções/hotfixes, Z = tentativas (ver `version.ts`).
 
 **Regra de ouro: nada entra na `main` sem a CI da `develop` 100% verde.** A `main` publica o web automaticamente, então o merge nela é o ponto de liberação. Nunca force-push, nunca pule hooks, nunca relance a CI às cegas.
-O pedido "liberar a versão" autoriza as etapas 1–8; `publish:ota` (etapa 10) pede confirmação.
+O pedido "liberar a versão" autoriza as etapas 0–8; `publish:ota` (etapa 10) pede confirmação.
+
+## 0. Revisão de segurança e performance (antes de qualquer bump)
+Revisar o diff desde a última tag (`git diff <última tag>...HEAD`) **antes** de mexer em versão. Se achar problema, corrija ou relate e pergunte ao usuário se segue; não prossiga em silêncio com achado aberto.
+- **Segurança**: invocar `/security-review` e `/code-review` sobre o diff. Checklist do projeto:
+  - toda tabela/rota nova respeita `user_id`/RLS; nenhum `service_role`/`dbAdmin()` em rota de usuário; nada de policy de SELECT em `usuarios` para outro usuário;
+  - rotas que usam RLS de admin (`trilha_auditoria`, `cron_execucoes`) filtram a própria visão por padrão — admin só vê dados de outros em `/admin/*`;
+  - segredos/chaves nunca no bundle (`FrontEnd/.env` é público); `X-Contexto-User-Id` só como dica, validado por `resolverContexto()`;
+  - tabela nova de dado do usuário entra em backup/restore (`ImportExportPage.tsx`) e em `fn_excluir_dados_usuario`.
+- **Performance**:
+  - queries novas filtram por colunas **indexadas** (confira `idx_*` nas migrations; para trilha/transações use `user_id` + coluna de ordenação); evite `.or()` em JSONB, `select *` e listas sem `limit`/paginação;
+  - policies RLS com função por linha (`fn_agregado_tem_acesso`) devem filtrar primeiro o dono (ver `20261016000001`);
+  - front: `staleTime`/invalidação coerentes, sem refetch em loop, listas grandes paginadas, chunk novo pesado só com `lazy`;
+  - migration pesada (índice em tabela grande, backfill): avaliar `CREATE INDEX CONCURRENTLY`/janela e tempo de lock.
+- Registrar no relato final o que foi revisado e os achados (corrigidos ou aceitos).
 
 ## 1. Pré-checagem
 - `git status`; anote a branch atual (feature/`release/*`) e a última tag (`git tag | tail`).
@@ -47,7 +61,12 @@ gh run watch <id> --exit-status      # um por workflow do SHA da etapa 4
 ```
 Use `run_in_background` para esperar (são ~30 min); não faça polling curto.
 - **Todos os 3 workflows do SHA com `success`** → seguir.
-- **Qualquer falha ou cancelamento** → PARE. Não faça merge na main. Leia o log (`gh run view <id> --log-failed`), identifique a causa raiz (ver notas de CI no `CLAUDE.md`: timeout por carga, `JA_AGREGADO`, concorrência na conta de teste) e relate. Corrija e volte à etapa 3/4; flaky por infraestrutura só pode ser relançada após explicar a causa ao usuário.
+- **Qualquer falha ou cancelamento** → PARE o merge na main e leia o log (`gh run view <id> --log-failed`) para classificar a causa:
+  - **Timeout do banco / limite de carga** (`statement timeout`/`57014`, `Exceeded timeout`, `canceling statement`, hooks `beforeAll` estourando, 429/rate limit, limite de convites/hora): é infraestrutura (compute burstable do Supabase, ver `CLAUDE.md`). **Avise o usuário** (causa + qual teste) e **espere o limite se recuperar antes de repetir**: 10 min para timeout/CPU; 60 min se for limite por hora (convites, rate limit). Depois `gh run rerun <id> --failed` (ou o run inteiro se o job dependente rodar em sequência) e volte a esperar. No máximo **2 repetições** por causa — se persistir, PARE: trate como problema real (consulta lenta nova? veja a etapa 0) e relate ao usuário.
+  - **Falha de teste/lint/build** (assertion, tipo, regressão): é bug. Não repita — corrija, volte à etapa 3/4.
+  - **Concorrência na conta de teste** (`JA_AGREGADO`, outra rodada em andamento): espere a outra rodada terminar e repita (mesma regra de no máximo 2 repetições).
+  Nunca repita às cegas nem sem avisar; cada repetição precisa de uma causa explicada ao usuário.
+- Para esperar o tempo de recuperação use `ScheduleWakeup`/espera em segundo plano, não `sleep` em loop curto.
 - Verifique que o resultado é do SHA **atual** da `develop` (`gh run list` mostra o commit), não de um anterior.
 
 ## 7. Merge na main + tag (só com o gate verde)
@@ -67,4 +86,4 @@ O push na `main` publica o web automaticamente. Se `--ff-only` falhar (main rece
 `cd FrontEnd && npm run publish:ota` — usa a `service_role` do `.env` da raiz; **peça confirmação** antes. Mudanças nativas exigem APK novo (`instalar_android.bat`).
 
 ## 10. Relato final
-Versão, SHA/tag, o que foi deployado (migrations, funções), resultado de CADA workflow da CI, estado da publicação do web e do OTA. Não afirmar "no ar" sem ter confirmado cada etapa; listar o que ficou pendente.
+Achados da revisão (etapa 0), versão, SHA/tag, o que foi deployado (migrations, funções), resultado de CADA workflow da CI, estado da publicação do web e do OTA. Não afirmar "no ar" sem ter confirmado cada etapa; listar o que ficou pendente.
