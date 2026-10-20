@@ -104,6 +104,14 @@ test('ZZ-TEARDOWN — apaga todos os dados E2E remanescentes', async ({ page, re
         { headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}`, 'Content-Profile': 'arqvalor' } },
       )
       console.log(`  • vínculos de agregado E2E (@example.com) removidos: HTTP ${r.status()}`)
+      // Vínculos encerrados (revogado/recusado/saiu) de qualquer e-mail: nesta conta de
+      // teste são sempre artefatos, e acumulados viram o aviso de login "Agregado saiu"
+      // (N pessoas deixaram de acessar...) que cobre a tela e trava os testes seguintes.
+      const r2 = await request.delete(
+        `${SUPABASE_URL}/rest/v1/agregados?dono_id=eq.${idUsuario}&status=in.(REVOGADO,RECUSADO)`,
+        { headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}`, 'Content-Profile': 'arqvalor' } },
+      )
+      console.log(`  • vínculos encerrados removidos: HTTP ${r2.status()}`)
     }
   }
 

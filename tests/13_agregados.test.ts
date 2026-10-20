@@ -1956,4 +1956,9 @@ afterAll(async () => {
   const { error } = await admin.from("agregados").delete()
     .eq("dono_id", await getUserId()).ilike("email_convidado", "%@example.com");
   if (error) console.warn(`[13_agregados] falha ao apagar vínculos de teste: ${error.message}`);
+  // Encerrados (revogado/recusado/saiu) de qualquer e-mail também são artefatos desta
+  // conta de teste; acumulados disparam o aviso de login "Agregado saiu" no E2E.
+  const { error: e2 } = await admin.from("agregados").delete()
+    .eq("dono_id", await getUserId()).in("status", ["REVOGADO", "RECUSADO"]);
+  if (e2) console.warn(`[13_agregados] falha ao apagar vínculos encerrados: ${e2.message}`);
 }, 60000);
