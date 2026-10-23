@@ -272,7 +272,7 @@ export default function ProjecaoEconomiaPage() {
   return (
     <div className="p-5 space-y-6">
 
-      <MascoteTutorial pagina="projecao" />
+      <div className="mobile-report-mentor"><MascoteTutorial pagina="projecao" /></div>
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -282,7 +282,7 @@ export default function ProjecaoEconomiaPage() {
             Baseado nos últimos {dadosMensais.length} meses · projeção para {hLabel}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-nowrap gap-2 shrink-0">
           <button onClick={exportar}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[16px] font-medium transition-all hover:border-white/30"
             style={{ borderColor: 'rgba(255,255,255,0.15)', color: '#8b92a8' }}>

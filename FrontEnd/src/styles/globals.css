@@ -538,6 +538,37 @@ html, body {
   }
 }
 
+/* Toolbars de filtro compactas são exclusivas dos celulares. */
+.mobile-report-toolbar { display: none; }
+
+.relatorios-table-scroll { max-width: 100%; }
+
+/* Relatórios: no celular, o mentor não deve ocupar a área de toque dos filtros. */
+@media (max-width: 767px) {
+  .relatorios-mentor,
+  .mobile-report-mentor {
+    display: none;
+  }
+
+  .mobile-report-filters-collapsed { display: none; }
+  .mobile-report-toolbar { display: flex; }
+
+  .relatorios-table-scroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .app-main .relatorios-table-scroll table { max-width: none; }
+  .relatorios-table-scroll thead { position: static; }
+  .relatorios-table-scroll :is(th, td):not(:first-child) {
+    padding-left: 0.875rem !important;
+    padding-right: 0.875rem !important;
+    white-space: nowrap;
+  }
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Tailwind grays (gray-50..900) — não são theme-aware, mas são usados
  * como cinzas neutros em telas que ainda não foram migradas pra tokens.

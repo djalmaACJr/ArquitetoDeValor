@@ -1694,10 +1694,7 @@ export default function DashboardPage() {
     refetch()
     toast(extra.valor !== undefined ? 'Lançamento confirmado como pago!' : 'Pago!')
   }
-  const pagarVencido = (tx: Transacao) => {
-    if (tx.status === 'PROJECAO') setConfirmandoProjecao(tx)
-    else void baixar(tx)
-  }
+  const pagarVencido = (tx: Transacao) => setConfirmandoProjecao(tx)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -2115,7 +2112,9 @@ export default function DashboardPage() {
             const tx = confirmandoProjecao
             if (isNaN(valorReal) || valorReal <= 0) { toast('Valor inválido.'); return }
             setConfirmandoProjecao(null)
-            void baixar(tx, { valor: valorReal, valor_projetado: tx.valor })
+            void baixar(tx, tx.status === 'PROJECAO'
+              ? { valor: valorReal, valor_projetado: tx.valor }
+              : { valor: valorReal })
           }}
         />
       )}

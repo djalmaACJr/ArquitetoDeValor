@@ -316,6 +316,7 @@ export default function RelatoriosPage() {
   const drillRef    = useRef<HTMLDivElement>(null)
 
   // ── Auto-colapsar a barra de filtros ──
+  // Os filtros começam visíveis para configurar a primeira consulta.
   const [filtrosColapsados, setFiltrosColapsados] = useState(false)
   const overrideManualRef = useRef(false)
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -479,6 +480,10 @@ export default function RelatoriosPage() {
         todos.push(...lista)
       }))
       setPgState({ lancamentos: todos, buscado: true })
+      if (window.matchMedia('(max-width: 767px)').matches) {
+        overrideManualRef.current = true
+        setFiltrosColapsados(true)
+      }
       // Debug (no-op em produção via lib/logger)
       if (todos.length > 0) {
         const ex = todos.find(l => l.categoria_id)
@@ -1055,12 +1060,9 @@ export default function RelatoriosPage() {
       {/* Sticky: topbar + filtros — encolhe automaticamente ao rolar.
           Quando colapsado, mostra só uma barra fina com botão pra reexibir
           os filtros + título + botão Gerar/atualizar. */}
-      {/* z-50: precisa ficar ACIMA do <thead> (z-30) e do canto sticky dele
-          (z-40) — senão o dropdown dos comboboxes de filtro (Contas,
-          Categorias, Status), embora tenha z-index alto internamente, fica
-          preso na stacking context desta div (z-20 antes) e é coberto pelo
-          cabeçalho sticky da tabela ao rolar. */}
-      <div ref={stickyBarRef} className="sticky top-0 z-50 -mx-5 px-5 pt-4 pb-2"
+      {/* Fica acima da tabela e abaixo do backdrop/sidebar mobile, para a
+          barra de filtros nunca cobrir o menu lateral aberto. */}
+      <div ref={stickyBarRef} className="sticky top-0 z-[39] -mx-5 px-5 pt-4 pb-2"
         style={{ background: 'var(--bg-page, #0d1220)', borderBottom: filtrosColapsados ? '1px solid rgba(255,255,255,0.08)' : 'none' }}>
         {filtrosColapsados ? (
           // ── Versão compacta (auto ao rolar) ──
@@ -1127,7 +1129,7 @@ export default function RelatoriosPage() {
         </div>
       </div>
 
-      <div className="mb-5">
+      <div className="relatorios-mentor mb-5">
         <MascoteTutorial pagina="relatorios" />
       </div>
 
@@ -1197,12 +1199,12 @@ export default function RelatoriosPage() {
           </div>{/* /relatorios-filtros */}
 
           {/* Botoes */}
-          <div className="flex items-center gap-2 ml-auto flex-wrap">
+          <div className="flex flex-nowrap items-center gap-2 ml-auto shrink-0">
             {buscado && (
               <button
                 data-tutorial="relatorios-exportar"
                 onClick={exportar}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[16px] font-semibold transition-all hover:opacity-90 border border-white/10"
+                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-[13px] sm:text-[16px] font-semibold transition-all hover:opacity-90 border border-white/10 whitespace-nowrap"
                 style={{ color: '#4da6ff', background: 'rgba(77,166,255,0.08)' }}
                 title={
                   vistaPareto
@@ -1218,7 +1220,7 @@ export default function RelatoriosPage() {
               data-tutorial="relatorios-gerar"
               onClick={() => buscar()}
               disabled={loading || meses.length === 0}
-              className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-[16px] font-semibold transition-all hover:opacity-90"
+              className="flex items-center gap-1.5 px-2 sm:px-4 py-1.5 rounded-lg text-[13px] sm:text-[16px] font-semibold transition-all hover:opacity-90 whitespace-nowrap"
               style={{ background: '#00c896', color: '#0a0f1a', opacity: loading ? 0.7 : 1 }}
             >
               {loading
@@ -1386,18 +1388,18 @@ export default function RelatoriosPage() {
             />
           )}
 
-          {/* Tabela principal. SEM wrapper com overflow:
-              qualquer overflow no caminho entre <thead sticky> e <main>
-              quebra o sticky vertical. Em viewports estreitas, a página
-              inteira (<main>) rola horizontalmente — não a tabela. */}
-          {!vistaPareto && <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl" data-tutorial="relatorios-tabela">
+          {/* A tabela ganha rolagem horizontal própria em telas estreitas;
+              assim a página não depende de rolagem lateral do <main>. */}
+          {!vistaPareto && <p className="mb-2 text-[13px] md:hidden" style={{ color: '#8b92a8' }}>Deslize a tabela para o lado para ver os outros meses ↔</p>}
+          {!vistaPareto && <div className="relatorios-table-scroll" data-tutorial="relatorios-tabela">
+            <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl">
               {/* table-layout: fixed — com `auto` (padrão), o navegador ignora a
                   largura definida da coluna Categoria sempre que o texto de
                   alguma célula (nome de categoria/subcategoria) "pede" mais
                   espaço, mesmo com truncate; com `fixed`, as larguras do
                   cabeçalho é que mandam, o que o redimensionamento
                   (larguraCategoria) exige pra funcionar de verdade. */}
-              <table className="w-full border-collapse" style={{ minWidth: 600, tableLayout: 'fixed' }}>
+              <table className="w-full border-collapse" style={{ width: Math.max(600, larguraCategoria + 130 + 125 + colunas.length * 124), minWidth: Math.max(600, larguraCategoria + 130 + 125 + colunas.length * 124), tableLayout: 'fixed' }}>
                 {/* Cabecalho — sticky logo abaixo da barra de filtros
                     (altura medida via ResizeObserver, ver alturaBarraFiltros). */}
                 <thead className="sticky z-30" style={{ top: alturaBarraFiltros }}>
@@ -1431,7 +1433,7 @@ export default function RelatoriosPage() {
                         <th key={m} className="px-3 py-3 text-right border-b border-white/10 border-l border-white/5"
                           onClick={ehAno ? () => toggleAno(m) : undefined}
                           title={ehAno ? (aberto ? 'Recolher meses' : 'Expandir meses') : undefined}
-                          style={{ width: 100, background: ehAno ? '#222a3d' : '#1a1f2e', cursor: ehAno ? 'pointer' : undefined }}>
+                          style={{ width: 124, background: ehAno ? '#222a3d' : '#1a1f2e', cursor: ehAno ? 'pointer' : undefined }}>
                           <span className="inline-flex items-center justify-end gap-1 text-[14px] font-bold uppercase tracking-widest"
                             style={{ color: ehAno ? '#00c896' : '#4a5168' }}>
                             {ehAno && (aberto ? <ChevronDown size={12}/> : <ChevronRight size={12}/>)}
@@ -1593,6 +1595,7 @@ export default function RelatoriosPage() {
                   </tr>
                 </tbody>
               </table>
+            </div>
           </div>}
         </>
       )}

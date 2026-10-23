@@ -276,12 +276,24 @@ export default function LancamentosPage() {
     // Navegação por Swipe no Android
     let touchStartX = 0
     let touchStartY = 0
+    // Gesto que começa dentro de um elemento com rolagem horizontal (ex.: a
+    // barra de datas) é pra rolar ele, não pra trocar de mês.
+    let gestoEmAreaRolavel = false
+    function dentroDeAreaRolavelX(el: EventTarget | null): boolean {
+      let n = el instanceof HTMLElement ? el : null
+      while (n && n !== document.body) {
+        if (n.scrollWidth > n.clientWidth + 1 && /(auto|scroll)/.test(getComputedStyle(n).overflowX)) return true
+        n = n.parentElement
+      }
+      return false
+    }
     function onTouchStart(e: TouchEvent) {
       touchStartX = e.touches[0].clientX
       touchStartY = e.touches[0].clientY
+      gestoEmAreaRolavel = dentroDeAreaRolavelX(e.target)
     }
     function onTouchEnd(e: TouchEvent) {
-      if (drawerAberto) return
+      if (drawerAberto || gestoEmAreaRolavel) return
       const dx = e.changedTouches[0].clientX - touchStartX
       const dy = e.changedTouches[0].clientY - touchStartY
       // Movimento horizontal predominante e distância mínima (75px)
