@@ -538,6 +538,7 @@ export interface InvestimentoHistoricoMensal {
   variacao_percentual: number
   rentabilidade_mes:   number
   created_at:          string
+  atualizado_em?:      string | null  // última cotação gravada neste snapshot
   // Join devolvido por GET /investimentos/historico-mensal
   inv_ativos?:         { ticker: string; nome: string; tipo_ativo: TipoAtivoInvestimento } | null
 }

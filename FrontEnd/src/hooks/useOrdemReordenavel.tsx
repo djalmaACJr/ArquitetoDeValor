@@ -25,14 +25,25 @@ export function useOrdemReordenavel<T extends string>(
   lsKey: string, chavesAtuais: T[],
   opts?: { valorRemoto?: T[] | null; aoMudar?: (ordem: T[]) => void },
 ) {
-  const [ordem, setOrdem] = useState<T[]>(() => {
+  const lerLocal = (chave: string): T[] => {
     try {
-      const salvo = JSON.parse(localStorage.getItem(lsKey) ?? 'null') as T[] | null
+      const salvo = JSON.parse(localStorage.getItem(chave) ?? 'null') as T[] | null
       if (Array.isArray(salvo)) return salvo
     } catch { /* localStorage indisponível/corrompido — usa o padrão */ }
     return chavesAtuais
-  })
+  }
+  const [ordem, setOrdem] = useState<T[]>(() => lerLocal(lsKey))
   const tocadoLocal = useRef(false)
+  // `lsKey` pode mudar depois do 1º render (ex.: página de detalhe do ativo só
+  // sabe o tipo do ativo — e portanto a chave — quando o fetch termina). Sem
+  // recarregar aqui, a ordem ficava presa à da chave provisória (vazia/padrão)
+  // e a ordem salva do tipo não era aplicada.
+  const [lsKeyAplicada, setLsKeyAplicada] = useState(lsKey)
+  if (lsKeyAplicada !== lsKey) {
+    setLsKeyAplicada(lsKey)
+    setOrdem(lerLocal(lsKey))
+    tocadoLocal.current = false
+  }
 
   useEffect(() => {
     if (!opts?.valorRemoto || tocadoLocal.current) return
@@ -56,6 +67,7 @@ export function useOrdemReordenavel<T extends string>(
   }, [ordem, chavesKey])
 
   useEffect(() => {
+    if (lsKeyAplicada !== lsKey) return
     try { localStorage.setItem(lsKey, JSON.stringify(ordemCompleta)) } catch { /* quota/privado — ignora */ }
     if (ordemCompleta.length !== ordem.length) setOrdem(ordemCompleta)
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -272,6 +272,7 @@ export default function ComparativoMensalPage() {
   const [tendenciaBruta, setTendencia] = useState<{ mes: string; receitas: number; despesas: number }[]>(() => _saved?.tendencia ?? [])
   const [tendPeriodo, setTendPeriodo] = useState(() => _saved?.tendPeriodo ?? '')
   const [buscado,     setBuscado]     = useState(() => _saved?.buscado ?? false)
+  const [filtrosColapsados, setFiltrosColapsados] = useState(false)
   const [busca,       setBusca]       = useState(() => _saved?.busca ?? '')
   const [sortCat,     setSortCat]     = useState<{ col: SortCol; dir: 1 | -1 }>(() => _saved?.sortCat ?? { col: 'variacao', dir: -1 })
   const [modo, setModo] = useState<ModoValor>(() => _saved?.modo ?? 'valores')
@@ -365,6 +366,7 @@ export default function ComparativoMensalPage() {
           : ''
       )
       setBuscado(true)
+      if (window.matchMedia('(max-width: 767px)').matches) setFiltrosColapsados(true)
     } finally {
       setLoading(false)
     }
@@ -925,12 +927,22 @@ export default function ComparativoMensalPage() {
         </div>
       </div>
 
-      <div className="mb-5">
+      <div className="relatorios-mentor mb-5">
         <MascoteTutorial pagina="comparativo" />
       </div>
 
+      {filtrosColapsados && (
+        <div className="mobile-report-toolbar sticky top-0 z-[39] -mx-5 px-5 py-2 flex items-center gap-2" style={{ background: 'var(--bg-page, #0d1220)' }}>
+          <button onClick={() => setFiltrosColapsados(false)} className="px-3 py-2 rounded-lg border border-white/10 text-[14px]" style={{ color: '#8b92a8' }}>
+            <ChevronDown size={14} className="inline mr-1" /> Filtros
+          </button>
+          {buscado && <button onClick={exportar} className="px-2 py-2 rounded-lg border border-white/10 text-[13px] whitespace-nowrap" style={{ color: '#4da6ff' }}><Download size={13} className="inline mr-1"/>Exportar</button>}
+          <button onClick={buscar} disabled={loading || !diasOk || periodoInvalido} className="ml-auto px-2 py-2 rounded-lg text-[13px] font-semibold whitespace-nowrap" style={{ background: '#00c896', color: '#0a0f1a' }}><RefreshCw size={13} className="inline mr-1"/>Comparar</button>
+        </div>
+      )}
+
       {/* Filters */}
-      <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5" data-tutorial="comparativo-filtros">
+      <div className={`mobile-report-filters bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5${filtrosColapsados ? ' mobile-report-filters-collapsed' : ''}`} data-tutorial="comparativo-filtros">
         <div className="flex flex-wrap gap-4 items-end">
 
           {/* Period A */}

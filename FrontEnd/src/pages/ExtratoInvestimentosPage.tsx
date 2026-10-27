@@ -577,7 +577,7 @@ export default function ExtratoInvestimentosPage() {
                           <td className="px-3 py-2">
                             {l.ticker ? (
                               <>
-                                <Link to={`/investimentos/ativos/${l.ativoId}`} className="text-white font-medium hover:underline">
+                                <Link to={`/investimentos/ativos/${l.ativoId}`} target="_blank" rel="noopener noreferrer" className="text-white font-medium hover:underline">
                                   {l.ticker}
                                 </Link>
                                 <span className="block text-[11px]" style={{ color: MUTED }}>

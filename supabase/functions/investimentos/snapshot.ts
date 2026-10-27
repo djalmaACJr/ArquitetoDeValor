@@ -197,6 +197,7 @@ export async function gravarSnapshot(
   const { error } = await c.from("inv_historico_mensal").upsert({
     user_id: userId, ativo_id: ativoId, conta_id: contaId, mes_ano: mesAno,
     valor_mercado: Number(valorMercado.toFixed(2)), quantidade: qtdTotal, preco_medio: precoMedio, ...desempenho,
+    atualizado_em: new Date().toISOString(),
   }, { onConflict: "ativo_id,conta_id,mes_ano" });
   if (error) throw error;
   await recalcularSeguinte(c, ativoId, contaId, mesAno);

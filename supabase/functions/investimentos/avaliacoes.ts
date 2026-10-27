@@ -9,6 +9,8 @@ import {
   PESOS_PADRAO_CRITERIO, TIPO_ATIVO_LABEL_BR, CATEGORIAS_FII, CATEGORIA_FII_LABEL_BR,
 } from "./shared.ts";
 import { buscarFatosRelevantesParaAtivo, descreverFatosRelevantes } from "./fatosRelevantes.ts";
+import { candidatosTicker } from "./mercado.ts";
+import { fechamentosRecentes, descreverPontos } from "../_shared/variacaoDiaria.ts";
 
 export function segmentoTipo(req: Request): string | null {
   const partes = new URL(req.url).pathname.split("/").filter(Boolean);
@@ -438,7 +440,9 @@ export async function avaliarUmMentor(
     "índice (0 a 4) da opção que melhor reflete a realidade do ativo — 0 = pior, 4 = melhor. Priorize os " +
     "Fatos Relevantes/Comunicados informados abaixo (se houver) sobre seu conhecimento de treinamento — " +
     "eles são publicações oficiais recentes do próprio fundo/empresa. Na ausência deles, use seu " +
-    "conhecimento de mercado sobre o ativo. Responda SOMENTE com um JSON válido (sem markdown, sem " +
+    "conhecimento de mercado sobre o ativo. Se você tiver busca na web disponível, use-a para validar " +
+    "informações atuais do ativo (resultados, notícias, dividendos, vacância/endividamento) antes de " +
+    "responder; os dados informados abaixo prevalecem sobre sua memória. Responda SOMENTE com um JSON válido (sem markdown, sem " +
     'comentários, sem texto fora do JSON) no formato exato: { "respostas": { "<id_da_pergunta>": indice_0_a_4 } }. ' +
     "Inclua TODAS as perguntas. Se não tiver dados sobre algum aspecto, escolha o índice mais neutro/conservador.";
   const perguntasTxt = perguntas.map((p) =>
@@ -458,9 +462,18 @@ export async function avaliarUmMentor(
     }
   }
 
+  // Variação diária recente (cotados) — contexto de momento de mercado.
+  // Falha silenciosa, como os Fatos Relevantes.
+  let blocoVariacao = "";
+  if (!["RENDA_FIXA", "TESOURO_DIRETO", "CRIPTOMOEDAS"].includes(String(ativo.tipo_ativo))) {
+    const pontos = await fechamentosRecentes(String(ativo.ticker ?? ""), candidatosTicker);
+    if (pontos) blocoVariacao = `Variação diária recente de ${ativo.ticker} (fechamento vs. anterior; pregão de hoje pode estar em andamento): ${descreverPontos(pontos)}`;
+  }
+
   const userMsg =
     `Ativo a avaliar:\n${descreverAtivo(ativo)}\n\n` +
     (blocoFatos ? `${blocoFatos}\n\n` : "") +
+    (blocoVariacao ? `${blocoVariacao}\n\n` : "") +
     `Questionário (${perguntas.length} perguntas):\n${perguntasTxt}\n\n` +
     "Devolva agora o JSON com as respostas (índice 0..4) de TODAS as perguntas.";
 

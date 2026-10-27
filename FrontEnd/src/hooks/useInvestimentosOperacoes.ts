@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, apiMutate, type OpResult } from '../lib/api'
 import { qk } from '../lib/queryKeys'
-import { useContextoUserId } from './useEspacoAtivo'
+import { useContextoUserId, useEmEspacoDeAgregado } from './useEspacoAtivo'
 import type { InvestimentoOperacao, TipoAtivoInvestimento, TipoOperacaoInvestimento } from '../types'
 
 export interface CriarOperacaoInput {
@@ -51,6 +51,7 @@ async function fetchOperacoes(filtros: FiltrosOperacoes): Promise<InvestimentoOp
 export function useInvestimentosOperacoes(filtros: FiltrosOperacoes = {}, opts: { enabled?: boolean } = {}) {
   const qc  = useQueryClient()
   const uid = useContextoUserId()
+  const emEspacoAgregado = useEmEspacoDeAgregado()
 
   const { data: operacoes = [], isLoading: loading, error } = useQuery({
     queryKey: qk.invOperacoes(uid, filtros),
@@ -68,6 +69,22 @@ export function useInvestimentosOperacoes(filtros: FiltrosOperacoes = {}, opts: 
     await qc.invalidateQueries({ queryKey: qk.invDashboardPref(uid) })
     await qc.invalidateQueries({ queryKey: qk.invRankingPref(uid) })
     await qc.invalidateQueries({ queryKey: qk.invHistoricoPref(uid) })
+    atualizarSnapshotMes()
+  }
+
+  // O snapshot do mês corrente (base do gráfico "Evolução mensal") só era
+  // regravado pelo cron diário ou ao abrir Investimentos — uma compra recém
+  // lançada não aparecia no gráfico. Recaptura em segundo plano após a
+  // operação. Nunca no espaço de um dono: a rota grava sob o usuário
+  // autenticado de verdade, não sob o contexto ativo.
+  const atualizarSnapshotMes = () => {
+    if (emEspacoAgregado) return
+    void apiMutate('/investimentos/snapshot-auto', 'POST', {}).then(async (r) => {
+      if (!r.ok) return
+      await qc.invalidateQueries({ queryKey: qk.invHistoricoPref(uid) })
+      await qc.invalidateQueries({ queryKey: qk.invDashboardPref(uid) })
+      await qc.invalidateQueries({ queryKey: qk.invRankingPref(uid) })
+    })
   }
 
   const criar = async (payload: CriarOperacaoInput): Promise<OpResult<InvestimentoOperacao>> => {

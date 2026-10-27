@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus, Minus, ExternalLink, ChevronLeft, ChevronRight, Calculator, Maximize2, Minimize2 } from 'lucide-react'
+import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus, Minus, ExternalLink, ChevronLeft, ChevronRight, Calculator, Maximize2, Minimize2, RefreshCw } from 'lucide-react'
 import { Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, Tooltip, Legend,
@@ -8,7 +8,7 @@ import {
 } from 'chart.js'
 import { useInvestimentoAtivo, useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
-import { useInvestimentosHistorico } from '../hooks/useInvestimentosHistorico'
+import { useInvestimentosHistorico, useAtualizarValoresMes } from '../hooks/useInvestimentosHistorico'
 import { useDividendos } from '../hooks/useDividendos'
 import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
 import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
@@ -167,6 +167,7 @@ export default function DetalheInvestimentoPage() {
   const { excluir, editar, provisionarRendimentoCripto } = useInvestimentosAtivos()
   const { posicoes }  = useInvestimentosPosicoes(ativoId ? { ativo_id: ativoId } : {})
   const { historico } = useInvestimentosHistorico(ativoId ? { ativo_id: ativoId } : {})
+  const { atualizar: atualizarCotacao, executando: atualizandoCotacao } = useAtualizarValoresMes()
   const { dividendos } = useDividendos(ativoId ? { ativo_id: ativoId } : {})
   const { operacoes } = useInvestimentosOperacoes(ativoId ? { ativo_id: ativoId } : {})
   const { dashboard } = useInvestimentosDashboard()
@@ -176,6 +177,13 @@ export default function DetalheInvestimentoPage() {
   const podeEscrever = !emEspacoAgregado || permissaoInvestimentos?.pode_escrever === true
 
   function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 3000) }
+
+  // Mesma captura do botão "Atualizar cotação" do painel: a rota recalcula o
+  // mês corrente da carteira inteira (não há filtro por ativo no backend).
+  async function atualizarCotacaoMes() {
+    const res = await atualizarCotacao()
+    showToast(res.ok ? 'Cotação atualizada!' : (res.erro ?? 'Erro ao atualizar cotação'))
+  }
 
   // Categoria do FII pode vir errada (digitada à mão antes, ou sem fonte
   // automática confiável — só FIAGRO tem categoria garantida pela CVM, ver
@@ -237,6 +245,12 @@ export default function DetalheInvestimentoPage() {
     () => (qtdAtual > 0 ? resumo.mercado / qtdAtual : null),
     [qtdAtual, resumo.mercado],
   )
+
+  // Data/hora da última cotação gravada (snapshot mais recente do ativo).
+  const ultimaCotacaoEm = useMemo(() => {
+    const ts = historico.map((h) => h.atualizado_em ?? h.created_at).filter(Boolean).sort()
+    return ts.length ? ts[ts.length - 1] : null
+  }, [historico])
 
   // P/VP (FIIs): preço atual ÷ valor patrimonial por cota (fii_vp, informado
   // manualmente no cadastro — não há fonte gratuita/sem-chave confiável para
@@ -967,9 +981,27 @@ export default function DetalheInvestimentoPage() {
               const usd = resumoConvertido?.usd
               const sub = (v?: number) => (v != null ? fmtUSD(v) : undefined)
               return (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-tutorial="detalhe-cards">
+                <div className={`grid grid-cols-2 ${custoMedioAtual != null ? 'lg:grid-cols-3 xl:grid-cols-6' : 'lg:grid-cols-4'} gap-3`} data-tutorial="detalhe-cards">
                   <CardMini icone={<Wallet size={14} />} titulo="Valor de mercado" valor={formatBRL(r.mercado)} sub={sub(usd?.mercado)} />
                   <CardMini icone={<Coins size={14} />} titulo="Custo" valor={formatBRL(r.custo)} sub={sub(usd?.custo)} />
+                  {custoMedioAtual != null && (
+                    <CardMini icone={<Coins size={14} />} titulo="Preço médio"
+                      valor={formatBRL(r.custo / qtdAtual)} sub={sub(usd ? usd.custo / qtdAtual : undefined)} />
+                  )}
+                  {precoAtualEstimado != null && (
+                    <CardMini icone={<Coins size={14} />} titulo="Valor atual cota"
+                      valor={formatBRL(r.mercado / qtdAtual)} sub={sub(usd ? usd.mercado / qtdAtual : undefined)}
+                      rodape={ultimaCotacaoEm
+                        ? `Última cotação: ${new Date(ultimaCotacaoEm).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`
+                        : undefined}
+                      acao={!emEspacoAgregado ? (
+                        <button onClick={atualizarCotacaoMes} disabled={atualizandoCotacao}
+                          title="Atualizar cotação" aria-label="Atualizar cotação"
+                          className="ml-auto p-1 rounded-md text-white/40 hover:text-white/80 transition-colors disabled:opacity-50">
+                          <RefreshCw size={13} className={atualizandoCotacao ? 'animate-spin' : ''} />
+                        </button>
+                      ) : undefined} />
+                  )}
                   <CardMini icone={r.ganho >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
                     titulo="Ganho / Prejuízo"
                     valor={`${r.ganho >= 0 ? '+' : ''}${formatBRL(r.ganho)}`} cor={corValor(r.ganho)} sub={sub(usd?.ganho)} />
@@ -1220,6 +1252,7 @@ export default function DetalheInvestimentoPage() {
                       <div>
                         <p className="text-white font-medium">{d.inv_tipos_dividendo?.nome ?? 'Dividendo'}</p>
                         <p style={{ color: MUTED }}>{formatData(d.data_pagamento)}
+                          {d.data_com && <span className="ml-1.5">· Data COM {formatData(d.data_com)}</span>}
                           {d.transacoes?.status === 'PROJECAO' && <span className="ml-1.5" style={{ color: '#ffb74d' }}>· projetado</span>}
                         </p>
                       </div>
@@ -2061,14 +2094,15 @@ function CaracteristicasAtivo({ ativo, valorInvestido, onSalvarCategoria, salvan
   )
 }
 
-function CardMini({ icone, titulo, valor, cor, sub }: {
-  icone: React.ReactNode; titulo: string; valor: string; cor?: string; sub?: string
+function CardMini({ icone, titulo, valor, cor, sub, acao, rodape }: {
+  icone: React.ReactNode; titulo: string; valor: string; cor?: string; sub?: string; acao?: React.ReactNode; rodape?: string
 }) {
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-      <div className="flex items-center gap-2 text-[13px]" style={{ color: MUTED }}>{icone}{titulo}</div>
+      <div className="flex items-center gap-2 text-[13px]" style={{ color: MUTED }}>{icone}{titulo}{acao}</div>
       <p className="mt-1.5 text-[18px] font-bold" style={{ color: cor ?? '#fff' }}>{valor}</p>
       {sub && <p className="text-[12px] mt-0.5" style={{ color: MUTED }}>{sub}</p>}
+      {rodape && <p className="text-[11px] mt-0.5" style={{ color: MUTED }}>{rodape}</p>}
     </div>
   )
 }

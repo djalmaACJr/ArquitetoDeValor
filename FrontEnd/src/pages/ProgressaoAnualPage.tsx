@@ -10,7 +10,7 @@ import {
 } from 'chart.js'
 import { Line } from 'react-chartjs-2'
 import type { ChartData, ChartOptions } from 'chart.js'
-import { RefreshCw, Download, TrendingUp, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react'
+import { RefreshCw, Download, TrendingUp, ArrowUpRight, ArrowDownRight, Minus, ChevronDown } from 'lucide-react'
 import { apiFetch } from '../lib/api'
 import { formatBRL, mesLabel, mesAtual } from '../lib/utils'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
@@ -82,6 +82,7 @@ export default function ProgressaoAnualPage() {
   const [dados,    setDados]    = useState<Record<number, Lancamento[]>>(() => _saved?.dados ?? {})
   const [anosBuscados, setAnosBuscados] = useState<number[]>(() => _saved?.anosBuscados ?? [])
   const [buscado,  setBuscado]  = useState(() => _saved?.buscado ?? false)
+  const [filtrosColapsados, setFiltrosColapsados] = useState(false)
   const [loading,  setLoading]  = useState(false)
   const [modo,     setModo]     = useState<ModoValor>(() => _saved?.modo ?? 'valores')
   const [agrup,    setAgrup]    = useState<'pai' | 'cat'>(() => _saved?.agrup ?? 'pai')
@@ -130,6 +131,7 @@ export default function ProgressaoAnualPage() {
       setDados(out)
       setAnosBuscados(anos)
       setBuscado(true)
+      if (window.matchMedia('(max-width: 767px)').matches) setFiltrosColapsados(true)
     } finally {
       setLoading(false)
     }
@@ -438,8 +440,18 @@ export default function ProgressaoAnualPage() {
         <BotaoOcultar oculto={oculto} onToggle={toggleOculto} />
       </div>
 
+      {filtrosColapsados && (
+        <div className="mobile-report-toolbar sticky top-0 z-[39] -mx-5 px-5 py-2 flex items-center gap-2" style={{ background: 'var(--bg-page, #0d1220)' }}>
+          <button onClick={() => setFiltrosColapsados(false)} className="px-3 py-2 rounded-lg border border-white/10 text-[14px]" style={{ color: '#8b92a8' }}>
+            <ChevronDown size={14} className="inline mr-1" /> Filtros
+          </button>
+          {buscado && <button onClick={exportar} className="px-2 py-2 rounded-lg border border-white/10 text-[13px] whitespace-nowrap" style={{ color: '#4da6ff' }}><Download size={13} className="inline mr-1"/>Exportar</button>}
+          <button onClick={buscar} disabled={loading || periodoInvalido} className="ml-auto px-2 py-2 rounded-lg text-[13px] font-semibold whitespace-nowrap" style={{ background: '#00c896', color: '#0a0f1a' }}><RefreshCw size={13} className="inline mr-1"/>Comparar</button>
+        </div>
+      )}
+
       {/* Filtros */}
-      <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5">
+      <div className={`mobile-report-filters bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5${filtrosColapsados ? ' mobile-report-filters-collapsed' : ''}`}>
         <div className="flex flex-wrap gap-4 items-end">
           <div className="w-full">
             <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>

@@ -48,7 +48,7 @@ export default function ModalConfirmarProjecao({ lancamento: l, contaNome, onCan
             <span className="text-[16px]" style={{ color: '#e8eaf0' }}>{contaNome ?? '—'}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[15px]" style={{ color: '#8b92a8' }}>Valor projetado</span>
+            <span className="text-[15px]" style={{ color: '#8b92a8' }}>{l.status === 'PROJECAO' ? 'Valor projetado' : 'Valor lançado'}</span>
             <span className="text-[16px]" style={{ color: '#8b92a8' }}>{sinal}{formatBRL(l.valor)}</span>
           </div>
           <div className="flex justify-between items-center gap-3">
@@ -80,7 +80,7 @@ export default function ModalConfirmarProjecao({ lancamento: l, contaNome, onCan
         </div>
 
         <p className="text-[15px] mb-4 text-center" style={{ color: '#8b92a8' }}>
-          O valor projetado será preservado e o lançamento marcado como{' '}
+          {l.status === 'PROJECAO' ? 'O valor projetado será preservado e o' : 'O'} lançamento será marcado como{' '}
           <span style={{ color: '#00c896' }}>PAGO</span>.
         </p>
 

@@ -478,7 +478,7 @@ export default function QuadroTipoAtivos({
   }
   const traco = <span style={{ color: MUTED }}>—</span>
   const linkAtivo = (l: AtivoLinha, texto: ReactNode) => (
-    <Link to={`/investimentos/ativos/${l.ativo_id}`} state={{ from: origem }}
+    <Link to={`/investimentos/ativos/${l.ativo_id}`} state={{ from: origem }} target="_blank" rel="noopener noreferrer"
       className="inline-flex items-center gap-2 text-white font-semibold hover:underline">
       <LogoAtivo url={l.logo_url} tipoAtivo={l.tipo_ativo} />{texto}
     </Link>

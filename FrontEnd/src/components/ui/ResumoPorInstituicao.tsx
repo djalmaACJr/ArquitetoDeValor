@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
 import { Doughnut } from 'react-chartjs-2'
 import { ChevronRight, ExternalLink } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
@@ -27,7 +26,6 @@ export default function ResumoPorInstituicao() {
   const { session } = useAuth()
   const uid = session?.user?.id ?? null
   const { contas } = useContas()
-  const navigate = useNavigate()
   const [nivel, setNivel] = useState<Nivel>({ n: 0 })
 
   // Só contas onde investimentos fazem sentido (as demais nunca têm posição).
@@ -84,14 +82,9 @@ export default function ResumoPorInstituicao() {
       .sort((a, b) => b.valor - a.valor)
   }, [nivel, ranking])
 
-  function abrirAtivo(ativoId: string, evt: unknown) {
+  function abrirAtivo(ativoId: string) {
     const url = `/investimentos/ativos/${ativoId}`
-    const native = (evt as { native?: MouseEvent } | undefined)?.native
-    if (native && (native.ctrlKey || native.metaKey || native.button === 1)) {
-      window.open(url, '_blank')
-    } else {
-      navigate(url)
-    }
+    window.open(url, '_blank')
   }
 
   const carregando = nivel.n === 0 ? carregandoInstituicoes : nivel.n === 2 ? carregandoRanking : false
@@ -120,7 +113,7 @@ export default function ResumoPorInstituicao() {
     : {
         fatias: fatiasAtivos,
         centro: TIPO_ATIVO_LABEL[nivel.tipo],
-        onClique: (i: number, e: unknown) => abrirAtivo(fatiasAtivos[i].ativoId, e),
+        onClique: (i: number) => abrirAtivo(fatiasAtivos[i].ativoId),
         dica: 'Clique num ativo para abrir a página dele — Ctrl/Cmd+clique abre em nova aba.',
       }
 
@@ -179,8 +172,8 @@ export default function ResumoPorInstituicao() {
               maintainAspectRatio: false,
               cutout: '62%',
               layout: { padding: { top: 16, bottom: 16, left: 64, right: 64 } },
-              onClick: (evt, elements) => {
-                if (elements.length > 0) onClique(elements[0].index, evt)
+              onClick: (_evt, elements) => {
+                if (elements.length > 0) onClique(elements[0].index)
               },
               onHover: (evt, elements) => {
                 const alvo = evt.native?.target as HTMLElement | null
