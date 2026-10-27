@@ -149,7 +149,12 @@ test.describe('Dashboard', () => {
 
       await card.getByRole('button', { name: new RegExp(`pagar ${desc}`, 'i') }).click()
 
-      await expect(page.getByText('Pago!')).toBeVisible({ timeout: 8_000 })
+      // Pagar abre o modal "Confirmar valor real" (também para PENDENTE) —
+      // confirma com o valor lançado.
+      await expect(page.getByText('Confirmar valor real')).toBeVisible({ timeout: 5_000 })
+      await page.getByRole('button', { name: /confirmar pago/i }).click()
+
+      await expect(page.getByText('Lançamento confirmado como pago!')).toBeVisible({ timeout: 8_000 })
       await expect(card.getByText(desc)).not.toBeVisible({ timeout: 8_000 })
 
       const tx = await (await request.get(`${base}/transacoes/${id}`, { headers })).json()
