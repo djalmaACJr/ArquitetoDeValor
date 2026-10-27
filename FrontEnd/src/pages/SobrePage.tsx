@@ -24,6 +24,18 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.2.1',
+    data:   '2026-10-20',
+    titulo: 'Últimas alterações do Dashboard',
+    icone:  <ShieldCheck size={16} />,
+    itens: [
+      { t: '🔐 "Últimas alterações" só com os seus dados', d: 'o quadro do Dashboard deixou de mostrar alterações de outras contas; a rota de auditoria passou a devolver só a própria trilha, e a visão de todos fica restrita à tela de administração.' },
+      { t: '👤 Nomes no lugar de códigos', d: 'em contas compartilhadas, o detalhe da alteração mostra "lançado por" com o nome da pessoa, não o identificador.' },
+      { t: '⚡ Quadro abre mais rápido, com "Ver mais"', d: 'a lista carrega 20 itens e pagina sob demanda; novo índice no banco acelera a consulta.' },
+      { t: '🔄 Lista aparece na primeira abertura', d: 'corrigido o "Nenhuma alteração" que só sumia depois de clicar em Atualizar.' },
+    ],
+  },
+  {
     versao: '7.2',
     data:   '2026-10-16',
     titulo: 'Atividade dos agregados e Pagar no Dashboard',
@@ -287,13 +299,13 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.2.1) */}
+        {/* Detalhe das novidades desta versão (7.3.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🔐 "Últimas alterações" só com os seus dados', d: 'o quadro do Dashboard deixou de mostrar alterações de outras contas; a rota de auditoria passou a devolver só a própria trilha, e a visão de todos fica restrita à tela de administração.' },
-            { t: '👤 Nomes no lugar de códigos', d: 'em contas compartilhadas, o detalhe da alteração mostra "lançado por" com o nome da pessoa, não o identificador.' },
-            { t: '⚡ Quadro abre mais rápido, com "Ver mais"', d: 'a lista carrega 20 itens e pagina sob demanda; novo índice no banco acelera a consulta.' },
-            { t: '🔄 Lista aparece na primeira abertura', d: 'corrigido o "Nenhuma alteração" que só sumia depois de clicar em Atualizar.' },
+            { t: '💲 Preço médio e valor atual da cota', d: 'a página do ativo ganhou dois cards na primeira linha: o preço médio que você pagou e o valor atual da cota, com a data/hora da última cotação e um botão discreto para atualizar.' },
+            { t: '🗂️ Ativos abrem em nova aba', d: 'clicar no ativo nos Destaques, quadros por tipo, extrato e gráfico por instituição abre a página de detalhe em outra aba, sem perder o lugar onde você estava.' },
+            { t: '📉 IAs respondem sobre quedas e altas do dia', d: 'no Conselho e no chat do mascote, perguntas como "quais ativos mais caíram ontem?" agora usam o fechamento diário real dos seus ativos cotados.' },
+            { t: '🧠 Mentores com mais contexto', d: 'a avaliação dos mentores recebe a variação recente do ativo e pede que validem informações atuais na web quando a busca estiver ativada.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

@@ -90,7 +90,7 @@ Permite:
 
 | Pasta | Conteúdo |
 |---|---|
-| `functions/_shared/` | `utils.ts` (CORS, JSON helpers, `db()`, `autenticar()`, `extrairId()`, validações), `logger.ts` |
+| `functions/_shared/` | `utils.ts` (CORS, JSON helpers, `db()`, `autenticar()`, `extrairId()`, validações), `logger.ts`, `variacaoDiaria.ts` (fechamentos diários dos ativos cotados via Yahoo, injetados como contexto nas IAs — Conselho/`chat_mascote` quando a pergunta fala de queda/alta, e avaliação dos mentores; filtra sempre por `user_id`) |
 | `functions/contas/` | CRUD de contas |
 | `functions/categorias/` | CRUD de categorias hierárquicas |
 | `functions/transacoes/` | CRUD + recorrência + `POST /:id/antecipar` |

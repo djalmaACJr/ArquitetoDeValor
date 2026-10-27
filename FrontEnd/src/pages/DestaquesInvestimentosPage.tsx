@@ -92,7 +92,7 @@ function totalDY(itens: InvestimentoRankingAtivo[]): { pct: number; dividendos: 
 // navegador ao passar o mouse), pra manter as linhas enxutas.
 function LinkAtivo({ a, origem, className }: { a: InvestimentoRankingAtivo; origem: string; className?: string }) {
   return (
-    <Link to={`/investimentos/ativos/${a.ativo_id}`} state={{ from: origem }} title={a.nome || a.ticker}
+    <Link to={`/investimentos/ativos/${a.ativo_id}`} state={{ from: origem }} target="_blank" rel="noopener noreferrer" title={a.nome || a.ticker}
       className={className ?? 'text-white text-[13px] font-semibold shrink-0 hover:underline'}>
       {a.ticker}
     </Link>

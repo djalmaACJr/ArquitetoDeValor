@@ -15,6 +15,8 @@ import { json, erro } from "../_shared/utils.ts";
 import { logError, logRequest } from "../_shared/logger.ts";
 import { chamarProvedorIA, ErroIA, lerConfigIAAtiva, lerMentoresIA, MentorIA } from "../_shared/ia.ts";
 import { Db } from "./shared.ts";
+import { candidatosTicker } from "./mercado.ts";
+import { contextoVariacaoDiaria } from "../_shared/variacaoDiaria.ts";
 import { buscarFatosRelevantesParaAtivo, descreverFatosRelevantes } from "./fatosRelevantes.ts";
 
 // Persona única do mentor de ativos — deliberadamente SEM a restrição
@@ -140,8 +142,11 @@ export async function rotaChatMentor(c: Db, req: Request, m: string, userId: str
     return erro("Nenhum dos mentores selecionados foi encontrado. Recarregue a página e tente de novo.", 400);
   }
 
-  const contextoFatos = await contextoFatosRelevantes(c, mensagem);
-  const mensagens = montarMensagens(historico, mensagem, [contextoAnexo, contextoFatos]);
+  const [contextoFatos, contextoVariacao] = await Promise.all([
+    contextoFatosRelevantes(c, mensagem),
+    contextoVariacaoDiaria(c, userId, mensagem, contextoAnexo, candidatosTicker),
+  ]);
+  const mensagens = montarMensagens(historico, mensagem, [contextoAnexo, contextoFatos, contextoVariacao]);
 
   const respostas = await Promise.all(
     mentoresParticipantes.map(async (mentor: MentorIA) => {

@@ -29,6 +29,7 @@ import {
   json,
 } from "../_shared/utils.ts";
 import { comOrigem } from "../_shared/utils.ts";
+import { contextoVariacaoDiaria } from "../_shared/variacaoDiaria.ts";
 import { chamarProvedorIA, ErroIA, lerConfigIAAtiva, parsearImagem } from "../_shared/ia.ts";
 
 // ── Persona dos mascotes ──────────────────────────────────────────────
@@ -274,8 +275,12 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
 
   // Injeta contexto da página (texto) antes da pergunta do usuário, separado
   // por delimitador claro pra IA distinguir o que são DADOS e o que é PERGUNTA.
-  const mensagemFinal = contexto
-    ? `${contexto}\n\n---\nPergunta do usuário:\n${mensagem}`
+  // Perguntas sobre queda/alta/variação ganham o fechamento diário dos ativos
+  // cotados da carteira (a IA não consulta o mercado sozinha).
+  const variacao = await contextoVariacaoDiaria(cliente, userId, mensagem, contexto);
+  const contextoCompleto = [contexto, variacao].filter(Boolean).join("\n\n---\n\n");
+  const mensagemFinal = contextoCompleto
+    ? `${contextoCompleto}\n\n---\nPergunta do usuário:\n${mensagem}`
     : mensagem;
 
   const mensagens: Array<{ role: "user" | "assistant"; content: string }> = [
