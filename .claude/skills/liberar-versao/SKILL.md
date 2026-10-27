@@ -23,7 +23,8 @@ Revisar o diff desde a última tag (`git diff <última tag>...HEAD`) **antes** d
   - policies RLS com função por linha (`fn_agregado_tem_acesso`) devem filtrar primeiro o dono (ver `20261016000001`);
   - front: `staleTime`/invalidação coerentes, sem refetch em loop, listas grandes paginadas, chunk novo pesado só com `lazy`;
   - migration pesada (índice em tabela grande, backfill): avaliar `CREATE INDEX CONCURRENTLY`/janela e tempo de lock.
-- Registrar no relato final o que foi revisado e os achados (corrigidos ou aceitos).
+- **Testes**: para cada mudança do diff, verificar se exige **novos testes** ou **ajuste dos existentes** (API em `tests/`, E2E em `FrontEnd/e2e/tests/`) — comportamento alterado de UI/rota quebra testes antigos (ex.: E2E-DB16). Criar/atualizar antes do bump, para a CI da develop já validar.
+- Registrar no relato final o que foi revisado e os achados (corrigidos ou aceitos), e quais testes foram criados/alterados (ou por que nenhum).
 
 ## 1. Pré-checagem
 - `git status`; anote a branch atual (feature/`release/*`) e a última tag (`git tag | tail`).
@@ -85,5 +86,8 @@ O push na `main` publica o web automaticamente. Se `--ff-only` falhar (main rece
 ## 9. Android OTA (se houver mudança de React)
 `cd FrontEnd && npm run publish:ota` — usa a `service_role` do `.env` da raiz; **peça confirmação** antes. Mudanças nativas exigem APK novo (`instalar_android.bat`).
 
-## 10. Relato final
+## 10. Limpeza da branch de release
+Se a versão saiu de uma `release/*` já mergeada na `main`, exclua-a local e remotamente: `git branch -d <branch>` e `git push origin --delete <branch>`. Só a branch desta versão; não apague outras sem pedir.
+
+## 11. Relato final
 Achados da revisão (etapa 0), versão, SHA/tag, o que foi deployado (migrations, funções), resultado de CADA workflow da CI, estado da publicação do web e do OTA. Não afirmar "no ar" sem ter confirmado cada etapa; listar o que ficou pendente.
