@@ -9,7 +9,17 @@ argument-hint: "<X.Y.Z> [resumo das mudanças]"
 Argumento: a nova versão (`X.Y.Z`). Se faltar, pergunte. Formato: X = features, Y = correções/hotfixes, Z = tentativas (ver `version.ts`).
 
 **Regra de ouro: nada entra na `main` sem a CI da `develop` 100% verde.** A `main` publica o web automaticamente, então o merge nela é o ponto de liberação. Nunca force-push, nunca pule hooks, nunca relance a CI às cegas.
-O pedido "liberar a versão" autoriza as etapas 0–8; `publish:ota` (etapa 10) pede confirmação.
+O pedido "liberar a versão" autoriza as etapas 0–8; `publish:ota` (etapa 9) pede confirmação.
+
+## Passo inicial — Guarda de branch (antes de tudo)
+Execute **antes de qualquer outra etapa**; se falhar (exceto o caso "à frente" abaixo, resolvido com push), emita o aviso e **pare o processo** (nada de revisão, bump ou commit):
+1. **Só em branch de release**: `git branch --show-current` deve casar com `release/*`. Caso contrário, avise "A liberação só pode ocorrer a partir de uma branch `release/*` (atual: `<branch>`)" e pare.
+2. **Local atualizada com a remota**: `git fetch origin` e compare `git rev-list --left-right --count HEAD...origin/<branch>`. Resultado:
+   - **Igual**: segue.
+   - **À frente** (só commits locais não enviados): faça o push automático (`git push origin <branch>`, sem force) e siga. Se houver mudanças não commitadas, elas entram no commit da etapa 3 como de costume.
+   - **Atrás** (pull pendente) ou **divergida**: avise qual é o caso e **pare** — não faça pull/merge/rebase por conta própria; o usuário resolve e relança.
+   - **Sem remota**: avise e pare.
+3. Working tree com mudanças não commitadas não bloqueia (entram no commit da etapa 3), mas cite no aviso/relato.
 
 ## 0. Revisão de segurança e performance (antes de qualquer bump)
 Revisar o diff desde a última tag (`git diff <última tag>...HEAD`) **antes** de mexer em versão. Se achar problema, corrija ou relate e pergunte ao usuário se segue; não prossiga em silêncio com achado aberto.
@@ -27,7 +37,7 @@ Revisar o diff desde a última tag (`git diff <última tag>...HEAD`) **antes** d
 - Registrar no relato final o que foi revisado e os achados (corrigidos ou aceitos), e quais testes foram criados/alterados (ou por que nenhum).
 
 ## 1. Pré-checagem
-- `git status`; anote a branch atual (feature/`release/*`) e a última tag (`git tag | tail`).
+- `git status`; anote a branch atual (já validada como `release/*` no passo inicial) e a última tag (`git tag | tail`).
 - `git log <última tag>..HEAD --oneline` para montar o resumo das novidades.
 - Em `FrontEnd/`: `npx tsc -b`, `npx eslint <arquivos alterados>`, `npm run build`. Rode localmente só os testes afetados (`npx jest --runInBand tests/<arquivo>`).
 
