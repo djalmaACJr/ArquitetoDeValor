@@ -24,6 +24,18 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.3',
+    data:   '2026-10-27',
+    titulo: 'Preço médio, valor da cota e IAs com quedas do dia',
+    icone:  <ShieldCheck size={16} />,
+    itens: [
+      { t: '💲 Preço médio e valor atual da cota', d: 'a página do ativo ganhou dois cards na primeira linha: o preço médio que você pagou e o valor atual da cota, com a data/hora da última cotação e um botão discreto para atualizar.' },
+      { t: '🗂️ Ativos abrem em nova aba', d: 'clicar no ativo nos Destaques, quadros por tipo, extrato e gráfico por instituição abre a página de detalhe em outra aba, sem perder o lugar onde você estava.' },
+      { t: '📉 IAs respondem sobre quedas e altas do dia', d: 'no Conselho e no chat do mascote, perguntas como "quais ativos mais caíram ontem?" agora usam o fechamento diário real dos seus ativos cotados.' },
+      { t: '🧠 Mentores com mais contexto', d: 'a avaliação dos mentores recebe a variação recente do ativo e pede que validem informações atuais na web quando a busca estiver ativada.' },
+    ],
+  },
+  {
     versao: '7.2.1',
     data:   '2026-10-20',
     titulo: 'Últimas alterações do Dashboard',
@@ -299,14 +311,18 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.3.0) */}
+        {/* Detalhe das novidades desta versão (7.4.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '💲 Preço médio e valor atual da cota', d: 'a página do ativo ganhou dois cards na primeira linha: o preço médio que você pagou e o valor atual da cota, com a data/hora da última cotação e um botão discreto para atualizar.' },
-            { t: '🗂️ Ativos abrem em nova aba', d: 'clicar no ativo nos Destaques, quadros por tipo, extrato e gráfico por instituição abre a página de detalhe em outra aba, sem perder o lugar onde você estava.' },
-            { t: '📉 IAs respondem sobre quedas e altas do dia', d: 'no Conselho e no chat do mascote, perguntas como "quais ativos mais caíram ontem?" agora usam o fechamento diário real dos seus ativos cotados.' },
-            { t: '🧠 Mentores com mais contexto', d: 'a avaliação dos mentores recebe a variação recente do ativo e pede que validem informações atuais na web quando a busca estiver ativada.' },
-          ].map(x => (
+            { t: '🕸️ Radares da carteira e dos ativos', d: 'em Avaliações, gráficos de teia mostram diversificação, liquidez, retorno, eficiência e proteção da carteira, ao lado de fundamentos, crescimento, renda e valuation; cada tipo de ativo exibe só os critérios que fazem sentido para ele.' },
+            { t: '🏆 Posição do ativo nos Destaques', d: 'a página do ativo mostra onde ele está em cada ranking, no geral e dentro do tipo, em um quadro que você pode mover.' },
+            { t: '📈 Novo ranking de Maior YoC', d: 'Destaques ganhou o ranking de YoC e o cálculo de DY/YoC agora é o mesmo em todas as telas, então os números batem entre Meus ativos, Destaques e o ativo.' },
+            { t: '🧾 Página do ativo mais organizada', d: 'Últimos dividendos e Operações recentes têm a mesma altura dos gráficos, sem barra de rolagem, e cada operação tem botão de editar.' },
+            { t: '➕ Nova movimentação para o mesmo ativo', d: 'depois de registrar uma movimentação, uma nova opção limpa só quantidade e valor e mantém o resto preenchido.' },
+            { t: '🔁 Transferências claras no Extrato', d: 'a conta de origem/destino aparece na coluna Conta quando não está filtrada, a saída vem antes da entrada e as duas pernas formam um bloco com cor própria por transferência.' },
+            { t: '📉 Cenário pessimista em toda a Projeção', d: 'Evolução Patrimonial Projetada passa a usar o cenário pessimista nos cards, no simulador, na tabela comparativa, nos insights, na exportação e na IA.' },
+            { t: '🧹 Menos poluição em Meus ativos', d: 'o botão "Valor de mercado" dos quadros por tipo foi removido.' },
+                    ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
             </li>

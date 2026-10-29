@@ -24,6 +24,7 @@ import { useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAti
 import { IconeConta } from '../components/ui/IconeConta'
 import { Toast, ModalExcluir } from '../components/ui/shared'
 import { MonthPicker } from '../components/ui/MonthPicker'
+import { ordenarPernasDeTransferencia } from '../lib/ordemTransferencias'
 
 // ── Helpers de data ───────────────────────────────────────────
 function fmtDataLabel(iso: string) {
@@ -35,6 +36,13 @@ function fmtDataCurta(iso: string) {
   const d = new Date(iso + 'T12:00:00')
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 }
+// Cor de cada transferência (par) na lista — alterna entre pares seguidos pra
+// duas transferências em sequência não parecerem uma só.
+const CORES_PAR = ['#818cf8', '#2dd4bf', '#fbbf24', '#f472b6', '#38bdf8', '#a3e635']
+
+// Rótulo da perna dentro do par de transferência exibido junto.
+const ROTULO_PERNA = { inicio: 'Transferência · saída', fim: 'Transferência · entrada' } as const
+
 function agruparPorData<T extends { data: string }>(items: T[]): [string, T[]][] {
   const map = new Map<string, T[]>()
   for (const l of items) {
@@ -208,6 +216,25 @@ function CalendarioStrip({ mes, diasComMovimento, hoje, onSelectDia, onDiaVazio 
 type StatusTx = 'PAGO' | 'PENDENTE' | 'PROJECAO'
 
 // ── Página principal ──────────────────────────────────────────
+// Conta do OUTRO lado de uma transferência, exibida na coluna Conta quando há
+// conta filtrada (só uma perna aparece na lista; ver contrapartePorId). Some
+// se a conta do outro lado também está filtrada — aí a outra perna já está na
+// lista, com a própria conta na coluna.
+function ContraparteTransf({ l, outra, contasFiltradas }: {
+  l: Lancamento; outra: Lancamento | undefined; contasFiltradas: string[]
+}) {
+  if (!outra || contasFiltradas.length === 0 || contasFiltradas.includes(outra.conta_id)) return null
+  const nome = outra.conta_nome ?? '—'
+  const saida = l.tipo === 'DESPESA'
+  return (
+    <span className="text-[13px] truncate flex items-center gap-1" style={{ color: '#818cf8' }}
+      title={saida ? `Transferido para ${nome}` : `Recebido de ${nome}`}>
+      <ArrowLeftRight size={11} className="flex-shrink-0" />
+      {saida ? 'para' : 'de'} {nome}
+    </span>
+  )
+}
+
 export default function LancamentosPage() {
   const location = useLocation()
   const { lancamentos: pgState, setLancamentos: setPgState } = usePageState()
@@ -231,7 +258,7 @@ export default function LancamentosPage() {
   // até o mês quando ele não tem nenhum lançamento (ver `saldoMesVazio`).
   const saldoBaseConta = useSaldoBaseMes(mes, filtContas.length === 1 || (comSaldo && filtCats.length === 0))
 
-  const { lancamentos, loading, fetching, error, carregar, removerLocal, prefetchAdj, editar, excluir, antecipar, alterarStatus } =
+  const { lancamentos, contrapartePorId, loading, fetching, error, carregar, removerLocal, prefetchAdj, editar, excluir, antecipar, alterarStatus } =
     useLancamentos({ mes, conta_ids: filtContas, categoria_ids: filtCats, status_ids: filtStatus, com_saldo: comSaldo })
 
   const { contas }     = useContas()
@@ -701,7 +728,7 @@ export default function LancamentosPage() {
         return filtTipo.includes(t)
       })
     }
-    if (buscaMultiMes) return porTipo(buscaResultados)
+    if (buscaMultiMes) return porTipo(ordenarPernasDeTransferencia(buscaResultados))
     if (!pesquisa) return porTipo(lancamentosComSaldoCorrigido)
     const term = pesquisa.toLowerCase()
     const match = (l: Lancamento) =>
@@ -711,6 +738,24 @@ export default function LancamentosPage() {
       l.observacao?.toLowerCase().includes(term)
     return porTipo(lancamentosComSaldoCorrigido.filter(match))
   }, [buscaMultiMes, pesquisa, lancamentosComSaldoCorrigido, buscaResultados, filtTipo])
+
+  // Pernas de uma mesma transferência que aparecem coladas na lista: a 1ª é
+  // 'inicio' (saída) e a 2ª 'fim' (entrada) — a tela as desenha como um bloco só.
+  const { posicaoNoPar, corDoPar } = useMemo(() => {
+    const pos = new Map<string, 'inicio' | 'fim'>()
+    const cor = new Map<string, string>()
+    let n = 0
+    for (let i = 0; i < lancamentosParaExibir.length - 1; i++) {
+      const a = lancamentosParaExibir[i], b = lancamentosParaExibir[i + 1]
+      if (a.id_par_transferencia && a.id_par_transferencia === b.id_par_transferencia) {
+        const c = CORES_PAR[n++ % CORES_PAR.length]
+        pos.set(a.id, 'inicio'); pos.set(b.id, 'fim')
+        cor.set(a.id, c); cor.set(b.id, c)
+        i++
+      }
+    }
+    return { posicaoNoPar: pos, corDoPar: cor }
+  }, [lancamentosParaExibir])
 
   // Totais do mês/busca — exclui transferências
   const totais = useMemo(() => {
@@ -1293,6 +1338,8 @@ export default function LancamentosPage() {
                     {/* Linhas */}
                     {grupo.map(l => {
                       const isTransf   = !!l.id_par_transferencia
+                      const parPos     = posicaoNoPar.get(l.id)
+                      const corPar     = corDoPar.get(l.id) ?? '#818cf8'
                       const isRecorr   = !!l.id_recorrencia && !isTransf
                       const isPago     = l.status === 'PAGO'
                       const isAtrasado = !isPago && l.data <= hoje
@@ -1305,9 +1352,10 @@ export default function LancamentosPage() {
                             else    linhasRef.current.delete(l.id)
                           }}
                           onClick={() => abrirEditar(l)}
-                          className={`grid gap-2 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center${podeEscrever ? ' cursor-pointer' : ''}`}
+                          className={`relative grid gap-2 px-4 ${parPos === 'inicio' ? 'pt-2.5 pb-1 border-b border-transparent' : parPos === 'fim' ? 'pt-1 pb-2.5 border-b border-white/20' : 'py-2.5 border-b border-white/5'} hover:bg-white/[0.02] transition-colors items-center${podeEscrever ? ' cursor-pointer' : ''}`}
                           style={{
                             gridTemplateColumns: '20px 28px 1fr 180px 160px 110px 80px 90px',
+                            ...(parPos && { background: `${corPar}10` }),
                             ...(isAtrasado && {
                               boxShadow: 'inset 4px 0 0 rgba(248,113,113,0.9)',
                               background: 'rgba(248,113,113,0.08)',
@@ -1322,6 +1370,17 @@ export default function LancamentosPage() {
                               background: 'rgba(0,200,150,0.10)',
                             }),
                           }}>
+
+                          {/* Barra lateral: liga as 2 pernas da transferência num bloco só */}
+                          {parPos && (
+                            <span aria-hidden className="absolute left-0 w-[3px]"
+                              style={{
+                                background: corPar,
+                                ...(parPos === 'inicio'
+                                  ? { top: 6, bottom: 0, borderRadius: '3px 3px 0 0' }
+                                  : { top: 0, bottom: 6, borderRadius: '0 0 3px 3px' }),
+                              }} />
+                          )}
 
                           {/* Checkbox seleção */}
                           <div className="flex items-center justify-center">
@@ -1364,6 +1423,9 @@ export default function LancamentosPage() {
                                 </span>
                               )}
                             </p>
+                            {parPos && (
+                              <p className="text-[12px] mt-0.5 font-medium" style={{ color: corPar }}>{ROTULO_PERNA[parPos]}</p>
+                            )}
                             {l.observacao && (
                               <p className="text-[14px] truncate mt-0.5" style={{ color: '#8b92a8' }}>{l.observacao}</p>
                             )}
@@ -1387,11 +1449,16 @@ export default function LancamentosPage() {
                           </div>
 
                           {/* Conta */}
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <IconeConta icone={l.conta_icone} cor={l.conta_cor} size="sm" />
-                            <span className="text-[15px] truncate" style={{ color: '#c5cad8' }}>
-                              {l.conta_nome ?? '—'}
-                            </span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <IconeConta icone={l.conta_icone} cor={l.conta_cor} size="sm" />
+                              <span className="text-[15px] truncate" style={{ color: '#c5cad8' }}>
+                                {l.conta_nome ?? '—'}
+                              </span>
+                            </div>
+                            {l.id_par_transferencia && (
+                              <ContraparteTransf l={l} outra={contrapartePorId.get(l.id)} contasFiltradas={filtContas} />
+                            )}
                           </div>
 
                           {/* Valor */}
@@ -1545,6 +1612,8 @@ export default function LancamentosPage() {
                     <div className="space-y-2">
                       {grupo.map(l => {
                         const isTransf  = !!l.id_par_transferencia
+                        const parPos    = posicaoNoPar.get(l.id)
+                        const corPar    = corDoPar.get(l.id) ?? '#818cf8'
                         const isRecorr  = !!l.id_recorrencia && !isTransf
                         const isPago    = l.status === 'PAGO'
                         const isAtrasado = !isPago && l.data <= hoje
@@ -1556,6 +1625,9 @@ export default function LancamentosPage() {
                             className={`bg-[#1a1f2e] rounded-xl p-3${podeEscrever ? ' cursor-pointer' : ''}`}
                             style={{
                               border: isAtrasado ? '1px solid rgba(248,113,113,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                              ...(parPos && { borderLeft: `3px solid ${corPar}` }),
+                              ...(parPos === 'inicio' && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottomColor: 'transparent' }),
+                              ...(parPos === 'fim' && { marginTop: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0, borderTopColor: 'transparent' }),
                               ...(isAtrasado && {
                                 boxShadow: 'inset 4px 0 0 rgba(248,113,113,0.9)',
                                 background: 'rgba(248,113,113,0.07)',
@@ -1603,6 +1675,9 @@ export default function LancamentosPage() {
                                       </span>
                                     )}
                                   </p>
+                                  {parPos && (
+                                    <p className="text-[12px] mt-0.5 font-medium" style={{ color: corPar }}>{ROTULO_PERNA[parPos]}</p>
+                                  )}
                                   <p className="text-[14px] mt-0.5" style={{ color: '#8b92a8' }}>
                                     {l.categoria_nome ?? ''}
                                   </p>
@@ -1625,6 +1700,9 @@ export default function LancamentosPage() {
                               <div className="flex items-center gap-1.5">
                                 <IconeConta icone={l.conta_icone} cor={l.conta_cor} size="sm" />
                                 <span className="text-[15px]" style={{ color: '#8b92a8' }}>{l.conta_nome}</span>
+                                {l.id_par_transferencia && (
+                                  <ContraparteTransf l={l} outra={contrapartePorId.get(l.id)} contasFiltradas={filtContas} />
+                                )}
                               </div>
                               {podeEscrever && (
                                 <div className="flex gap-1">

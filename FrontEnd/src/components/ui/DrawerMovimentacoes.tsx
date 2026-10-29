@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Trash2, Pencil, X, CircleSlash } from 'lucide-react'
 import { Drawer, Field, Input, SelectDark } from './shared'
 import { useInvestimentosPosicoes } from '../../hooks/useInvestimentosPosicoes'
@@ -15,7 +15,7 @@ const hoje = () => new Date().toISOString().split('T')[0]
 // Tela única de movimentações de um ativo. Registrar uma movimentação
 // (Compra/Venda/Aporte/Resgate) mantém a posição automaticamente no backend
 // (posição = soma das operações). O saldo atual é exibido no topo, só leitura.
-export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistrarNova, valoresIniciais }: {
+export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistrarNova, valoresIniciais, editarOperacaoId }: {
   ativo: InvestimentoAtivo; onClose: () => void; onToast: (m: string) => void
   // Presente só quando o drawer foi aberto pelo atalho "Nova movimentação" do
   // header (não pela ação "Posições" de uma linha): ao registrar uma
@@ -26,6 +26,9 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
   // pelo "Simular compra" (DetalheInvestimentoPage) para virar a simulação
   // numa movimentação real sem o usuário ter que redigitar os números.
   valoresIniciais?: { quantidade: string; preco_unitario: string }
+  // Abre o drawer já editando esta operação (botão de editar do quadro
+  // "Operações recentes" da página do ativo).
+  editarOperacaoId?: string
 }) {
   const { posicoes } = useInvestimentosPosicoes({ ativo_id: ativo.id })
   const { operacoes, loading, criar, editar, excluir } = useInvestimentosOperacoes({ ativo_id: ativo.id })
@@ -63,6 +66,10 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
   const [encValor, setEncValor] = useState('')
   // Pergunta pós-registro (só no atalho "Nova movimentação" — ver onRegistrarNova).
   const [perguntarNova, setPerguntarNova] = useState(false)
+  // Formulário da movimentação recém-registrada — a opção "Nova movimentação
+  // para este ativo" reaproveita tudo (conta, tipo, data…), menos quantidade/valor.
+  const [ultimoLancamento, setUltimoLancamento] =
+    useState<{ form: typeof form; novoLote: boolean; rfTaxaLote: string } | null>(null)
   const ehSaida = TIPO_OPERACAO_LABEL[tipoSaidaPara(ativo.tipo_ativo)].toLowerCase()
   // Posições/operações ficam na moeda do ativo → exibe com o símbolo certo (US$/R$).
   const fmt = (v: number) => formatMoeda(v, ativo.moeda)
@@ -132,6 +139,18 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
     setValorRecebido(ehSaidaOp && Number(o.valor_total) !== Number(o.quantidade) ? String(o.valor_total) : '')
   }
 
+  // Abre direto em modo edição quando vier `editarOperacaoId` — uma vez só,
+  // assim que a lista de operações carregar (não reabre após salvar/cancelar).
+  const edicaoInicialAplicada = useRef(false)
+  useEffect(() => {
+    if (!editarOperacaoId || edicaoInicialAplicada.current) return
+    const op = movimentos.find((o) => o.id === editarOperacaoId)
+    if (!op) return
+    edicaoInicialAplicada.current = true
+    iniciarEdicao(op)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editarOperacaoId, movimentos])
+
   async function salvar() {
     if (!form.conta_id) { onToast('Selecione a conta'); return }
     const qtd = Number(form.quantidade)
@@ -171,12 +190,25 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
     setSalvando(false)
     if (!res.ok) { onToast(res.erro ?? 'Erro ao salvar movimentação'); return }
     onToast(eraEdicao ? 'Movimentação atualizada!' : 'Movimentação registrada!')
+    if (!eraEdicao && onRegistrarNova) setUltimoLancamento({ form, novoLote, rfTaxaLote })
     cancelarEdicao()
     // Renda fixa: reconstrói o histórico de cotação a partir da posição atual.
     preencher({ ativo_id: ativo.id }).then((bf) => {
       if (bf.ok && (bf.dados?.meses_gravados ?? 0) > 0) onToast(`Histórico reconstruído: ${bf.dados!.meses_gravados} mês(es).`)
     })
     if (!eraEdicao && onRegistrarNova) setPerguntarNova(true)
+  }
+
+  // "Nova movimentação para este ativo": volta ao formulário já preenchido com
+  // o último lançamento, limpando só quantidade e valor.
+  function novaParaEsteAtivo() {
+    if (ultimoLancamento) {
+      setForm({ ...ultimoLancamento.form, quantidade: '', preco_unitario: '' })
+      setNovoLote(ultimoLancamento.novoLote)
+      setRfTaxaLote(ultimoLancamento.rfTaxaLote)
+      setValorRecebido('')
+    }
+    setPerguntarNova(false)
   }
 
   function abrirEncerramento(p: InvestimentoPosicao) {
@@ -442,16 +474,21 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
         <div className="relative bg-[#1a1f2e] border border-white/10 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-5">
           <p className="text-[18px] font-semibold mb-1" style={{ color: '#e8eaf0' }}>Movimentação registrada!</p>
           <p className="text-[16px] mb-5" style={{ color: MUTED }}>Deseja registrar uma nova movimentação?</p>
-          <div className="flex gap-2 justify-end">
-            <button onClick={onClose}
-              className="px-4 py-2 text-[16px] border border-white/10 rounded-lg transition-all hover:border-white/20"
-              style={{ color: MUTED }}>
-              Não, fechar
-            </button>
+          <div className="flex flex-col gap-2">
             <button onClick={() => { setPerguntarNova(false); onRegistrarNova?.() }}
               className="px-4 py-2 text-[16px] font-semibold text-white rounded-lg transition-colors"
               style={{ background: '#3b82f6' }}>
               Sim, nova movimentação
+            </button>
+            <button onClick={novaParaEsteAtivo}
+              className="px-4 py-2 text-[16px] font-semibold rounded-lg border transition-colors hover:bg-white/5"
+              style={{ color: '#7aa7f7', borderColor: '#3b82f680' }}>
+              Nova movimentação para este ativo
+            </button>
+            <button onClick={onClose}
+              className="px-4 py-2 text-[16px] border border-white/10 rounded-lg transition-all hover:border-white/20"
+              style={{ color: MUTED }}>
+              Não, fechar
             </button>
           </div>
         </div>

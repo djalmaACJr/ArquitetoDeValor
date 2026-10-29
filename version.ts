@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "7.3.0"
+export const APP_VERSION = "7.4.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -19,8 +19,8 @@ export const getVersionInfo = () => ({
     // Data de lançamento (AAAA-MM-DD) — exibida em Sobre › Versão atual.
     // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
     // em FrontEnd/src/pages/SobrePage.tsx.
-    date: "2026-10-27",
-    description: "Página do ativo com Preço médio e Valor atual da cota (com data/hora e botão de atualizar), ativos abrem em nova aba e as IAs passam a responder sobre quedas e altas do dia"
+    date: "2026-10-29",
+    description: "Radares da carteira e dos ativos nas Avaliações, posição do ativo nos rankings de Destaques com novo ranking de YoC, Extrato com transferências mais claras e cenário pessimista em toda a Projeção de Economia"
   }
 })
 
