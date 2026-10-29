@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "7.4.0"
+export const APP_VERSION = "7.4.1"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -20,7 +20,7 @@ export const getVersionInfo = () => ({
     // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
     // em FrontEnd/src/pages/SobrePage.tsx.
     date: "2026-10-29",
-    description: "Radares da carteira e dos ativos nas Avaliações, posição do ativo nos rankings de Destaques com novo ranking de YoC, Extrato com transferências mais claras e cenário pessimista em toda a Projeção de Economia"
+    description: "Ajustes de desempenho e segurança no banco de dados (índices e regras de acesso), sem mudanças visíveis na tela"
   }
 })
 
