@@ -66,6 +66,15 @@ Os testes de API/E2E rodam contra o Supabase real; sem o backend novo no ar eles
 - Só vale para mudanças **retrocompatíveis** (o web antigo ainda está no ar até a etapa 8). Se não forem, avise o usuário antes.
 - Se o deploy acontecer depois do push da etapa 4, a CI já em andamento testou o backend velho: relance (`gh run rerun <id>`) ou faça novo push — não considere aquele resultado.
 
+## 5b. Hints e warnings do banco (logo após migrations e deploys; rode também sem migration, durante a espera da CI)
+`supabase db advisors --linked --type all --level info --output-format json > <scratchpad>/adv.json` (security + performance do projeto linkado). Resuma por `name`/`level` e **compare com o baseline aceito** (abaixo): só item **novo** ou de **nível maior** bloqueia.
+- **Baseline aceito (out/2026)** — não reabrir sem motivo:
+  - `multiple_permissive_policies` (WARN, ~259): consequência do desenho de agregados (policy permissiva extra por tabela, nunca reescreve a do dono). Só preocupa se aparecer em tabela **nova** ou se o total crescer sem migration de policy.
+  - `authenticated_security_definer_function_executable` (WARN, ~18): RPCs `fn_*` de agregados/saldos/exclusão são chamadas pelo app e validam `auth.uid()` internamente (coberto por `09_seguranca_rpc`). RPC **nova** `SECURITY DEFINER` exposta a `authenticated` precisa validar `auth.uid()` e entrar na revisão; função de infraestrutura/cron nunca deve ser exposta (REVOKE).
+  - `unused_index`, `unindexed_foreign_keys` (INFO), `auth_db_connections_absolute` (INFO), `extension_in_public` (`pg_net`), `function_search_path_mutable` (`fn_default_criado_por`), `auth_rls_initplan` (`pol_objetivos_agregado_insert`): dívida conhecida, a tratar em release própria.
+- Achado **novo** (ex.: `rls_disabled_in_public`, `policy_exists_rls_disabled`, tabela sem RLS, `auth_rls_initplan` em policy criada nesta release, FK nova sem índice em tabela grande): corrija com migration idempotente (volta à etapa 3/4) ou relate ao usuário e pergunte se segue.
+- Registrar no relato final: contagem por tipo/nível, o que é novo vs baseline.
+
 ## 6. Gate: esperar a CI inteira
 ```bash
 gh run list --branch develop --limit 6
