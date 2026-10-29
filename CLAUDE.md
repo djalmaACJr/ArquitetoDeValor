@@ -287,6 +287,10 @@ Antes da migration `20260505000001`, qualquer UPDATE em `transacoes` revalidava 
 | `10_seguranca_auth_cors.test.ts` | Auth e CORS |
 | `11_objetivos.test.ts` | CA-OBJ01..17 |
 | `12_investimentos.test.ts` | CA-INV01..26 |
+| `14_radar_carteira.test.ts` | CA-RAD01..09 — cálculo puro dos radares da página Avaliações (sem rede; roda no job `api-base`) |
+| `14_destaques_ranking.test.ts` | CA-DST01..05 — ordenação dos rankings de Destaques e posição do ativo (lib pura, roda no `api-base`) |
+| `14_yield_carteira.test.ts` | CA-YLD01..04 — contas de DY/YoC do frontend (`lib/yieldCarteira.ts`; lib pura, roda no `api-base`) |
+| `14_ordem_transferencias.test.ts` | CA-ORD01..07 — pernas da transferência coladas, saída antes da entrada, no Extrato (`lib/ordemTransferencias.ts`; lib pura, roda no `api-base`) |
 | `13_agregados.test.ts` | CA-AGR01..83 + CA-AGR43b — ciclo de vida do vínculo, leitura/escrita em Extrato/Objetivos/Investimentos por agregado, hardening (throttling/expurgo/aviso de revogação) |
 | `99_limpar.test.ts` | CA-LIM01..11 (limpeza pós-suite) |
 

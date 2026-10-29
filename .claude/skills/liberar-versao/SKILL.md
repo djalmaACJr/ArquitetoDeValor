@@ -12,13 +12,14 @@ Argumento: a nova versão (`X.Y.Z`). Se faltar, pergunte. Formato: X = features,
 O pedido "liberar a versão" autoriza as etapas 0–8; `publish:ota` (etapa 9) pede confirmação.
 
 ## Passo inicial — Guarda de branch (antes de tudo)
-Execute **antes de qualquer outra etapa**; se falhar (exceto o caso "à frente" abaixo, resolvido com push), emita o aviso e **pare o processo** (nada de revisão, bump ou commit):
+Execute **antes de qualquer outra etapa**; se falhar (exceto os casos "à frente" e "branch inexistente no remoto" abaixo, resolvidos com push), emita o aviso e **pare o processo** (nada de revisão, bump ou commit):
 1. **Só em branch de release**: `git branch --show-current` deve casar com `release/*`. Caso contrário, avise "A liberação só pode ocorrer a partir de uma branch `release/*` (atual: `<branch>`)" e pare.
 2. **Local atualizada com a remota**: `git fetch origin` e compare `git rev-list --left-right --count HEAD...origin/<branch>`. Resultado:
    - **Igual**: segue.
    - **À frente** (só commits locais não enviados): faça o push automático (`git push origin <branch>`, sem force) e siga. Se houver mudanças não commitadas, elas entram no commit da etapa 3 como de costume.
    - **Atrás** (pull pendente) ou **divergida**: avise qual é o caso e **pare** — não faça pull/merge/rebase por conta própria; o usuário resolve e relança.
-   - **Sem remota**: avise e pare.
+   - **Branch inexistente no remoto** (`origin/<branch>` não existe): publique com `git push -u origin <branch>` (sem force) e siga. Se houver mudanças não commitadas, elas entram no commit da etapa 3 como de costume.
+   - **Sem remote `origin` configurado**: avise e pare.
 3. Working tree com mudanças não commitadas não bloqueia (entram no commit da etapa 3), mas cite no aviso/relato.
 
 ## 0. Revisão de segurança e performance (antes de qualquer bump)

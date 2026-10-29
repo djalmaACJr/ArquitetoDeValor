@@ -12,6 +12,7 @@ import { useInvestimentosHistorico, useAtualizarValoresMes } from '../hooks/useI
 import { useDividendos } from '../hooks/useDividendos'
 import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
 import { useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
+import PosicaoNosDestaques from '../components/ui/PosicaoNosDestaques'
 import { usePtax } from '../hooks/usePtax'
 import { useIndicesEconomicos } from '../hooks/useIndicesEconomicos'
 import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo, SelectDark, Field, Input, InputMoeda } from '../components/ui/shared'
@@ -23,6 +24,7 @@ import LoadingMascote from '../components/ui/LoadingMascote'
 import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_INVESTIMENTOS_DETALHE } from '../lib/tutoriaisPaginas'
 import { formatBRL, formatData, formatUSD as fmtUSD } from '../lib/utils'
+import { yieldAnualizadoPct } from '../lib/yieldCarteira'
 import {
   TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPO_OPERACAO_LABEL,
   INDEXADOR_RF_LABEL, INDEXADOR_RF_DESCRICAO, SUBTIPO_RF_INFO, FII_CATEGORIA_INFO, CATEGORIAS_FII,
@@ -56,7 +58,7 @@ function potencialAte(precoAtual: number, alvo: number): number {
 // por TIPO de ativo (não por ativo individual): reordenar na página do MXRF11
 // também reordena a página de qualquer outro FII.
 type QuadroDetalheKey =
-  | 'resumo' | 'caracteristicas'
+  | 'resumo' | 'posicao_destaques' | 'caracteristicas'
   | 'grafico_evolucao' | 'grafico_cotas' | 'grafico_rent_mes' | 'grafico_rent_acum'
   | 'grafico_dividendos_mes' | 'grafico_dy_mes' | 'grafico_ultimos_dividendos'
   | 'magic_number' | 'dy_yoc' | 'valuation_acoes' | 'protecao_poder_compra' | 'operacoes'
@@ -72,18 +74,6 @@ function fmtMes(anoMes: string): string {
   return `${MESES_PT[parseInt(m) - 1]}/${ano.slice(2)}`
 }
 
-// Helpers de aritmética sobre "YYYY-MM" — usados pela paginação de 6 em 6
-// meses do quadro "Últimos dividendos".
-function mesParaIndice(anoMes: string): number {
-  const [ano, m] = anoMes.split('-').map(Number)
-  return ano * 12 + (m - 1)
-}
-function deslocarMes(anoMes: string, deltaMeses: number): string {
-  const indice = mesParaIndice(anoMes) + deltaMeses
-  const ano = Math.floor(indice / 12)
-  const mes = (indice % 12) + 1
-  return `${ano}-${String(mes).padStart(2, '0')}`
-}
 
 function corValor(v: number): string {
   if (v > 0) return '#00c896'
@@ -117,8 +107,13 @@ const PERIODOS_GRAFICO = [
   { value: 'tudo',      label: 'Tudo' },
 ]
 
+// Altura do CORPO dos quadros de gráfico e das listas (Últimos dividendos /
+// Operações recentes): igual nos dois pra os quadros ficarem do mesmo tamanho.
+const CORPO_QUADRO = 'h-64'
+
 const OPCOES_GRAFICO = {
   responsive: true,
+  maintainAspectRatio: false,
   plugins: { legend: { display: false } },
   scales: {
     x: { ticks: { color: MUTED }, grid: { color: 'rgba(255,255,255,0.05)' } },
@@ -152,6 +147,8 @@ export default function DetalheInvestimentoPage() {
   const [excluindo, setExcluindo] = useState(false)
   const [salvandoExclusao, setSalvandoExclusao] = useState(false)
   const [gerenciar, setGerenciar] = useState(false)
+  // Operação a editar ao abrir o drawer de movimentações (botão do quadro "Operações recentes").
+  const [editarOperacaoId, setEditarOperacaoId] = useState<string | undefined>(undefined)
   const [simulando, setSimulando] = useState(false)
   // Preenche "Nova movimentação" com os números da simulação quando o usuário
   // decide transformá-la numa compra de verdade (ver DrawerSimularCompra).
@@ -296,11 +293,10 @@ export default function DetalheInvestimentoPage() {
   // carrega); é só uma simulação simplificada com o dado já disponível aqui.
   const dySimuladoPvp1 = useMemo(() => {
     if (!magicNumberFII || !ativo?.fii_vp || ativo.fii_vp <= 0) return null
-    const anualizado = magicNumberFII.valorPorCota * 12
     return {
       valorPorCota: magicNumberFII.valorPorCota,
-      dyAtual: (anualizado / magicNumberFII.precoCota) * 100,
-      dyPvp1:  (anualizado / ativo.fii_vp) * 100,
+      dyAtual: yieldAnualizadoPct(magicNumberFII.valorPorCota, magicNumberFII.precoCota) ?? 0,
+      dyPvp1:  yieldAnualizadoPct(magicNumberFII.valorPorCota, ativo.fii_vp) ?? 0,
     }
   }, [magicNumberFII, ativo?.fii_vp])
 
@@ -313,10 +309,9 @@ export default function DetalheInvestimentoPage() {
     if (!dySimuladoPvp1 || qtdAtual <= 0) return null
     const custoMedio = resumo.custo / qtdAtual
     if (!(custoMedio > 0)) return null
-    const anualizado = dySimuladoPvp1.valorPorCota * 12
     return {
       custoMedio,
-      yocAtual: (anualizado / custoMedio) * 100,
+      yocAtual: yieldAnualizadoPct(dySimuladoPvp1.valorPorCota, custoMedio) ?? 0,
       yocPvp1:  dySimuladoPvp1.dyPvp1, // mesma conta (anualizado ÷ VP) — só reapresentada como YoC
     }
   }, [dySimuladoPvp1, resumo.custo, qtdAtual])
@@ -346,11 +341,10 @@ export default function DetalheInvestimentoPage() {
   // — usados no quadro de simulação de compra/venda dos demais tipos de ativo.
   const dyYocAtualGenerico = useMemo(() => {
     if (!ultimoDivPorCota || !precoAtualEstimado) return null
-    const anualizado = ultimoDivPorCota * 12
     return {
       valorPorCota: ultimoDivPorCota,
-      dyAtual: (anualizado / precoAtualEstimado) * 100,
-      yocAtual: custoMedioAtual ? (anualizado / custoMedioAtual) * 100 : null,
+      dyAtual: yieldAnualizadoPct(ultimoDivPorCota, precoAtualEstimado) ?? 0,
+      yocAtual: yieldAnualizadoPct(ultimoDivPorCota, custoMedioAtual ?? 0),
     }
   }, [ultimoDivPorCota, precoAtualEstimado, custoMedioAtual])
 
@@ -396,7 +390,7 @@ export default function DetalheInvestimentoPage() {
       return {
         novaQtd, valorOperacao: qtdVendida * preco, novoPM,
         novoDividendoMensal: valorPorCota != null ? valorPorCota * novaQtd : null,
-        novoYoc: valorPorCota != null && novoPM > 0 ? (valorPorCota * 12 / novoPM) * 100 : null,
+        novoYoc: valorPorCota != null ? yieldAnualizadoPct(valorPorCota, novoPM) : null,
       }
     }
     const novaQtd = qtdAtual + qtdSimulada
@@ -406,7 +400,7 @@ export default function DetalheInvestimentoPage() {
     return {
       novaQtd, valorOperacao, novoPM,
       novoDividendoMensal: valorPorCota != null ? valorPorCota * novaQtd : null,
-      novoYoc: valorPorCota != null && novoPM > 0 ? (valorPorCota * 12 / novoPM) * 100 : null,
+      novoYoc: valorPorCota != null ? yieldAnualizadoPct(valorPorCota, novoPM) : null,
     }
   }, [precoAtualEstimado, qtdSimulada, direcaoSimulada, qtdAtual, resumo.custo, ultimoDivPorCota, custoMedioAtual])
 
@@ -514,30 +508,20 @@ export default function DetalheInvestimentoPage() {
     [dividendos, janela],
   )
 
-  // Paginação do quadro "Últimos dividendos": blocos de 6 meses (mais recente
-  // primeiro), pra não listar de uma vez todo o período selecionado no topo
-  // (ex.: "Tudo"). Reinicia na página mais recente ao trocar de ativo/período.
+  // Paginação do quadro "Últimos dividendos": POR_PAGINA_DIVIDENDOS registros
+  // (mais recente primeiro) — número fixo, pra a lista caber no corpo do
+  // quadro sem barra de rolagem. Reinicia na página mais recente ao trocar de
+  // ativo/período.
+  const POR_PAGINA_DIVIDENDOS = 5
   const [paginaDividendos, setPaginaDividendos] = useState(0)
   useEffect(() => { setPaginaDividendos(0) }, [ativoId, periodoGraficos])
   const divPaginacao = useMemo(() => {
-    if (divFiltrados.length === 0) {
-      return { itens: [] as typeof divFiltrados, pagina: 0, totalPaginas: 0, mesInicio: '', mesFim: '' }
-    }
-    const mesMaisAntigo = divFiltrados.reduce(
-      (m, d) => { const mes = d.data_pagamento.slice(0, 7); return mes < m ? mes : m },
-      janela.mesAtual,
-    )
-    const totalMeses = mesParaIndice(janela.mesAtual) - mesParaIndice(mesMaisAntigo) + 1
-    const totalPaginas = Math.max(1, Math.ceil(totalMeses / 6))
-    const pagina = Math.min(paginaDividendos, totalPaginas - 1)
-    const mesFim = deslocarMes(janela.mesAtual, -6 * pagina)
-    const mesInicio = deslocarMes(mesFim, -5)
-    const itens = divFiltrados.filter((d) => {
-      const mes = d.data_pagamento.slice(0, 7)
-      return mes >= mesInicio && mes <= mesFim
-    })
-    return { itens, pagina, totalPaginas, mesInicio, mesFim }
-  }, [divFiltrados, janela, paginaDividendos])
+    const ordenados = [...divFiltrados].sort((x, y) => y.data_pagamento.localeCompare(x.data_pagamento))
+    const totalPaginas = Math.ceil(ordenados.length / POR_PAGINA_DIVIDENDOS)
+    const pagina = Math.max(0, Math.min(paginaDividendos, totalPaginas - 1))
+    const itens = ordenados.slice(pagina * POR_PAGINA_DIVIDENDOS, (pagina + 1) * POR_PAGINA_DIVIDENDOS)
+    return { itens, pagina, totalPaginas }
+  }, [divFiltrados, paginaDividendos])
 
   // Dividendos agregados por mês (período selecionado)
   const divPorMes = useMemo(() => {
@@ -608,6 +592,7 @@ export default function DetalheInvestimentoPage() {
     const temCaracteristicas = ehFIIAtivo ||
       (ehRFAtivo && !!(ativo.rf_subtipo || ativo.rf_indexador || ativo.rf_taxa || ativo.rf_vencimento || ativo.rf_emissor))
     const ks: QuadroDetalheKey[] = ['resumo']
+    if (qtdAtual > 0) ks.push('posicao_destaques')
     if (temCaracteristicas) ks.push('caracteristicas')
     ks.push('grafico_evolucao', 'grafico_cotas', 'grafico_rent_mes', 'grafico_rent_acum')
     if (podeDividendosAtivo) ks.push('grafico_dividendos_mes')
@@ -625,7 +610,7 @@ export default function DetalheInvestimentoPage() {
     if (ehFIIAtivo && magicNumberFII) ks.push('protecao_poder_compra')
     ks.push('operacoes')
     return ks
-  }, [ativo, magicNumberFII, dySimuladoPvp1, dyPorMes, precoAtualEstimado, precoTetoBazin])
+  }, [ativo, magicNumberFII, dySimuladoPvp1, dyPorMes, precoAtualEstimado, precoTetoBazin, qtdAtual])
   const { blob: ordemQuadrosDb, salvar: salvarOrdemQuadrosDb } = usePreferenciasOrdemQuadros()
   const chaveOrdemQuadros = `detalhe-${ativo?.tipo_ativo ?? 'generico'}`
   const {
@@ -676,10 +661,10 @@ export default function DetalheInvestimentoPage() {
   // ordenadas da mais recente para a mais antiga). Reinicia ao trocar de ativo.
   const [paginaOperacoes, setPaginaOperacoes] = useState(0)
   useEffect(() => { setPaginaOperacoes(0) }, [ativoId])
-  const totalPaginasOperacoes = Math.max(1, Math.ceil(compras.length / 6))
+  const totalPaginasOperacoes = Math.max(1, Math.ceil(compras.length / 7))
   const paginaOperacoesEfetiva = Math.min(paginaOperacoes, totalPaginasOperacoes - 1)
   const comprasPaginadas = useMemo(
-    () => compras.slice(paginaOperacoesEfetiva * 6, paginaOperacoesEfetiva * 6 + 6),
+    () => compras.slice(paginaOperacoesEfetiva * 7, paginaOperacoesEfetiva * 7 + 7),
     [compras, paginaOperacoesEfetiva],
   )
 
@@ -1012,6 +997,13 @@ export default function DetalheInvestimentoPage() {
           </Quadro>
         )
 
+        if (chave === 'posicao_destaques') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <PosicaoNosDestaques ativoId={ativo.id} />
+          </Quadro>
+        )
+
         if (chave === 'caracteristicas') return (
           <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
             largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
@@ -1030,6 +1022,7 @@ export default function DetalheInvestimentoPage() {
                   Registre o valor de mercado de pelo menos 2 meses para ver o gráfico.
                 </p>
               ) : (
+                <div className={CORPO_QUADRO}>
                 <Line
                   data={{
                     labels: evolucao.map(([mes]) => fmtMes(mes)),
@@ -1046,6 +1039,7 @@ export default function DetalheInvestimentoPage() {
                   }}
                   options={OPCOES_GRAFICO}
                 />
+                </div>
               )}
             </section>
           </Quadro>
@@ -1061,6 +1055,7 @@ export default function DetalheInvestimentoPage() {
                   Registre o valor de mercado de pelo menos 2 meses para ver o gráfico.
                 </p>
               ) : (
+                <div className={CORPO_QUADRO}>
                 <Line
                   data={{
                     labels: evolucaoCotas.map(([mes]) => fmtMes(mes)),
@@ -1077,6 +1072,7 @@ export default function DetalheInvestimentoPage() {
                   }}
                   options={OPCOES_GRAFICO}
                 />
+                </div>
               )}
             </section>
           </Quadro>
@@ -1106,6 +1102,7 @@ export default function DetalheInvestimentoPage() {
                   Sem dados suficientes de variação mensal.
                 </p>
               ) : (
+                <div className={CORPO_QUADRO}>
                 <Bar
                   data={{
                     labels: rentPorMesJanela.map(([mes]) => fmtMes(mes)),
@@ -1118,6 +1115,7 @@ export default function DetalheInvestimentoPage() {
                   }}
                   options={OPCOES_GRAFICO}
                 />
+                </div>
               )}
             </section>
           </Quadro>
@@ -1136,6 +1134,7 @@ export default function DetalheInvestimentoPage() {
                   Sem dados suficientes de variação mensal.
                 </p>
               ) : (
+                <div className={CORPO_QUADRO}>
                 <Line
                   data={{
                     labels: rentAcumulada.map(([mes]) => fmtMes(mes)),
@@ -1152,6 +1151,7 @@ export default function DetalheInvestimentoPage() {
                   }}
                   options={OPCOES_GRAFICO}
                 />
+                </div>
               )}
             </section>
           </Quadro>
@@ -1166,6 +1166,7 @@ export default function DetalheInvestimentoPage() {
               {divPorMes.length === 0 ? (
                 <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo {labelSemDados}.</p>
               ) : (
+                <div className={CORPO_QUADRO}>
                 <Bar
                   data={{
                     labels: divPorMes.map(([mes]) => fmtMes(mes)),
@@ -1178,6 +1179,7 @@ export default function DetalheInvestimentoPage() {
                   }}
                   options={OPCOES_GRAFICO}
                 />
+                </div>
               )}
             </section>
           </Quadro>
@@ -1192,6 +1194,7 @@ export default function DetalheInvestimentoPage() {
                 title="Dividendos recebidos no mês ÷ valor de mercado da posição no mês">
                 Dividend Yield por mês (%)
               </h2>
+              <div className={CORPO_QUADRO}>
               <Bar
                 data={{
                   labels: dyPorMes.map(([mes]) => fmtMes(mes)),
@@ -1204,6 +1207,7 @@ export default function DetalheInvestimentoPage() {
                 }}
                 options={OPCOES_GRAFICO}
               />
+              </div>
             </section>
           </Quadro>
         )
@@ -1212,7 +1216,7 @@ export default function DetalheInvestimentoPage() {
         if (chave === 'grafico_ultimos_dividendos') return (
           <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
             largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
-            <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <section className="h-full flex flex-col rounded-xl border border-white/10 bg-white/[0.02] p-4">
               <div className="flex items-center justify-between gap-2 mb-3">
                 <h2 className="text-[14px] font-semibold text-white/80">Últimos dividendos</h2>
                 {divPaginacao.totalPaginas > 1 && (
@@ -1220,8 +1224,8 @@ export default function DetalheInvestimentoPage() {
                     <button
                       onClick={() => setPaginaDividendos((p) => p + 1)}
                       disabled={divPaginacao.pagina >= divPaginacao.totalPaginas - 1}
-                      title="6 meses mais antigos"
-                      aria-label="6 meses mais antigos"
+                      title="Dividendos mais antigos"
+                      aria-label="Dividendos mais antigos"
                       className="flex items-center justify-center h-6 w-6 rounded-md border border-white/10 text-white/70
                                  hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                     >
@@ -1233,8 +1237,8 @@ export default function DetalheInvestimentoPage() {
                     <button
                       onClick={() => setPaginaDividendos((p) => Math.max(0, p - 1))}
                       disabled={divPaginacao.pagina <= 0}
-                      title="6 meses mais recentes"
-                      aria-label="6 meses mais recentes"
+                      title="Dividendos mais recentes"
+                      aria-label="Dividendos mais recentes"
                       className="flex items-center justify-center h-6 w-6 rounded-md border border-white/10 text-white/70
                                  hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                     >
@@ -1246,17 +1250,17 @@ export default function DetalheInvestimentoPage() {
               {divPaginacao.itens.length === 0 ? (
                 <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhum dividendo {labelSemDados}.</p>
               ) : (
-                <div className="space-y-2">
+                <div className={`${CORPO_QUADRO} flex flex-col justify-between gap-2`}>
                   {divPaginacao.itens.map((d) => (
-                    <div key={d.id} className="flex items-center justify-between gap-2 text-[13px]">
-                      <div>
-                        <p className="text-white font-medium">{d.inv_tipos_dividendo?.nome ?? 'Dividendo'}</p>
-                        <p style={{ color: MUTED }}>{formatData(d.data_pagamento)}
+                    <div key={d.id} className="shrink-0 flex items-center justify-between gap-2 text-[13px]">
+                      <div className="min-w-0">
+                        <p className="text-white font-medium truncate">{d.inv_tipos_dividendo?.nome ?? 'Dividendo'}</p>
+                        <p className="truncate" style={{ color: MUTED }}>{formatData(d.data_pagamento)}
                           {d.data_com && <span className="ml-1.5">· Data COM {formatData(d.data_com)}</span>}
                           {d.transacoes?.status === 'PROJECAO' && <span className="ml-1.5" style={{ color: '#ffb74d' }}>· projetado</span>}
                         </p>
                       </div>
-                      <span className="font-semibold" style={{ color: '#00c896' }}>{formatBRL(d.valor)}</span>
+                      <span className="font-semibold shrink-0" style={{ color: '#00c896' }}>{formatBRL(d.valor)}</span>
                     </div>
                   ))}
                 </div>
@@ -1596,57 +1600,44 @@ export default function DetalheInvestimentoPage() {
         if (chave === 'operacoes') return (
           <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
             largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
-        <section className="rounded-xl border border-white/10 bg-white/[0.02] p-4" data-tutorial="detalhe-operacoes">
+        <section className="h-full rounded-xl border border-white/10 bg-white/[0.02] p-4" data-tutorial="detalhe-operacoes">
           <h2 className="text-[14px] font-semibold text-white/80 mb-3">Operações recentes</h2>
 
           {/* Resumo GERAL do ativo (todo o histórico, não só o período
               selecionado no topo da página): compras × vendas × resultado. */}
+          <div className={`${CORPO_QUADRO} flex flex-col`}>
           {(resumoComprasVendas.qtdEntrada > 0 || resumoComprasVendas.qtdSaida > 0 || resumoComprasVendas.qtdRendimento > 0) && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+            <div className="flex flex-wrap gap-1.5 mb-2 shrink-0">
               {resumoComprasVendas.qtdEntrada > 0 && (
-                <div className="rounded-lg border border-white/10 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
-                    {ehRendaFixaAtivo ? 'Aportes' : 'Compras'}
-                  </p>
-                  <p className="font-semibold text-[13px]" style={{ color: '#00c896' }}>{fmtNativo(resumoComprasVendas.valorEntrada)}</p>
-                  <p className="text-[11px]" style={{ color: MUTED }}>Qtd: {fmtTokens(resumoComprasVendas.qtdEntrada)}</p>
-                </div>
+                <span className="rounded-md border border-white/10 px-2 py-1 whitespace-nowrap">
+                  <span className="text-[10.5px] uppercase tracking-wide" style={{ color: MUTED }}>{ehRendaFixaAtivo ? 'Aportes' : 'Compras'}</span>{' '}
+                  <span className="font-semibold text-[12.5px]" style={{ color: '#00c896' }}>{fmtNativo(resumoComprasVendas.valorEntrada)}</span>
+                  <span className="text-[11px]" style={{ color: MUTED }}> · qtd {fmtTokens(resumoComprasVendas.qtdEntrada)}</span>
+                </span>
               )}
               {resumoComprasVendas.qtdSaida > 0 && (
-                <div className="rounded-lg border border-white/10 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
-                    {ehRendaFixaAtivo ? 'Resgates' : 'Vendas'}
-                  </p>
-                  <p className="font-semibold text-[13px]" style={{ color: '#ff5c7a' }}>{fmtNativo(resumoComprasVendas.valorSaida)}</p>
-                  <p className="text-[11px]" style={{ color: MUTED }}>Qtd: {fmtTokens(resumoComprasVendas.qtdSaida)}</p>
-                </div>
+                <span className="rounded-md border border-white/10 px-2 py-1 whitespace-nowrap">
+                  <span className="text-[10.5px] uppercase tracking-wide" style={{ color: MUTED }}>{ehRendaFixaAtivo ? 'Resgates' : 'Vendas'}</span>{' '}
+                  <span className="font-semibold text-[12.5px]" style={{ color: '#ff5c7a' }}>{fmtNativo(resumoComprasVendas.valorSaida)}</span>
+                  <span className="text-[11px]" style={{ color: MUTED }}> · qtd {fmtTokens(resumoComprasVendas.qtdSaida)}</span>
+                </span>
               )}
               {resumoComprasVendas.qtdSaida > 0 && (
-                <div className="rounded-lg border border-white/10 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>
-                    Resultado ({ehRendaFixaAtivo ? 'aportes − resgates' : 'compras − vendas'})
-                  </p>
-                  <p className="font-semibold text-[13px]" style={{ color: corValor(resumoComprasVendas.valorLiquido) }}>
-                    {fmtNativo(resumoComprasVendas.valorLiquido)}
-                  </p>
-                  <p className="text-[11px]" style={{ color: MUTED }}>Qtd líquida: {fmtTokens(resumoComprasVendas.qtdLiquida)}</p>
-                </div>
+                <span className="rounded-md border border-white/10 px-2 py-1 whitespace-nowrap">
+                  <span className="text-[10.5px] uppercase tracking-wide" style={{ color: MUTED }}>Resultado</span>{' '}
+                  <span className="font-semibold text-[12.5px]" style={{ color: corValor(resumoComprasVendas.valorLiquido) }}>{fmtNativo(resumoComprasVendas.valorLiquido)}</span>
+                  <span className="text-[11px]" style={{ color: MUTED }}> · qtd líq. {fmtTokens(resumoComprasVendas.qtdLiquida)}</span>
+                </span>
               )}
               {/* RENDIMENTO não tem valor_total (sempre 0, é yield em tokens) — o
                   R$ é uma ESTIMATIVA pela cotação atual, não o valor real
                   recebido em cada crédito. */}
               {resumoComprasVendas.qtdRendimento > 0 && (
-                <div className="rounded-lg border border-white/10 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>Rendimento</p>
-                  <p className="text-white font-semibold text-[13px]">
-                    +{fmtTokens(resumoComprasVendas.qtdRendimento)} {ativo.ticker}
-                  </p>
-                  {precoAtualEstimado != null && (
-                    <p className="text-[11px]" style={{ color: MUTED }}>
-                      ≈ {formatBRL(resumoComprasVendas.qtdRendimento * precoAtualEstimado)} (preço atual)
-                    </p>
-                  )}
-                </div>
+                <span className="rounded-md border border-white/10 px-2 py-1 whitespace-nowrap">
+                  <span className="text-[10.5px] uppercase tracking-wide" style={{ color: MUTED }}>Rendimento</span>{' '}
+                  <span className="font-semibold text-[12.5px]">+{fmtTokens(resumoComprasVendas.qtdRendimento)} {ativo.ticker}</span>
+                  <span className="text-[11px]" style={{ color: MUTED }}> {precoAtualEstimado != null ? `· ≈ ${formatBRL(resumoComprasVendas.qtdRendimento * precoAtualEstimado)}` : ''}</span>
+                </span>
               )}
             </div>
           )}
@@ -1654,7 +1645,7 @@ export default function DetalheInvestimentoPage() {
           {compras.length === 0 && rendimentos.length === 0 ? (
             <p className="text-[13px] py-6 text-center" style={{ color: MUTED }}>Nenhuma operação registrada.</p>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-4 flex-1 min-h-0 overflow-y-auto pr-1">
               {compras.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -1695,20 +1686,28 @@ export default function DetalheInvestimentoPage() {
                     const saida = o.tipo_operacao === 'VENDA' || o.tipo_operacao === 'RESGATE'
                     const corOperacao = saida ? '#ff5c7a' : '#00c896'
                     return (
-                      <div key={o.id} className="flex items-center justify-between gap-2 text-[13px]">
-                        <div className="flex items-center gap-2">
+                      <div key={o.id} className="flex items-center justify-between gap-2 text-[13px] whitespace-nowrap">
+                        <p className="flex items-center gap-2 min-w-0">
                           <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: corOperacao }} />
-                          <div>
-                            <p className="font-medium" style={{ color: corOperacao }}>{TIPO_OPERACAO_LABEL[o.tipo_operacao]}</p>
-                            <p style={{ color: MUTED }}>
-                              {ativo.tipo_ativo === 'RENDA_FIXA'
-                                ? formatData(o.data_operacao)
-                                : `${o.quantidade} × ${fmtNativo(o.preco_unitario)} · ${formatData(o.data_operacao)}`}
-                            </p>
-                          </div>
-                        </div>
-                        <span className="font-semibold" style={{ color: corOperacao }}>
-                          {saida ? '-' : '+'}{fmtNativo(o.valor_total)}
+                          <span className="font-medium" style={{ color: corOperacao }}>{TIPO_OPERACAO_LABEL[o.tipo_operacao]}</span>
+                          <span className="truncate" style={{ color: MUTED }}>
+                            {ativo.tipo_ativo === 'RENDA_FIXA'
+                              ? formatData(o.data_operacao)
+                              : `${o.quantidade} × ${fmtNativo(o.preco_unitario)} · ${formatData(o.data_operacao)}`}
+                          </span>
+                        </p>
+                        <span className="flex items-center gap-2 shrink-0">
+                          <span className="font-semibold" style={{ color: corOperacao }}>
+                            {saida ? '-' : '+'}{fmtNativo(o.valor_total)}
+                          </span>
+                          {podeEscrever && o.data_operacao <= new Date().toISOString().split('T')[0] && (
+                            <button onClick={() => { setEditarOperacaoId(o.id); setGerenciar(true) }}
+                              title="Editar operação" aria-label="Editar operação"
+                              className="w-6 h-6 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25"
+                              style={{ color: MUTED }}>
+                              <Pencil size={12} />
+                            </button>
+                          )}
                         </span>
                       </div>
                     )
@@ -1738,6 +1737,7 @@ export default function DetalheInvestimentoPage() {
               )}
             </div>
           )}
+          </div>
         </section>
           </Quadro>
         )
@@ -1757,8 +1757,8 @@ export default function DetalheInvestimentoPage() {
       )}
 
       {gerenciar && (
-        <DrawerMovimentacoes ativo={ativo} onClose={() => { setGerenciar(false); setPrefilCompra(null) }}
-          onToast={showToast} valoresIniciais={prefilCompra ?? undefined} />
+        <DrawerMovimentacoes ativo={ativo} onClose={() => { setGerenciar(false); setPrefilCompra(null); setEditarOperacaoId(undefined) }}
+          onToast={showToast} valoresIniciais={prefilCompra ?? undefined} editarOperacaoId={editarOperacaoId} />
       )}
 
       {simulando && (

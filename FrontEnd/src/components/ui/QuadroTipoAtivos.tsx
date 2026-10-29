@@ -1,9 +1,10 @@
 import { useMemo, useState, useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
-import { ChevronDown, ChevronUp, ChevronRight, TrendingUp, TrendingDown, Layers, LineChart, Pencil, CheckCircle2, GripHorizontal, AlertTriangle } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronRight, TrendingUp, TrendingDown, Layers, Pencil, CheckCircle2, GripHorizontal, AlertTriangle } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { LogoAtivo, SelectDark } from './shared'
 import { formatBRL, formatData } from '../../lib/utils'
 import { recomendacaoCompra } from '../../lib/questionarioAtivos'
+import { dyMedioPct, yocMedioPct } from '../../lib/yieldCarteira'
 import {
   calcularProtecaoPoderCompraCompleta, montarEntradaProtecaoPoderCompra,
   type ResultadoProtecaoPoderCompraCompleto,
@@ -171,7 +172,6 @@ function rfIndexadorLabel(l: AtivoLinha): string | null {
 
 interface AcoesAtivo {
   onPosicoes:  (a: InvestimentoAtivo) => void
-  onHistorico: (a: InvestimentoAtivo) => void
   onEditar:    (a: InvestimentoAtivo) => void
 }
 
@@ -377,12 +377,7 @@ export default function QuadroTipoAtivos({
   const mostraDyYocMedio = ehFII || tipo === 'ACOES' || tipo === 'ETF' || tipo === 'ETF_INTERNACIONAL'
   const dyYocMedio = useMemo(() => {
     if (!mostraDyYocMedio) return null
-    const somaMercado = linhas.reduce((s, l) => s + l.valor_mercado, 0)
-    const somaCusto   = linhas.reduce((s, l) => s + l.valor_custo, 0)
-    return {
-      dy:  somaMercado > 0 ? linhas.reduce((s, l) => s + l.dividend_yield_pct * l.valor_mercado, 0) / somaMercado : 0,
-      yoc: somaCusto   > 0 ? linhas.reduce((s, l) => s + l.yield_on_cost_pct  * l.valor_custo,   0) / somaCusto   : 0,
-    }
+    return { dy: dyMedioPct(linhas), yoc: yocMedioPct(linhas) }
   }, [mostraDyYocMedio, linhas])
 
   // % ideal por ativo — distribui a meta do TIPO (dados.percentual_ideal,
@@ -692,10 +687,6 @@ export default function QuadroTipoAtivos({
               <button onClick={() => l.meta && acoes.onPosicoes(l.meta)} disabled={!l.meta} title="Movimentações"
                 className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>
                 <Layers size={13} />
-              </button>
-              <button onClick={() => l.meta && acoes.onHistorico(l.meta)} disabled={!l.meta} title="Valor de mercado"
-                className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>
-                <LineChart size={13} />
               </button>
               <button onClick={() => l.meta && acoes.onEditar(l.meta)} disabled={!l.meta} title="Editar"
                 className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25 disabled:opacity-40" style={{ color: MUTED }}>

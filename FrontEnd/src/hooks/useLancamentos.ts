@@ -4,6 +4,7 @@ import { useEffect, useCallback, useMemo } from 'react'
 import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useContextoUserId } from './useEspacoAtivo'
+import { ordenarPernasDeTransferencia } from '../lib/ordemTransferencias'
 
 export interface Lancamento {
   id: string
@@ -163,8 +164,32 @@ export function useLancamentos(filtros: FiltrosLancamento) {
       lista = lista.filter(l => filtros.status_ids!.includes(l.status))
     else if (filtros.status)
       lista = lista.filter(l => l.status === filtros.status)
-    return lista
+    // Pernas de cada transferência juntas, saída antes da entrada — aqui (antes
+    // de a página recalcular o saldo corrente) pra o saldo seguir a ordem exibida.
+    return ordenarPernasDeTransferencia(lista)
   }, [doMes, filtros.conta_ids, filtros.categoria_ids, filtros.status_ids, filtros.status])
+
+  // Perna OPOSTA de cada transferência (id da perna → lançamento do outro lado
+  // do par), buscada no mês COMPLETO (sem filtros): com uma conta filtrada o
+  // Extrato só lista uma perna, e a conta do outro lado só estaria no editar.
+  // Fica de fora quando a outra perna não está no mês carregado (ex.: conta
+  // não compartilhada com o agregado).
+  const contrapartePorId = useMemo(() => {
+    const porPar = new Map<string, Lancamento[]>()
+    for (const l of doMes) {
+      if (!l.id_par_transferencia) continue
+      const pernas = porPar.get(l.id_par_transferencia) ?? []
+      pernas.push(l)
+      porPar.set(l.id_par_transferencia, pernas)
+    }
+    const out = new Map<string, Lancamento>()
+    for (const pernas of porPar.values()) {
+      if (pernas.length !== 2) continue
+      out.set(pernas[0].id, pernas[1])
+      out.set(pernas[1].id, pernas[0])
+    }
+    return out
+  }, [doMes])
 
   // Prefetch pontual — chamado no onMouseEnter dos botões de navegação
   const prefetchAdj = useCallback((delta: number) => {
@@ -325,6 +350,7 @@ export function useLancamentos(filtros: FiltrosLancamento) {
 
   return {
     lancamentos,
+    contrapartePorId,
     loading,
     fetching,
     error: error ? (error as Error).message : null,

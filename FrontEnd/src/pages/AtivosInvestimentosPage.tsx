@@ -1,15 +1,15 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, Search, Wallet, Sparkles, ArrowLeftRight, Upload } from 'lucide-react'
+import { Plus, Search, Wallet, Sparkles, ArrowLeftRight, Upload } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend, type ChartData } from 'chart.js'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
-import { useInvestimentosHistorico, type RegistrarHistoricoInput } from '../hooks/useInvestimentosHistorico'
+import { useInvestimentosHistorico } from '../hooks/useInvestimentosHistorico'
 import { useInvestimentosDashboard, useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
 import { useIndicesEconomicos } from '../hooks/useIndicesEconomicos'
 import {
-  Drawer, Field, Input, SelectDark, SearchableSelect, Toast,
+  Drawer, Field, SelectDark, SearchableSelect, Toast,
 } from '../components/ui/shared'
 import DrawerAtivo from '../components/ui/DrawerAtivo'
 import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
@@ -278,7 +278,6 @@ export default function AtivosInvestimentosPage() {
   const [editando,   setEditando]   = useState<InvestimentoAtivo | null>(null)
   const [toast,      setToast]      = useState<string | null>(null)
   const [posicoesDe, setPosicoesDe] = useState<InvestimentoAtivo | null>(null)
-  const [historicoDe, setHistoricoDe] = useState<InvestimentoAtivo | null>(null)
   const [seletorMov, setSeletorMov] = useState(false)
   // Diferencia o drawer de movimentações aberto pelo atalho do header (onde,
   // ao registrar, pergunta se quer lançar outra) do aberto pela ação
@@ -541,7 +540,7 @@ export default function AtivosInvestimentosPage() {
                       focoSinal={foco?.tipo === g.tipo ? foco.n : focoTipo?.tipo === g.tipo ? focoTipo.n : null}
                       focoGrupo={foco?.tipo === g.tipo ? { dim: foco.dim, chave: foco.chave } : null}
                       acoes={podeEscrever
-                        ? { onPosicoes: (a) => { setMovViaAtalho(false); setPosicoesDe(a) }, onHistorico: setHistoricoDe, onEditar: abrirEditar }
+                        ? { onPosicoes: (a) => { setMovViaAtalho(false); setPosicoesDe(a) }, onEditar: abrirEditar }
                         : undefined}
                       alca={<AlcaArrastar {...alcaTipo(tipo)} />}
                       totalCarteira={dashboard?.total_mercado}
@@ -575,11 +574,6 @@ export default function AtivosInvestimentosPage() {
           onRegistrarNova={movViaAtalho ? () => { setPosicoesDe(null); setSeletorMov(true) } : undefined} />
       )}
 
-      {/* Drawer histórico mensal de valor de mercado */}
-      {historicoDe && (
-        <DrawerHistorico ativo={historicoDe} onClose={() => setHistoricoDe(null)} onToast={showToast} />
-      )}
-
       <TutorialTour pageKey="investimentos-ativos-v1" passos={TUTORIAL_INVESTIMENTOS_ATIVOS} />
     </div>
   )
@@ -609,104 +603,6 @@ function SeletorAtivoMovimentacao({ ativos, onSelecionar, onClose }: {
         <SearchableSelect value={ativoId} onChange={selecionar} placeholder="Buscar por ticker ou nome..."
           opcoes={ordenados.map((a) => ({ id: a.id, label: a.ticker, sublabel: a.nome }))} />
       </Field>
-    </Drawer>
-  )
-}
-
-// ── Drawer de histórico mensal (valor de mercado) ───────────────
-
-const mesAtual = () => new Date().toISOString().slice(0, 7)
-const HIST_VAZIO = { conta_id: '', mes_ano: mesAtual(), valor_mercado: '', quantidade: '' }
-
-function DrawerHistorico({ ativo, onClose, onToast }: {
-  ativo: InvestimentoAtivo; onClose: () => void; onToast: (m: string) => void
-}) {
-  const { historico, loading, registrar, excluir } = useInvestimentosHistorico({ ativo_id: ativo.id })
-  const { posicoes } = useInvestimentosPosicoes({ ativo_id: ativo.id, status: 'ATIVA' })
-  const [form, setForm] = useState(HIST_VAZIO)
-  const [salvando, setSalvando] = useState(false)
-
-  // Contas onde o ativo tem posição ativa (destino natural do snapshot)
-  const contasDoAtivo = [...new Map(posicoes.map((p) => [p.conta_id, p.contas?.nome ?? '—'])).entries()]
-
-  async function salvar() {
-    if (!form.conta_id) { onToast('Selecione a conta'); return }
-    const valor = Number(form.valor_mercado)
-    if (!(valor >= 0)) { onToast('Valor de mercado inválido'); return }
-    setSalvando(true)
-    const payload: RegistrarHistoricoInput = {
-      ativo_id: ativo.id, conta_id: form.conta_id, mes_ano: form.mes_ano, valor_mercado: valor,
-      ...(form.quantidade !== '' ? { quantidade: Number(form.quantidade) } : {}),
-    }
-    const res = await registrar(payload)
-    setSalvando(false)
-    if (res.ok) { setForm({ ...HIST_VAZIO, conta_id: form.conta_id }); onToast('Valor registrado!') }
-    else onToast(res.erro ?? 'Erro ao registrar valor')
-  }
-
-  async function remover(id: string) {
-    const res = await excluir(id)
-    onToast(res.ok ? 'Registro removido.' : (res.erro ?? 'Erro ao remover'))
-  }
-
-  return (
-    <Drawer open onClose={onClose} titulo={`Valor de mercado · ${ativo.ticker}`} subtitulo={ativo.nome}>
-      <div className="rounded-lg border border-white/10 p-3 space-y-3">
-        <Field label="Conta">
-          <SelectDark value={form.conta_id} onChange={(e) => setForm({ ...form, conta_id: e.target.value })}>
-            <option value="">Selecione...</option>
-            {contasDoAtivo.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
-          </SelectDark>
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Mês">
-            <Input type="month" value={form.mes_ano} onChange={(e) => setForm({ ...form, mes_ano: e.target.value })} />
-          </Field>
-          <Field label="Valor de mercado">
-            <Input type="number" min={0} step="any" value={form.valor_mercado}
-              onChange={(e) => setForm({ ...form, valor_mercado: e.target.value })} placeholder="0,00" />
-          </Field>
-        </div>
-        <Field label="Quantidade (opcional — usa as posições se vazio)">
-          <Input type="number" min={0} step="any" value={form.quantidade}
-            onChange={(e) => setForm({ ...form, quantidade: e.target.value })} placeholder="Automática" />
-        </Field>
-        <button onClick={salvar} disabled={salvando}
-          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-semibold text-white disabled:opacity-50"
-          style={{ background: '#3b82f6' }}>
-          <Plus size={14} /> Registrar valor do mês
-        </button>
-      </div>
-
-      {loading ? (
-        <p className="text-[13px]" style={{ color: MUTED }}>Carregando...</p>
-      ) : historico.length === 0 ? (
-        <p className="text-[13px] text-center py-4" style={{ color: MUTED }}>
-          Nenhum valor registrado. Sem snapshots, o dashboard usa o valor de custo.
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {historico.map((h) => (
-            <div key={h.id} className="rounded-lg border border-white/10 p-3 flex items-center justify-between gap-2">
-              <div>
-                <p className="text-white text-[14px] font-medium">
-                  {h.mes_ano} · {formatBRL(h.valor_mercado)}
-                </p>
-                <p className="text-[12px]" style={{ color: MUTED }}>
-                  {h.quantidade} un. ·{' '}
-                  <span style={{ color: h.variacao_percentual >= 0 ? '#00c896' : '#ff5c7a' }}>
-                    {h.variacao_percentual >= 0 ? '+' : ''}{h.variacao_percentual.toFixed(2)}%
-                    {' '}({formatBRL(h.rentabilidade_mes)})
-                  </span>
-                </p>
-              </div>
-              <button onClick={() => remover(h.id)} className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
     </Drawer>
   )
 }

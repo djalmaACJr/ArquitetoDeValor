@@ -10,6 +10,8 @@ import { useInvestimentosRanking } from '../hooks/useInvestimentosDashboard'
 import { useInvestimentosHistorico } from '../hooks/useInvestimentosHistorico'
 import QuadroSobreposicao from '../components/ui/QuadroSobreposicao'
 import QuadroCorrelacao from '../components/ui/QuadroCorrelacao'
+import QuadroRadarCarteira, { RadarDuplo } from '../components/ui/QuadroRadarCarteira'
+import { calcularRadarCarteira, calcularRadarCriteriosAtivos, criteriosCarteiraRelevantes, criteriosQuestaoRelevantes } from '../lib/radarCarteira'
 import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
 import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
 import { useInvAvaliacoes } from '../hooks/useInvAvaliacoes'
@@ -31,7 +33,7 @@ import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_INVESTIMENTOS_AVALIACOES } from '../lib/tutoriaisPaginas'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPOS_ATIVO_INV, CRITERIOS_QUESTAO, CRITERIO_LABEL } from '../lib/constants'
-import type { InvAvaliacao, InvAvaliacaoMentor, InvestimentoAtivo, CriterioQuestao, TipoAtivoInvestimento, NivelConsenso, FrequenciaAgenda, PerguntaAvaliacao, PesosCriterio } from '../types'
+import type { InvAvaliacao, InvAvaliacaoMentor, InvestimentoAtivo, InvestimentoRankingAtivo, CriterioQuestao, TipoAtivoInvestimento, NivelConsenso, FrequenciaAgenda, PerguntaAvaliacao, PesosCriterio } from '../types'
 
 type LinhaRank = { ativo: InvestimentoAtivo; final: number | null; medias: Record<CriterioQuestao, number | null> }
 // Questionário efetivo reduzido (o necessário para salvar).
@@ -910,6 +912,19 @@ export default function AvaliacoesInvestimentosPage() {
     return out
   }, [ativos, avalView, detalheView, comSaldo])
 
+  // Radares da carteira: saúde (calculada das posições atuais — não existe
+  // "foto" histórica de posições, então fica de fora no modo histórico) e
+  // qualidade dos ativos (critérios dos questionários, ponderados por valor).
+  const radarCarteira = useMemo(
+    () => (modoHistorico ? null : calcularRadarCarteira(ativosComSaldo)),
+    [modoHistorico, ativosComSaldo],
+  )
+  const radarAtivos = useMemo(() => {
+    if (dadosRank.length === 0) return null
+    const pesos = new Map(ativosComSaldo.map((a) => [a.ativo_id, a.valor_mercado]))
+    return calcularRadarCriteriosAtivos(dadosRank.map((d) => ({ ativoId: d.ativo.id, medias: d.medias })), pesos)
+  }, [dadosRank, ativosComSaldo])
+
   // Agenda de reavaliação: deriva a última avaliação e a próxima data.
   const ultimaEm = useMemo(() => {
     let max = 0
@@ -1671,6 +1686,9 @@ export default function AvaliacoesInvestimentosPage() {
             </section>
           )}
 
+          {/* Radares da carteira — saúde (5 critérios) e qualidade dos ativos (4 critérios) */}
+          {(radarCarteira || radarAtivos) && <QuadroRadarCarteira carteira={radarCarteira} ativos={radarAtivos} />}
+
           {/* Ranking geral dos ativos — logo após a avaliação da carteira */}
           {dadosRank.length > 0 && <RankingTopo dados={dadosRank} />}
 
@@ -1691,7 +1709,7 @@ export default function AvaliacoesInvestimentosPage() {
                     <div key={tipo} data-quadro-arrastavel
                       className={`rounded-xl transition-all duration-150 ${contornoComPosicao(tipo)}`}
                       {...alvoComPosicao(tipo)}>
-                      <GrupoTipoAvaliacao tipo={tipo} ativos={lista} comSaldo={comSaldo}
+                      <GrupoTipoAvaliacao tipo={tipo} ativos={lista} comSaldo={comSaldo} posicoes={ativosComSaldo}
                         avalPorAtivo={avalView} detalhePorAtivo={detalheView}
                         ordenar={ordenar} setOrdenar={setOrdenar} modoHistorico={modoHistorico}
                         rodando={rodando} onReavaliar={(id) => avaliar([ativoPorId.get(id)!], true)}
@@ -1724,7 +1742,7 @@ export default function AvaliacoesInvestimentosPage() {
                           <div key={`sem-${tipo}`} data-quadro-arrastavel
                             className={`rounded-xl transition-all duration-150 ${contornoSemPosicao(tipo)}`}
                             {...alvoSemPosicao(tipo)}>
-                            <GrupoTipoAvaliacao tipo={tipo} ativos={lista} comSaldo={comSaldo}
+                            <GrupoTipoAvaliacao tipo={tipo} ativos={lista} comSaldo={comSaldo} posicoes={ativosComSaldo}
                               avalPorAtivo={avalView} detalhePorAtivo={detalheView}
                               ordenar={ordenar} setOrdenar={setOrdenar} modoHistorico={modoHistorico}
                               rodando={rodando} onReavaliar={(id) => avaliar([ativoPorId.get(id)!], true)}
@@ -1795,7 +1813,7 @@ function ThSort({ col, label, icon: Icon, ordenar, setOrdenar, className }: {
 
 // ── Grupo de um tipo de ativo: lista ordenável (médias por critério + nota
 //    final), com cada ativo expansível para a planilha mentor × pergunta. ──
-function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAtivo, ordenar, setOrdenar, rodando, onReavaliar, modoHistorico, alca }: {
+function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, posicoes, avalPorAtivo, detalhePorAtivo, ordenar, setOrdenar, rodando, onReavaliar, modoHistorico, alca }: {
   tipo: TipoAtivoInvestimento
   ativos: InvestimentoAtivo[]
   /** Ativos com posição válida (saldo > 0) — só estes podem ser reavaliados
@@ -1803,6 +1821,8 @@ function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAt
       continuar listado aqui mesmo depois de zerada a posição — só o botão
       "Reavaliar" fica desabilitado. */
   comSaldo: Set<string>
+  /** Linhas do ranking com saldo > 0 (valor de mercado, DY…) — base do radar do tipo. */
+  posicoes: InvestimentoRankingAtivo[]
   avalPorAtivo: Map<string, InvAvaliacao>
   detalhePorAtivo: Map<string, DetAtivo>
   ordenar: Ordenacao
@@ -1840,6 +1860,19 @@ function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAt
     () => resumoQualidade(ativos, avalPorAtivo, detalhePorAtivo),
     [ativos, avalPorAtivo, detalhePorAtivo],
   )
+
+  // Radares do tipo: saúde (das posições deste tipo; fora no modo histórico,
+  // que não guarda foto das posições) e qualidade dos ativos com posição.
+  const radarTipo = useMemo(() => {
+    const doTipo = posicoes.filter((p) => p.tipo_ativo === tipo)
+    const carteira = modoHistorico ? null : calcularRadarCarteira(doTipo, 'tipo')
+    const linhasQ = ativos
+      .filter((a) => comSaldo.has(a.id) && detalhePorAtivo.has(a.id))
+      .map((a) => ({ ativoId: a.id, medias: detalhePorAtivo.get(a.id)!.medias }))
+    const pesos = new Map(doTipo.map((p) => [p.ativo_id, p.valor_mercado]))
+    const qualidade = linhasQ.length ? calcularRadarCriteriosAtivos(linhasQ, pesos) : null
+    return { carteira, qualidade, criteriosCarteira: criteriosCarteiraRelevantes(tipo, doTipo.length), criteriosAtivos: criteriosQuestaoRelevantes(tipo) }
+  }, [posicoes, tipo, modoHistorico, ativos, comSaldo, detalhePorAtivo])
 
   // Melhores e piores do tipo (por nota final). O quadro de ranking só faz
   // sentido para tipos com mais de 10 ativos avaliados — abaixo disso a própria
@@ -1900,6 +1933,14 @@ function GrupoTipoAvaliacao({ tipo, ativos, comSaldo, avalPorAtivo, detalhePorAt
           style={{ borderColor: `${resumo.cor}55`, background: `${resumo.cor}14` }}>
           <span className="font-semibold" style={{ color: resumo.cor }}>{resumo.label}.</span>{' '}
           <span className="text-white/85">{resumo.texto.replace(/^Qualidade \w+ — /, '')}</span>
+        </div>
+      )}
+
+      {/* Radares do tipo (só quando há algo a mostrar) */}
+      {(radarTipo.carteira || radarTipo.qualidade) && (
+        <div className="mb-2">
+          <RadarDuplo carteira={radarTipo.carteira} ativos={radarTipo.qualidade} escopo="tipo" altura={220}
+            criteriosCarteira={radarTipo.criteriosCarteira} criteriosAtivos={radarTipo.criteriosAtivos} />
         </div>
       )}
 

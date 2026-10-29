@@ -1,11 +1,13 @@
 import { useMemo, useState, useRef, useEffect } from 'react'
 import { useLocation, Link } from 'react-router-dom'
-import { TrendingUp, TrendingDown, Percent, Trophy, Calendar, Layers, Zap, ChevronDown, ChevronUp, Loader2, ArrowUp, Coins } from 'lucide-react'
+import { TrendingUp, TrendingDown, Percent, Trophy, Calendar, Layers, Zap, ChevronDown, ChevronUp, Loader2, ArrowUp, Coins, PiggyBank } from 'lucide-react'
 import { Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend,
 } from 'chart.js'
 import { useInvestimentosDestaques } from '../hooks/useInvestimentosDashboard'
+import { calcularRankingsDestaques } from '../lib/destaquesRanking'
+import { yocMedioPct } from '../lib/yieldCarteira'
 import { useContas } from '../hooks/useContas'
 import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
 import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
@@ -44,8 +46,8 @@ const PERIODOS: { value: PeriodoRanking; label: string }[] = [
 
 // Chaves dos 6 quadros gerais — ordem PADRÃO (usada quando o usuário nunca
 // reordenou nada); a ordem de fato é definida por useOrdemReordenavel.
-type ChaveGeral = 'contribuintes' | 'em_alta' | 'em_baixa' | 'maior_dy' | 'maior_div_recebido' | 'maior_peso'
-const CHAVES_GERAIS: ChaveGeral[] = ['contribuintes', 'em_alta', 'em_baixa', 'maior_dy', 'maior_div_recebido', 'maior_peso']
+type ChaveGeral = 'contribuintes' | 'em_alta' | 'em_baixa' | 'maior_dy' | 'maior_yoc' | 'maior_div_recebido' | 'maior_peso'
+const CHAVES_GERAIS: ChaveGeral[] = ['contribuintes', 'em_alta', 'em_baixa', 'maior_dy', 'maior_yoc', 'maior_div_recebido', 'maior_peso']
 
 function corPct(v: number): string { return v > 0 ? VERDE : v < 0 ? VERMELHO : MUTED }
 function fmtPct(v: number): string { return `${v > 0 ? '+' : ''}${v}%` }
@@ -79,6 +81,11 @@ function totalRetorno(itens: InvestimentoRankingAtivo[]): { pct: number; ganho: 
   const inicio  = itens.reduce((s, a) => s + a.valor_mercado_inicio_periodo, 0)
   const ganho   = mercado - inicio
   return { pct: inicio > 0 ? (ganho / inicio) * 100 : 0, ganho }
+}
+// YoC médio (12m, mesmo cálculo da coluna YoC de "Meus ativos"): média do
+// yield_on_cost_pct ponderada pelo custo; dividendos = recebidos nos 12m.
+function totalYoC(itens: InvestimentoRankingAtivo[]): { pct: number; dividendos: number } {
+  return { pct: yocMedioPct(itens), dividendos: itens.reduce((s, a) => s + a.dividendos_12m, 0) }
 }
 function totalDY(itens: InvestimentoRankingAtivo[]): { pct: number; dividendos: number } {
   const mercado = itens.reduce((s, a) => s + a.valor_mercado, 0)
@@ -557,46 +564,9 @@ export default function DestaquesInvestimentosPage() {
     return m
   }, [ativosFiltrados])
 
-  // Contribuição em R$ pro resultado do período — NÃO é a mesma coisa que
-  // "Em alta" (que ordena por %): um ativo pequeno com +50% pode contribuir
-  // menos em dinheiro do que um grande com +2%. Ordena pelo módulo do ganho/
-  // perda em reais, misturando altas e baixas — "quem mais mexeu o
-  // patrimônio", pra cima ou pra baixo.
-  const contribuintes = useMemo(
-    () => [...ativosFiltrados]
-      .map((a) => ({ a, ganho: a.valor_mercado - a.valor_mercado_inicio_periodo }))
-      .sort((x, y) => Math.abs(y.ganho) - Math.abs(x.ganho))
-      .map(({ a }) => a),
-    [ativosFiltrados],
-  )
-  const emAlta = useMemo(
-    () => [...ativosFiltrados].filter((a) => a.rentabilidade_periodo_pct > 0)
-      .sort((x, y) => y.rentabilidade_periodo_pct - x.rentabilidade_periodo_pct),
-    [ativosFiltrados],
-  )
-  const emBaixa = useMemo(
-    () => [...ativosFiltrados].filter((a) => a.rentabilidade_periodo_pct < 0)
-      .sort((x, y) => x.rentabilidade_periodo_pct - y.rentabilidade_periodo_pct),
-    [ativosFiltrados],
-  )
-  // Maior DY% (relação dividendos ÷ valor de mercado) — não é o mesmo ranking
-  // que "maiorDivRecebido" abaixo: um ativo pequeno pode ter DY% alto com
-  // pouco dinheiro em jogo, e um ativo grande pode receber mais em R$ com
-  // DY% menor. São dois quadros deliberadamente separados.
-  const maiorDY = useMemo(
-    () => [...ativosFiltrados].filter((a) => a.dy_periodo_pct > 0)
-      .sort((x, y) => y.dy_periodo_pct - x.dy_periodo_pct),
-    [ativosFiltrados],
-  )
-  // Maior valor de dividendos recebidos em R$ no período — ordena pelo
-  // dinheiro efetivamente recebido, não pela relação percentual.
-  const maiorDivRecebido = useMemo(
-    () => [...ativosFiltrados].filter((a) => a.dividendos_periodo > 0)
-      .sort((x, y) => y.dividendos_periodo - x.dividendos_periodo),
-    [ativosFiltrados],
-  )
-  const maiorPeso = useMemo(
-    () => [...ativosFiltrados].sort((x, y) => y.participacao_pct - x.participacao_pct),
+  // Ordenação dos 6 rankings: lib/destaquesRanking (compartilhada com a página do ativo).
+  const { contribuintes, emAlta, emBaixa, maiorDY, maiorYoC, maiorDivRecebido, maiorPeso } = useMemo(
+    () => calcularRankingsDestaques(ativosFiltrados),
     [ativosFiltrados],
   )
 
@@ -604,6 +574,7 @@ export default function DestaquesInvestimentosPage() {
   const totalEmAlta  = useMemo(() => totalRetorno(emAlta), [emAlta])
   const totalEmBaixa = useMemo(() => totalRetorno(emBaixa), [emBaixa])
   const totalDYLista = useMemo(() => totalDY(maiorDY), [maiorDY])
+  const totalYoCLista = useMemo(() => totalYoC(maiorYoC), [maiorYoC])
   const totalDivRecebidoLista = useMemo(() => totalDY(maiorDivRecebido), [maiorDivRecebido])
   const totalPeso    = useMemo(() => ({
     pct: maiorPeso.reduce((s, a) => s + a.participacao_pct, 0),
@@ -670,6 +641,16 @@ export default function DestaquesInvestimentosPage() {
         metrica={(a) => ({ texto: `${a.dy_periodo_pct}%`, cor: VERDE, valorTexto: formatBRL(a.dividendos_periodo) })}
         total={{ pctTexto: `${totalDYLista.pct.toFixed(2)}%`, valorTexto: formatBRL(totalDYLista.dividendos), cor: VERDE }}
         dragHandleProps={alcaGeral('maior_dy')} dropTargetProps={alvoGeral('maior_dy')} bordaClasse={bordaGeral('maior_dy')} />
+    ),
+    maior_yoc: (
+      <ListaDestaque titulo="Maior YoC" icone={<PiggyBank size={14} />} itens={maiorYoC} periodo={periodo} origem={origem}
+        colunaLabel="Yield on cost (12m)"
+        metrica={(a) => ({
+          texto: `${a.yield_on_cost_pct}%`, cor: VERDE,
+          valorTexto: !a.posse_12m && a.yoc_real_pct !== a.yield_on_cost_pct ? `real ${a.yoc_real_pct}%` : formatBRL(a.dividendos_12m),
+        })}
+        total={{ pctTexto: `${totalYoCLista.pct.toFixed(2)}%`, valorTexto: formatBRL(totalYoCLista.dividendos), cor: VERDE }}
+        dragHandleProps={alcaGeral('maior_yoc')} dropTargetProps={alvoGeral('maior_yoc')} bordaClasse={bordaGeral('maior_yoc')} />
     ),
     maior_div_recebido: (
       <ListaDestaque titulo="Maiores dividendos recebidos" icone={<Coins size={14} />} itens={maiorDivRecebido} periodo={periodo} origem={origem}

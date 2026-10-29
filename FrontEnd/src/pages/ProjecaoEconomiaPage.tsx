@@ -188,6 +188,7 @@ export default function ProjecaoEconomiaPage() {
 
   const pvAtual    = fvAnnuity(economiaAtual,    taxa, horizonte)
   const pvOtimista = fvAnnuity(economiaOtimista, taxa, horizonte)
+  const pvPessimista = fvAnnuity(economiaPessimista, taxa, horizonte)
 
   const chartData = useMemo(() => {
     const mes    = mesAtual()
@@ -224,11 +225,13 @@ export default function ProjecaoEconomiaPage() {
       projecao: {
         cenario_atual_aporte_mensal:    economiaAtual,
         cenario_otimista_aporte_mensal: economiaOtimista,
+        cenario_pessimista_aporte_mensal: economiaPessimista,
         patrimonio_final_atual:    pvAtual,
         patrimonio_final_otimista: pvOtimista,
+        patrimonio_final_pessimista: pvPessimista,
       },
     },
-  }), [hLabel, horizonte, rendimento, reducaoPerc, medias, economiaAtual, economiaOtimista, pvAtual, pvOtimista]))
+  }), [hLabel, horizonte, rendimento, reducaoPerc, medias, economiaAtual, economiaOtimista, economiaPessimista, pvAtual, pvOtimista, pvPessimista]))
 
   // ── Insights ─────────────────────────────────────────────────
   const insights = useMemo(() => {
@@ -249,14 +252,22 @@ export default function ProjecaoEconomiaPage() {
       list.push({ icon: '⚠️', text: `Atenção: despesas superam receitas em ${formatBRL(Math.abs(medias.economia))}/mês. Priorize cortar gastos variáveis.` })
     if (economiaOtimista > economiaAtual * 1.2)
       list.push({ icon: '✨', text: `No cenário otimista, a diferença em ${hLabel} é de ${formatBRL(pvOtimista - pvAtual)} a mais do que o cenário atual.` })
+    if (reducaoPerc > 0 && medias.despesas > 0)
+      list.push({
+        icon: '📉',
+        text: economiaPessimista < 0
+          ? `No cenário pessimista (despesas +${reducaoPerc}%), você teria um déficit de ${formatBRL(Math.abs(economiaPessimista))}/mês e o patrimônio em ${hLabel} ficaria em ${formatBRL(pvPessimista)}.`
+          : `No cenário pessimista (despesas +${reducaoPerc}%), em ${hLabel} você teria ${formatBRL(pvPessimista)} — ${formatBRL(pvAtual - pvPessimista)} a menos que o cenário atual.`,
+      })
     return list
-  }, [medias, reducaoPerc, categorias, rendimento, economiaAtual, economiaOtimista, pvAtual, pvOtimista, hLabel])
+  }, [medias, reducaoPerc, categorias, rendimento, economiaAtual, economiaOtimista, economiaPessimista, pvAtual, pvOtimista, pvPessimista, hLabel])
 
   const exportar = () => {
     const rows = [
       ['Cenário', 'Economia/Mês', 'Economia Anual', `Patrimônio (${hLabel})`, 'Rendimento a.m.'],
       ['Atual',    formatBRL(economiaAtual),    formatBRL(economiaAtual * 12),    formatBRL(pvAtual),    `${rendimento}%`],
       ['Otimista', formatBRL(economiaOtimista), formatBRL(economiaOtimista * 12), formatBRL(pvOtimista), `${rendimento}%`],
+      ['Pessimista', formatBRL(economiaPessimista), formatBRL(economiaPessimista * 12), formatBRL(pvPessimista), `${rendimento}%`],
     ]
     const csv  = rows.map(r => r.map(c => `"${c}"`).join(';')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
@@ -297,7 +308,7 @@ export default function ProjecaoEconomiaPage() {
       </div>
 
       {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-tutorial="projecao-kpis">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3" data-tutorial="projecao-kpis">
         <KpiCard label="Economia Média/Mês"
           value={formatBRL(medias.economia)}
           color={medias.economia >= 0 ? '#00c896' : '#f87171'}
@@ -322,6 +333,9 @@ export default function ProjecaoEconomiaPage() {
         <KpiCard label={`Cenário Otimista (${hLabel})`}
           value={formatBRL(pvOtimista)}
           color="#00c896" sub={`-${reducaoPerc}% gastos + ${rendimento}% a.m.`} trend="up" />
+        <KpiCard label={`Cenário Pessimista (${hLabel})`}
+          value={formatBRL(pvPessimista)}
+          color="#ff5c7a" sub={`+${reducaoPerc}% gastos + ${rendimento}% a.m.`} trend="down" />
       </div>
 
       {dadosMensais.length === 0 ? (
@@ -361,12 +375,14 @@ export default function ProjecaoEconomiaPage() {
             </div>
 
             {/* Resumo dos cenários */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {[
-                { label: 'Poupança atual/mês',    v: economiaAtual,    c: '#4da6ff' },
-                { label: 'Poupança otimista/mês', v: economiaOtimista, c: '#00c896' },
-                { label: `Atual em ${hLabel}`,    v: pvAtual,          c: '#a78bfa' },
-                { label: `Otimista em ${hLabel}`, v: pvOtimista,       c: '#f0b429' },
+                { label: 'Poupança atual/mês',      v: economiaAtual,      c: '#4da6ff' },
+                { label: 'Poupança otimista/mês',   v: economiaOtimista,   c: '#00c896' },
+                { label: 'Poupança pessimista/mês', v: economiaPessimista, c: '#ff5c7a' },
+                { label: `Atual em ${hLabel}`,      v: pvAtual,            c: '#a78bfa' },
+                { label: `Otimista em ${hLabel}`,   v: pvOtimista,         c: '#f0b429' },
+                { label: `Pessimista em ${hLabel}`, v: pvPessimista,       c: '#ff5c7a' },
               ].map(s => (
                 <div key={s.label} className="rounded-lg px-3 py-2.5"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -481,7 +497,7 @@ export default function ProjecaoEconomiaPage() {
               <table className="w-full border-collapse">
                 <thead>
                   <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
-                    {['Cenário', 'Poupança/Mês', 'Poupança Anual', `Patrimônio (${hLabel})`, 'Ganho vs. Atual'].map(h => (
+                    {['Cenário', 'Poupança/Mês', 'Poupança Anual', `Patrimônio (${hLabel})`, 'Diferença vs. Atual'].map(h => (
                       <th key={h} className="px-4 py-2.5 text-left border-b border-white/5">
                         <span className="text-[14px] font-semibold uppercase tracking-wider" style={{ color: '#8b92a8' }}>{h}</span>
                       </th>
@@ -492,6 +508,7 @@ export default function ProjecaoEconomiaPage() {
                   {[
                     { nome: 'Atual',    ec: economiaAtual,    pv: pvAtual,    ganho: 0,                color: '#4da6ff', bg: '' },
                     { nome: 'Otimista', ec: economiaOtimista, pv: pvOtimista, ganho: pvOtimista - pvAtual, color: '#00c896', bg: 'rgba(0,200,150,0.04)' },
+                    { nome: 'Pessimista', ec: economiaPessimista, pv: pvPessimista, ganho: pvPessimista - pvAtual, color: '#ff5c7a', bg: 'rgba(255,92,122,0.04)' },
                   ].map(row => (
                     <tr key={row.nome} className="border-b border-white/5" style={{ background: row.bg }}>
                       <td className="px-4 py-3.5">
@@ -509,7 +526,9 @@ export default function ProjecaoEconomiaPage() {
                       <td className="px-4 py-3.5">
                         {row.ganho > 0
                           ? <span className="text-[16px] font-semibold" style={{ color: '#00c896' }}>+{formatBRL(row.ganho)}</span>
-                          : <span className="text-[15px]" style={{ color: '#4a5168' }}>—</span>
+                          : row.ganho < 0
+                            ? <span className="text-[16px] font-semibold" style={{ color: '#ff5c7a' }}>{formatBRL(row.ganho)}</span>
+                            : <span className="text-[15px]" style={{ color: '#4a5168' }}>—</span>
                         }
                       </td>
                     </tr>
