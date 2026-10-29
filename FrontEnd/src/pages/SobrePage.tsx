@@ -24,6 +24,22 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.4',
+    data:   '2026-10-29',
+    titulo: 'Radares, rankings e transferências mais claras',
+    icone:  <ShieldCheck size={16} />,
+    itens: [
+      { t: '🕸️ Radares da carteira e dos ativos', d: 'em Avaliações, gráficos de teia mostram diversificação, liquidez, retorno, eficiência e proteção da carteira, ao lado de fundamentos, crescimento, renda e valuation; cada tipo de ativo exibe só os critérios que fazem sentido para ele.' },
+      { t: '🏆 Posição do ativo nos Destaques', d: 'a página do ativo mostra onde ele está em cada ranking, no geral e dentro do tipo, em um quadro que você pode mover.' },
+      { t: '📈 Novo ranking de Maior YoC', d: 'Destaques ganhou o ranking de YoC e o cálculo de DY/YoC agora é o mesmo em todas as telas, então os números batem entre Meus ativos, Destaques e o ativo.' },
+      { t: '🧾 Página do ativo mais organizada', d: 'Últimos dividendos e Operações recentes têm a mesma altura dos gráficos, sem barra de rolagem, e cada operação tem botão de editar.' },
+      { t: '➕ Nova movimentação para o mesmo ativo', d: 'depois de registrar uma movimentação, uma nova opção limpa só quantidade e valor e mantém o resto preenchido.' },
+      { t: '🔁 Transferências claras no Extrato', d: 'a conta de origem/destino aparece na coluna Conta quando não está filtrada, a saída vem antes da entrada e as duas pernas formam um bloco com cor própria por transferência.' },
+      { t: '📉 Cenário pessimista em toda a Projeção', d: 'Evolução Patrimonial Projetada passa a usar o cenário pessimista nos cards, no simulador, na tabela comparativa, nos insights, na exportação e na IA.' },
+      { t: '🧹 Menos poluição em Meus ativos', d: 'o botão "Valor de mercado" dos quadros por tipo foi removido.' },
+    ],
+  },
+  {
     versao: '7.3',
     data:   '2026-10-27',
     titulo: 'Preço médio, valor da cota e IAs com quedas do dia',
@@ -311,17 +327,11 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.4.0) */}
+        {/* Detalhe das novidades desta versão (7.4.1) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🕸️ Radares da carteira e dos ativos', d: 'em Avaliações, gráficos de teia mostram diversificação, liquidez, retorno, eficiência e proteção da carteira, ao lado de fundamentos, crescimento, renda e valuation; cada tipo de ativo exibe só os critérios que fazem sentido para ele.' },
-            { t: '🏆 Posição do ativo nos Destaques', d: 'a página do ativo mostra onde ele está em cada ranking, no geral e dentro do tipo, em um quadro que você pode mover.' },
-            { t: '📈 Novo ranking de Maior YoC', d: 'Destaques ganhou o ranking de YoC e o cálculo de DY/YoC agora é o mesmo em todas as telas, então os números batem entre Meus ativos, Destaques e o ativo.' },
-            { t: '🧾 Página do ativo mais organizada', d: 'Últimos dividendos e Operações recentes têm a mesma altura dos gráficos, sem barra de rolagem, e cada operação tem botão de editar.' },
-            { t: '➕ Nova movimentação para o mesmo ativo', d: 'depois de registrar uma movimentação, uma nova opção limpa só quantidade e valor e mantém o resto preenchido.' },
-            { t: '🔁 Transferências claras no Extrato', d: 'a conta de origem/destino aparece na coluna Conta quando não está filtrada, a saída vem antes da entrada e as duas pernas formam um bloco com cor própria por transferência.' },
-            { t: '📉 Cenário pessimista em toda a Projeção', d: 'Evolução Patrimonial Projetada passa a usar o cenário pessimista nos cards, no simulador, na tabela comparativa, nos insights, na exportação e na IA.' },
-            { t: '🧹 Menos poluição em Meus ativos', d: 'o botão "Valor de mercado" dos quadros por tipo foi removido.' },
+            { t: '⚡ Consultas mais rápidas', d: 'novos índices no banco aceleram buscas por "lançado por" em lançamentos, objetivos e investimentos de contas compartilhadas.' },
+            { t: '🔒 Regras de acesso reforçadas', d: 'ajustes internos no banco para o cadastro de objetivos por agregados e na rotina que preenche o autor dos lançamentos, sem mudar o que você vê.' },
                     ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
