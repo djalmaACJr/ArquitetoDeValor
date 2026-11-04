@@ -4,6 +4,7 @@ import { Plus, Pencil, X as XIcon, CreditCard, Trash2 } from 'lucide-react'
 import { useContas } from '../hooks/useContas'
 import { useOcultarValores } from '../hooks/useOcultarValores'
 import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
+import { useFechamentoPeriodo, dataMaximaFechamento } from '../hooks/useFechamentoPeriodo'
 import { formatBRL, formatData } from '../lib/utils'
 import { IconeConta } from '../components/ui/IconeConta'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
@@ -123,6 +124,61 @@ function LinhaConta({ conta, oculto, onEditar, onExcluir }: {
         <div className="w-1.5" />
         <AcaoBtn onClick={onExcluir} title="Excluir" danger><XIcon size={12} /></AcaoBtn>
       </div>
+    </div>
+  )
+}
+
+/** Fechamento de período: saldo guardado até a data → saldos só somam o que veio depois. */
+function CartaoFechamento({ onFeedback }: { onFeedback: (msg: string) => void }) {
+  const { dataFechamento, fechar, remover } = useFechamentoPeriodo()
+  const maxima = dataMaximaFechamento()
+  const [data,     setData]     = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [erro,     setErro]     = useState<string | null>(null)
+
+  const executar = async (op: () => Promise<{ ok: boolean; erro: string | null }>, ok: string) => {
+    setSalvando(true); setErro(null)
+    const res = await op()
+    setSalvando(false)
+    if (!res.ok) { setErro(res.erro ?? 'Erro ao salvar o fechamento'); return }
+    setData(''); onFeedback(ok)
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.02] p-4" data-tutorial="contas-fechamento">
+      <p className="text-[16px] font-semibold" style={{ color: '#e8eaf0' }}>Fechamento de período</p>
+      <p className="text-[14px] mt-0.5" style={{ color: '#8b92a8' }}>
+        {dataFechamento
+          ? <>Saldos guardados até <strong style={{ color: '#e8eaf0' }}>{formatData(dataFechamento)}</strong>. Os cálculos de saldo somam só os lançamentos posteriores; alterar um lançamento antigo atualiza o saldo guardado.</>
+          : 'Guarda o saldo de cada conta até uma data (no máximo 1 ano atrás) para deixar Extrato, Dashboard e Contas mais rápidos.'}
+      </p>
+      <div className="flex flex-wrap items-center gap-2 mt-3">
+        <Input type="date" value={data} max={maxima} onChange={e => setData(e.target.value)}
+          aria-label="Data de fechamento" className="!w-auto" />
+        <button disabled={!data || data > maxima || salvando}
+          onClick={() => executar(() => fechar(data), 'Período fechado')}
+          className="px-3 py-2 rounded-lg bg-av-green text-[15px] font-semibold disabled:opacity-40"
+          style={{ color: '#0a0f1a' }}>
+          {salvando ? 'Salvando...' : dataFechamento ? 'Alterar data' : 'Fechar período'}
+        </button>
+        {dataFechamento && (
+          <>
+            <button disabled={salvando}
+              onClick={() => executar(() => fechar(dataFechamento), 'Saldos recalculados')}
+              className="px-3 py-2 rounded-lg border border-white/10 text-[15px] font-semibold disabled:opacity-40"
+              style={{ color: '#8b92a8' }}>
+              Recalcular
+            </button>
+            <button disabled={salvando}
+              onClick={() => executar(remover, 'Fechamento removido')}
+              className="px-3 py-2 rounded-lg border border-white/10 text-[15px] font-semibold disabled:opacity-40"
+              style={{ color: '#f87171' }}>
+              Remover
+            </button>
+          </>
+        )}
+      </div>
+      {erro && <p className="text-[14px] mt-2" style={{ color: '#f87171' }}>{erro}</p>}
     </div>
   )
 }
@@ -291,6 +347,8 @@ export default function ContasPage() {
       <div className="mb-4">
         <MascoteTutorial pagina="contas" />
       </div>
+
+      <CartaoFechamento onFeedback={toast} />
 
       {loading && <LoadingMascote texto="Carregando contas…" size={130} fullPage />}
       {error   && <p className="text-[17px] text-center py-12" style={{ color: '#f87171' }}>{error}</p>}

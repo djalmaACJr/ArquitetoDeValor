@@ -42,8 +42,19 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
   const id = extrairId(req, "contas");
   const m  = req.method;
   const c  = db(req);
+  const partes = new URL(req.url).pathname.split("/").filter(Boolean);
+  const ehFechamento = partes[partes.indexOf("contas") + 1] === "fechamento";
 
   try {
+    // Fechamento de período (v7.5.0): sempre do PRÓPRIO usuário — não passa
+    // por resolverContexto(), como o resto da gestão de contas.
+    if (ehFechamento) {
+      if (m === "GET")    return await consultarFechamento(c, userId);
+      if (m === "PUT")    return await fecharPeriodo(c, await req.json());
+      if (m === "DELETE") return await removerFechamento(c);
+      return erro("Rota não encontrada", 404);
+    }
+
     // GET aceita o cabeçalho X-Contexto-User-Id (seletor de espaço — ver
     // EspacoContext.tsx no front): um agregado com EXTRATO ou
     // INVESTIMENTOS liberado pode listar as contas de outro user_id.
@@ -68,6 +79,47 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
     return erro("Erro interno", 500);
   }
 }));
+
+// GET /contas/fechamento — data de fechamento vigente (null se não houver).
+async function consultarFechamento(c: ReturnType<typeof db>, userId: string) {
+  logRequest("GET", "/contas/fechamento");
+  const { data, error } = await c.from("conta_fechamento")
+    .select("data_fechamento, atualizado_em")
+    .eq("user_id", userId)
+    .order("atualizado_em", { ascending: false }).limit(1);
+  if (error) { logError("Consultar fechamento", error); return erro(error.message); }
+  const f = data?.[0];
+  return json({ dados: { data_fechamento: f?.data_fechamento ?? null, atualizado_em: f?.atualizado_em ?? null } });
+}
+
+// PUT /contas/fechamento { data_fechamento: "YYYY-MM-DD" } — (re)calcula o
+// snapshot de todas as contas. A regra "<= hoje − 1 ano" é validada no banco
+// (fn_fechar_periodo), que usa CURRENT_DATE no fuso America/Sao_Paulo.
+async function fecharPeriodo(c: ReturnType<typeof db>, body: Record<string, unknown>) {
+  logRequest("PUT", "/contas/fechamento", body);
+  const data = String(body.data_fechamento ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || Number.isNaN(Date.parse(data))) {
+    return erro("data_fechamento deve estar no formato YYYY-MM-DD");
+  }
+  const { data: qtd, error } = await c.rpc("fn_fechar_periodo", { p_data: data });
+  if (error) {
+    logError("Fechar período", error);
+    if (error.message?.includes("DATA_FECHAMENTO_INVALIDA")) {
+      return erro("A data de fechamento não pode ser posterior a hoje menos 1 ano");
+    }
+    return erro(error.message);
+  }
+  logResponse(200, { contas: qtd });
+  return json({ dados: { data_fechamento: data, contas: qtd } });
+}
+
+// DELETE /contas/fechamento — volta a calcular os saldos do histórico inteiro.
+async function removerFechamento(c: ReturnType<typeof db>) {
+  logRequest("DELETE", "/contas/fechamento");
+  const { error } = await c.rpc("fn_remover_fechamento");
+  if (error) { logError("Remover fechamento", error); return erro(error.message); }
+  return json({ dados: { data_fechamento: null } });
+}
 
 async function listar(c: ReturnType<typeof db>, contextoUserId: string) {
   logRequest("GET", "/contas");
