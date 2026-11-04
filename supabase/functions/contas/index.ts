@@ -49,6 +49,9 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
     // Fechamento de período (v7.5.0): sempre do PRÓPRIO usuário — não passa
     // por resolverContexto(), como o resto da gestão de contas.
     if (ehFechamento) {
+      if (m === "GET" && partes[partes.indexOf("contas") + 2] === "pendencias") {
+        return await pendenciasFechamento(c, new URL(req.url).searchParams.get("data") ?? "");
+      }
       if (m === "GET")    return await consultarFechamento(c, userId);
       if (m === "PUT")    return await fecharPeriodo(c, await req.json());
       if (m === "DELETE") return await removerFechamento(c);
@@ -92,9 +95,23 @@ async function consultarFechamento(c: ReturnType<typeof db>, userId: string) {
   return json({ dados: { data_fechamento: f?.data_fechamento ?? null, atualizado_em: f?.atualizado_em ?? null } });
 }
 
+// GET /contas/fechamento/pendencias?data=YYYY-MM-DD — lançamentos até a data
+// que NÃO estão PAGOS (impedem o fechamento). Máx. 500; `total` é o geral.
+async function pendenciasFechamento(c: ReturnType<typeof db>, data: string) {
+  logRequest("GET", "/contas/fechamento/pendencias", { data });
+  if (!/^d{4}-d{2}-d{2}$/.test(data) || Number.isNaN(Date.parse(data))) {
+    return erro("data deve estar no formato YYYY-MM-DD");
+  }
+  const { data: rows, error } = await c.rpc("fn_pendencias_fechamento", { p_data: data });
+  if (error) { logError("Pendências do fechamento", error); return erro(error.message); }
+  const lista = rows ?? [];
+  return json({ dados: { total: Number(lista[0]?.total ?? 0), itens: lista } });
+}
+
 // PUT /contas/fechamento { data_fechamento: "YYYY-MM-DD" } — (re)calcula o
 // snapshot de todas as contas. A regra "<= hoje − 1 ano" é validada no banco
-// (fn_fechar_periodo), que usa CURRENT_DATE no fuso America/Sao_Paulo.
+// (fn_fechar_periodo), que usa CURRENT_DATE no fuso America/Sao_Paulo. Só fecha
+// se TODOS os lançamentos até a data estão PAGOS (409 caso contrário).
 async function fecharPeriodo(c: ReturnType<typeof db>, body: Record<string, unknown>) {
   logRequest("PUT", "/contas/fechamento", body);
   const data = String(body.data_fechamento ?? "");
@@ -106,6 +123,9 @@ async function fecharPeriodo(c: ReturnType<typeof db>, body: Record<string, unkn
     logError("Fechar período", error);
     if (error.message?.includes("DATA_FECHAMENTO_INVALIDA")) {
       return erro("A data de fechamento não pode ser posterior a hoje menos 1 ano");
+    }
+    if (error.message?.includes("FECHAMENTO_COM_PENDENCIAS")) {
+      return erro("Há lançamentos até essa data que não estão pagos. Edite ou exclua para poder fechar o período", 409);
     }
     return erro(error.message);
   }

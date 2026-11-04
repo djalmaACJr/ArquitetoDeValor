@@ -4,7 +4,8 @@ import { Plus, Pencil, X as XIcon, CreditCard, Trash2 } from 'lucide-react'
 import { useContas } from '../hooks/useContas'
 import { useOcultarValores } from '../hooks/useOcultarValores'
 import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
-import { useFechamentoPeriodo, dataMaximaFechamento } from '../hooks/useFechamentoPeriodo'
+import { useFechamentoPeriodo, dataMaximaFechamento, type Pendencias } from '../hooks/useFechamentoPeriodo'
+import DrawerLancamento from '../components/ui/DrawerLancamento'
 import { formatBRL, formatData } from '../lib/utils'
 import { IconeConta } from '../components/ui/IconeConta'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
@@ -130,18 +131,31 @@ function LinhaConta({ conta, oculto, onEditar, onExcluir }: {
 
 /** Fechamento de período: saldo guardado até a data → saldos só somam o que veio depois. */
 function CartaoFechamento({ onFeedback }: { onFeedback: (msg: string) => void }) {
-  const { dataFechamento, fechar, remover } = useFechamentoPeriodo()
+  const { dataFechamento, fechar, remover, pendencias } = useFechamentoPeriodo()
   const maxima = dataMaximaFechamento()
   const [data,     setData]     = useState('')
   const [salvando, setSalvando] = useState(false)
   const [erro,     setErro]     = useState<string | null>(null)
+  // Lançamentos não PAGOS que impedem o fechamento na data tentada
+  const [pend,      setPend]      = useState<{ data: string; lista: Pendencias } | null>(null)
+  const [editarId,  setEditarId]  = useState<string | null>(null)
 
-  const executar = async (op: () => Promise<{ ok: boolean; erro: string | null }>, ok: string) => {
+  const carregarPendencias = async (d: string) => {
+    const lista = await pendencias(d)
+    setPend(lista && lista.total > 0 ? { data: d, lista } : null)
+    return lista?.total ?? 0
+  }
+
+  const executar = async (op: () => Promise<{ ok: boolean; erro: string | null; status?: number }>, ok: string, dataAlvo?: string) => {
     setSalvando(true); setErro(null)
     const res = await op()
     setSalvando(false)
-    if (!res.ok) { setErro(res.erro ?? 'Erro ao salvar o fechamento'); return }
-    setData(''); onFeedback(ok)
+    if (!res.ok) {
+      setErro(res.erro ?? 'Erro ao salvar o fechamento')
+      if (res.status === 409 && dataAlvo) await carregarPendencias(dataAlvo)
+      return
+    }
+    setData(''); setPend(null); onFeedback(ok)
   }
 
   return (
@@ -156,7 +170,7 @@ function CartaoFechamento({ onFeedback }: { onFeedback: (msg: string) => void })
         <Input type="date" value={data} max={maxima} onChange={e => setData(e.target.value)}
           aria-label="Data de fechamento" className="!w-auto" />
         <button disabled={!data || data > maxima || salvando}
-          onClick={() => executar(() => fechar(data), 'Período fechado')}
+          onClick={() => executar(() => fechar(data), 'Período fechado', data)}
           className="px-3 py-2 rounded-lg bg-av-green text-[15px] font-semibold disabled:opacity-40"
           style={{ color: '#0a0f1a' }}>
           {salvando ? 'Salvando...' : dataFechamento ? 'Alterar data' : 'Fechar período'}
@@ -164,7 +178,7 @@ function CartaoFechamento({ onFeedback }: { onFeedback: (msg: string) => void })
         {dataFechamento && (
           <>
             <button disabled={salvando}
-              onClick={() => executar(() => fechar(dataFechamento), 'Saldos recalculados')}
+              onClick={() => executar(() => fechar(dataFechamento), 'Saldos recalculados', dataFechamento)}
               className="px-3 py-2 rounded-lg border border-white/10 text-[15px] font-semibold disabled:opacity-40"
               style={{ color: '#8b92a8' }}>
               Recalcular
@@ -179,6 +193,47 @@ function CartaoFechamento({ onFeedback }: { onFeedback: (msg: string) => void })
         )}
       </div>
       {erro && <p className="text-[14px] mt-2" style={{ color: '#f87171' }}>{erro}</p>}
+
+      {pend && (
+        <div className="mt-3 rounded-lg border border-[#f0b429]/30 bg-[#f0b429]/5 p-3" data-tutorial="contas-fechamento-pendencias">
+          <p className="text-[14px] font-semibold" style={{ color: '#f0b429' }}>
+            {pend.lista.total} lançamento(s) até {formatData(pend.data)} não estão pagos
+            {pend.lista.total > pend.lista.itens.length && <> — mostrando os {pend.lista.itens.length} mais antigos</>}
+          </p>
+          <p className="text-[13px] mt-0.5 mb-2" style={{ color: '#8b92a8' }}>
+            Marque como pago, ajuste a data ou exclua cada um e depois feche o período de novo.
+          </p>
+          <ul className="flex flex-col divide-y divide-white/5 max-h-72 overflow-y-auto">
+            {pend.lista.itens.map(p => (
+              <li key={p.id} className="flex items-center gap-2 py-1.5 text-[14px]">
+                <span className="w-16 flex-shrink-0" style={{ color: '#8b92a8' }}>{formatData(p.data)}</span>
+                <span className="min-w-0 flex-1 truncate" style={{ color: '#e8eaf0' }}>
+                  {p.descricao}
+                  <span className="ml-1.5 text-[12px]" style={{ color: '#8b92a8' }}>{p.conta_nome} · {p.status === 'PENDENTE' ? 'Pendente' : 'Projeção'}</span>
+                </span>
+                <span className="flex-shrink-0" style={{ color: p.tipo === 'RECEITA' ? '#00c896' : '#f87171' }}>{formatBRL(p.valor)}</span>
+                <button onClick={() => setEditarId(p.id)}
+                  className="flex-shrink-0 p-1.5 rounded-lg border border-white/10 hover:border-white/20" aria-label="Editar lançamento"
+                  style={{ color: '#8b92a8' }}>
+                  <Pencil size={13} />
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button disabled={salvando}
+            onClick={() => executar(() => fechar(pend.data), 'Período fechado', pend.data)}
+            className="mt-2 px-3 py-1.5 rounded-lg bg-av-green text-[14px] font-semibold disabled:opacity-40" style={{ color: '#0a0f1a' }}>
+            Tentar fechar de novo
+          </button>
+        </div>
+      )}
+
+      <DrawerLancamento
+        lancamentoId={editarId}
+        onFechar={() => setEditarId(null)}
+        onSalvo={() => { setEditarId(null); if (pend) void carregarPendencias(pend.data) }}
+        onExcluido={() => { setEditarId(null); if (pend) void carregarPendencias(pend.data) }}
+      />
     </div>
   )
 }
