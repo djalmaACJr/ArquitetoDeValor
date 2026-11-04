@@ -2,6 +2,7 @@
 // Dropdown multi-seleção reutilizável — mesma identidade visual do projeto
 import { useState, useEffect, useRef } from 'react'
 import { Check, ChevronDown, X } from 'lucide-react'
+import { ehTelaDeToque } from '../../lib/tecladoMobile'
 
 export interface MultiSelectOption {
   value: string
@@ -169,7 +170,7 @@ export function MultiSelect({
                   text-[16px] outline-none focus:border-av-green transition-colors
                   placeholder:text-white/30"
                 style={{ color: '#e8eaf0' }}
-                autoFocus
+                autoFocus={!ehTelaDeToque()}
               />
             </div>
           )}

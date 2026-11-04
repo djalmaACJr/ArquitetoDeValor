@@ -1,4 +1,5 @@
 // src/pages/ImportExportPage.tsx
+import { baixarArquivo } from '../lib/baixarArquivo'
 import { useState, useRef, useMemo, useEffect } from 'react'
 import {
   Trash2, Download, Upload, AlertTriangle, CheckCircle2,
@@ -2359,7 +2360,8 @@ function SecaoImport({ modo, setModo }: { modo: ModoImport; setModo: (m: ModoImp
                   XLSX.utils.book_append_sheet(wb, ws, 'Categorias')
                 }
                 const nomeArq = `modelo_importacao_${modo}.xlsx`
-                XLSX.writeFile(wb, nomeArq)
+                const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+                void baixarArquivo(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), nomeArq)
               }}
               className="flex items-center gap-2 text-[16px] font-semibold px-3 py-2 rounded-lg transition-colors"
               style={{ background: 'rgba(167,139,250,0.08)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)' }}
@@ -3144,12 +3146,7 @@ function SecaoBackup() {
 
       // Download do JSON
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-      const url  = URL.createObjectURL(blob)
-      const a    = document.createElement('a')
-      a.href     = url
-      a.download = `arqvalor_backup_${hojeLocal()}.json`
-      a.click()
-      URL.revokeObjectURL(url)
+      await baixarArquivo(blob, `arqvalor_backup_${hojeLocal()}.json`)
 
       addLog('ok', 'Backup gerado e download iniciado!')
     } catch (e) {

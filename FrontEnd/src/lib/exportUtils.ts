@@ -10,6 +10,7 @@
 // exportação acontece de fato.
 
 import { logoComoPng, APP_NAME } from './appLogo'
+import { baixarArquivo } from './baixarArquivo'
 
 // ── Tipos públicos ────────────────────────────────────────────────────────
 
@@ -300,12 +301,6 @@ export async function exportToExcel(opts: ExportOptions): Promise<void> {
   // Gerar e disparar download
   const buffer = await wb.xlsx.writeBuffer()
   const blob   = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-  const url    = URL.createObjectURL(blob)
   const fname  = opts.filename.endsWith('.xlsx') ? opts.filename : `${opts.filename}.xlsx`
-  const a      = Object.assign(document.createElement('a'), { href: url, download: fname })
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  // Libera o blob após o navegador iniciar o download
-  setTimeout(() => URL.revokeObjectURL(url), 1_000)
+  await baixarArquivo(blob, fname)
 }

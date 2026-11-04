@@ -19,7 +19,7 @@ android {
         // do One UI em tablets Samsung) não tinham motivo pra invalidar o
         // ícone antigo. versionName só é exibido pro usuário (Configurações
         // > Apps) — mantido igual ao APP_VERSION do app (ver ../../../version.ts).
-        versionCode 3
+        versionCode 4
         versionName "7.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

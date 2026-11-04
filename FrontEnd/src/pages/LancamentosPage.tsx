@@ -939,6 +939,8 @@ export default function LancamentosPage() {
             )}
           </div>
 
+          {/* No celular: Filtros + Exportar + Novo lançamento ficam juntos numa linha própria (sm:contents = sem efeito no desktop) */}
+          <div className="flex items-center gap-2 w-full sm:contents">
           {/* Recolhida por padrão no Android — só a pesquisa fica visível de cara */}
           <button
             onClick={() => setFiltrosExpandidos(v => !v)}
@@ -991,6 +993,7 @@ export default function LancamentosPage() {
               <BotaoNovoLancamento onSelect={abrirNovo} onLembrete={() => setModalLembreteAberto(true)} />
             </div>
           )}
+          </div>
         </div>
 
         {/* Filtros — Conta/Categoria/Status/Saldo anterior, recolhível.

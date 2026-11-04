@@ -55,3 +55,9 @@ export function iniciarTecladoMobile(): void {
     }).catch(() => {})
   }
 }
+
+/** Tela de toque: campos de busca de combobox não devem abrir o teclado sozinhos
+ *  (ele ocupa a tela e sobra pouco espaço pra ver as opções). */
+export function ehTelaDeToque(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
+}

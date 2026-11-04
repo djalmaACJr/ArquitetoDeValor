@@ -786,6 +786,7 @@ export default function DrawerLancamento({
       <Drawer
         open={aberto}
         onClose={onFechar}
+        fecharAoClicarFora={false}
         titulo={editando ? 'Editar lançamento' : 'Novo lançamento'}
         subtitulo={editando?.descricao ?? 'Preencha os dados abaixo'}
         rodape={

@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "7.4.1"
+export const APP_VERSION = "7.4.2"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -19,8 +19,8 @@ export const getVersionInfo = () => ({
     // Data de lançamento (AAAA-MM-DD) — exibida em Sobre › Versão atual.
     // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
     // em FrontEnd/src/pages/SobrePage.tsx.
-    date: "2026-10-29",
-    description: "Ajustes de desempenho e segurança no banco de dados (índices e regras de acesso), sem mudanças visíveis na tela"
+    date: "2026-11-04",
+    description: "Exportação de arquivos no app Android, filtros e botões reorganizados no celular, e formulário de lançamento que não fecha mais ao tocar fora"
   }
 })
 
