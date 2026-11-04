@@ -72,17 +72,17 @@ describe("Fechamento de período — CA-FEC01 a CA-FEC08", () => {
 
   test("CA-FEC02 — rejeita data posterior a hoje − 1 ano e formato inválido", async () => {
     const hoje = await api("/contas/fechamento", "PUT", { data_fechamento: DATA_RECENTE });
-    expect(hoje.status).toBe(422);
+    expect(hoje.status).toBe(400);
     const quaseUmAno = await api("/contas/fechamento", "PUT", { data_fechamento: dia(5, -1) });
-    expect(quaseUmAno.status).toBe(422);
+    expect(quaseUmAno.status).toBe(400);
     const lixo = await api("/contas/fechamento", "PUT", { data_fechamento: "ontem" });
-    expect(lixo.status).toBe(422);
+    expect(lixo.status).toBe(400);
   });
 
   test("CA-FEC03 — fechar o período não altera o saldo da conta nem o do Extrato", async () => {
     const mes = DATA_RECENTE.slice(0, 7);
     const antes = await api(`/transacoes?saldo=true&mes=${mes}`) as { data: { dados: { saldo_acumulado: number }[] } };
-    const ultimoAntes = antes.data.dados.at(-1)?.saldo_acumulado;
+    const ultimoAntes = antes.data.dados[antes.data.dados.length - 1]?.saldo_acumulado;
 
     const { status, data } = await api("/contas/fechamento", "PUT", { data_fechamento: DATA_FECHAMENTO }) as { status: number; data: { dados: { data_fechamento: string } } };
     expect(status).toBe(200);
@@ -93,7 +93,7 @@ describe("Fechamento de período — CA-FEC01 a CA-FEC08", () => {
 
     expect(await saldoConta()).toBe(140);
     const depois = await api(`/transacoes?saldo=true&mes=${mes}`) as { data: { dados: { saldo_acumulado: number }[] } };
-    expect(depois.data.dados.at(-1)?.saldo_acumulado).toBe(ultimoAntes);
+    expect(depois.data.dados[depois.data.dados.length - 1]?.saldo_acumulado).toBe(ultimoAntes);
   });
 
   test("CA-FEC04 — lançamento criado dentro do período fechado atualiza o saldo", async () => {
