@@ -9,7 +9,14 @@ import { apiFetch, apiMutate } from '../lib/api'
 import { useAuth } from './useAuth'
 
 interface Fechamento { data_fechamento: string | null; atualizado_em: string | null }
-interface OpResult { ok: boolean; erro: string | null }
+interface OpResult { ok: boolean; erro: string | null; status?: number }
+
+/** Lançamento (até a data de fechamento) que impede o fechamento por não estar PAGO. */
+export interface PendenciaFechamento {
+  id: string; data: string; descricao: string; valor: number
+  tipo: 'RECEITA' | 'DESPESA'; status: string; conta_id: string; conta_nome: string
+}
+export interface Pendencias { total: number; itens: PendenciaFechamento[] }
 
 const SEM_FECHAMENTO: Fechamento = { data_fechamento: null, atualizado_em: null }
 
@@ -46,7 +53,12 @@ export function useFechamentoPeriodo() {
   const fechar = async (dataFechamento: string): Promise<OpResult> => {
     const res = await apiMutate('/contas/fechamento', 'PUT', { data_fechamento: dataFechamento })
     if (res.ok) await depois()
-    return { ok: res.ok, erro: res.erro }
+    return { ok: res.ok, erro: res.erro, status: res.status }
+  }
+
+  const pendencias = async (dataFechamento: string): Promise<Pendencias | null> => {
+    const res = await apiFetch<Pendencias>(`/contas/fechamento/pendencias?data=${dataFechamento}`)
+    return res.ok ? res.dados : null
   }
 
   const remover = async (): Promise<OpResult> => {
@@ -55,5 +67,5 @@ export function useFechamentoPeriodo() {
     return { ok: res.ok, erro: res.erro }
   }
 
-  return { dataFechamento: data.data_fechamento, loading, fechar, remover }
+  return { dataFechamento: data.data_fechamento, loading, fechar, remover, pendencias }
 }

@@ -116,7 +116,7 @@ export const TUTORIAL_CONTAS: PassoTutorial[] = [
   },
   {
     titulo: 'Fechamento de período',
-    texto: 'Deixa Extrato, Dashboard e Contas mais rápidos. Escolha uma data (no máximo 1 ano atrás) e clique em Fechar período: o sistema guarda o saldo de cada conta até lá e passa a somar só os lançamentos mais novos. Seus saldos não mudam, e se você editar um lançamento antigo o saldo guardado é atualizado sozinho.\n• Alterar data — fecha em outra data.\n• Recalcular — refaz os saldos guardados.\n• Remover — volta a calcular todo o histórico.',
+    texto: 'Deixa Extrato, Dashboard e Contas mais rápidos. Escolha uma data (no máximo 1 ano atrás) e clique em Fechar período: o sistema guarda o saldo de cada conta até lá e passa a somar só os lançamentos mais novos. Só fecha se todos os lançamentos até a data estiverem pagos — se houver pendentes, uma lista aparece para você editar ou excluir cada um. Seus saldos não mudam, e se você editar um lançamento antigo o saldo guardado é atualizado sozinho.\n• Alterar data — fecha em outra data.\n• Recalcular — refaz os saldos guardados.\n• Remover — volta a calcular todo o histórico.',
     seletor: '[data-tutorial="contas-fechamento"]',
   },
   {

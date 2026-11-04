@@ -24,6 +24,17 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.5.0',
+    data:   '2026-11-04',
+    titulo: 'Fechamento de período',
+    icone:  <ShieldCheck size={16} />,
+    itens: [
+      { t: '⚡ Fechamento de período', d: 'em Contas, escolha uma data de fechamento (no máximo 1 ano atrás). O sistema guarda o saldo de cada conta até lá e passa a somar só os lançamentos mais novos, deixando Extrato, Dashboard e Contas mais rápidos.' },
+      { t: '🔄 Saldos sempre corretos', d: 'se você criar, editar ou excluir um lançamento antigo, o saldo guardado da conta é atualizado na hora; os valores exibidos não mudam por causa do fechamento.' },
+      { t: '🛠️ Alterar, recalcular ou remover', d: 'você pode mudar a data, recalcular os saldos guardados ou remover o fechamento quando quiser.' },
+    ],
+  },
+  {
     versao: '7.4.2',
     data:   '2026-11-04',
     titulo: 'Exportação no Android e formulários no celular',
@@ -349,12 +360,12 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.5.0) */}
+        {/* Detalhe das novidades desta versão (7.5.1) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '⚡ Fechamento de período', d: 'em Contas, escolha uma data de fechamento (no máximo 1 ano atrás). O sistema guarda o saldo de cada conta até lá e passa a somar só os lançamentos mais novos, deixando Extrato, Dashboard e Contas mais rápidos.' },
-            { t: '🔄 Saldos sempre corretos', d: 'se você criar, editar ou excluir um lançamento antigo, o saldo guardado da conta é atualizado na hora; os valores exibidos não mudam por causa do fechamento.' },
-            { t: '🛠️ Alterar, recalcular ou remover', d: 'você pode mudar a data, recalcular os saldos guardados ou remover o fechamento quando quiser.' },
+            { t: '✅ Fechar só com tudo pago', d: 'o fechamento de período exige que todos os lançamentos até a data estejam pagos, em qualquer conta ou tipo.' },
+            { t: '📋 Lista de pendências', d: 'se houver lançamentos pendentes ou projetados até a data, o card de Contas mostra a lista para você editar ou excluir cada um e tentar fechar de novo.' },
+            { t: '🔒 Períodos fechados só aceitam Pago', d: 'com um período fechado, lançamentos nessas datas não podem mais ser criados nem alterados para Pendente ou Projeção, valendo também para transferências e importações.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
