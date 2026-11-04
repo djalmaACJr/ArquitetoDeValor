@@ -24,6 +24,16 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.4.1',
+    data:   '2026-10-29',
+    titulo: 'Desempenho e segurança no banco',
+    icone:  <ShieldCheck size={16} />,
+    itens: [
+      { t: '⚡ Consultas mais rápidas', d: 'novos índices no banco aceleram buscas por "lançado por" em lançamentos, objetivos e investimentos de contas compartilhadas.' },
+      { t: '🔒 Regras de acesso reforçadas', d: 'ajustes internos no banco para o cadastro de objetivos por agregados e na rotina que preenche o autor dos lançamentos, sem mudar o que você vê.' },
+    ],
+  },
+  {
     versao: '7.4',
     data:   '2026-10-29',
     titulo: 'Radares, rankings e transferências mais claras',
