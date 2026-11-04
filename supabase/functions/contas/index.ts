@@ -99,7 +99,7 @@ async function consultarFechamento(c: ReturnType<typeof db>, userId: string) {
 // que NÃO estão PAGOS (impedem o fechamento). Máx. 500; `total` é o geral.
 async function pendenciasFechamento(c: ReturnType<typeof db>, data: string) {
   logRequest("GET", "/contas/fechamento/pendencias", { data });
-  if (!/^d{4}-d{2}-d{2}$/.test(data) || Number.isNaN(Date.parse(data))) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || Number.isNaN(Date.parse(data))) {
     return erro("data deve estar no formato YYYY-MM-DD");
   }
   const { data: rows, error } = await c.rpc("fn_pendencias_fechamento", { p_data: data });

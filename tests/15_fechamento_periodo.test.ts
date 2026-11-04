@@ -179,7 +179,7 @@ describe("Fechamento de período — CA-FEC01 a CA-FEC09", () => {
 
     if (!podeFechar) return;
     const pago = await api(`/transacoes/${id}`, "PUT", { status: "PAGO" });
-    expect(pago.status).toBe(200);
+    expect([pago.status, JSON.stringify(pago.data)]).toEqual([200, expect.anything()]);
     const ok = await api("/contas/fechamento", "PUT", { data_fechamento: DATA_FECHAMENTO });
     expect(ok.status).toBe(200);
   });
@@ -190,6 +190,9 @@ describe("Fechamento de período — CA-FEC01 a CA-FEC09", () => {
       data: DATA_ANTIGA_2, descricao: "Teste Jest RV-012", valor: 5, tipo: "DESPESA", status: "PENDENTE",
       conta_id: contaId, categoria_id: categoriaId,
     }) as { status: number; data: { erro?: string } };
+    // se a regra falhar e o POST passar, registra o id para a limpeza não deixar lixo
+    const idCriado = (r.data as { id?: string }).id;
+    if (r.status === 201 && idCriado) criadas.push(idCriado);
     expect(r.status).toBeGreaterThanOrEqual(400);
     expect(JSON.stringify(r.data)).toContain("RV-012");
 
