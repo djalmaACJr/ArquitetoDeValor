@@ -1091,6 +1091,17 @@ export default function RelatoriosPage() {
             </h1>
             {buscado && (
               <button
+                onClick={exportar}
+                title={vistaPareto ? 'Exportar análise Pareto para Excel' : 'Exportar tabela para Excel'}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[14px] font-semibold transition-all hover:opacity-90 border border-white/10 whitespace-nowrap"
+                style={{ color: '#4da6ff', background: 'rgba(77,166,255,0.08)' }}
+              >
+                <Download size={12} />
+                <span className="hidden sm:inline">{vistaPareto ? 'Exportar Pareto' : 'Exportar tabela'}</span>
+              </button>
+            )}
+            {buscado && (
+              <button
                 onClick={() => buscar()}
                 disabled={loading}
                 title="Atualizar relatório"
@@ -1137,6 +1148,7 @@ export default function RelatoriosPage() {
       <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-4 mb-5">
         <div className="flex flex-wrap gap-3 items-end">
           {/* Periodo */}
+          <div className="flex flex-wrap gap-3 items-end w-full">
           <div className="flex flex-wrap gap-3 items-end" data-tutorial="relatorios-periodo">
             <div>
               <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>De</p>
@@ -1146,6 +1158,39 @@ export default function RelatoriosPage() {
               <p className="text-[14px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#8b92a8' }}>Até</p>
               <MonthPicker value={fim} onChange={setFim} />
             </div>
+          </div>
+
+          {/* Botoes — na mesma linha dos calendários */}
+          <div className="flex flex-nowrap items-center gap-2 ml-auto shrink-0">
+            {buscado && (
+              <button
+                data-tutorial="relatorios-exportar"
+                onClick={exportar}
+                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-[13px] sm:text-[16px] font-semibold transition-all hover:opacity-90 border border-white/10 whitespace-nowrap"
+                style={{ color: '#4da6ff', background: 'rgba(77,166,255,0.08)' }}
+                title={
+                  vistaPareto
+                    ? 'Exportar análise Pareto (Receitas + Despesas) para Excel'
+                    : `Exportar tabela (${nivel === 1 ? 'Resumo' : nivel === 2 ? 'Categorias' : 'Completo'}) para Excel`
+                }
+              >
+                <Download size={13} />
+                {vistaPareto ? 'Exportar Pareto' : 'Exportar tabela'}
+              </button>
+            )}
+            <button
+              data-tutorial="relatorios-gerar"
+              onClick={() => buscar()}
+              disabled={loading || meses.length === 0}
+              className="flex items-center gap-1.5 px-2 sm:px-4 py-1.5 rounded-lg text-[13px] sm:text-[16px] font-semibold transition-all hover:opacity-90 whitespace-nowrap"
+              style={{ background: '#00c896', color: '#0a0f1a', opacity: loading ? 0.7 : 1 }}
+            >
+              {loading
+                ? <><RefreshCw size={13} className="animate-spin" /> Carregando...</>
+                : <><Filter size={13} /> Gerar relatório</>
+              }
+            </button>
+          </div>
           </div>
 
           {/* Contas + Categorias + Status + Transferências */}
@@ -1159,7 +1204,7 @@ export default function RelatoriosPage() {
                   pagina="relatorios"
                   filtContas={filtContas} filtCats={filtCats} filtStatus={filtStatus}
                   setFiltContas={setFiltContas} setFiltCats={setFiltCats} setFiltStatus={setFiltStatus}
-                  classNameContas="w-full sm:w-44" classNameCats="w-full sm:w-48" classNameStatus="w-full sm:w-40"
+                  classNameContas="w-full sm:w-36" classNameCats="w-full sm:w-40" classNameStatus="w-full sm:w-32"
                   extras={{ incluirTransf }}
                   extrasFiltroAtivo={incluirTransf}
                   onAplicarExtras={d => {
@@ -1198,37 +1243,6 @@ export default function RelatoriosPage() {
           </div>
           </div>{/* /relatorios-filtros */}
 
-          {/* Botoes */}
-          <div className="flex flex-nowrap items-center gap-2 ml-auto shrink-0">
-            {buscado && (
-              <button
-                data-tutorial="relatorios-exportar"
-                onClick={exportar}
-                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-[13px] sm:text-[16px] font-semibold transition-all hover:opacity-90 border border-white/10 whitespace-nowrap"
-                style={{ color: '#4da6ff', background: 'rgba(77,166,255,0.08)' }}
-                title={
-                  vistaPareto
-                    ? 'Exportar análise Pareto (Receitas + Despesas) para Excel'
-                    : `Exportar tabela (${nivel === 1 ? 'Resumo' : nivel === 2 ? 'Categorias' : 'Completo'}) para Excel`
-                }
-              >
-                <Download size={13} />
-                {vistaPareto ? 'Exportar Pareto' : 'Exportar tabela'}
-              </button>
-            )}
-            <button
-              data-tutorial="relatorios-gerar"
-              onClick={() => buscar()}
-              disabled={loading || meses.length === 0}
-              className="flex items-center gap-1.5 px-2 sm:px-4 py-1.5 rounded-lg text-[13px] sm:text-[16px] font-semibold transition-all hover:opacity-90 whitespace-nowrap"
-              style={{ background: '#00c896', color: '#0a0f1a', opacity: loading ? 0.7 : 1 }}
-            >
-              {loading
-                ? <><RefreshCw size={13} className="animate-spin" /> Carregando...</>
-                : <><Filter size={13} /> Gerar relatório</>
-              }
-            </button>
-          </div>
         </div>
 
         {/* Info periodo */}

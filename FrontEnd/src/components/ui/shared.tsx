@@ -5,6 +5,7 @@ import React, { useState, useEffect, useRef, Children, isValidElement } from 're
 import * as RadixSelect from '@radix-ui/react-select'
 import { X, Check, ChevronDown } from 'lucide-react'
 import { formatBRL, parsearValorBR } from '../../lib/utils'
+import { ehTelaDeToque } from '../../lib/tecladoMobile'
 import type { TipoAtivoInvestimento } from '../../types'
 
 const CORES_SM = [
@@ -59,12 +60,14 @@ const ICONES_ALL = [...new Set([
 // Responsivo: full-width em mobile, 420px fixo em desktop.
 // Desliza da direita. Para trocar para modal: edite só aqui.
 export function Drawer({
-  open, onClose, titulo, subtitulo, children, rodape, largura = 'normal',
+  open, onClose, titulo, subtitulo, children, rodape, largura = 'normal', fecharAoClicarFora = true,
 }: {
   open: boolean; onClose: () => void; titulo: string
   subtitulo?: string; children: React.ReactNode; rodape?: React.ReactNode
   // 'larga' para conteúdos largos (ex.: tabelas com vários campos editáveis)
   largura?: 'normal' | 'larga'
+  // false: clique no fundo escuro não fecha (evita perder um formulário em preenchimento)
+  fecharAoClicarFora?: boolean
 }) {
   const dialogRef = useRef<HTMLDivElement>(null)
 
@@ -110,7 +113,7 @@ export function Drawer({
 
   return (
     <>
-      <div onClick={onClose}
+      <div onClick={fecharAoClicarFora ? onClose : undefined}
         style={{ pointerEvents: open ? 'auto' : 'none', opacity: open ? 1 : 0 }}
         className="fixed inset-0 bg-black/60 z-[100] transition-opacity duration-300" />
 
@@ -559,7 +562,7 @@ export function SearchableSelect({ opcoes, value, onChange, placeholder = 'Selec
     }
   }, [focusIdx])
 
-  function abrir() { setAberto(true); setBusca(''); setFocusIdx(-1); setTimeout(() => inputRef.current?.focus(), 0) }
+  function abrir() { setAberto(true); setBusca(''); setFocusIdx(-1); if (!ehTelaDeToque()) setTimeout(() => inputRef.current?.focus(), 0) }
   function fechar() { setAberto(false); setBusca(''); setFocusIdx(-1) }
   function selecionar(id: string) { onChange(id); fechar() }
 

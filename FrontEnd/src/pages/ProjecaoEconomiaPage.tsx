@@ -16,6 +16,7 @@ import { useMascotePreferido } from '../hooks/useMascotePreferido'
 import { registrarResetCliente } from '../lib/clientCache'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { TUTORIAL_PROJECAO } from '../lib/tutoriaisPaginas'
+import { baixarArquivo } from '../lib/baixarArquivo'
 
 ChartJS.register(CategoryScale, LinearScale, LineElement, BarElement, PointElement, Tooltip, Legend, Filler)
 
@@ -271,10 +272,7 @@ export default function ProjecaoEconomiaPage() {
     ]
     const csv  = rows.map(r => r.map(c => `"${c}"`).join(';')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
-    Object.assign(document.createElement('a'), {
-      href: URL.createObjectURL(blob),
-      download: `projecao_${mesAtual()}.csv`,
-    }).click()
+    void baixarArquivo(blob, `projecao_${mesAtual()}.csv`)
   }
 
   // ── Loading ───────────────────────────────────────────────────

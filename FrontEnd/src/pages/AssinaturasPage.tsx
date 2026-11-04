@@ -21,6 +21,7 @@ import { useExpansaoCategoria, paiPorCategoriaId } from '../lib/agrupamentoCateg
 import { registrarResetCliente } from '../lib/clientCache'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { TUTORIAL_ASSINATURAS } from '../lib/tutoriaisPaginas'
+import { baixarArquivo } from '../lib/baixarArquivo'
 
 ChartJS.register(ArcElement, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, Filler)
 
@@ -582,10 +583,7 @@ export default function AssinaturasPage() {
     }
     const csv  = rows.map(r => r.map(c => `"${c}"`).join(';')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
-    const a    = Object.assign(document.createElement('a'), {
-      href: URL.createObjectURL(blob), download: `assinaturas_${hoje}.csv`,
-    })
-    a.click()
+    void baixarArquivo(blob, `assinaturas_${hoje}.csv`)
   }
 
   // ── Render: loading ──────────────────────────────────────────

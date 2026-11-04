@@ -327,11 +327,13 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.4.1) */}
+        {/* Detalhe das novidades desta versão (7.4.2) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '⚡ Consultas mais rápidas', d: 'novos índices no banco aceleram buscas por "lançado por" em lançamentos, objetivos e investimentos de contas compartilhadas.' },
-            { t: '🔒 Regras de acesso reforçadas', d: 'ajustes internos no banco para o cadastro de objetivos por agregados e na rotina que preenche o autor dos lançamentos, sem mudar o que você vê.' },
+            { t: '📤 Exportar funciona no Android', d: 'Excel, backup e CSVs agora abrem o menu de compartilhar do celular para salvar ou enviar o arquivo.' },
+            { t: '⌨️ Combos sem teclado automático', d: 'no celular, a busca dos seletores só abre o teclado quando você toca nela, sobrando espaço para ver as opções.' },
+            { t: '📝 Lançamento não fecha ao tocar fora', d: 'o formulário só fecha por Cancelar, pelo X ou por Esc, e você não perde o que já preencheu.' },
+            { t: '🧭 Controles na mesma linha', d: 'Extrato e Relatórios agrupam filtros, exportar e gerar numa linha só, e o Exportar continua visível com os filtros recolhidos.' },
                     ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
