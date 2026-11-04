@@ -46,6 +46,7 @@ Revisar o diff desde a última tag (`git diff <última tag>...HEAD`) **antes** d
 - `version.ts` (raiz): `APP_VERSION`, `current.date` (AAAA-MM-DD, **hoje**), `current.description` (1 frase).
 - `FrontEnd/src/pages/SobrePage.tsx`: mover o detalhe da versão antiga (bloco `{/* Detalhe das novidades desta versão (...) */}`) para o **topo** de `VERSOES_ANTERIORES` (`versao: 'X.Y'`, `data`, `titulo`, `icone`, `itens`) e reescrever o bloco da versão atual (itens `{ t: 'emoji título', d: 'descrição' }`, linguagem de usuário).
 - Atualizar `CLAUDE.md` / `ARCHITECTURE.md` / `BUSINESS_RULES.md` / `README.md` se o comportamento documentado mudou.
+- **Tutorial do mentor**: se o diff criou, removeu ou mudou **controles visíveis de uma tela** (botão, card, filtro, campo, ação), atualizar os passos dessa tela em `FrontEnd/src/lib/tutoriaisPaginas.ts` (`TUTORIAL_*`). Controle novo = passo novo, na ordem em que aparece na tela, com `seletor: '[data-tutorial="..."]'` e o mesmo `data-tutorial` no elemento (confira no componente; crie se faltar). Controle alterado/removido = ajustar ou remover o passo (seletor órfão quebra o tour). Texto em linguagem de usuário; quebras de linha no `texto` são `\n` literal dentro da string (não quebra real). Rode `npx tsc -b` depois. Não se aplica a mudança só de backend, de lógica sem UI nova ou de telas sem tutorial; nesse caso registre "sem mudança de controles" no relato.
 - Android (só se for gerar APK novo): `build.gradle` → `versionName` = `APP_VERSION`, `versionCode` +1.
 
 ## 3. Commit na branch de trabalho
