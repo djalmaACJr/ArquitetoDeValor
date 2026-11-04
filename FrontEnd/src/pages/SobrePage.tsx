@@ -24,6 +24,18 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.4.2',
+    data:   '2026-11-04',
+    titulo: 'Exportação no Android e formulários no celular',
+    icone:  <ShieldCheck size={16} />,
+    itens: [
+      { t: '📤 Exportar funciona no Android', d: 'Excel, backup e CSVs agora abrem o menu de compartilhar do celular para salvar ou enviar o arquivo.' },
+      { t: '⌨️ Combos sem teclado automático', d: 'no celular, a busca dos seletores só abre o teclado quando você toca nela, sobrando espaço para ver as opções.' },
+      { t: '📝 Lançamento não fecha ao tocar fora', d: 'o formulário só fecha por Cancelar, pelo X ou por Esc, e você não perde o que já preencheu.' },
+      { t: '🧭 Controles na mesma linha', d: 'Extrato e Relatórios agrupam filtros, exportar e gerar numa linha só, e o Exportar continua visível com os filtros recolhidos.' },
+    ],
+  },
+  {
     versao: '7.4.1',
     data:   '2026-10-29',
     titulo: 'Desempenho e segurança no banco',
@@ -337,14 +349,13 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.4.2) */}
+        {/* Detalhe das novidades desta versão (7.5.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '📤 Exportar funciona no Android', d: 'Excel, backup e CSVs agora abrem o menu de compartilhar do celular para salvar ou enviar o arquivo.' },
-            { t: '⌨️ Combos sem teclado automático', d: 'no celular, a busca dos seletores só abre o teclado quando você toca nela, sobrando espaço para ver as opções.' },
-            { t: '📝 Lançamento não fecha ao tocar fora', d: 'o formulário só fecha por Cancelar, pelo X ou por Esc, e você não perde o que já preencheu.' },
-            { t: '🧭 Controles na mesma linha', d: 'Extrato e Relatórios agrupam filtros, exportar e gerar numa linha só, e o Exportar continua visível com os filtros recolhidos.' },
-                    ].map(x => (
+            { t: '⚡ Fechamento de período', d: 'em Contas, escolha uma data de fechamento (no máximo 1 ano atrás). O sistema guarda o saldo de cada conta até lá e passa a somar só os lançamentos mais novos, deixando Extrato, Dashboard e Contas mais rápidos.' },
+            { t: '🔄 Saldos sempre corretos', d: 'se você criar, editar ou excluir um lançamento antigo, o saldo guardado da conta é atualizado na hora; os valores exibidos não mudam por causa do fechamento.' },
+            { t: '🛠️ Alterar, recalcular ou remover', d: 'você pode mudar a data, recalcular os saldos guardados ou remover o fechamento quando quiser.' },
+          ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
             </li>

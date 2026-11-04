@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "7.4.2"
+export const APP_VERSION = "7.5.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -20,7 +20,7 @@ export const getVersionInfo = () => ({
     // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
     // em FrontEnd/src/pages/SobrePage.tsx.
     date: "2026-11-04",
-    description: "Exportação de arquivos no app Android, filtros e botões reorganizados no celular, e formulário de lançamento que não fecha mais ao tocar fora"
+    description: "Fechamento de período: o saldo das contas é guardado até uma data e os cálculos somam só o que veio depois, deixando Extrato, Dashboard e Contas mais rápidos"
   }
 })
 

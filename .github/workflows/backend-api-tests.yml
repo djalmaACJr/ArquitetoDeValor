@@ -42,8 +42,8 @@ jobs:
       - name: Instalar dependências
         run: npm install
 
-      - name: Rodar testes (01 a 10)
-        run: npm test -- --runInBand --verbose "tests/(0[1-9]|10|14)_"
+      - name: Rodar testes (01 a 10, 14 e 15)
+        run: npm test -- --runInBand --verbose "tests/(0[1-9]|10|14|15)_"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
