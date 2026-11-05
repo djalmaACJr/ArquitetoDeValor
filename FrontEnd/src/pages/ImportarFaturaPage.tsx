@@ -23,6 +23,7 @@ import { formatBRL } from '../lib/utils'
 import { Field, SelectDark, Toast, ModalExcluir } from '../components/ui/shared'
 import ModalNovaCategoriaRapida from '../components/ui/ModalNovaCategoriaRapida'
 import LoadingMascote from '../components/ui/LoadingMascote'
+import { alvosDosGrupos } from '../lib/faturaConciliacao'
 import type {
   FaturaImportSessao, FaturaImportItem, StatusFaturaImport, TxCandidata, Categoria,
 } from '../types'
@@ -685,11 +686,19 @@ function Sandbox({ id }: { id: string }) {
   // filtramos as tx CRIADAS por confirmar anterior (transacao_criada_id).
   // Sem isso, depois de "Reabrir análise" o tx criado aparece em
   // txTodasCartao E na soma de itens — dobrando o valor.
+  // No modo CATEGORIA só o ALVO de cada grupo é atualizado (alvosDosGrupos):
+  // outra transação vinculada a um item do mesmo grupo continua na conta do
+  // cartão e entra em "não vinculadas" — senão a conferência passa com o
+  // lançamento duplicado (ex.: Netflix absorve o Crunchyroll, que já tinha o seu).
   const txIdsRepresentadas = new Set<string>()
-  for (const i of itens) {
-    if (i.decisao === 'IGNORAR') continue
-    if (i.transacao_existente_id) txIdsRepresentadas.add(i.transacao_existente_id)
-    if (i.transacao_criada_id)    txIdsRepresentadas.add(i.transacao_criada_id)
+  if (modoImportacao === 'CATEGORIA') {
+    for (const id of alvosDosGrupos(grupos, itens)) txIdsRepresentadas.add(id)
+  } else {
+    for (const i of itens) {
+      if (i.decisao === 'IGNORAR') continue
+      if (i.transacao_existente_id) txIdsRepresentadas.add(i.transacao_existente_id)
+      if (i.transacao_criada_id)    txIdsRepresentadas.add(i.transacao_criada_id)
+    }
   }
   const totalItensImport = itens.reduce(
     (s, i) => i.decisao === 'IGNORAR'

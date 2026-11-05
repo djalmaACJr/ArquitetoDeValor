@@ -553,6 +553,8 @@ Por item: normaliza a descrição (remove sufixo de parcela), busca o melhor pad
 - `hash_match` (chave `conta|data|valor|descrição normalizada`) é calculado por item mas **não usado em nenhuma query de deduplicação hoje** — reenviar o mesmo PDF cria uma nova sessão/novos itens sem bloqueio automático; a prevenção de duplicidade real das transações só acontece nos pontos acima, no momento de confirmar.
 - Papel do "grupo" (modo CATEGORIA): por padrão 1 grupo por categoria; o usuário pode separar manualmente um subconjunto em um grupo novo (`grupo_chave`), com descrição própria (`descricao_override`) — persistido, sobrevive a reload/pausa da revisão. Cada grupo vira **uma única transação** na confirmação, somando os itens (sinal RECEITA/DESPESA conforme o líquido).
 
+- **Conferência do total no modo CATEGORIA**: o que vale é o saldo final do cartão no mês (itens + lançamentos não tocados), não só a soma dos itens. Cada grupo atualiza no máximo UMA transação existente (`alvosDosGrupos`, `FrontEnd/src/lib/faturaConciliacao.ts`, espelha `confirmar`); outra transação vinculada a um item do mesmo grupo (ex.: Crunchyroll agrupado em "Streaming" com a Netflix) permanece na conta e entra em "não vinculadas", bloqueando o Confirmar até ser excluída ou o item ser separado em outro grupo.
+
 ### Regras de dados
 
 - `tipo` do item (`RECEITA`|`DESPESA`) distingue créditos (estornos/descontos) de débitos — o valor numérico é sempre positivo, o sinal é dado por `tipo`.
