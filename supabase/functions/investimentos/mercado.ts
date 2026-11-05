@@ -1519,8 +1519,18 @@ async function buscarSgsUltimo(serie: number): Promise<{ valor: number; data: st
     return { valor, data: `${mm[3]}-${mm[2]}-${mm[1]}` };
   } catch (e) { logError(`SGS ultimo ${serie}`, e); return null; }
 }
+// Cache por instância (30 min): a taxa só muda em reunião do Copom / 1x por dia
+// útil, e todo GET de /indices com SELIC/CDI passaria por 3 chamadas ao BCB.
+const CACHE_TAXAS_MS = 30 * 60 * 1000;
+const cacheTaxas = new Map<string, { em: number; v: TaxaAtual | null }>();
 export async function taxasAtuais(nomes: IndiceNome[]): Promise<Record<string, TaxaAtual | null>> {
   const out: Record<string, TaxaAtual | null> = {};
+  const agora = Date.now();
+  nomes = nomes.filter((n) => {
+    const c = cacheTaxas.get(n);
+    if (c && agora - c.em < CACHE_TAXAS_MS) { out[n] = c.v; return false; }
+    return true;
+  });
   await Promise.all(nomes.map(async (n) => {
     if (n === "SELIC") {
       const [meta, over] = await Promise.all([buscarSgsUltimo(432), buscarSgsUltimo(1178)]);
@@ -1529,6 +1539,8 @@ export async function taxasAtuais(nomes: IndiceNome[]): Promise<Record<string, T
       out.CDI = await buscarSgsUltimo(4389);
     }
   }));
+  // Falha (null) não fica em cache: tenta de novo no próximo GET.
+  for (const n of nomes) if (out[n]) cacheTaxas.set(n, { em: agora, v: out[n] });
   return out;
 }
 
