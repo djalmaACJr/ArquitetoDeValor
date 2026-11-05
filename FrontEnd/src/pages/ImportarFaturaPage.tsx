@@ -14,11 +14,11 @@ import { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import {
   FileUp, Receipt, Trash2, ArrowLeft, AlertCircle,
-  XCircle, RotateCcw, ChevronDown, ChevronRight, Pencil,
+  XCircle, RotateCcw, ChevronDown, ChevronRight, Pencil, Download,
 } from 'lucide-react'
 import { useContas } from '../hooks/useContas'
 import { useCategorias } from '../hooks/useCategorias'
-import { useFaturasImport, useFaturaImportSessao } from '../hooks/useFaturasImport'
+import { useFaturasImport, useFaturaImportSessao, baixarPdfFatura } from '../hooks/useFaturasImport'
 import { formatBRL } from '../lib/utils'
 import { Field, SelectDark, Toast, ModalExcluir } from '../components/ui/shared'
 import ModalNovaCategoriaRapida from '../components/ui/ModalNovaCategoriaRapida'
@@ -213,6 +213,11 @@ function ListagemEUpload() {
   const [sessaoExcluir, setSessaoExcluir] = useState<FaturaImportSessao | null>(null)
 
   const toast = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(null), 3000) }
+
+  const baixarPdf = async (s: FaturaImportSessao) => {
+    const r = await baixarPdfFatura(s.id)
+    if (!r.ok) toast(r.erro ?? 'Falha ao baixar o PDF.')
+  }
 
   // Senha de PDFs protegidos.
   //   precisaSenha === null  → PDF não precisa (caso normal).
@@ -439,6 +444,16 @@ function ListagemEUpload() {
                   style={{ color: '#e8eaf0' }}>
                   {s.status === 'EM_ANALISE' ? 'Revisar' : 'Ver detalhes'}
                 </button>
+                {s.arquivo_path && (
+                  <button
+                    onClick={() => baixarPdf(s)}
+                    title="Baixar o PDF da fatura"
+                    aria-label="Baixar o PDF da fatura"
+                    className="w-8 h-8 rounded-md border border-white/10 flex items-center justify-center hover:border-av-green hover:text-av-green transition-colors"
+                    style={{ color: '#e8eaf0' }}>
+                    <Download size={14} />
+                  </button>
+                )}
                 <button
                   onClick={() => setSessaoExcluir(s)}
                   title="Excluir sessão"
@@ -1213,6 +1228,18 @@ function Sandbox({ id }: { id: string }) {
       </div>
       <p className="text-[14px] mb-2" style={{ color: '#8b92a8' }}>
         {sessao.arquivo_nome}
+        {sessao.arquivo_path && (
+          <button
+            onClick={async () => {
+              const r = await baixarPdfFatura(sessao.id)
+              if (!r.ok) toast(r.erro ?? 'Falha ao baixar o PDF.')
+            }}
+            title="Baixar o PDF da fatura"
+            className="inline-flex items-center gap-1 ml-2 px-2 py-0.5 rounded-md border border-white/10 text-[13px] align-middle hover:border-av-green hover:text-av-green transition-colors"
+            style={{ color: '#e8eaf0' }}>
+            <Download size={13} /> Baixar PDF
+          </button>
+        )}
         {' '}· <span style={{ color: STATUS_COR[sessao.status] }}>{STATUS_LABEL[sessao.status]}</span>
         {sessao.vencimento_fatura && (
           <> · Vencimento:{' '}
