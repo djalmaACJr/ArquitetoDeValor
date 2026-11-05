@@ -24,6 +24,17 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.5.1',
+    data:   '2026-11-04',
+    titulo: 'Fechamento só com lançamentos pagos',
+    icone:  <ShieldCheck size={16} />,
+    itens: [
+      { t: '✅ Fechar só com tudo pago', d: 'o fechamento de período exige que todos os lançamentos até a data estejam pagos, em qualquer conta ou tipo.' },
+      { t: '📋 Lista de pendências', d: 'se houver lançamentos pendentes ou projetados até a data, o card de Contas mostra a lista para você editar ou excluir cada um e tentar fechar de novo.' },
+      { t: '🔒 Períodos fechados só aceitam Pago', d: 'com um período fechado, lançamentos nessas datas não podem mais ser criados nem alterados para Pendente ou Projeção, valendo também para transferências e importações.' },
+    ],
+  },
+  {
     versao: '7.5.0',
     data:   '2026-11-04',
     titulo: 'Fechamento de período',
@@ -360,12 +371,11 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.5.1) */}
+        {/* Detalhe das novidades desta versão (7.5.2) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '✅ Fechar só com tudo pago', d: 'o fechamento de período exige que todos os lançamentos até a data estejam pagos, em qualquer conta ou tipo.' },
-            { t: '📋 Lista de pendências', d: 'se houver lançamentos pendentes ou projetados até a data, o card de Contas mostra a lista para você editar ou excluir cada um e tentar fechar de novo.' },
-            { t: '🔒 Períodos fechados só aceitam Pago', d: 'com um período fechado, lançamentos nessas datas não podem mais ser criados nem alterados para Pendente ou Projeção, valendo também para transferências e importações.' },
+            { t: '🧮 Acumulado de 12 meses correto', d: 'em Gerenciar dados, o acumulado de Selic e CDI passa a usar só meses fechados. Antes, o mês em andamento (com poucos dias) derrubava o valor em cerca de 1 ponto.' },
+            { t: '📈 Taxa atual em destaque', d: 'os cards de Selic e CDI mostram também a taxa vigente (meta Selic e CDI anual) com a data da última cotação, além da Selic over.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

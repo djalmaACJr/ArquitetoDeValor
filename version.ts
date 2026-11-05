@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "7.5.1"
+export const APP_VERSION = "7.5.2"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -19,8 +19,8 @@ export const getVersionInfo = () => ({
     // Data de lançamento (AAAA-MM-DD) — exibida em Sobre › Versão atual.
     // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
     // em FrontEnd/src/pages/SobrePage.tsx.
-    date: "2026-11-04",
-    description: "Fechamento de período só com lançamentos pagos: pendências aparecem numa lista para editar ou excluir, e lançamentos de períodos fechados só aceitam status Pago"
+    date: "2026-11-05",
+    description: "Selic e CDI em Gerenciar dados: acumulado de 12 meses só com meses fechados e nova exibição da taxa atual com a data da última cotação"
   }
 })
 

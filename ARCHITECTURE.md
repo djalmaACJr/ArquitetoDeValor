@@ -406,6 +406,8 @@ Cache compartilhado (sem `user_id`) de composição de ETF: PK `(etf_ticker, hol
 | `cotacoes_tesouro` | `(tipo_titulo, vencimento, mes_ano)` | PU/taxa de venda (só títulos com marcação a mercado) | Tesouro Transparente (STN) |
 | `inv_fatos_relevantes` | `id` (doc do Fundos.NET) | Fato Relevante/Comunicado de FII: fundo, categoria, resumo, data, url do PDF | Fundos.NET (B3) |
 
+> `GET /investimentos/indices` também devolve `atual` (taxa anual vigente: SELIC = meta SGS 432 + `over` SGS 1178; CDI = SGS 4389) com a data da última cotação, lida ao vivo do BCB (cache em memória de 30 min por instância, sem tabela). O acumulado de 12 meses de Gerenciar dados ignora o mês corrente (o SGS devolve só os dias já passados).
+
 #### View `vw_inv_ultimo_mercado`
 `DISTINCT ON (user_id, ativo_id, conta_id)` sobre `inv_historico_mensal` ordenado por `mes_ano DESC` — só o snapshot mais recente por par.
 
