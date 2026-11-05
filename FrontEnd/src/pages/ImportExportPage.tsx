@@ -3932,7 +3932,12 @@ const labelComp = (comp: string) => {
 // Taxa acumulada em 12 meses (o "valor", em % a.a.), derivada da série de
 // taxas mensais por composição: ∏(1 + taxa_i/100) − 1. Cada ponto exige os
 // 12 meses anteriores, então os primeiros meses da série ficam de fora.
-function acumulado12m(pts: PontoIndice[]): PontoIndice[] {
+// O mês corrente vem do SGS só com os dias já passados (ex.: 0,10% nos primeiros
+// dias), então só entra na conta quando fecha — senão o acumulado despenca
+// ~1 ponto no início de todo mês.
+function acumulado12m(todos: PontoIndice[]): PontoIndice[] {
+  const mesAtual = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date()).slice(0, 7)
+  const pts = todos.filter((p) => p.competencia < mesAtual)
   const out: PontoIndice[] = []
   for (let i = 11; i < pts.length; i++) {
     let fator = 1
@@ -3948,7 +3953,7 @@ function CardIndice({ indice, titulo, subtitulo, cor, icon }: {
   const [periodo, setPeriodo] = useState<PeriodoIndiceMacro>('ano')
   // Os cards compartilham a mesma query (dedup pelo React Query). `historico`
   // libera a série completa (desde 2006) em vez do mínimo padrão de 2020.
-  const { serie, loading } = useIndicesEconomicos(['IPCA', 'SELIC', 'CDI'], '2006-01', true, true)
+  const { serie, atual: taxaAtual, loading } = useIndicesEconomicos(['IPCA', 'SELIC', 'CDI'], '2006-01', true, true)
 
   // Exibe o VALOR (taxa acumulada 12 meses), não a variação mensal.
   const serie12m = acumulado12m(serie(indice))
@@ -3958,10 +3963,22 @@ function CardIndice({ indice, titulo, subtitulo, cor, icon }: {
   const valores = pts.map((p) => p.valor)
   const atual = serie12m.length ? serie12m[serie12m.length - 1] : null
   const fmtPct = (v: number) => `${v.toFixed(2).replace('.', ',')}%`
+  const fmtDia = (iso: string) => iso.split('-').reverse().join('/')
+  const vigente = indice === 'IPCA' ? null : taxaAtual(indice)
 
   return (
     <Section titulo={titulo} subtitulo={subtitulo} icon={icon} cor={cor} defaultOpen fill>
       <div className="space-y-3">
+        {vigente && (
+          <div>
+            <p className="text-[13px] text-gray-400">{indice === 'SELIC' ? 'Meta Selic atual (% a.a.)' : 'CDI atual (% a.a.)'}</p>
+            <p className="text-[24px] font-bold text-gray-800 dark:text-gray-100 leading-tight">{fmtPct(vigente.valor)}</p>
+            <p className="text-[12px] text-gray-400">
+              Última cotação: {fmtDia(vigente.data)}
+              {vigente.over && ` · Selic over ${fmtPct(vigente.over.valor)} (${fmtDia(vigente.over.data)})`}
+            </p>
+          </div>
+        )}
         <div>
           <p className="text-[13px] text-gray-400">Acumulado 12 meses (% a.a.)</p>
           <p className="text-[24px] font-bold text-gray-800 dark:text-gray-100 leading-tight">

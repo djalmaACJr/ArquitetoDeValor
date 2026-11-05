@@ -1384,7 +1384,8 @@ export async function sincronizarPtaxResposta(c: Db) {
 // SGS/BCB, com data de corte 2020-01. Mesma mecânica do PTAX:
 //
 //   GET  /investimentos/indices?indices=IPCA,SELIC,CDI&desde=2020-01
-//        → { series: { IPCA: [{competencia,valor}], SELIC: [...], CDI: [...] }, ultimo }
+//        → { series: { IPCA: [{competencia,valor}], SELIC: [...], CDI: [...] }, ultimo,
+//            atual: { SELIC: {valor,data,over?}, CDI: {valor,data} } }  (taxa anual vigente, ao vivo)
 //   POST /investimentos/indices  → força sincronização (agendador/cron)
 //
 // Séries SGS: 433 = IPCA variação mensal (%); 4390 = Selic acum. no mês (%);
@@ -1492,6 +1493,45 @@ export async function garantirIndicesSincronizados(c: Db): Promise<void> {
   }
 }
 
+// Taxa ANUAL vigente (% a.a.) lida ao vivo do SGS, com a data da última
+// cotação. SELIC = meta definida pelo Copom (série 432, vale até a próxima
+// reunião); a Selic over anualizada (1178) vai junto em `over`. CDI = série
+// 4389 (anualizada, base 252). Falha de rede devolve null — o acumulado
+// mensal continua sendo exibido normalmente.
+export interface TaxaAtual { valor: number; data: string; over?: { valor: number; data: string } }
+async function buscarSgsUltimo(serie: number): Promise<{ valor: number; data: string } | null> {
+  try {
+    // Janela até HOJE (não "ultimos/1"): a meta Selic (432) já traz a data da
+    // próxima reunião do Copom, que é futura.
+    const hoje = hojeISO();
+    const ini = new Date(Date.parse(hoje + "T12:00:00Z") - 45 * 86400000).toISOString().slice(0, 10);
+    const f = (iso: string) => iso.split("-").reverse().join("/");
+    const res = await fetch(
+      `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${serie}/dados?formato=json&dataInicial=${f(ini)}&dataFinal=${f(hoje)}`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (!res.ok) return null;
+    const arr = await res.json() as { data?: string; valor?: string }[];
+    const it = arr?.[arr.length - 1];
+    const mm = String(it?.data ?? "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    const valor = Number(String(it?.valor ?? "").replace(",", "."));
+    if (!mm || !Number.isFinite(valor)) return null;
+    return { valor, data: `${mm[3]}-${mm[2]}-${mm[1]}` };
+  } catch (e) { logError(`SGS ultimo ${serie}`, e); return null; }
+}
+export async function taxasAtuais(nomes: IndiceNome[]): Promise<Record<string, TaxaAtual | null>> {
+  const out: Record<string, TaxaAtual | null> = {};
+  await Promise.all(nomes.map(async (n) => {
+    if (n === "SELIC") {
+      const [meta, over] = await Promise.all([buscarSgsUltimo(432), buscarSgsUltimo(1178)]);
+      out.SELIC = meta ? { ...meta, ...(over ? { over } : {}) } : null;
+    } else if (n === "CDI") {
+      out.CDI = await buscarSgsUltimo(4389);
+    }
+  }));
+  return out;
+}
+
 export async function rotaIndices(c: Db, params: URLSearchParams) {
   try { await garantirIndicesSincronizados(c); } catch (e) { logError("Sincronizar índices", e); }
 
@@ -1520,7 +1560,8 @@ export async function rotaIndices(c: Db, params: URLSearchParams) {
     series[r.indice].push(item);
     ultimo[r.indice] = item; // ordenado asc → último vence
   }
-  return json({ dados: { series, ultimo, desde } });
+  const atual = await taxasAtuais(nomes);
+  return json({ dados: { series, ultimo, atual, desde } });
 }
 
 // POST /investimentos/indices — sincronização explícita (agendador/cron).

@@ -12,8 +12,13 @@ export interface PontoIndice { competencia: string; valor: number } // competenc
 interface IndicesResposta {
   series: Record<string, PontoIndice[]>
   ultimo: Record<string, PontoIndice | null>
+  atual?: Record<string, TaxaAtual | null>
   desde: string
 }
+
+// Taxa anual vigente (% a.a.) lida ao vivo do BCB. `data` = última cotação
+// (YYYY-MM-DD). SELIC: valor = meta do Copom; `over` = Selic over anualizada.
+export interface TaxaAtual { valor: number; data: string; over?: { valor: number; data: string } }
 
 // `indices`: quais séries buscar (default: ambas). `desde`: competência
 // mínima 'YYYY-MM' (default e mínimo: 2020-01). `historico`: libera o mínimo
@@ -45,6 +50,7 @@ export function useIndicesEconomicos(
 
   const series = data?.series ?? {}
   const ultimo = data?.ultimo ?? {}
+  const atual = data?.atual ?? {}
 
   return {
     loading: isLoading,
@@ -53,6 +59,8 @@ export function useIndicesEconomicos(
     serie: (i: IndiceNome): PontoIndice[] => series[i] ?? [],
     // Taxa mais recente (% no mês) de um índice, ou null.
     ultimo: (i: IndiceNome): PontoIndice | null => ultimo[i] ?? null,
+    // Taxa anual vigente (ao vivo) de SELIC/CDI, com a data da última cotação.
+    atual: (i: IndiceNome): TaxaAtual | null => atual[i] ?? null,
     // Taxa de um índice numa competência ('YYYY-MM') específica.
     taxaEm: (i: IndiceNome, comp: string): number | null =>
       (series[i] ?? []).find((p) => p.competencia === comp)?.valor ?? null,
