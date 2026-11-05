@@ -137,13 +137,23 @@ test.describe('Compartilhamento (Agregados)', () => {
     await expect(amigos).toBeVisible({ timeout: 10_000 })
     await expect(agregado).toBeVisible()
 
-    const a = (await amigos.boundingBox())!
-    const g = (await agregado.boundingBox())!
+    // As duas posições eram lidas em sequência, uma única vez. Se algum conteúdo
+    // acima carregasse entre as leituras (Perfil busca dados após o 1º render),
+    // a página descia e os títulos pareciam em linhas diferentes (Δy ≈ 293px).
+    // O grid do Perfil é CSS puro (lg:grid-cols-2), então o resultado correto é
+    // determinístico: aguarda a posição estabilizar (poll) em vez de medir 1 vez.
+    const caixas = async () => ({
+      a: (await amigos.boundingBox())!,
+      g: (await agregado.boundingBox())!,
+    })
     if (page.viewportSize()!.width >= 1024) {
-      expect(Math.abs(a.y - g.y)).toBeLessThan(8)   // mesma linha
-      expect(g.x).toBeGreaterThan(a.x)              // agregado à direita
+      await expect.poll(async () => { const { a, g } = await caixas(); return Math.abs(a.y - g.y) },
+        { timeout: 10_000 }).toBeLessThan(8)         // mesma linha
+      const { a, g } = await caixas()
+      expect(g.x).toBeGreaterThan(a.x)               // agregado à direita
     } else {
-      expect(g.y).toBeGreaterThan(a.y)              // celular: empilhado
+      await expect.poll(async () => { const { a, g } = await caixas(); return g.y - a.y },
+        { timeout: 10_000 }).toBeGreaterThan(0)      // celular: empilhado
     }
 
     const email = `e2e-agregado-perfil-${Date.now()}@example.com`

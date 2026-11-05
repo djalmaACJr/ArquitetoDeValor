@@ -10,6 +10,7 @@ import { apiFetch, apiMutate } from '../lib/api'
 import { qk } from '../lib/queryKeys'
 import { useAuth } from './useAuth'
 import { supabase } from '../lib/supabase'
+import { baixarArquivo } from '../lib/baixarArquivo'
 import type {
   FaturaImportSessao, FaturaImportItem, DecisaoFaturaImport, TxCandidata,
 } from '../types'
@@ -129,6 +130,25 @@ export function useFaturasImport() {
     error: error ? (error as Error).message : null,
     importar,
     excluir,
+  }
+}
+
+/**
+ * Baixa o PDF original da fatura. O backend devolve uma URL assinada de 60s
+ * (bucket privado); o arquivo é lido como blob e entregue por `baixarArquivo`
+ * (download no web, folha de compartilhar no Android).
+ */
+export async function baixarPdfFatura(id: string): Promise<{ ok: boolean; erro: string | null }> {
+  const res = await apiFetch<{ url: string; nome: string }>(`/faturas/${id}/pdf`)
+  if (!res.ok || !res.dados) return { ok: false, erro: res.erro ?? 'Não foi possível obter o PDF.' }
+  try {
+    const r = await fetch(res.dados.url)
+    if (!r.ok) return { ok: false, erro: 'Não foi possível baixar o PDF.' }
+    const nome = res.dados.nome.toLowerCase().endsWith('.pdf') ? res.dados.nome : `${res.dados.nome}.pdf`
+    await baixarArquivo(await r.blob(), nome)
+    return { ok: true, erro: null }
+  } catch {
+    return { ok: false, erro: 'Falha ao baixar o PDF.' }
   }
 }
 

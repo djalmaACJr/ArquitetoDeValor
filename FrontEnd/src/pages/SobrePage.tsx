@@ -376,6 +376,8 @@ export default function SobrePage() {
           {[
             { t: '🧮 Acumulado de 12 meses correto', d: 'em Gerenciar dados, o acumulado de Selic e CDI passa a usar só meses fechados. Antes, o mês em andamento (com poucos dias) derrubava o valor em cerca de 1 ponto.' },
             { t: '📈 Taxa atual em destaque', d: 'os cards de Selic e CDI mostram também a taxa vigente (meta Selic e CDI anual) com a data da última cotação, além da Selic over.' },
+            { t: '🧾 Conferência da fatura mais rigorosa', d: 'na importação por categoria, um lançamento já existente que ficaria duplicado (ex.: Crunchyroll agrupado com a Netflix) agora aparece em "não vinculados" e bloqueia a confirmação, em vez de somar a mais no saldo do cartão.' },
+            { t: '📄 Baixar o PDF da fatura', d: 'a Importação de Fatura passa a guardar o PDF original (privado, só seu) e ganha o botão de baixar na lista e na revisão. Vale para as faturas importadas a partir de agora.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

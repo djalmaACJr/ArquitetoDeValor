@@ -28,6 +28,8 @@ import type { ParsedLinha } from "./parsers/index.ts";
 const DECISOES = ["PENDENTE", "CRIAR", "ATUALIZAR", "IGNORAR"] as const;
 type Decisao = typeof DECISOES[number];
 
+const BUCKET_PDF = "faturas-pdf";
+
 const STATUS_SESSAO = ["EM_ANALISE", "CONFIRMADA", "CANCELADA"] as const;
 
 Deno.serve((req: Request) => comOrigem(req, async () => {
@@ -75,6 +77,9 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
 
     // POST /faturas/:id/aplicar-sugestoes — aplica categoria_sugerida→escolhida em lote
     if (m === "POST"   &&  id && acao === "aplicar-sugestoes") return await aplicarSugestoes(c, id);
+
+    // GET /faturas/:id/pdf — URL assinada (curta) do PDF original
+    if (m === "GET"    &&  id && acao === "pdf")               return await baixarPdf(c, id);
 
     // GET /faturas/:id/transacoes — candidatas para vincular manualmente
     if (m === "GET"    &&  id && acao === "transacoes")        return await listarTransacoesCandidatas(c, req, id);
@@ -316,6 +321,20 @@ async function criar(c: ReturnType<typeof db>, req: Request, userId: string) {
     return erro(errSessao.message);
   }
 
+  // Guarda o PDF original (bucket privado, pasta do usuário) p/ download
+  // posterior. Falha aqui NÃO derruba a importação: a sessão segue sem PDF.
+  // Se o PDF tinha senha, vai cifrado como veio — a senha nunca é persistida.
+  const arquivoPath = `${userId}/${sessao.id}.pdf`;
+  const { error: errUp } = await c.storage.from(BUCKET_PDF)
+    .upload(arquivoPath, new Uint8Array(ab), { contentType: "application/pdf", upsert: true });
+  if (errUp) {
+    logWarn("Guardar PDF da fatura", errUp.message);
+  } else {
+    const { error: errPath } = await c.from("fatura_import_sessao")
+      .update({ arquivo_path: arquivoPath }).eq("id", sessao.id);
+    if (!errPath) sessao.arquivo_path = arquivoPath;
+  }
+
   if (resultado.lancamentos.length > 0) {
     const itens = resultado.lancamentos.map((l: ParsedLinha) => ({
       sessao_id:       sessao.id,
@@ -346,6 +365,25 @@ async function criar(c: ReturnType<typeof db>, req: Request, userId: string) {
   });
   logResponse(201, sessao);
   return json(sessao, 201);
+}
+
+
+// ── Download do PDF original ──────────────────────────────────
+// Devolve uma URL assinada de 60s (o bucket é privado; a RLS do storage só
+// deixa gerar para objetos da pasta do próprio usuário).
+async function baixarPdf(c: ReturnType<typeof db>, id: string) {
+  logRequest("GET", `/faturas/${id}/pdf`);
+  const { data: sess, error } = await c.from("fatura_import_sessao")
+    .select("arquivo_nome, arquivo_path").eq("id", id).maybeSingle();
+  if (error || !sess) return erro("Sessão não encontrada", 404);
+  if (!sess.arquivo_path) return erro("Esta fatura foi importada antes do PDF ser guardado.", 404);
+  const { data, error: errUrl } = await c.storage.from(BUCKET_PDF)
+    .createSignedUrl(sess.arquivo_path as string, 60, { download: sess.arquivo_nome as string });
+  if (errUrl || !data?.signedUrl) {
+    logError("URL assinada do PDF", errUrl);
+    return erro("Não foi possível gerar o link do PDF", 500);
+  }
+  return json({ dados: { url: data.signedUrl, nome: sess.arquivo_nome } });
 }
 
 
@@ -1287,8 +1325,14 @@ async function excluir(c: ReturnType<typeof db>, id: string) {
   const naoEncontrada = await verificarExistencia(c, "fatura_import_sessao", id, "Sessão não encontrada");
   if (naoEncontrada) return naoEncontrada;
 
+  const { data: sess } = await c.from("fatura_import_sessao").select("arquivo_path").eq("id", id).maybeSingle();
   const { error } = await c.from("fatura_import_sessao").delete().eq("id", id);
   if (error) { logError("Excluir fatura", error); return erro(error.message); }
+  const pdf = (sess as { arquivo_path?: string | null } | null)?.arquivo_path;
+  if (pdf) {
+    const { error: errRm } = await c.storage.from(BUCKET_PDF).remove([pdf]);
+    if (errRm) logWarn("Remover PDF da fatura", errRm.message);
+  }
   logSuccess("Sessão excluída", { id });
   return json({ mensagem: "Sessão excluída" });
 }

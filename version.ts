@@ -20,7 +20,7 @@ export const getVersionInfo = () => ({
     // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
     // em FrontEnd/src/pages/SobrePage.tsx.
     date: "2026-11-05",
-    description: "Selic e CDI em Gerenciar dados: acumulado de 12 meses só com meses fechados e nova exibição da taxa atual com a data da última cotação"
+    description: "Selic e CDI em Gerenciar dados: acumulado de 12 meses só com meses fechados e nova exibição da taxa atual com a data da última cotação; fatura: conferência do total mais rigorosa e botão para baixar o PDF"
   }
 })
 

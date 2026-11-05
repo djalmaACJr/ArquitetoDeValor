@@ -46,6 +46,18 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
 
     logInfo("excluir_conta: dados excluídos", { userId });
 
+    // 1b. PDFs de fatura guardados no Storage (pasta <user_id>/ do bucket
+    //     privado). Apagar as linhas do banco não remove os arquivos. Melhor
+    //     esforço: falha aqui não impede a exclusão da conta.
+    try {
+      const { data: arqs } = await userClient.storage.from("faturas-pdf").list(userId, { limit: 1000 });
+      if (arqs && arqs.length > 0) {
+        await userClient.storage.from("faturas-pdf").remove(arqs.map((a) => `${userId}/${a.name}`));
+      }
+    } catch (e) {
+      logError("excluir_conta: PDFs de fatura", e);
+    }
+
     // 2. Remove a conta de autenticação
     const authAdmin = createClient(
       Deno.env.get("SUPABASE_URL")!,
