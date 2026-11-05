@@ -535,6 +535,7 @@ Cron `snapshot-diario` (ver `ARCHITECTURE.md`) fecha posições de RF/Tesouro ve
 ### Fluxo
 
 1. **Upload** (`POST /faturas`, multipart): PDF do emissor (Nubank/C6/Inter/MercadoPago, ou parser genérico) + `conta_id` (deve ser `tipo=CARTAO`). PDF com senha é tratado explicitamente (erros `SENHA_OBRIGATORIA`/`SENHA_INCORRETA`); a senha nunca é persistida.
+1b. O PDF original é guardado no bucket **privado** `faturas-pdf` (`<user_id>/<sessao_id>.pdf`, `fatura_import_sessao.arquivo_path`) e pode ser baixado por `GET /faturas/:id/pdf` (URL assinada de 60s) — botão "Baixar PDF" na lista e na revisão. PDF protegido vai cifrado como veio (a senha continua sem ser persistida). O arquivo é removido ao excluir a sessão e ao excluir a conta; **não** entra no backup/restore (é binário, fora do JSON). Sessões anteriores à migration `20261105000002` não têm PDF (sem botão). Falha ao guardar o PDF não derruba a importação.
 2. O parser do emissor extrai lançamentos → cria `fatura_import_sessao` (`status=EM_ANALISE`) + um `fatura_import_item` por linha.
 3. **Classificação** (fase 1, UI): usuário escolhe categoria por item ou marca "Ignorar" (`decisao=IGNORAR`, excluído do resto do fluxo). `POST /faturas/:id/sugerir` roda um motor de matching (ver abaixo) que preenche `categoria_sugerida_id`/`transacao_existente_id` automaticamente; usuário pode aceitar ou vincular manualmente.
 4. **Modo de importação** (fase 2, decisão persistida em `fatura_import_sessao.modo_importacao`):
@@ -552,6 +553,8 @@ Por item: normaliza a descrição (remove sufixo de parcela), busca o melhor pad
 - No modo CATEGORIA, uma **guarda anti-overwrite** garante que uma mesma transação-alvo só seja usada por um grupo por confirmação — evita que dois grupos façam UPDATE sequencial na mesma transação e um sobrescreva o valor do outro.
 - `hash_match` (chave `conta|data|valor|descrição normalizada`) é calculado por item mas **não usado em nenhuma query de deduplicação hoje** — reenviar o mesmo PDF cria uma nova sessão/novos itens sem bloqueio automático; a prevenção de duplicidade real das transações só acontece nos pontos acima, no momento de confirmar.
 - Papel do "grupo" (modo CATEGORIA): por padrão 1 grupo por categoria; o usuário pode separar manualmente um subconjunto em um grupo novo (`grupo_chave`), com descrição própria (`descricao_override`) — persistido, sobrevive a reload/pausa da revisão. Cada grupo vira **uma única transação** na confirmação, somando os itens (sinal RECEITA/DESPESA conforme o líquido).
+
+- **Conferência do total no modo CATEGORIA**: o que vale é o saldo final do cartão no mês (itens + lançamentos não tocados), não só a soma dos itens. Cada grupo atualiza no máximo UMA transação existente (`alvosDosGrupos`, `FrontEnd/src/lib/faturaConciliacao.ts`, espelha `confirmar`); outra transação vinculada a um item do mesmo grupo (ex.: Crunchyroll agrupado em "Streaming" com a Netflix) permanece na conta e entra em "não vinculadas", bloqueando o Confirmar até ser excluída ou o item ser separado em outro grupo.
 
 ### Regras de dados
 

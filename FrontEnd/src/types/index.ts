@@ -158,6 +158,8 @@ export interface FaturaImportSessao {
   user_id:             string
   conta_id:            string
   arquivo_nome:        string
+  // Caminho do PDF original no Storage; null em sessões antigas (sem PDF guardado).
+  arquivo_path?:       string | null
   vencimento_fatura:   string | null
   valor_total:         number | null
   status:              StatusFaturaImport
