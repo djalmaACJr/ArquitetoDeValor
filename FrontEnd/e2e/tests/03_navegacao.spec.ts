@@ -26,14 +26,19 @@ test.describe('Navegação e Persistência de Estado', () => {
     await page.goto('/lancamentos')
     await page.waitForLoadState('domcontentloaded')
 
-    // Avançar um mês com tratamento de erro
-    const btnProximo = page.locator('button').filter({ hasText: '>' }).first()
-    if (await btnProximo.isVisible({ timeout: 5000 })) {
-      await btnProximo.click()
-      await page.waitForTimeout(1000) // espera carregamento com muitos dados
-    }
-    
-    const mes = await page.locator('button:has-text("/2")').first().textContent({ timeout: 10_000 })
+    // O botão do mês é o vizinho do "Mês anterior" no MonthPicker. Um seletor
+    // por texto ("/2") também casa com botões de data de outros componentes
+    // (avisos de proventos) e, ao voltar à página, devolvia esse antes de o
+    // MonthPicker renderizar.
+    const btnMes = page.locator('button[aria-label="Mês anterior"] + button')
+
+    // Avançar um mês (o botão só tem ícone: localizar pelo aria-label)
+    const btnProximo = page.getByRole('button', { name: /próximo mês/i }).first()
+    await expect(btnProximo).toBeVisible({ timeout: 10_000 })
+    await btnProximo.click()
+    await page.waitForTimeout(1000) // espera carregamento com muitos dados
+
+    const mes = await btnMes.textContent({ timeout: 10_000 })
 
     await page.getByRole('link', { name: /contas/i }).click()
     await page.waitForLoadState('domcontentloaded')
@@ -41,7 +46,9 @@ test.describe('Navegação e Persistência de Estado', () => {
     await page.getByRole('link', { name: /lançamentos|extrato/i }).click()
     await page.waitForLoadState('domcontentloaded')
 
-    const mesApos = await page.locator('button:has-text("/2")').first().textContent({ timeout: 10_000 })
+    // Espera o MonthPicker renderizar antes de ler o mês
+    await expect(btnMes).toBeVisible({ timeout: 10_000 })
+    const mesApos = await btnMes.textContent()
     expect(mes).toBe(mesApos)
   })
 
