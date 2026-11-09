@@ -218,7 +218,7 @@ Em dev fica `*`.
 | POST | `/<recurso>` | Criar |
 | PUT | `/<recurso>/:id` | Atualizar (escopo via `?escopo=` em recorrentes) |
 | DELETE | `/<recurso>/:id` | Excluir (escopo via `?escopo=` em recorrentes) |
-| POST | `/transacoes/:id/antecipar` | Antecipar parcelas seguintes |
+| POST | `/transacoes/:id/antecipar` | Antecipar parcelas seguintes (body opcional `{ parcelas: number[] }` = parcial) |
 
 ---
 
@@ -618,6 +618,7 @@ Padrão parecido, mas o "visto" é um **conjunto de chaves** (`datacom_avisos_vi
 | `fn_bloquear_exclusao_conta` | trigger | Impede DELETE de conta com transações |
 | `fn_bloquear_exclusao_categoria` | trigger | Impede DELETE de categoria com filhos ou lançamentos |
 | `fn_antecipar_parcelas(p_transacao_id, p_user_id)` | RPC | Soma valores das parcelas seguintes na atual, ajusta `total_parcelas`, salva `valor_projetado`, deleta as seguintes |
+| `fn_antecipar_parcelas_parcial(p_transacao_id, p_user_id, p_parcelas int[])` | RPC (INVOKER) | Antecipação parcial: soma e deleta só as parcelas listadas; `total_parcelas` só cai se todas as seguintes foram listadas (`20261109000001`) |
 | `fn_saldo_conta_ate(p_conta_id, p_ate)` | SQL stable | Saldo da conta até timestamp |
 | `fn_sincronizar_usuario` | trigger AFTER INSERT em `auth.users` | Cria `arqvalor.usuarios` + contas seed (Carteira, Nubank, Inter, C6) + categorias pai/filho seed (Moradia, Alimentação, Transporte, Saúde, Renda, Transferências) + transações/transferência de exemplo (`20260716000001`) + `SET search_path` (`20260723000002`) |
 | `fn_remover_usuario` | trigger BEFORE DELETE em `auth.users` | Delega para `fn_excluir_dados_usuario(OLD.id)` (FK-safe em todas as tabelas de domínio, não só `usuarios`) — corrigido em `20260806000007` após a versão anterior (`DELETE FROM arqvalor.usuarios` direto, sem ordem FK-safe) falhar com "Database error deleting user" para qualquer caller que não fosse a Edge Function `excluir_conta` (ex.: botão "Delete User" do Dashboard, scripts ad-hoc) |

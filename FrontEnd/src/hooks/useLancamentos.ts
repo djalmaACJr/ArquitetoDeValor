@@ -299,8 +299,9 @@ export function useLancamentos(filtros: FiltrosLancamento) {
     return { ok: res.ok, erro: res.erro }
   }
 
-  const antecipar = async (id: string): Promise<OpResult> => {
-    const res = await apiMutate(`/transacoes/${id}/antecipar`, 'POST')
+  // `parcelas` (nr_parcela) = antecipação parcial; omitido = todas as seguintes
+  const antecipar = async (id: string, parcelas?: number[]): Promise<OpResult> => {
+    const res = await apiMutate(`/transacoes/${id}/antecipar`, 'POST', parcelas ? { parcelas } : undefined)
     if (res.ok) await invalidarTudo()
     return { ok: res.ok, erro: res.erro ?? null }
   }

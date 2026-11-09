@@ -210,6 +210,11 @@ export default function DrawerLancamento({
   const [excluindo,           setExcluindo]           = useState(false)
   const [confirmandoAntecip,  setConfirmandoAntecip]  = useState(false)
   const [antecipando,         setAntecipando]         = useState(false)
+  // Antecipação parcial: parcelas seguintes da série + as escolhidas (nr_parcela)
+  const [anteciparEscolher,   setAnteciparEscolher]   = useState(false)
+  const [parcelasSeguintes,   setParcelasSeguintes]   = useState<Lancamento[]>([])
+  const [parcelasEscolhidas,  setParcelasEscolhidas]  = useState<number[]>([])
+  const [carregandoSeguintes, setCarregandoSeguintes] = useState(false)
   const [escopo,              setEscopo]              = useState<'SOMENTE_ESTE' | 'ESTE_E_SEGUINTES'>('SOMENTE_ESTE')
   const [calcAberta,          setCalcAberta]          = useState(false)
   const [expandindo,          setExpandindo]          = useState(false)
@@ -721,17 +726,54 @@ export default function DrawerLancamento({
     && editando.status !== 'PAGO'
     && (editando.nr_parcela ?? 0) < (editando.total_parcelas ?? 0)
 
+  // Ao abrir o modal, carrega as parcelas seguintes reais da série (data/valor)
+  useEffect(() => {
+    if (!confirmandoAntecip || !editando?.id_recorrencia) return
+    let cancelado = false
+    setAnteciparEscolher(false)
+    setParcelasEscolhidas([])
+    setCarregandoSeguintes(true)
+    apiFetch<Lancamento[]>(`/transacoes?id_recorrencia=${editando.id_recorrencia}`)
+      .then(res => {
+        if (cancelado) return
+        const nrAtual = editando.nr_parcela ?? 0
+        const seguintes = (res.ok && res.dados ? res.dados : [])
+          .filter(t => (t.nr_parcela ?? 0) > nrAtual)
+          .sort((a, b) => (a.nr_parcela ?? 0) - (b.nr_parcela ?? 0))
+        setParcelasSeguintes(seguintes)
+      })
+      .finally(() => { if (!cancelado) setCarregandoSeguintes(false) })
+    return () => { cancelado = true }
+  }, [confirmandoAntecip, editando?.id_recorrencia, editando?.nr_parcela])
+
+  const alternarParcelaEscolhida = (nr: number) =>
+    setParcelasEscolhidas(p => p.includes(nr) ? p.filter(n => n !== nr) : [...p, nr])
+
   const confirmarAntecipar = async () => {
     if (!editando) return
+    const parcial = anteciparEscolher
+    if (parcial && parcelasEscolhidas.length === 0) return
     setAntecipando(true)
     try {
       const nrAtual       = editando.nr_parcela ?? 0
       const totalParc     = editando.total_parcelas ?? 0
-      const nFuturas      = Math.max(0, totalParc - nrAtual)
       const valorUnitario = editando.valor
-      const valorTotal    = valorUnitario * (nFuturas + 1)
+      const nrsOrdenados  = [...parcelasEscolhidas].sort((a, b) => a - b)
+      const alvos         = parcial
+        ? parcelasSeguintes.filter(t => nrsOrdenados.includes(t.nr_parcela ?? 0))
+        : parcelasSeguintes
+      const nFuturas      = parcial ? nrsOrdenados.length : Math.max(0, totalParc - nrAtual)
+      // Valor real das parcelas antecipadas (podem diferir da atual); sem a
+      // lista carregada, cai para o valor unitário.
+      const somaFuturas   = alvos.length === nFuturas
+        ? alvos.reduce((s, t) => s + t.valor, 0)
+        : nFuturas * valorUnitario
+      const valorTotal    = valorUnitario + somaFuturas
 
-      const res = await apiMutate(`/transacoes/${editando.id}/antecipar`, 'POST')
+      const res = await apiMutate(
+        `/transacoes/${editando.id}/antecipar`, 'POST',
+        parcial ? { parcelas: nrsOrdenados } : undefined,
+      )
       if (!res.ok) {
         mostrarErro(res.erro ?? 'Erro ao antecipar.')
         return
@@ -739,7 +781,9 @@ export default function DrawerLancamento({
       if (nFuturas > 0) {
         const dataHoje   = new Date().toLocaleDateString('pt-BR')
         const totalParcs = nFuturas + 1
-        const nota       = `[Antecip. ${dataHoje}: ${totalParcs} parc. (${nrAtual}–${totalParc}/${totalParc}) · ${formatBRL(valorUnitario)}/un · Total ${formatBRL(valorTotal)}]`
+        const nota       = parcial
+          ? `[Antecip. ${dataHoje}: parc. ${[nrAtual, ...nrsOrdenados].join(', ')}/${totalParc} · ${formatBRL(valorUnitario)}/un · Total ${formatBRL(valorTotal)}]`
+          : `[Antecip. ${dataHoje}: ${totalParcs} parc. (${nrAtual}–${totalParc}/${totalParc}) · ${formatBRL(valorUnitario)}/un · Total ${formatBRL(valorTotal)}]`
         const obsAtual   = editando.observacao ? `${editando.observacao}\n${nota}` : nota
         await apiMutate(`/transacoes/${editando.id}?escopo=SOMENTE_ESTE`, 'PUT', { observacao: obsAtual })
       }
@@ -1427,11 +1471,17 @@ export default function DrawerLancamento({
       {confirmandoAntecip && editando && (() => {
         const nrAtual       = editando.nr_parcela ?? 0
         const totalParc     = editando.total_parcelas ?? 0
-        const nFuturas      = Math.max(0, totalParc - nrAtual)
+        const nTodas        = Math.max(0, totalParc - nrAtual)
         const valorUnitario = editando.valor
-        const valorTotal    = valorUnitario * (nFuturas + 1)
+        const escolhidas    = parcelasSeguintes.filter(t => parcelasEscolhidas.includes(t.nr_parcela ?? 0))
+        const nFuturas      = anteciparEscolher ? escolhidas.length : nTodas
+        const somaFuturas   = anteciparEscolher
+          ? escolhidas.reduce((s, t) => s + t.valor, 0)
+          : nTodas * valorUnitario
+        const valorTotal    = valorUnitario + somaFuturas
         const corValor      = editando.tipo === 'RECEITA' ? '#00c896' : '#f87171'
         const sinal         = editando.tipo === 'RECEITA' ? '+' : '-'
+        const semEscolha    = anteciparEscolher && escolhidas.length === 0
         return (
           <div role="dialog" aria-modal="true" aria-label="Confirmar antecipação"
             className="fixed inset-0 z-[200] flex items-center justify-center">
@@ -1443,6 +1493,49 @@ export default function DrawerLancamento({
                 </div>
                 <p className="text-[18px] font-semibold" style={{ color: '#e8eaf0' }}>Confirmar antecipação</p>
               </div>
+
+              {/* Escopo: todas as seguintes ou só algumas */}
+              <div className="grid grid-cols-2 gap-1 p-1 mb-3 rounded-lg bg-[#252d42]" role="radiogroup" aria-label="Quais parcelas antecipar">
+                {([
+                  { v: false, t: `Todas (${nTodas})` },
+                  { v: true,  t: 'Escolher parcelas' },
+                ] as const).map(o => (
+                  <button key={String(o.v)} type="button" role="radio"
+                    aria-checked={anteciparEscolher === o.v}
+                    onClick={() => setAnteciparEscolher(o.v)}
+                    className="py-1.5 rounded-md text-[14px] font-semibold transition-all"
+                    style={anteciparEscolher === o.v
+                      ? { background: '#f0b429', color: '#0a0f1a' }
+                      : { color: '#8b92a8' }}>
+                    {o.t}
+                  </button>
+                ))}
+              </div>
+
+              {anteciparEscolher && (
+                <div className="mb-3 rounded-xl border border-white/10 max-h-48 overflow-y-auto divide-y divide-white/5">
+                  {carregandoSeguintes && (
+                    <p className="p-3 text-[14px] text-center" style={{ color: '#8b92a8' }}>Carregando parcelas…</p>
+                  )}
+                  {!carregandoSeguintes && parcelasSeguintes.length === 0 && (
+                    <p className="p-3 text-[14px] text-center" style={{ color: '#8b92a8' }}>Nenhuma parcela seguinte encontrada.</p>
+                  )}
+                  {parcelasSeguintes.map(t => {
+                    const nr = t.nr_parcela ?? 0
+                    const marcada = parcelasEscolhidas.includes(nr)
+                    return (
+                      <label key={t.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-white/5">
+                        <input type="checkbox" checked={marcada} onChange={() => alternarParcelaEscolhida(nr)}
+                          className="w-4 h-4 accent-[#f0b429]" />
+                        <span className="flex-1 text-[15px]" style={{ color: '#e8eaf0' }}>
+                          {nr}/{totalParc} · {formatData(t.data)}
+                        </span>
+                        <span className="text-[15px]" style={{ color: '#8b92a8' }}>{formatBRL(t.valor)}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
 
               <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
                 <div className="flex justify-between">
@@ -1458,7 +1551,7 @@ export default function DrawerLancamento({
                 <div className="flex justify-between">
                   <span className="text-[15px]" style={{ color: '#8b92a8' }}>Parcelas a eliminar</span>
                   <span className="text-[16px]" style={{ color: corValor }}>
-                    {nFuturas}× — {sinal}{formatBRL(nFuturas * valorUnitario)}
+                    {nFuturas}× — {sinal}{formatBRL(somaFuturas)}
                   </span>
                 </div>
                 <div className="border-t border-white/5 pt-2 flex justify-between">
@@ -1472,7 +1565,9 @@ export default function DrawerLancamento({
               </div>
 
               <p className="text-[15px] mb-4 text-center" style={{ color: '#8b92a8' }}>
-                A parcela atual será marcada como <span style={{ color: '#00c896' }}>PAGA</span> com o valor consolidado e as {nFuturas} parcelas seguintes serão removidas.
+                A parcela atual será marcada como <span style={{ color: '#00c896' }}>PAGA</span> com o valor consolidado e {anteciparEscolher
+                  ? <>as {nFuturas} parcelas escolhidas serão removidas (as demais continuam).</>
+                  : <>as {nFuturas} parcelas seguintes serão removidas.</>}
               </p>
 
               <div className="flex gap-2">
@@ -1481,7 +1576,7 @@ export default function DrawerLancamento({
                   style={{ color: '#8b92a8' }}>
                   Cancelar
                 </button>
-                <button onClick={confirmarAntecipar} disabled={antecipando}
+                <button onClick={confirmarAntecipar} disabled={antecipando || semEscolha}
                   className="flex-1 py-2.5 rounded-lg text-[16px] font-semibold transition-all hover:bg-yellow-400/90 disabled:opacity-50"
                   style={{ background: '#f0b429', color: '#0a0f1a' }}>
                   {antecipando ? 'Antecipando…' : <><Zap size={12} className="inline mr-1" /> Antecipar</>}

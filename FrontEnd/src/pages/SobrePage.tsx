@@ -24,6 +24,18 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.5.2',
+    data:   '2026-11-05',
+    titulo: 'Selic/CDI e fatura com PDF',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '🧮 Acumulado de 12 meses correto', d: 'em Gerenciar dados, o acumulado de Selic e CDI passa a usar só meses fechados. Antes, o mês em andamento (com poucos dias) derrubava o valor em cerca de 1 ponto.' },
+      { t: '📈 Taxa atual em destaque', d: 'os cards de Selic e CDI mostram também a taxa vigente (meta Selic e CDI anual) com a data da última cotação, além da Selic over.' },
+      { t: '🧾 Conferência da fatura mais rigorosa', d: 'na importação por categoria, um lançamento já existente que ficaria duplicado (ex.: Crunchyroll agrupado com a Netflix) agora aparece em "não vinculados" e bloqueia a confirmação, em vez de somar a mais no saldo do cartão.' },
+      { t: '📄 Baixar o PDF da fatura', d: 'a Importação de Fatura passa a guardar o PDF original (privado, só seu) e ganha o botão de baixar na lista e na revisão. Vale para as faturas importadas a partir de agora.' },
+    ],
+  },
+  {
     versao: '7.5.1',
     data:   '2026-11-04',
     titulo: 'Fechamento só com lançamentos pagos',
@@ -371,13 +383,13 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.5.2) */}
+        {/* Detalhe das novidades desta versão (7.6.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🧮 Acumulado de 12 meses correto', d: 'em Gerenciar dados, o acumulado de Selic e CDI passa a usar só meses fechados. Antes, o mês em andamento (com poucos dias) derrubava o valor em cerca de 1 ponto.' },
-            { t: '📈 Taxa atual em destaque', d: 'os cards de Selic e CDI mostram também a taxa vigente (meta Selic e CDI anual) com a data da última cotação, além da Selic over.' },
-            { t: '🧾 Conferência da fatura mais rigorosa', d: 'na importação por categoria, um lançamento já existente que ficaria duplicado (ex.: Crunchyroll agrupado com a Netflix) agora aparece em "não vinculados" e bloqueia a confirmação, em vez de somar a mais no saldo do cartão.' },
-            { t: '📄 Baixar o PDF da fatura', d: 'a Importação de Fatura passa a guardar o PDF original (privado, só seu) e ganha o botão de baixar na lista e na revisão. Vale para as faturas importadas a partir de agora.' },
+            { t: '⚡ Antecipar só algumas parcelas', d: 'ao antecipar um lançamento parcelado, você pode escolher exatamente quais parcelas antecipar (ex.: na 3ª, antecipar a 10, 11 e 12). As demais continuam como estão.' },
+            { t: '📈 Posições com lucro', d: 'novo quadro em Destaques de Investimentos com as posições em lucro e em prejuízo, pela rentabilidade total desde a compra.' },
+            { t: '🛒 Oportunidades de compra', d: 'novo quadro em Destaques com ativos recomendados para compra (nota alta e tipo abaixo da meta) cujo preço atual está abaixo do preço médio pago, com o valor sugerido.' },
+            { t: '⌫ Backspace para voltar', d: 'nos relatórios com detalhamento por categoria, a tecla Backspace volta um nível.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

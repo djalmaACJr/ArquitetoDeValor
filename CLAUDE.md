@@ -278,7 +278,7 @@ Antes da migration `20260505000001`, qualquer UPDATE em `transacoes` revalidava 
 |---|---|
 | `01_contas.test.ts` | CA-CONTA01..19 |
 | `02_categorias.test.ts` | CA-CAT01..13 |
-| `03_transacoes.test.ts` | CA-TX01..28 |
+| `03_transacoes.test.ts` | CA-TX01..30 |
 | `04_transferencias.test.ts` | CA-TRF01..22 |
 | `05_lembretes.test.ts` | CA-LEM01..11 |
 | `06_assistente.test.ts` | CA-ASS01..09 |
