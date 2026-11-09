@@ -543,6 +543,18 @@ html, body {
 
 .relatorios-table-scroll { max-width: 100%; }
 
+/* Desktop: a rolagem horizontal fica NA tabela (e não no <main>), senão rolar
+   de lado arrastava junto filtros/cards e a página ficava deslocada. Para o
+   cabeçalho continuar fixo, a tabela também rola na vertical dentro do wrapper
+   (altura = tela menos a barra de filtros fixa). */
+@media (min-width: 768px) {
+  .relatorios-table-scroll {
+    overflow: auto;
+    max-height: calc(100vh - var(--alt-barra-filtros, 0px) - 16px);
+    overscroll-behavior-x: contain;
+  }
+}
+
 /* Relatórios: no celular, o mentor não deve ocupar a área de toque dos filtros. */
 @media (max-width: 767px) {
   .relatorios-mentor,

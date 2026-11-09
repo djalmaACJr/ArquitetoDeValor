@@ -10,7 +10,9 @@ import { useDividendos, type CriarDividendoInput } from '../hooks/useDividendos'
 import { useObjetivos } from '../hooks/useObjetivos'
 import { useTiposDividendo } from '../hooks/useTiposDividendo'
 import { useAvisosDividendos, type AvisoTipoDividendo } from '../hooks/useAvisosDividendos'
+import { useAtalhoVoltarNivel } from '../hooks/useAtalhoVoltarNivel'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
+import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useContas } from '../hooks/useContas'
 import { useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAtivo'
 import {
@@ -449,6 +451,13 @@ function useModoEscuro(): boolean {
 
 function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[] }) {
   const dark = useModoEscuro() // rótulos do canvas precisam contrastar com o fundo
+  // Ativos que o usuário ainda possui (posição ATIVA com quantidade > 0). Proventos
+  // de ativos fora desse conjunto (vendidos/encerrados) continuam no quadro, então
+  // avisamos — sem isso parece que a carteira atual ainda gera esse rendimento.
+  const { posicoes, loading: carregandoPos } = useInvestimentosPosicoes({ status: 'ATIVA' })
+  const ativosAtuais = useMemo(
+    () => new Set(posicoes.filter((p) => p.quantidade > 0).map((p) => p.ativo_id)),
+    [posicoes])
   const [periodo, setPeriodo] = useState<PeriodoRanking>('ANO')
   // "Provisionado" (projeções ainda não recebidas) é um STATUS, não um
   // período — fica de fora da lista acima, num toggle à parte; ligado, o
@@ -471,6 +480,7 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
     state: { ...(location.state as Record<string, unknown> ?? {}), proventosFoco: tipo },
   })
   const desfocar = () => navigate(-1)
+  useAtalhoVoltarNivel(tipoFoco !== null, desfocar)
   const [abertos, setAbertos] = useState<Set<TipoAtivoInvestimento>>(new Set())
   const toggleAberto = (t: TipoAtivoInvestimento) => setAbertos((s) => {
     const n = new Set(s)
@@ -504,6 +514,13 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
     setPeriodo(v)
     setSortResumo({ key: 'total', dir: 'desc' })
   }
+  // Tickers exibidos que o usuário não possui mais (só após as posições carregarem)
+  const ativosEncerrados = useMemo(() => {
+    if (carregandoPos) return [] as string[]
+    const s = new Set<string>()
+    for (const l of linhas) for (const a of l.ativos) if (!ativosAtuais.has(a.ativoId)) s.add(a.ticker)
+    return [...s].sort()
+  }, [linhas, ativosAtuais, carregandoPos])
   // Tipos/ativos com valor no período/status escolhido, do maior p/ o menor
   const tipos = useMemo(() =>
     linhas
@@ -696,6 +713,18 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
         </button>
       )}
 
+      {ativosEncerrados.length > 0 && (
+        <div className="flex items-start gap-2 mb-3 px-3 py-2 rounded-lg border text-[12px]"
+          style={{ borderColor: 'rgba(240,180,41,.4)', background: 'rgba(240,180,41,.08)', color: '#f0b429' }}>
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+          <span>
+            Este quadro inclui proventos de ativos que você <strong>não possui mais</strong>
+            {' '}({ativosEncerrados.join(', ')}). Eles refletem o que foi recebido no período,
+            não o rendimento da sua carteira atual. Na tabela abaixo estão marcados como “encerrado”.
+          </span>
+        </div>
+      )}
+
       {tiposVis.length === 0 ? (
         <p className="text-[13px] text-center py-6" style={{ color: MUTED }}>
           Nenhum provento no período selecionado.
@@ -801,6 +830,11 @@ function AtivosPorCategoria({ dividendos }: { dividendos: InvestimentoDividendo[
                   <tr key={a.ticker} className="border-t border-white/5">
                     <td className="px-3 py-1.5">
                       <span className="text-[13px] font-medium text-white">{a.ticker}</span>
+                      {ativosEncerrados.includes(a.ticker) && (
+                        <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded"
+                          style={{ background: 'rgba(240,180,41,.15)', color: '#f0b429' }}
+                          title="Você não possui mais este ativo">encerrado</span>
+                      )}
                       <span className="text-[11px] ml-2" style={{ color: MUTED }}>
                         {l.total > 0 ? Math.round((a.total / l.total) * 100) : 0}% da categoria
                       </span>

@@ -13,6 +13,7 @@ import { apiFetch } from '../lib/api'
 import { log } from '../lib/logger'
 import { formatBRL, mesLabel, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
 import { usePageState } from '../context/PageStateContext'
+import { useAtalhoVoltarNivel } from '../hooks/useAtalhoVoltarNivel'
 import { useCategorias } from '../hooks/useCategorias'
 import { useOcultarValores } from '../hooks/useOcultarValores'
 import { FiltrosLancamentos } from '../components/ui/FiltrosLancamentos'
@@ -429,6 +430,7 @@ export default function RelatoriosPage() {
     categoria_nome: string
     mes: string | null  // null = todos os meses
   } | null>(null)
+  useAtalhoVoltarNivel(drillDown !== null, () => setDrillDown(null))
 
   const { categorias }   = useCategorias()
 
@@ -1405,7 +1407,8 @@ export default function RelatoriosPage() {
           {/* A tabela ganha rolagem horizontal própria em telas estreitas;
               assim a página não depende de rolagem lateral do <main>. */}
           {!vistaPareto && <p className="mb-2 text-[13px] md:hidden" style={{ color: '#8b92a8' }}>Deslize a tabela para o lado para ver os outros meses ↔</p>}
-          {!vistaPareto && <div className="relatorios-table-scroll" data-tutorial="relatorios-tabela">
+          {!vistaPareto && <div className="relatorios-table-scroll" data-tutorial="relatorios-tabela"
+            style={{ ['--alt-barra-filtros' as string]: `${alturaBarraFiltros}px` }}>
             <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl">
               {/* table-layout: fixed — com `auto` (padrão), o navegador ignora a
                   largura definida da coluna Categoria sempre que o texto de
@@ -1416,7 +1419,7 @@ export default function RelatoriosPage() {
               <table className="w-full border-collapse" style={{ width: Math.max(600, larguraCategoria + 130 + 125 + colunas.length * 124), minWidth: Math.max(600, larguraCategoria + 130 + 125 + colunas.length * 124), tableLayout: 'fixed' }}>
                 {/* Cabecalho — sticky logo abaixo da barra de filtros
                     (altura medida via ResizeObserver, ver alturaBarraFiltros). */}
-                <thead className="sticky z-30" style={{ top: alturaBarraFiltros }}>
+                <thead className="sticky z-30" style={{ top: 0 }}>
                   <tr style={{ background: '#1a1f2e' }}>
                     <th className="px-4 py-3 text-left sticky left-0 z-40 border-b border-white/10"
                       style={{ background: '#1a1f2e', width: larguraCategoria, minWidth: larguraCategoria }}>
