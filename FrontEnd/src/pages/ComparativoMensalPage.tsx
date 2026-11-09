@@ -13,6 +13,7 @@ import {
   ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { apiFetch } from '../lib/api'
+import { useAtalhoVoltarNivel } from '../hooks/useAtalhoVoltarNivel'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
 import { formatBRL, mesLabel, mesAtual, dataParaYMD } from '../lib/utils'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
@@ -280,6 +281,7 @@ export default function ComparativoMensalPage() {
   const [drillDown,   setDrillDown]   = useState<{ catKey: string; nome: string; periodo: 'inicial' | 'final' } | null>(null)
   const [editandoId,  setEditandoId]  = useState<string | null>(null)
   const drillDownRef = useRef<HTMLDivElement>(null)
+  useAtalhoVoltarNivel(drillDown !== null, () => setDrillDown(null))
   // Insight ativo: destaca as catKeys do insight no grid e dá scroll
   const [insightAtivo,  setInsightAtivo]  = useState<number | null>(null)
   const tabelaRef       = useRef<HTMLDivElement>(null)

@@ -30,7 +30,7 @@ function dataFutura(meses: number): string {
   return d.toISOString().split("T")[0];
 }
 
-describe("Transações — CA-TX01 a CA-TX28", () => {
+describe("Transações — CA-TX01 a CA-TX30", () => {
 
   beforeAll(async () => {
     const { data: contas } = await api("/contas") as { data: { dados: Record<string, unknown>[] } };
@@ -671,6 +671,73 @@ describe("Transações — CA-TX01 a CA-TX28", () => {
 
     const { data: txs } = await api(`/transacoes?id_recorrencia=${idRec}&per_page=200`) as { data: { dados: Record<string, unknown>[] } };
     for (const id of txs.dados.map(t => t.id as string)) await limparTransacao(id).catch(() => {});
+  });
+
+  // ── CA-TX29 / CA-TX30 — Antecipação parcial ──────────────
+  test("CA-TX29 — POST /:id/antecipar com { parcelas } consolida só as escolhidas", async () => {
+    const { status: st, data: d } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: dataFutura(1),
+      status: "PENDENTE",
+      valor: 100.00,
+      total_parcelas: 5,
+      tipo_recorrencia: "MENSAL",
+      intervalo_recorrencia: 1,
+    }) as { status: number; data: Record<string, unknown> };
+    expect(st).toBe(201);
+    const idRec = (d as any).id_recorrencia as string;
+    const ids = ((d as any).parcelas as any[]).map((p: any) => p.id as string);
+
+    try {
+      // Antecipa as parcelas 2 e 4 na parcela 1
+      const r = await api(`/transacoes/${ids[0]}/antecipar`, "POST", { parcelas: [2, 4] }) as { status: number };
+      expect(r.status).toBe(200);
+
+      const { data: lista } = await api(`/transacoes?id_recorrencia=${idRec}&per_page=200`) as { data: { dados: Record<string, unknown>[] } };
+      const nrs = lista.dados.map(t => t.nr_parcela as number).sort((a, b) => a - b);
+      expect(nrs).toEqual([1, 3, 5]);
+
+      const p1 = lista.dados.find(t => t.nr_parcela === 1)!;
+      expect(Number(p1.valor)).toBe(300);
+      expect(Number(p1.valor_projetado)).toBe(100);
+      expect(p1.total_parcelas).toBe(5); // restam parcelas — total preservado
+
+      // Parcela já antecipada / inexistente → 400
+      const inv = await api(`/transacoes/${ids[0]}/antecipar`, "POST", { parcelas: [2] }) as { status: number };
+      expect(inv.status).toBe(400);
+      // Lista vazia → 400
+      const vazia = await api(`/transacoes/${ids[0]}/antecipar`, "POST", { parcelas: [] }) as { status: number };
+      expect(vazia.status).toBe(400);
+    } finally {
+      const { data: txs } = await api(`/transacoes?id_recorrencia=${idRec}&per_page=200`) as { data: { dados: Record<string, unknown>[] } };
+      for (const id of txs.dados.map(t => t.id as string)) await limparTransacao(id).catch(() => {});
+    }
+  });
+
+  test("CA-TX30 — antecipação parcial de todas as seguintes equivale à total (total_parcelas = nr atual)", async () => {
+    const { status: st, data: d } = await api("/transacoes", "POST", {
+      ...TX_VALIDA(),
+      data: dataFutura(1),
+      status: "PENDENTE",
+      valor: 50.00,
+      total_parcelas: 3,
+      tipo_recorrencia: "MENSAL",
+      intervalo_recorrencia: 1,
+    }) as { status: number; data: Record<string, unknown> };
+    expect(st).toBe(201);
+    const idRec = (d as any).id_recorrencia as string;
+    const ids = ((d as any).parcelas as any[]).map((p: any) => p.id as string);
+
+    try {
+      const r = await api(`/transacoes/${ids[0]}/antecipar`, "POST", { parcelas: [2, 3] }) as { status: number };
+      expect(r.status).toBe(200);
+      const { data: tx } = await api(`/transacoes/${ids[0]}`) as { data: Record<string, unknown> };
+      expect(Number(tx.valor)).toBe(150);
+      expect(tx.total_parcelas).toBe(1);
+    } finally {
+      const { data: txs } = await api(`/transacoes?id_recorrencia=${idRec}&per_page=200`) as { data: { dados: Record<string, unknown>[] } };
+      for (const id of txs.dados.map(t => t.id as string)) await limparTransacao(id).catch(() => {});
+    }
   });
 
 });

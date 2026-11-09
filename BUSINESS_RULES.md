@@ -175,6 +175,8 @@ Função `fn_antecipar_parcelas`:
 2. **Deleta** essas parcelas seguintes.
 3. Atualiza a parcela atual: `valor = valor + soma`, `total_parcelas = N`, `valor_projetado = valor original`.
 
+**Antecipação parcial** — `POST /transacoes/:id/antecipar` com body `{ "parcelas": [10, 11, 12] }` (nr_parcela) chama `fn_antecipar_parcelas_parcial`: soma e deleta **só** as parcelas listadas; as demais seguem intactas com a numeração original e `total_parcelas` é preservado (ex.: 3/12 vira R$ 4×; sobram 4..9 de 12). Só se todas as seguintes forem listadas o resultado é o da antecipação total (`total_parcelas = N`). `valor_projetado` mantém o 1º valor unitário em antecipações sucessivas. Erros extras: `PARCELA_INVALIDA` (inexistente/não posterior) e `PARCELAS_VAZIAS` → 400. UI: modal "Antecipar" do `DrawerLancamento` (aba "Escolher parcelas").
+
 Erros possíveis:
 
 - `TRANSACAO_NAO_ENCONTRADA`

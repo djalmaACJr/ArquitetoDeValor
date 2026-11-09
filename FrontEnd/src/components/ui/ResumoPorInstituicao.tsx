@@ -4,6 +4,7 @@ import { Doughnut } from 'react-chartjs-2'
 import { ChevronRight, ExternalLink } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { useContas } from '../../hooks/useContas'
+import { useAtalhoVoltarNivel } from '../../hooks/useAtalhoVoltarNivel'
 import { fetchDashboard, fetchTotaisPorConta, useInvestimentosRanking } from '../../hooks/useInvestimentosDashboard'
 import { qk } from '../../lib/queryKeys'
 import { formatBRL } from '../../lib/utils'
@@ -27,6 +28,10 @@ export default function ResumoPorInstituicao() {
   const uid = session?.user?.id ?? null
   const { contas } = useContas()
   const [nivel, setNivel] = useState<Nivel>({ n: 0 })
+
+  // Backspace sobe um nível (ativo → tipo → instituição).
+  useAtalhoVoltarNivel(nivel.n !== 0, () => setNivel((n) =>
+    n.n === 2 ? { n: 1, contaId: n.contaId, contaNome: n.contaNome } : { n: 0 }))
 
   // Só contas onde investimentos fazem sentido (as demais nunca têm posição).
   const instituicoes = useMemo(

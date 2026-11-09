@@ -55,7 +55,10 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
     if (m === "POST"   &&  id && acao==="antecipar") {
       const ctx = await resolverContexto(req, c, userId, ["EXTRATO"], true);
       if (ctx instanceof Response) return ctx;
-      return await antecipar(c, id, ctx.userId);
+      // Body opcional: { parcelas: number[] } = antecipação parcial.
+      // Sem body (ou sem "parcelas") = antecipa todas as seguintes.
+      const bodyAntecip = await req.json().catch(() => null) as { parcelas?: unknown } | null;
+      return await antecipar(c, id, ctx.userId, bodyAntecip?.parcelas);
     }
     if (m === "PUT"    &&  id) {
       const ctx = await resolverContexto(req, c, userId, ["EXTRATO"], true);
@@ -987,17 +990,36 @@ async function excluir(c: ReturnType<typeof db>, id: string, escopo: string) {
   return json({ excluidos: ids.length, ids });
 }
 
-async function antecipar(c: ReturnType<typeof db>, id: string, userId: string) {
+async function antecipar(
+  c: ReturnType<typeof db>, id: string, userId: string, parcelasEscolhidas?: unknown,
+) {
   logRequest("POST", `/transacoes/${id}/antecipar`);
+
+  // Antecipação parcial: lista de nr_parcela inteiros e positivos.
+  let parcelas: number[] | null = null;
+  if (parcelasEscolhidas !== undefined && parcelasEscolhidas !== null) {
+    if (!Array.isArray(parcelasEscolhidas) || parcelasEscolhidas.length === 0
+        || parcelasEscolhidas.length > 600
+        || !parcelasEscolhidas.every((n) => Number.isInteger(n) && n > 0)) {
+      return erro("parcelas deve ser uma lista não vazia de números de parcela inteiros", 400);
+    }
+    parcelas = parcelasEscolhidas as number[];
+  }
 
   const naoEncontrado = await verificarExistencia(c, "transacoes", id, "Lançamento não encontrado", userId);
   if (naoEncontrado) return naoEncontrado;
 
   try {
-    const { data, error } = await c.rpc("fn_antecipar_parcelas", {
-      p_transacao_id: id,
-      p_user_id: userId,
-    });
+    const { data, error } = parcelas
+      ? await c.rpc("fn_antecipar_parcelas_parcial", {
+          p_transacao_id: id,
+          p_user_id: userId,
+          p_parcelas: parcelas,
+        })
+      : await c.rpc("fn_antecipar_parcelas", {
+          p_transacao_id: id,
+          p_user_id: userId,
+        });
 
     if (error) {
       logError("Antecipar parcelas", error);
@@ -1005,6 +1027,8 @@ async function antecipar(c: ReturnType<typeof db>, id: string, userId: string) {
         return erro("Não é possível antecipar a última parcela", 400);
       if (error.message?.includes("NOT_INSTALLMENT"))
         return erro("Disponível apenas para lançamentos do tipo PARCELA", 400);
+      if (error.message?.includes("PARCELA_INVALIDA") || error.message?.includes("PARCELAS_VAZIAS"))
+        return erro("Parcelas inválidas: escolha apenas parcelas seguintes da mesma série", 400);
       return erro("Erro ao antecipar parcelas: " + error.message, 500);
     }
 

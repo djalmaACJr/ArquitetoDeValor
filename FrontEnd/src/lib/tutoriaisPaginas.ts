@@ -355,7 +355,7 @@ export const TUTORIAL_EXTRATO: PassoTutorial[] = [
   },
   {
     titulo: 'Lista de lançamentos',
-    texto: 'Lançamentos agrupados por data. Clique em qualquer linha para editar. Use o checkbox à esquerda para selecionar vários e pagar ou excluir em lote. Ícone ⚡ antecipa parcelas de recorrências.',
+    texto: 'Lançamentos agrupados por data. Clique em qualquer linha para editar. Use o checkbox à esquerda para selecionar vários e pagar ou excluir em lote. Ícone ⚡ antecipa parcelas de recorrências (todas as seguintes ou só as que você escolher).',
     seletor: '[data-tutorial="extrato-lista"]',
   },
   {

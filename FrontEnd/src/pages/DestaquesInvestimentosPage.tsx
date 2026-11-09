@@ -5,7 +5,7 @@ import { Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend,
 } from 'chart.js'
-import { useInvestimentosDestaques } from '../hooks/useInvestimentosDashboard'
+import { useInvestimentosDestaques, useInvestimentosDashboard } from '../hooks/useInvestimentosDashboard'
 import { calcularRankingsDestaques } from '../lib/destaquesRanking'
 import { yocMedioPct } from '../lib/yieldCarteira'
 import { useContas } from '../hooks/useContas'
@@ -16,6 +16,8 @@ import { MultiSelect, type MultiSelectOption } from '../components/ui/MultiSelec
 import InvestimentosNav from '../components/ui/InvestimentosNav'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import QuadroRentabilidadeIndices from '../components/ui/QuadroRentabilidadeIndices'
+import QuadroPosicoesLucro from '../components/ui/QuadroPosicoesLucro'
+import QuadroOportunidadesCompra from '../components/ui/QuadroOportunidadesCompra'
 import { formatBRL } from '../lib/utils'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, TIPOS_ATIVO_INV } from '../lib/constants'
 import type {
@@ -46,8 +48,8 @@ const PERIODOS: { value: PeriodoRanking; label: string }[] = [
 
 // Chaves dos 6 quadros gerais — ordem PADRÃO (usada quando o usuário nunca
 // reordenou nada); a ordem de fato é definida por useOrdemReordenavel.
-type ChaveGeral = 'contribuintes' | 'em_alta' | 'em_baixa' | 'maior_dy' | 'maior_yoc' | 'maior_div_recebido' | 'maior_peso'
-const CHAVES_GERAIS: ChaveGeral[] = ['contribuintes', 'em_alta', 'em_baixa', 'maior_dy', 'maior_yoc', 'maior_div_recebido', 'maior_peso']
+type ChaveGeral = 'posicoes_lucro' | 'oportunidades' | 'contribuintes' | 'em_alta' | 'em_baixa' | 'maior_dy' | 'maior_yoc' | 'maior_div_recebido' | 'maior_peso'
+const CHAVES_GERAIS: ChaveGeral[] = ['posicoes_lucro', 'oportunidades', 'contribuintes', 'em_alta', 'em_baixa', 'maior_dy', 'maior_yoc', 'maior_div_recebido', 'maior_peso']
 
 function corPct(v: number): string { return v > 0 ? VERDE : v < 0 ? VERMELHO : MUTED }
 function fmtPct(v: number): string { return `${v > 0 ? '+' : ''}${v}%` }
@@ -528,6 +530,7 @@ export default function DestaquesInvestimentosPage() {
   const contasInvest = contas.filter((c) => c.tipo === 'INVESTIMENTO' && c.ativa)
 
   const { destaques, loading, atualizando, error } = useInvestimentosDestaques(contaId || null, periodo)
+  const { dashboard } = useInvestimentosDashboard(contaId || null)
   const ativos     = destaques?.ativos ?? []
   const categorias = destaques?.categorias ?? []
   const rentabilidadePeriodoTotal = destaques?.rentabilidade_periodo_pct_total ?? null
@@ -601,6 +604,14 @@ export default function DestaquesInvestimentosPage() {
   )
 
   const PAINEIS_GERAIS: Record<ChaveGeral, React.ReactNode> = {
+    posicoes_lucro: (
+      <QuadroPosicoesLucro ativos={ativosFiltrados} origem={origem}
+        dragHandleProps={alcaGeral('posicoes_lucro')} dropTargetProps={alvoGeral('posicoes_lucro')} bordaClasse={bordaGeral('posicoes_lucro')} />
+    ),
+    oportunidades: (
+      <QuadroOportunidadesCompra ativos={ativosFiltrados} tipos={dashboard?.tipos ?? []} totalCarteira={dashboard?.total_mercado ?? 0} origem={origem}
+        dragHandleProps={alcaGeral('oportunidades')} dropTargetProps={alvoGeral('oportunidades')} bordaClasse={bordaGeral('oportunidades')} />
+    ),
     contribuintes: (
       <ListaDestaque titulo="Maiores contribuintes" icone={<Zap size={14} />} itens={contribuintes} periodo={periodo} origem={origem}
         colunaLabel="Contribuição no período"
