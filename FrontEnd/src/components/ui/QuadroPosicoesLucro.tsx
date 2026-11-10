@@ -21,7 +21,7 @@ function fmtPct(v: number): string {
 // não a do período filtrado — a "Variação" mostra o período, a
 // "Rentabilidade" mostra o acumulado. Ativo com rentabilidade 0 não entra em nenhum
 // dos lados (mas conta no total "de N").
-export function dividirPorResultado(ativos: InvestimentoRankingAtivo[]) {
+function dividirPorResultado(ativos: InvestimentoRankingAtivo[]) {
   const lucro = ativos.filter((a) => a.rentabilidade_pct > 0)
     .sort((x, y) => y.rentabilidade_pct - x.rentabilidade_pct)
   const prejuizo = ativos.filter((a) => a.rentabilidade_pct < 0)
