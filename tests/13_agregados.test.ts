@@ -1875,9 +1875,19 @@ describe("Agregados — atividade dos agregados visível ao dono", () => {
   afterAll(async () => {
     if (!ok) return;
     await api(`/agregados/${vinculoId}/revogar`, { method: "POST", headers: headersA }).catch(() => {});
+    // Remove a conta AGR-ATV criada no beforeAll (e qualquer lançamento que sobrou
+    // nela — o trigger bloqueia excluir conta com lançamentos). Sem isso, cada
+    // rodada deixava uma conta órfã na conta de teste (31 acumuladas em nov/2026).
+    if (contaId) {
+      const { data: txs } = await api(`/transacoes?conta_id=${contaId}&per_page=200`, { method: "GET", headers: headersA });
+      for (const tx of ((txs?.dados ?? []) as { id: string }[])) {
+        await api(`/transacoes/${tx.id}?escopo=SOMENTE_ESTE`, { method: "DELETE", headers: headersA }).catch(() => {});
+      }
+      await api(`/contas/${contaId}`, { method: "DELETE", headers: headersA }).catch(() => {});
+    }
   }, 60000);
 
-  test("CA-AGR78 — criação feita pelo agregado aparece na atividade do dono (INSERT, com nome do ator)", async () => {
+  test("CA-AGR78— criação feita pelo agregado aparece na atividade do dono (INSERT, com nome do ator)", async () => {
     if (!ok) { console.warn("[13_agregados] User B indisponível — CA-AGR78 pulado."); return; }
     const { status, data } = await api("/transacoes", { method: "POST", headers: ctxB,
       body: JSON.stringify({ descricao: `AGR Atv ${TS}`, valor: 31, data: hoje, conta_id: contaId,
