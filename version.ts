@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "7.6.0"
+export const APP_VERSION = "7.6.1"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -19,8 +19,8 @@ export const getVersionInfo = () => ({
     // Data de lançamento (AAAA-MM-DD) — exibida em Sobre › Versão atual.
     // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
     // em FrontEnd/src/pages/SobrePage.tsx.
-    date: "2026-11-09",
-    description: "Investimentos: novos quadros em Destaques (posições em lucro/prejuízo e oportunidades de compra) e atalho Backspace para voltar nível nos relatórios; antecipação parcial de parcelas: escolha quais parcelas antecipar"
+    date: "2026-11-10",
+    description: "Correção: o ⚡ de antecipar na lista do Extrato agora também permite escolher quais parcelas antecipar (antes só o fazia pela tela de edição)"
   }
 })
 

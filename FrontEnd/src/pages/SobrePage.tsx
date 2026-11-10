@@ -24,6 +24,18 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.6.0',
+    data:   '2026-11-09',
+    titulo: 'Destaques e antecipação parcial',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '⚡ Antecipar só algumas parcelas', d: 'ao antecipar um lançamento parcelado, você pode escolher exatamente quais parcelas antecipar (ex.: na 3ª, antecipar a 10, 11 e 12). As demais continuam como estão.' },
+      { t: '📈 Posições com lucro', d: 'novo quadro em Destaques de Investimentos com as posições em lucro e em prejuízo, pela rentabilidade total desde a compra.' },
+      { t: '🛒 Oportunidades de compra', d: 'novo quadro em Destaques com ativos recomendados para compra (nota alta e tipo abaixo da meta) cujo preço atual está abaixo do preço médio pago, com o valor sugerido.' },
+      { t: '⌫ Backspace para voltar', d: 'nos relatórios com detalhamento por categoria, a tecla Backspace volta um nível.' },
+    ],
+  },
+  {
     versao: '7.5.2',
     data:   '2026-11-05',
     titulo: 'Selic/CDI e fatura com PDF',
@@ -383,13 +395,10 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.6.0) */}
+        {/* Detalhe das novidades desta versão (7.6.1) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '⚡ Antecipar só algumas parcelas', d: 'ao antecipar um lançamento parcelado, você pode escolher exatamente quais parcelas antecipar (ex.: na 3ª, antecipar a 10, 11 e 12). As demais continuam como estão.' },
-            { t: '📈 Posições com lucro', d: 'novo quadro em Destaques de Investimentos com as posições em lucro e em prejuízo, pela rentabilidade total desde a compra.' },
-            { t: '🛒 Oportunidades de compra', d: 'novo quadro em Destaques com ativos recomendados para compra (nota alta e tipo abaixo da meta) cujo preço atual está abaixo do preço médio pago, com o valor sugerido.' },
-            { t: '⌫ Backspace para voltar', d: 'nos relatórios com detalhamento por categoria, a tecla Backspace volta um nível.' },
+            { t: '⚡ Escolher parcelas também na lista', d: 'o ícone ⚡ de antecipar na lista do Extrato agora oferece "Todas" ou "Escolher parcelas", como já era na tela de edição do lançamento. Antes, por ali, só dava para antecipar todas as seguintes.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
