@@ -46,8 +46,9 @@ function ModalOportunidades({ itens, origem, aoFechar }: { itens: OportunidadeCo
     setOrdem((o) => (o.chave === chave ? { chave, dir: o.dir === 'asc' ? 'desc' : 'asc' } : { chave, dir: chave === 'ticker' ? 'asc' : 'desc' }))
     setPagina(1)
   }
-  const Th = ({ k, rot, esquerda }: { k: ChaveOrdem; rot: string; esquerda?: boolean }) => (
-    <th className={`font-medium py-2.5 ${esquerda ? 'text-left' : 'text-right'}`}>
+  // Função de render (não componente): definir componente dentro do render recria o tipo a cada render.
+  const th = (k: ChaveOrdem, rot: string, esquerda?: boolean) => (
+    <th key={k} className={`font-medium py-2.5 ${esquerda ? 'text-left' : 'text-right'}`}>
       <button type="button" onClick={() => clicar(k)} className={`inline-flex items-center gap-1 hover:text-white ${ordem.chave === k ? 'text-white' : ''}`}>
         {rot}<ArrowUpDown size={11} />
       </button>
@@ -73,11 +74,11 @@ function ModalOportunidades({ itens, origem, aoFechar }: { itens: OportunidadeCo
           <table className="w-full text-[13px]">
             <thead>
               <tr style={{ color: MUTED }} className="border-y border-white/10">
-                <Th k="ticker" rot="Ativo" esquerda />
-                <Th k="pm" rot="Preço Médio" />
-                <Th k="pa" rot="Preço Atual" />
-                <Th k="cart" rot="% na carteira" />
-                <Th k="sugerido" rot="Valor sugerido" />
+                {th('ticker', 'Ativo', true)}
+                {th('pm', 'Preço Médio')}
+                {th('pa', 'Preço Atual')}
+                {th('cart', '% na carteira')}
+                {th('sugerido', 'Valor sugerido')}
               </tr>
             </thead>
             <tbody>
