@@ -8,7 +8,7 @@
 import { api, apiSemAuth, tryGetTokenB, limparUserBSeDinamico, gerarHeaders } from "./setup";
 
 // ── IDs gerados durante os testes ────────────────────────────
-let contaId:        string;   // conta reutilizada de /contas
+let contaId:        string;   // conta base dedicada (criada e removida pela suíte)
 let contaCalculoId: string;   // conta exclusiva para testes de cálculo
 let categoriaId:    string;   // categoria reutilizada de /categorias
 let sonhoId:        string;
@@ -34,10 +34,18 @@ async function limparObjetivosJest(): Promise<void> {
 describe("Objetivos — CA-OBJ01 a CA-OBJ13", () => {
 
   beforeAll(async () => {
-    // Reutiliza primeira conta ativa
-    const { data: contas } = await api("/contas") as { data: { dados: Record<string, unknown>[] } };
-    expect(contas.dados.length).toBeGreaterThan(0);
-    contaId = (contas.dados[0].conta_id ?? contas.dados[0].id) as string;
+    // Conta base DEDICADA (saldo 0, removida no afterAll). Antes reutilizava
+    // contas[0] e o CA-OBJ11 lançava R$ 2.300 nela a cada rodada sem limpar:
+    // o saldo crescia até passar da meta de R$ 50.000 do SONHO (CA-OBJ01) e o
+    // objetivo nascia ATINGIDO (achado nov/2026, saldo da conta chegou a 53 mil).
+    const { data: contaBase } = await api("/contas", "POST", {
+      nome:          "Jest OBJ Conta Base",
+      tipo:          "CARTEIRA",
+      cor:           "#00c896",
+      saldo_inicial: 0,
+    });
+    contaId = (contaBase.conta_id ?? contaBase.id) as string;
+    expect(contaId).toBeDefined();
 
     // Reutiliza primeira categoria pai
     const { data: cats } = await api("/categorias?apenas_pai=true") as { data: { dados: Record<string, unknown>[] } };
@@ -66,12 +74,13 @@ describe("Objetivos — CA-OBJ01 a CA-OBJ13", () => {
     await limparObjetivosJest();
     // Remove transações de cálculo remanescentes e a conta de teste
     // (só funciona se não houver outras transações na conta)
-    if (contaCalculoId) {
-      const { data: txs } = await api(`/transacoes?conta_id=${contaCalculoId}&per_page=200`);
+    for (const idConta of [contaCalculoId, contaId]) {
+      if (!idConta) continue;
+      const { data: txs } = await api(`/transacoes?conta_id=${idConta}&per_page=200`);
       for (const tx of (txs?.dados ?? []) as any[]) {
         await api(`/transacoes/${tx.id}?escopo=SOMENTE_ESTE`, "DELETE");
       }
-      await api(`/contas/${contaCalculoId}`, "DELETE");
+      await api(`/contas/${idConta}`, "DELETE");
     }
     // CA-OBJ12 pode ter criado um User B descartável via tryGetTokenB()
     // (sem TEST_EMAIL_B configurado) — exclui aqui, não faz nada se User B
