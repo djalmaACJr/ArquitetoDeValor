@@ -15,8 +15,8 @@ import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_EXTRATO } from '../lib/tutoriaisPaginas'
 import { useLancamentos, fetchLancamentos, mesAdjacente, type Lancamento } from '../hooks/useLancamentos'
 import { useContas } from '../hooks/useContas'
-import { formatBRL, mesLabel, proximoMes, hojeLocal, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
-import { apiMutate } from '../lib/api'
+import { formatBRL, formatData, mesLabel, proximoMes, hojeLocal, STATUS_LABEL, STATUS_COR, STATUS_BG } from '../lib/utils'
+import { apiMutate, apiFetch } from '../lib/api'
 import { usePageState } from '../context/PageStateContext'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { useSaldoBaseMes } from '../hooks/useSaldoBaseMes'
@@ -347,6 +347,31 @@ export default function LancamentosPage() {
   const [statusOpen,  setStatusOpen]  = useState<{ id: string; top: number; left: number } | null>(null)
   // Modal de antecipação
   const [antecipando,        setAntecipando]        = useState<Lancamento | null>(null)
+  // Antecipação parcial: parcelas seguintes da série + as escolhidas (nr_parcela)
+  const [anteciparEscolher,   setAnteciparEscolher]   = useState(false)
+  const [parcelasSeguintes,   setParcelasSeguintes]   = useState<Lancamento[]>([])
+  const [parcelasEscolhidas,  setParcelasEscolhidas]  = useState<number[]>([])
+  const [carregandoSeguintes, setCarregandoSeguintes] = useState(false)
+  useEffect(() => {
+    if (!antecipando?.id_recorrencia) return
+    let cancelado = false
+    setAnteciparEscolher(false)
+    setParcelasEscolhidas([])
+    setParcelasSeguintes([])
+    setCarregandoSeguintes(true)
+    apiFetch<Lancamento[]>(`/transacoes?id_recorrencia=${antecipando.id_recorrencia}`)
+      .then(res => {
+        if (cancelado) return
+        const nrAtual = antecipando.nr_parcela ?? 0
+        setParcelasSeguintes(
+          (res.ok && res.dados ? res.dados : [])
+            .filter(t => (t.nr_parcela ?? 0) > nrAtual)
+            .sort((a, b) => (a.nr_parcela ?? 0) - (b.nr_parcela ?? 0)),
+        )
+      })
+      .finally(() => { if (!cancelado) setCarregandoSeguintes(false) })
+    return () => { cancelado = true }
+  }, [antecipando?.id, antecipando?.id_recorrencia, antecipando?.nr_parcela])
   const [confirmandoProjecao, setConfirmandoProjecao] = useState<Lancamento | null>(null)
   const [valorConfirmado,     setValorConfirmado]     = useState<string>('')
   // Seleção múltipla
@@ -1961,12 +1986,19 @@ export default function LancamentosPage() {
         // Calcula parcelas futuras pelos metadados da transação (não depende do mês carregado)
         const nrAtual        = antecipando.nr_parcela ?? 0
         const totalParc      = antecipando.total_parcelas ?? 0
-        const nFuturas       = Math.max(0, totalParc - nrAtual)
+        const nTodas         = Math.max(0, totalParc - nrAtual)
+        const escolhidas     = parcelasSeguintes.filter(t => parcelasEscolhidas.includes(t.nr_parcela ?? 0))
+        const parcial        = isRecorrModal && anteciparEscolher
+        const nFuturas       = parcial ? escolhidas.length : nTodas
         const temFuturas     = isRecorrModal && nFuturas > 0
+        const semEscolha     = parcial && escolhidas.length === 0
+        const nrsOrdenados   = [...parcelasEscolhidas].sort((a, b) => a - b)
 
-        // Valor estimado: usa valor unitário para as parcelas futuras
+        // Valor estimado: valor real das escolhidas; "todas" usa o valor unitário
         const valorUnitario  = antecipando.valor
-        const valorFutEst    = nFuturas * valorUnitario
+        const valorFutEst    = parcial
+          ? escolhidas.reduce((s, t) => s + t.valor, 0)
+          : nFuturas * valorUnitario
         const valorTotal     = antecipando.valor + valorFutEst
 
         return (
@@ -1985,6 +2017,54 @@ export default function LancamentosPage() {
                   {isRecorrModal ? 'Confirmar antecipação' : 'Confirmar pagamento'}
                 </p>
               </div>
+
+              {/* Escopo: todas as seguintes ou só algumas */}
+              {isRecorrModal && nTodas > 0 && (
+                <>
+                  <div className="grid grid-cols-2 gap-1 p-1 mb-3 rounded-lg bg-[#252d42]" role="radiogroup" aria-label="Quais parcelas antecipar">
+                    {([
+                      { v: false, t: `Todas (${nTodas})` },
+                      { v: true,  t: 'Escolher parcelas' },
+                    ] as const).map(o => (
+                      <button key={String(o.v)} type="button" role="radio"
+                        aria-checked={anteciparEscolher === o.v}
+                        onClick={() => setAnteciparEscolher(o.v)}
+                        className="py-1.5 rounded-md text-[14px] font-semibold transition-all"
+                        style={anteciparEscolher === o.v
+                          ? { background: '#f0b429', color: '#0a0f1a' }
+                          : { color: '#8b92a8' }}>
+                        {o.t}
+                      </button>
+                    ))}
+                  </div>
+
+                  {anteciparEscolher && (
+                    <div className="mb-3 rounded-xl border border-white/10 max-h-48 overflow-y-auto divide-y divide-white/5">
+                      {carregandoSeguintes && (
+                        <p className="p-3 text-[14px] text-center" style={{ color: '#8b92a8' }}>Carregando parcelas…</p>
+                      )}
+                      {!carregandoSeguintes && parcelasSeguintes.length === 0 && (
+                        <p className="p-3 text-[14px] text-center" style={{ color: '#8b92a8' }}>Nenhuma parcela seguinte encontrada.</p>
+                      )}
+                      {parcelasSeguintes.map(t => {
+                        const nr = t.nr_parcela ?? 0
+                        const marcada = parcelasEscolhidas.includes(nr)
+                        return (
+                          <label key={t.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-white/5">
+                            <input type="checkbox" checked={marcada}
+                              onChange={() => setParcelasEscolhidas(p => p.includes(nr) ? p.filter(n => n !== nr) : [...p, nr])}
+                              className="w-4 h-4 accent-[#f0b429]" />
+                            <span className="flex-1 text-[15px]" style={{ color: '#e8eaf0' }}>
+                              {nr}/{totalParc} · {formatData(t.data)}
+                            </span>
+                            <span className="text-[15px]" style={{ color: '#8b92a8' }}>{formatBRL(t.valor)}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
 
               {/* Resumo */}
               <div className="bg-[#252d42] rounded-xl p-3 mb-4 space-y-2">
@@ -2043,7 +2123,7 @@ export default function LancamentosPage() {
 
               <p className="text-[15px] mb-4 text-center" style={{ color: '#8b92a8' }}>
                 {temFuturas
-                  ? <>A parcela atual será marcada como <span style={{ color: '#00c896' }}>PAGA</span> com o valor consolidado e as {nFuturas} parcelas seguintes serão removidas.</>
+                  ? <>A parcela atual será marcada como <span style={{ color: '#00c896' }}>PAGA</span> com o valor consolidado e {parcial ? `as ${nFuturas} parcelas escolhidas (${nrsOrdenados.join(', ')})` : `as ${nFuturas} parcelas seguintes`} serão removidas.</>
                   : <>O lançamento será marcado como <span style={{ color: '#00c896' }}>PAGO</span> com a data de hoje.</>
                 }
               </p>
@@ -2055,17 +2135,20 @@ export default function LancamentosPage() {
                   Cancelar
                 </button>
                 <button
+                  disabled={semEscolha}
                   onClick={async () => {
                     const l = antecipando
                     setAntecipando(null)
                     if (isRecorrModal) {
-                      const { ok, erro: e } = await antecipar(l.id)
+                      const { ok, erro: e } = await antecipar(l.id, parcial ? nrsOrdenados : undefined)
                       if (ok) {
                         // Registrar detalhes da antecipação na observação
                         if (nFuturas > 0) {
                           const dataHoje = new Date().toLocaleDateString('pt-BR')
                           const totalParcs = nFuturas + 1
-                          const nota = `[Antecip. ${dataHoje}: ${totalParcs} parc. (${nrAtual}–${totalParc}/${totalParc}) · ${formatBRL(valorUnitario)}/un · Total ${formatBRL(valorTotal)}]`
+                          const nota = parcial
+                            ? `[Antecip. ${dataHoje}: parc. ${[nrAtual, ...nrsOrdenados].join(', ')}/${totalParc} · ${formatBRL(valorUnitario)}/un · Total ${formatBRL(valorTotal)}]`
+                            : `[Antecip. ${dataHoje}: ${totalParcs} parc. (${nrAtual}–${totalParc}/${totalParc}) · ${formatBRL(valorUnitario)}/un · Total ${formatBRL(valorTotal)}]`
                           const obsAtualizada = l.observacao ? `${l.observacao}\n${nota}` : nota
                           await apiMutate(`/transacoes/${l.id}?escopo=SOMENTE_ESTE`, 'PUT', { observacao: obsAtualizada })
                         }
@@ -2083,7 +2166,7 @@ export default function LancamentosPage() {
                       }
                     }
                   }}
-                  className={`flex-1 py-2.5 rounded-lg text-[16px] font-semibold transition-all ${isRecorrModal ? 'hover:bg-yellow-400/90' : 'hover:bg-green-500/90'}`}
+                  className={`flex-1 py-2.5 rounded-lg text-[16px] font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${isRecorrModal ? 'hover:bg-yellow-400/90' : 'hover:bg-green-500/90'}`}
                   style={{ background: isRecorrModal ? '#f0b429' : '#00c896', color: '#0a0f1a' }}>
                   {isRecorrModal
                     ? <><Zap size={12} className="inline mr-1" /> Antecipar</>
