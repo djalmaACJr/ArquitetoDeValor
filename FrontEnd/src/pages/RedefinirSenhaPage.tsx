@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { CampoSenha } from '../components/ui/CampoSenha'
+import { traduzirErroAuth } from '../lib/errosAuth'
 
 export default function RedefinirSenhaPage() {
   const navigate = useNavigate()
@@ -64,7 +65,7 @@ export default function RedefinirSenhaPage() {
     setLoading(false)
 
     if (err) {
-      setError(`Não foi possível redefinir a senha: ${err.message}`)
+      setError(`Não foi possível redefinir a senha: ${traduzirErroAuth(err)}`)
       return
     }
 

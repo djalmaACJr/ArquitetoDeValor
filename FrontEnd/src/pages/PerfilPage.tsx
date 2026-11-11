@@ -20,6 +20,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAdmin } from '../hooks/useAdmin'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import { traduzirErroAuth } from '../lib/errosAuth'
 import { useAuth } from '../hooks/useAuth'
 import { useUsuarioPerfil } from '../hooks/useUsuarioPerfil'
 import { apiMutate } from '../lib/api'
@@ -1263,7 +1264,7 @@ export default function PerfilPage() {
     const { error } = await supabase.auth.updateUser({ password: novaSenha })
     setLoadSenha(false)
     if (error) {
-      setFbSenha({ tipo: 'erro', msg: 'Não foi possível atualizar a senha.' })
+      setFbSenha({ tipo: 'erro', msg: `Não foi possível atualizar a senha: ${traduzirErroAuth(error)}` })
     } else {
       setFbSenha({ tipo: 'ok', msg: 'Senha atualizada com sucesso.' })
       setSenhaAtual(''); setNovaSenha(''); setConfirmar('')
