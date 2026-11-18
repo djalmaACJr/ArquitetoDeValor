@@ -49,11 +49,18 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           E2E_BASE_URL: http://localhost:5173
 
-      - name: Salvar relatório Playwright
+      # O outputFolder do reporter é relativo à pasta da config (FrontEnd/e2e), então o
+      # HTML sai em FrontEnd/e2e/e2e/report — o caminho antigo (e2e/report) nunca existia
+      # e a CI jamais guardou relatório. test-results traz screenshot, trace e
+      # error-context.md de cada falha (o que mostra o que a página exibia).
+      - name: Salvar relatório e evidências das falhas (Playwright)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ github.run_number }}
-          path: FrontEnd/e2e/report/
-          if-no-files-found: ignore
+          path: |
+            FrontEnd/e2e/e2e/report/
+            FrontEnd/e2e/test-results/
+            FrontEnd/test-results/
+          if-no-files-found: warn
           retention-days: 7
