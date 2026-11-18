@@ -138,14 +138,14 @@ export default function DetalheInvestimentoPage() {
   // (link direto/refresh), navega para o caminho conhecido.
   const voltar = () => {
     if ((window.history.state?.idx ?? 0) > 0) { navigate(-1); return }
-    // Aba aberta por link "em nova aba" (sem histórico próprio): fecha a aba e
-    // devolve o foco à de origem. Se a aba fecha, o timer abaixo nunca roda; se o
-    // navegador não deixar fechar (link direto, F5), cai no caminho conhecido.
-    // Não checar `window.closed`: não é confiável (Firefox o reporta como true
-    // mesmo quando o fechamento é negado — quebrou o E2E-INV12 na CI da 7.7.0).
+    // Aba aberta por link "em nova aba" (sem histórico próprio): navega para o
+    // caminho conhecido E tenta fechar a aba (devolvendo o foco à de origem). A ORDEM
+    // importa: navegar primeiro. Se o navegador nega o fechamento (link direto, F5), o
+    // usuário já está no destino; e no Firefox/Playwright um window.close() negado deixa
+    // a janela "em fechamento" e timers pendentes nunca disparam (quebrou o E2E-INV12).
     if (window.history.length <= 1) {
+      navigate(voltarPara)
       window.close()
-      setTimeout(() => navigate(voltarPara), 200)
       return
     }
     navigate(voltarPara)
