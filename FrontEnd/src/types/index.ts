@@ -687,7 +687,8 @@ export type VereditoRelatorio = 'POSITIVO' | 'NEUTRO' | 'ATENCAO' | 'NEGATIVO'
 export interface AnaliseRelatorioFii {
   id:              string
   ativo_id:        string
-  relatorio_id:    number
+  relatorio_id:    number | null   // relatório de FII (Fundos.NET)
+  documento_id?:   string | null   // OU documento de resultado (CVM/EDGAR) de ações e stocks
   data_referencia: string | null
   veredito:        VereditoRelatorio
   resumo:          string
@@ -703,6 +704,7 @@ export interface AnaliseRelatorioFii {
   created_at:      string
   inv_ativos?:          { ticker: string; nome: string } | null
   inv_relatorios_fii?:  { url_documento: string; fundo_nome: string; data_entrega: string } | null
+  inv_documentos_resultado?: { url_documento: string | null; emissor_nome: string; data_entrega: string; tipo_doc: string; fonte: 'EDGAR' | 'CVM' } | null
 }
 
 // Alerta de FII "em vias de mudar de forma" (liquidação, fusão, transformação,
@@ -721,10 +723,12 @@ export interface AlertaFii {
 }
 
 export interface RelatorioFiiDisponivel {
-  id:              number
+  id:              number | string   // FII: id numérico do Fundos.NET; ações/stocks: id textual do documento
   fundo_nome:      string
   data_referencia: string | null
   data_entrega:    string
-  url_documento:   string
+  url_documento:   string | null
+  tipo_doc?:       string            // 10-Q | 10-K | ITR | DFP (ações/stocks)
+  fonte?:          'EDGAR' | 'CVM'
   analisado:       boolean
 }

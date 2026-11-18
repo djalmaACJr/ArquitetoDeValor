@@ -7,7 +7,7 @@ import { useAuth } from './useAuth'
 import { useEmEspacoDeAgregado } from './useEspacoAtivo'
 import type { AnaliseRelatorioFii, RelatorioFiiDisponivel } from '../types'
 
-// Análises de Relatórios Gerenciais de FIIs. Sempre do PRÓPRIO usuário (a
+// Análises de relatórios/resultados: FIIs (Relatório Gerencial), ações (CVM) e stocks/REITs (SEC). Sempre do PRÓPRIO usuário (a
 // análise gasta a chave de IA de quem pede) — por isso usa o uid real da
 // sessão, nunca o do espaço de um dono (ver BUSINESS_RULES.md).
 export function useRelatoriosFii(ativoId?: string) {
@@ -30,7 +30,7 @@ export function useRelatoriosFii(ativoId?: string) {
 
   const invalidar = () => qc.invalidateQueries({ queryKey: qk.invRelatoriosFiiPref(uid) })
 
-  const analisar = async (ativo_id: string, relatorio_id?: number, config_id?: string): Promise<OpResult<AnaliseRelatorioFii>> => {
+  const analisar = async (ativo_id: string, relatorio_id?: number | string, config_id?: string): Promise<OpResult<AnaliseRelatorioFii>> => {
     const res = await apiMutate<AnaliseRelatorioFii>('/investimentos/relatorios-fii/analisar', 'POST', { ativo_id, relatorio_id, config_id })
     if (res.ok) await invalidar()
     return { ok: res.ok, dados: res.dados, erro: res.erro }
@@ -79,8 +79,9 @@ export function useAnalisesNaoVistas() {
 
 // Busca no Fundos.NET uma janela maior de relatórios (o cron diário só guarda
 // os últimos ~12 dias). Pode levar até ~100s.
-export async function sincronizarRelatoriosFii(dias = 100): Promise<boolean> {
-  const res = await apiMutate('/investimentos/relatorios-fii/sincronizar', 'POST', { dias })
+// Com `ativoId` de uma ação/stock, busca só os documentos daquele papel (CVM/EDGAR).
+export async function sincronizarRelatoriosFii(dias = 100, ativoId?: string): Promise<boolean> {
+  const res = await apiMutate('/investimentos/relatorios-fii/sincronizar', 'POST', ativoId ? { dias, ativo_id: ativoId } : { dias })
   return res.ok
 }
 

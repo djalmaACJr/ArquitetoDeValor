@@ -232,7 +232,7 @@ export default function QuadroTipoAtivos({
   ipca12mPct?:   number | null
 }) {
   const location = useLocation()
-  // FIIs com análise de relatório gerencial ainda não lida → selo "NOVA ANÁLISE" na linha.
+  // Ativos (FII/ações/stocks) com análise de relatório ainda não lida → selo "NOVA ANÁLISE" na linha.
   const { ativosComNova } = useAnalisesNaoVistas()
   const { porAtivo: alertasPorAtivo } = useAlertasFii() // selo vermelho: FII em liquidação/fusão/troca
   // Origem para o botão "voltar" da página de detalhe — preserva de qual página
@@ -486,7 +486,7 @@ export default function QuadroTipoAtivos({
       <span title={alertasPorAtivo.get(l.ativo_id)!.map((a) => a.rotulo).join(' · ')} className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded align-middle"
         style={{ color: '#ff8aa0', background: 'rgba(255,92,122,0.18)' }}>ALERTA</span>
     )}
-    {l.tipo_ativo === 'FII' && ativosComNova.has(l.ativo_id) && (
+    {['FII', 'ACOES', 'STOCKS', 'REIT'].includes(l.tipo_ativo) && ativosComNova.has(l.ativo_id) && (
       <span title="Há análise nova de relatório gerencial para verificar" className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded align-middle"
         style={{ color: '#93c5fd', background: 'rgba(59,130,246,0.18)' }}>NOVA ANÁLISE</span>
     )}

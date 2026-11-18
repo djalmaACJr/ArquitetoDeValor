@@ -623,7 +623,7 @@ export default function DetalheInvestimentoPage() {
     if (dySimuladoPvp1 || podeSimularCompraVenda) ks.push('dy_yoc')
     if (ehFIIAtivo && magicNumberFII) ks.push('protecao_poder_compra')
     // Análise gasta a chave de IA de quem pede → só em "Meus dados".
-    if (ehFIIAtivo && !emEspacoAgregado) ks.push('relatorios_fii')
+    if (['FII', 'ACOES', 'STOCKS', 'REIT'].includes(ativo.tipo_ativo) && !emEspacoAgregado) ks.push('relatorios_fii')
     ks.push('operacoes')
     return ks
   }, [ativo, emEspacoAgregado, magicNumberFII, dySimuladoPvp1, dyPorMes, precoAtualEstimado, precoTetoBazin, qtdAtual])
@@ -1627,7 +1627,7 @@ export default function DetalheInvestimentoPage() {
         if (chave === 'relatorios_fii') return (
           <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
             largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
-            <QuadroRelatoriosFii key={ativo.id} ativoId={ativo.id} ticker={ativo.ticker} />
+            <QuadroRelatoriosFii key={ativo.id} ativoId={ativo.id} ticker={ativo.ticker} tipo={ativo.tipo_ativo} />
           </Quadro>
         )
 

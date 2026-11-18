@@ -27,7 +27,7 @@ function Lista({ titulo, itens, cor, Icone }: { titulo: string; itens: string[];
 }
 
 // Cartão de uma análise de Relatório Gerencial de FII. Usado na página
-// "Análise Relatórios de FIIs" e no quadro da página do ativo.
+// "Análise de Relatórios" e no quadro da página do ativo.
 // `semLinkAtivo`: na página do próprio ativo o ticker não precisa ser link.
 export default function CartaoAnaliseRelatorio({ a, onVisto, onExcluir, semLinkAtivo = false }: {
   a: AnaliseRelatorioFii; onVisto: () => void; onExcluir: () => void; semLinkAtivo?: boolean
@@ -45,15 +45,16 @@ export default function CartaoAnaliseRelatorio({ a, onVisto, onExcluir, semLinkA
             {nova && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-400/15 text-blue-300">NOVA</span>}
           </p>
           <p className="text-[12px]" style={{ color: MUTED }}>
-            Relatório de {a.data_referencia ? formatData(a.data_referencia) : '—'} · {a.origem === 'CRON' ? 'automática' : 'manual'}
+            {a.inv_documentos_resultado ? (a.inv_documentos_resultado.fonte === 'EDGAR' ? `Relatório ${a.inv_documentos_resultado.tipo_doc}` : 'Resultado') : 'Relatório'} de {a.data_referencia ? formatData(a.data_referencia) : '—'} · {a.origem === 'CRON' ? 'automática' : 'manual'}
             {a.mentor_nome || a.provedor ? ` · ${a.mentor_nome || a.provedor}` : ''}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
-          {a.inv_relatorios_fii?.url_documento && (
-            <a href={a.inv_relatorios_fii.url_documento} target="_blank" rel="noreferrer" title="Abrir o PDF do relatório (Fundos.NET)"
+          {(a.inv_relatorios_fii?.url_documento ?? a.inv_documentos_resultado?.url_documento) && (
+            <a href={(a.inv_relatorios_fii?.url_documento ?? a.inv_documentos_resultado?.url_documento) as string} target="_blank" rel="noreferrer"
+              title={a.inv_documentos_resultado ? (a.inv_documentos_resultado.fonte === 'EDGAR' ? 'Abrir o documento na SEC (EDGAR)' : 'Abrir a fonte dos dados (CVM)') : 'Abrir o PDF do relatório (Fundos.NET)'}
               className="flex items-center gap-1 text-[12px] px-2 py-1 rounded-md border border-white/10 hover:border-white/25 text-white/80">
-              <ExternalLink size={12} /> PDF
+              <ExternalLink size={12} /> {a.inv_documentos_resultado ? (a.inv_documentos_resultado.fonte === 'EDGAR' ? a.inv_documentos_resultado.tipo_doc : 'Fonte') : 'PDF'}
             </a>
           )}
           {nova && (
