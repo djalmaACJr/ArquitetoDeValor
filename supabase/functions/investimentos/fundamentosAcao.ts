@@ -45,8 +45,8 @@ export function calcularValorJustoGraham(lpa: number | null | undefined, vpa: nu
 // Units (TAEE11, KLBN11, SANB11…) são cestas de ações de classes diferentes
 // (ex.: 1 ON + 2 PN); LPA/VPA "por ação" não vale por unit e a proporção varia
 // por papel. Não calculamos (o usuário pode informar LPA/VPA à mão).
-export function ehUnit(ticker: string): boolean {
-  return /11$/.test(ticker.trim().toUpperCase());
+export function ehUnit(ticker: string, subtipo?: string | null): boolean {
+  return subtipo === "UNIT" || /11$/.test(ticker.trim().toUpperCase());
 }
 
 const ehControladora = (ds: string) => /controlador/i.test(ds) && !/n[ãa]o\s*controlador/i.test(ds);

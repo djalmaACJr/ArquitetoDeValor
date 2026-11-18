@@ -23,6 +23,10 @@ import { chamarProvedorIA, lerConfigIAAtiva, ErroIA, type ConfigIAAtiva } from "
 import { extractText, getDocumentProxy } from "npm:unpdf@1.3.0";
 import { Db, hojeISO, recuarDias } from "./shared.ts";
 import {
+  TIPOS_COM_RESULTADO, analisarESalvarDocumento, documentosDoAtivo, listarDisponiveis,
+  processarResultadosCron, sincronizarDocumentosAtivo,
+} from "./resultadosEmpresas.ts";
+import {
   FNET_HEADERS, dataEntregaParaISO, fetchFnet, montarUrlBusca, normaliza, nucleoTicker,
   type LinhaFnet,
 } from "./fatosRelevantes.ts";
@@ -302,12 +306,20 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
     }
   }
 
+  // Ações BR (CVM) e Stocks/REITs (EDGAR): mesmo job, mesmo orçamento de tempo/IA.
+  let resultados: Record<string, unknown> = {};
+  try {
+    resultados = await processarResultadosCron(idsAuto, {
+      analisesRestantes: Math.max(MAX_ANALISES_POR_CRON - analisados, 0), prazoMs: inicio + ORCAMENTO_CRON_MS,
+    });
+  } catch (e) { logError("Resultados de empresas (cron)", e); resultados = { erro: String(e) }; }
+
   // Histórico: mantém só ~6 meses de análises (por competência; sem competência, pela data de criação).
   const corte = recuarDias(hojeISO(), DIAS_HISTORICO_ANALISES);
   const { count: expA } = await admin.from("inv_analises_relatorio").delete({ count: "exact" }).lt("data_referencia", corte);
   const { count: expB } = await admin.from("inv_analises_relatorio").delete({ count: "exact" }).is("data_referencia", null).lt("created_at", `${corte}T00:00:00Z`);
 
-  const resumo = { ...sync, analisados, expurgadas: (expA ?? 0) + (expB ?? 0), ignorados, falhas_analise: falhasIA, duracao_ms: Date.now() - inicio };
+  const resumo = { ...sync, analisados, expurgadas: (expA ?? 0) + (expB ?? 0), ignorados, falhas_analise: falhasIA, resultados, duracao_ms: Date.now() - inicio };
   logSuccess("Relatórios FII processados", resumo);
   return json({ dados: resumo });
 }
@@ -331,7 +343,7 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
     const ativoId = url.searchParams.get("ativo_id");
     const limite = Math.min(Math.max(Number(url.searchParams.get("limite")) || 60, 1), 200);
     let q = c.from("inv_analises_relatorio")
-      .select("*, inv_ativos(ticker, nome), inv_relatorios_fii(url_documento, fundo_nome, data_entrega)")
+      .select("*, inv_ativos(ticker, nome), inv_relatorios_fii(url_documento, fundo_nome, data_entrega), inv_documentos_resultado(url_documento, emissor_nome, data_entrega, tipo_doc, fonte)")
       .eq("user_id", userId).order("data_referencia", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false }).limit(limite);
     if (ativoId) q = q.eq("ativo_id", ativoId);
@@ -346,6 +358,15 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
   // relatório no cache (ou o "3 últimos") precisa buscar uma janela maior.
   if (m === "POST" && sub === "sincronizar") {
     const body = await req.json().catch(() => ({}));
+    if (body.ativo_id) {
+      const { data: alvo } = await c.from("inv_ativos").select("id, user_id, ticker, nome, tipo_ativo, acoes_subtipo")
+        .eq("id", String(body.ativo_id)).eq("user_id", userId).maybeSingle();
+      if (!alvo) return erro("Ativo não encontrado", 404);
+      if ((TIPOS_COM_RESULTADO as readonly string[]).includes(String(alvo.tipo_ativo))) {
+        const r = await sincronizarDocumentosAtivo(alvo as never);
+        return json({ dados: r });
+      }
+    }
     const dias = Math.min(Math.max(Number(body.dias) || 100, 1), 120);
     const r = await sincronizarRelatorios({ dias, paginas: 60, orcamentoMs: 100_000 });
     if (r.gerenciais === 0 && r.falhas > 0) return erro("Fundos.NET indisponível no momento. Tente novamente em instantes.", 502);
@@ -355,8 +376,11 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
   if (m === "GET" && sub === "disponiveis") {
     const ativoId = url.searchParams.get("ativo_id");
     if (!ativoId) return erro("ativo_id obrigatório");
-    const { data: ativo } = await c.from("inv_ativos").select("id, ticker, nome").eq("id", ativoId).eq("user_id", userId).maybeSingle();
+    const { data: ativo } = await c.from("inv_ativos").select("id, ticker, nome, tipo_ativo").eq("id", ativoId).eq("user_id", userId).maybeSingle();
     if (!ativo) return erro("Ativo não encontrado", 404);
+    if (ativo.tipo_ativo && (TIPOS_COM_RESULTADO as readonly string[]).includes(String(ativo.tipo_ativo))) {
+      return json({ dados: await listarDisponiveis(c, userId, { id: String(ativo.id), ticker: String(ativo.ticker), tipo_ativo: String(ativo.tipo_ativo) }) });
+    }
     const nucleo = nucleoTicker(String(ativo.ticker));
     const { data: rels, error } = await c.from("inv_relatorios_fii")
       .select("id, fundo_nome, fundo_pregao, data_referencia, data_entrega, url_documento")
@@ -385,11 +409,22 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
     const { data: ativo } = await c.from("inv_ativos").select("id, user_id, ticker, nome, tipo_ativo")
       .eq("id", String(body.ativo_id)).eq("user_id", userId).maybeSingle();
     if (!ativo) return erro("Ativo não encontrado", 404);
-    if (ativo.tipo_ativo !== "FII") return erro("Só FIIs têm relatório gerencial");
+    const ehDoc = (TIPOS_COM_RESULTADO as readonly string[]).includes(String(ativo.tipo_ativo));
+    if (ativo.tipo_ativo !== "FII" && !ehDoc) return erro("Este tipo de ativo não tem relatório periódico para analisar");
 
     // config_id (opcional): usa outro motor de IA já cadastrado, sem trocar a ativa.
     const cfgRes = await lerConfigIAAtiva(c, userId, body.config_id ? String(body.config_id) : undefined);
     if (!cfgRes.ok) return erro(cfgRes.erro, cfgRes.status);
+
+    if (ehDoc) {
+      const alvo = { id: String(ativo.id), user_id: userId, ticker: String(ativo.ticker), nome: ativo.nome as string | null, tipo_ativo: String(ativo.tipo_ativo) };
+      const docs = await documentosDoAtivo(c, alvo, 24);
+      const doc = body.relatorio_id != null ? docs.find((d) => d.id === String(body.relatorio_id)) : docs[0];
+      if (!doc) return erro("Nenhum documento de resultado encontrado para este ativo. Use \"Buscar relatórios\" primeiro.", 404);
+      const rd = await analisarESalvarDocumento(c, userId, cfgRes.config, alvo, doc, "MANUAL");
+      if (!rd.ok) return erro(rd.erro, rd.status);
+      return json({ dados: rd.analise }, 201);
+    }
 
     const admin = dbAdmin();
     let rel: Relatorio | null = null;

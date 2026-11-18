@@ -59,7 +59,7 @@ interface FundamentosAcao {
   exercicio:  string;        // data-base (fim do último trimestre/exercício usado), "AAAA-MM-DD"
 }
 
-function raizDoTicker(ticker: string): string {
+export function raizDoTicker(ticker: string): string {
   return ticker.trim().toUpperCase().replace(/\d+$/, "");
 }
 
@@ -138,7 +138,7 @@ async function lerDemonstracao(zip: JSZip, prefixo: string, ano: number, cnpjs: 
   return [...con, ...await lerLinhasDosCnpjs(zip, `${prefixo}_ind_${ano}.csv`, faltam)];
 }
 
-interface DadosEmpresa {
+export interface DadosEmpresa {
   dfpDre: LinhaCsv[]; itrDre: LinhaCsv[]; bppItr: LinhaCsv[]; bppDfp: LinhaCsv[];
   comp: LinhaCsv | undefined;
 }
@@ -162,7 +162,7 @@ function composicaoMaisRecente(linhas: LinhaCsv[]): Map<string, LinhaCsv> {
 // Baixa DFP (ano-1; ano-2 se ainda não publicado) e ITR (ano corrente; ausente
 // em jan–abr) e devolve os dados só dos CNPJs pedidos. Sequencial (1 ZIP grande
 // por vez) — ver nota do WORKER_RESOURCE_LIMIT em mapasBase().
-async function carregarDadosEmpresas(cnpjs: Set<string>): Promise<Map<string, DadosEmpresa>> {
+export async function carregarDadosEmpresas(cnpjs: Set<string>): Promise<Map<string, DadosEmpresa>> {
   const anoAtual = new Date().getUTCFullYear();
   const resultado = new Map<string, DadosEmpresa>();
   for (const c of cnpjs) resultado.set(c, { dfpDre: [], itrDre: [], bppItr: [], bppDfp: [], comp: undefined });
@@ -203,7 +203,7 @@ let cacheBase: { ano: number; tickerParaCnpj: Map<string, string>; acoesPorCnpj:
 // Sequencial, não Promise.all — achado real (out/2026): baixar+descompactar
 // os ZIPs da CVM AO MESMO TEMPO estourava o limite de memória/CPU da Edge
 // Function (WORKER_RESOURCE_LIMIT).
-async function mapasBase() {
+export async function mapasBase() {
   const anoAtual = new Date().getUTCFullYear();
   if (cacheBase && cacheBase.ano === anoAtual && Date.now() - cacheBase.buscadoEm < 3_600_000) return cacheBase;
   const tickerParaCnpj = await buscarFcaDoAno(anoAtual).catch((e) => { logError("CVM FCA — buscar", e); return new Map<string, string>(); });
@@ -255,13 +255,14 @@ interface AtivoAcaoLinha {
   acao_valor_justo: number | null;
   acao_fundamentos_origem: string | null;
   acao_fundamentos_referencia: string | null;
+  acoes_subtipo: string | null;
 }
 
 export async function atualizarFundamentosTodasAcoes(
   c: Db,
 ): Promise<{ processados: number; atualizados: number; sem_dado: number }> {
   const { data, error } = await c.from("inv_ativos")
-    .select("id, ticker, acao_lpa, acao_vpa, acao_valor_justo, acao_fundamentos_origem, acao_fundamentos_referencia")
+    .select("id, ticker, acoes_subtipo, acao_lpa, acao_vpa, acao_valor_justo, acao_fundamentos_origem, acao_fundamentos_referencia")
     .eq("tipo_ativo", "ACOES");
   if (error) { logError("CVM cron — listar ações", error); throw error; }
   const ativos = (data ?? []) as AtivoAcaoLinha[];
@@ -270,14 +271,14 @@ export async function atualizarFundamentosTodasAcoes(
   const { tickerParaCnpj, acoesPorCnpj } = await mapasBase();
   const cnpjs = new Set<string>();
   for (const a of ativos) {
-    const cnpj = ehUnit(a.ticker) ? undefined : tickerParaCnpj.get(raizDoTicker(a.ticker));
+    const cnpj = ehUnit(a.ticker, a.acoes_subtipo) ? undefined : tickerParaCnpj.get(raizDoTicker(a.ticker));
     if (cnpj) cnpjs.add(cnpj);
   }
   const dados = cnpjs.size > 0 ? await carregarDadosEmpresas(cnpjs) : new Map<string, DadosEmpresa>();
 
   let atualizados = 0, semDado = 0;
   for (const a of ativos) {
-    const cnpj = ehUnit(a.ticker) ? undefined : tickerParaCnpj.get(raizDoTicker(a.ticker));
+    const cnpj = ehUnit(a.ticker, a.acoes_subtipo) ? undefined : tickerParaCnpj.get(raizDoTicker(a.ticker));
     const f = cnpj && dados.get(cnpj) ? fundamentosDe(dados.get(cnpj)!, acoesPorCnpj.get(cnpj)) : null;
     if (!f) { semDado++; continue; }
 
