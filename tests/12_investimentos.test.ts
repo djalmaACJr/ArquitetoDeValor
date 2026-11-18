@@ -619,6 +619,59 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     await api(`/investimentos/ativos/${aId}`, "DELETE");
   });
 
+  test("CA-INV33 — transferência de ativo carrega o custo (origem encerra, destino herda), bloqueia edição isolada e exclui o par", async () => {
+    const { data: dO } = await api("/investimentos/ativos", "POST", { ticker: "JESTINVTO", nome: "Jest Transf Origem", tipo_ativo: "FII" });
+    const { data: dD } = await api("/investimentos/ativos", "POST", { ticker: "JESTINVTD", nome: "Jest Transf Destino", tipo_ativo: "FII" });
+    const oId = dO.dados.id as string, dId = dD.dados.id as string;
+    const posDe = async (id: string) => {
+      const { data } = await api(`/investimentos/posicoes?ativo_id=${id}`);
+      return (data?.dados ?? [])[0] as { id: string; quantidade: number; preco_custo: number; status: string } | undefined;
+    };
+    await api("/investimentos/operacoes", "POST", {
+      ativo_id: oId, conta_id: contaId, tipo_operacao: "COMPRA",
+      quantidade: 10, preco_unitario: 50, valor_total: 500, data_operacao: `${mesOffset(-2)}-10`,
+    });
+
+    // validações
+    const base = { ativo_origem_id: oId, conta_origem_id: contaId, ativo_destino_id: dId, quantidade_entrada: 25, data_operacao: hoje() };
+    expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, quantidade_entrada: 0 })).status).toBe(400);
+    expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, ativo_destino_id: oId })).status).toBe(400);
+    expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, quantidade_saida: 999 })).status).toBe(400);
+
+    // transferência total: 10 cotas (custo 500) → 25 cotas do destino
+    const { status, data } = await api("/investimentos/transferencias-ativo", "POST", base);
+    expect(status).toBe(201);
+    expect(Number(data.dados.custo_transferido)).toBeCloseTo(500, 2);
+    const idPar = data.dados.id_par_transferencia as string;
+    expect(idPar).toBeTruthy();
+
+    const pO = await posDe(oId), pD = await posDe(dId);
+    expect(pO?.status).toBe("ENCERRADA");
+    expect(Number(pO?.quantidade)).toBe(0);
+    expect(pD?.status).toBe("ATIVA");
+    expect(Number(pD?.quantidade)).toBe(25);
+    expect(Number(pD?.preco_custo)).toBeCloseTo(20, 6); // 500 / 25 — custo carregado, sem ganho/perda
+
+    // operação isolada de um par não pode ser editada nem excluída
+    const { data: ops } = await api(`/investimentos/operacoes?ativo_id=${dId}`);
+    const opPar = (ops.dados as any[]).find((o) => o.id_par_transferencia === idPar);
+    expect(opPar).toBeTruthy();
+    expect((await api(`/investimentos/operacoes/${opPar.id}`, "DELETE")).status).toBe(409);
+    expect((await api(`/investimentos/operacoes/${opPar.id}`, "PUT", { quantidade: 1 })).status).toBe(409);
+
+    // excluir o par restaura a origem e zera o destino
+    expect((await api(`/investimentos/transferencias-ativo/${idPar}`, "DELETE")).status).toBe(200);
+    expect(Number((await posDe(oId))?.quantidade)).toBe(10);
+    expect(Number((await posDe(dId))?.quantidade)).toBe(0);
+    expect((await api(`/investimentos/transferencias-ativo/${idPar}`, "DELETE")).status).toBe(404);
+
+    for (const id of [oId, dId]) {
+      const { data: posAll } = await api(`/investimentos/posicoes?ativo_id=${id}`);
+      for (const pp of posAll?.dados ?? []) await api(`/investimentos/posicoes/${pp.id}`, "DELETE");
+      await api(`/investimentos/ativos/${id}`, "DELETE");
+    }
+  }, 60000);
+
   // O pré-agendamento do RESGATE no vencimento foi REMOVIDO do backend
   // (poluía a lista de operações e distorcia totais sem filtro de data —
   // ver comentário em fecharPosicoesVencidas). Hoje o fechamento é só via

@@ -374,6 +374,8 @@ export interface InvestimentoOperacao {
   valor_total:    number
   data_operacao:  string
   created_at:     string
+  // Preenchido nas 2 pernas (VENDA origem + COMPRA destino) de uma transferência de ativo.
+  id_par_transferencia?: string | null
   // joins opcionais (GET lista, usados no Extrato) — presentes só quando a
   // rota efetivamente os embute (GET /investimentos/operacoes sempre embute).
   inv_posicoes?: {
@@ -677,4 +679,52 @@ export interface TxCandidata {
   // projeção lançada na conta corrente).
   conta_id?:    string
   conta?:       { nome: string; tipo: string } | null
+}
+
+// ── Análise de Relatórios Gerenciais de FIIs (v7.7.0) ──────────────────────
+export type VereditoRelatorio = 'POSITIVO' | 'NEUTRO' | 'ATENCAO' | 'NEGATIVO'
+
+export interface AnaliseRelatorioFii {
+  id:              string
+  ativo_id:        string
+  relatorio_id:    number
+  data_referencia: string | null
+  veredito:        VereditoRelatorio
+  resumo:          string
+  pontos_fortes:   string[]
+  pontos_atencao:  string[]
+  inconsistencias: string[]
+  mudancas:        string | null
+  provedor:        string | null
+  modelo:          string | null
+  mentor_nome?:    string | null   // apelido do mentor (config de IA) que fez a análise
+  origem:          'CRON' | 'MANUAL'
+  visto_em:        string | null
+  created_at:      string
+  inv_ativos?:          { ticker: string; nome: string } | null
+  inv_relatorios_fii?:  { url_documento: string; fundo_nome: string; data_entrega: string } | null
+}
+
+// Alerta de FII "em vias de mudar de forma" (liquidação, fusão, transformação,
+// troca de código) — GET /investimentos/alertas-fii.
+export type TipoAlertaFii = 'LIQUIDACAO' | 'INCORPORACAO' | 'TRANSFORMACAO' | 'TROCA_CODIGO'
+export interface AlertaFii {
+  id:            number
+  ativo_id:      string
+  ticker:        string
+  tipo:          TipoAlertaFii
+  rotulo:        string
+  categoria:     string
+  data_entrega:  string
+  resumo:        string | null
+  url_documento: string
+}
+
+export interface RelatorioFiiDisponivel {
+  id:              number
+  fundo_nome:      string
+  data_referencia: string | null
+  data_entrega:    string
+  url_documento:   string
+  analisado:       boolean
 }

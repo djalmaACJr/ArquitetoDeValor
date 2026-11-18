@@ -775,6 +775,15 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
       for (const o of data ?? []) opExistSet.add(opKey(String(o.posicao_id), String(o.tipo_operacao), String(o.data_operacao), o.quantidade, o.valor_total));
     }
     const opInserir: Record<string, unknown>[] = [];
+    // Pares de transferência de ativo: gera um id novo por par do backup (o
+    // original pode colidir/não existir) mantendo as duas pernas ligadas.
+    const parMap = new Map<string, string>();
+    const novoPar = (antigo: unknown): string | null => {
+      if (!antigo) return null;
+      const k = String(antigo);
+      if (!parMap.has(k)) parMap.set(k, crypto.randomUUID());
+      return parMap.get(k)!;
+    };
     for (const o of opIn) {
       const posId = posMap[String(o.posicao_id)];
       const contaId = novaConta(o.conta_id);
@@ -786,6 +795,7 @@ export async function rotaRestaurar(c: Db, req: Request, m: string, userId: stri
         user_id: userId, posicao_id: posId, tipo_operacao: o.tipo_operacao, conta_id: contaId,
         quantidade: Number(o.quantidade) || 0, preco_unitario: Number(o.preco_unitario) || 0,
         valor_total: Number(o.valor_total) || 0, data_operacao: String(o.data_operacao),
+        id_par_transferencia: novoPar(o.id_par_transferencia),
       });
     }
     if (opInserir.length) out.operacoes = (await inserirEmLote(c, "inv_operacoes", opInserir)).length;

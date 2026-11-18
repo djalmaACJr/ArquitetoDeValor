@@ -104,7 +104,7 @@ export async function precosBrapi(tickers: string[]): Promise<Map<string, { prec
     ) as { results?: { symbol?: string; regularMarketPrice?: number; currency?: string }[] };
     for (const r of data.results ?? []) {
       const sym = String(r.symbol ?? "").toUpperCase();
-      if (sym && r.regularMarketPrice != null) {
+      if (sym && Number(r.regularMarketPrice) > 0) { // 0 = sem negociação/fundo em liquidação, não é cotação
         out.set(sym, { preco: Number(r.regularMarketPrice), moeda: String(r.currency ?? "BRL").toUpperCase() });
       }
     }
@@ -575,7 +575,7 @@ export async function precoAtualYahoo(ticker: string): Promise<{ preco: number; 
       if (!res.ok) continue;
       const data = await res.json() as { chart?: { result?: { meta?: { regularMarketPrice?: number; currency?: string } }[] } };
       const meta = data.chart?.result?.[0]?.meta;
-      if (meta?.regularMarketPrice != null) {
+      if (meta && Number(meta.regularMarketPrice) > 0) { // 0 = sem negociação/fundo em liquidação
         return { preco: Number(meta.regularMarketPrice), moeda: String(meta.currency ?? "").toUpperCase() || (sym.endsWith(".SA") ? "BRL" : "USD") };
       }
     } catch (e) { logError("yahoo quote", e); }
@@ -596,7 +596,7 @@ export async function resolverPrecosAtuais(
   const vencido = (a?: CacheCotacao) => !a || (ehAtual && agora - new Date(a.atualizadoEm).getTime() > COTACAO_STALE_MS);
 
   // cache válido entra direto
-  for (const t of cotados) { const a = cacheCot.get(t); if (a && !vencido(a)) precos.set(t, { preco: a.preco, moeda: a.moeda }); }
+  for (const t of cotados) { const a = cacheCot.get(t); if (a && a.preco > 0 && !vencido(a)) precos.set(t, { preco: a.preco, moeda: a.moeda }); }
   for (const t of cripto)  { const a = cacheCr.get(t);  if (a && !vencido(a)) criptoMap.set(t, a.preco); }
 
   // busca externa só do que falta/venceu e regrava
@@ -616,7 +616,7 @@ export async function resolverPrecosAtuais(
   await gravarCache(novas);
 
   // fallback: fonte externa falhou mas há cache (mesmo vencido) → usa o cache
-  for (const t of cotados) if (!precos.has(t))    { const a = cacheCot.get(t); if (a) precos.set(t, { preco: a.preco, moeda: a.moeda }); }
+  for (const t of cotados) if (!precos.has(t))    { const a = cacheCot.get(t); if (a && a.preco > 0) precos.set(t, { preco: a.preco, moeda: a.moeda }); }
   for (const t of cripto)  if (!criptoMap.has(t)) { const a = cacheCr.get(t);  if (a) criptoMap.set(t, a.preco); }
 
   return { precos, cripto: criptoMap };

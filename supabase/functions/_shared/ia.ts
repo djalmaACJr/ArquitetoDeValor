@@ -459,6 +459,7 @@ export interface ConfigIAAtiva {
   modelo:   string | null;
   apiKey:   string;     // já decriptada
   buscaWeb: boolean;     // opt-in do usuário + suporte do provedor (ver PROVEDORES_BUSCA_WEB)
+  nome?:    string | null; // apelido que o usuário deu à config (Perfil → Integração com IA)
 }
 
 export type ResultadoConfigIA =
@@ -521,6 +522,7 @@ export async function lerConfigIAAtiva(
       modelo:   alvo.modelo ?? null,
       apiKey,
       buscaWeb: !!alvo.busca_web && PROVEDORES_BUSCA_WEB.has(alvo.provedor),
+      nome:     alvo.nome?.trim() || null,
     },
   };
 }
