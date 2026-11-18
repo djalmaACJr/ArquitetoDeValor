@@ -24,6 +24,15 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.6.1',
+    data:   '2026-11-10',
+    titulo: 'Escolher parcelas na lista',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '⚡ Escolher parcelas também na lista', d: 'o ícone ⚡ de antecipar na lista do Extrato agora oferece "Todas" ou "Escolher parcelas", como já era na tela de edição do lançamento.' },
+    ],
+  },
+  {
     versao: '7.6.0',
     data:   '2026-11-09',
     titulo: 'Destaques e antecipação parcial',
@@ -395,10 +404,13 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.6.1) */}
+        {/* Detalhe das novidades desta versão (7.7.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '⚡ Escolher parcelas também na lista', d: 'o ícone ⚡ de antecipar na lista do Extrato agora oferece "Todas" ou "Escolher parcelas", como já era na tela de edição do lançamento. Antes, por ali, só dava para antecipar todas as seguintes.' },
+            { t: '🤖 Análise de Relatórios de FIIs', d: 'a IA lê o Relatório Gerencial mensal dos seus FIIs e explica em linguagem simples se o fundo está bem, com pontos fortes, pontos de atenção e o que mudou. Pode rodar automática (opção na própria página) ou sob demanda, escolhendo o mentor.' },
+            { t: '🔔 Aviso de novas análises', d: 'ao entrar, o sistema mostra o que o mentor analisou e destaca os FIIs com análise nova; o ticker abre a página do ativo já na seção do relatório.' },
+            { t: '🚨 Alerta de FII em migração', d: 'avisa quando um FII da carteira entra em liquidação, incorporação, transformação ou troca de código, com base nos fatos relevantes.' },
+            { t: '🔁 Transferir posição entre ativos', d: 'migre a posição de um ativo para outro (ex.: RBRR11 → PCIP11) mantendo o histórico, sem lançar venda e compra à mão.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

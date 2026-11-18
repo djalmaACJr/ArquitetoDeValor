@@ -5,6 +5,8 @@ import { Menu } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import Sidebar from './Sidebar'
 import NovidadesProventos from '../ui/NovidadesProventos'
+import AvisoAnaliseRelatorio from '../ui/AvisoAnaliseRelatorio'
+import AvisoFiiMigracao from '../ui/AvisoFiiMigracao'
 import AvisoDataComProxima from '../ui/AvisoDataComProxima'
 import AvisoRevogacaoAgregado from '../ui/AvisoRevogacaoAgregado'
 import AvisoAgregadoAceitou from '../ui/AvisoAgregadoAceitou'
@@ -210,6 +212,10 @@ export default function AppLayout() {
       <div className="fixed bottom-4 right-4 z-50 flex flex-col-reverse gap-3 pointer-events-none">
         {/* Proventos provisionados pelo job BRL (já mostra a Data COM quando a fonte tem) */}
         <NovidadesProventos />
+        {/* Análises de relatórios gerenciais de FII ainda não lidas */}
+        <AvisoAnaliseRelatorio />
+        {/* FII da carteira em liquidação / fusão / troca de código (alerta especial) */}
+        <AvisoFiiMigracao />
         {/* Ativos da carteira com Data COM próxima (próximos dias) */}
         <AvisoDataComProxima />
         {/* Algum dono revogou meu acesso de agregado desde a última vez que vi */}

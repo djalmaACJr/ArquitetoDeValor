@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Wallet, Coins, Trophy, Settings, ListFilter, Users } from 'lucide-react'
+import { LayoutDashboard, Wallet, Coins, Trophy, Settings, ListFilter, Users, FileSearch } from 'lucide-react'
 import MascoteDica from './MascoteDica'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
 import { escolherDica } from '../../lib/conteudoMascotes'
@@ -17,6 +17,7 @@ const ITENS = [
   { to: '/investimentos/dividendos',    label: 'Proventos',      icone: Coins,           end: false },
   { to: '/investimentos/extrato',       label: 'Extrato',        icone: ListFilter,      end: false },
   { to: '/investimentos/conselho',      label: 'Conselho',       icone: Users,           end: false },
+  { to: '/investimentos/relatorios',    label: 'Relatórios',     icone: FileSearch,      end: false },
   { to: '/investimentos/configuracoes', label: 'Configurações',  icone: Settings,        end: false },
 ] as const
 

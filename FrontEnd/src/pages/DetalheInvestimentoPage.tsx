@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus, Minus, ExternalLink, ChevronLeft, ChevronRight, Calculator, Maximize2, Minimize2, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Pencil, Coins, Wallet, TrendingUp, TrendingDown, Star, Trash2, Plus, Minus, ExternalLink, ChevronLeft, ChevronRight, Calculator, ArrowRightLeft, Maximize2, Minimize2, RefreshCw } from 'lucide-react'
 import { Line, Bar } from 'react-chartjs-2'
 import {
   Chart as ChartJS, Tooltip, Legend,
@@ -18,6 +18,9 @@ import { useIndicesEconomicos } from '../hooks/useIndicesEconomicos'
 import { Drawer, BtnSalvar, BtnCancelar, Toast, ModalExcluir, LogoAtivo, SelectDark, Field, Input, InputMoeda } from '../components/ui/shared'
 import DrawerAtivo from '../components/ui/DrawerAtivo'
 import DrawerMovimentacoes from '../components/ui/DrawerMovimentacoes'
+import DrawerTransferenciaAtivo from '../components/ui/DrawerTransferenciaAtivo'
+import BannerFiiMigracao from '../components/ui/BannerFiiMigracao'
+import { useAlertasFii } from '../hooks/useAlertasFii'
 import ProtecaoPoderCompra from '../components/ui/ProtecaoPoderCompra'
 import { calcularIpcaAcumulado12m, montarEntradaProtecaoPoderCompra } from '../lib/protecaoPoderCompra'
 import LoadingMascote from '../components/ui/LoadingMascote'
@@ -35,6 +38,7 @@ import { CRITERIOS_QUESTAO, CRITERIO_LABEL } from '../lib/constants'
 import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
 import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvPesos } from '../hooks/useInvPesos'
+import QuadroRelatoriosFii from '../components/ui/QuadroRelatoriosFii'
 import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
 import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
 import { useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAtivo'
@@ -61,7 +65,7 @@ type QuadroDetalheKey =
   | 'resumo' | 'posicao_destaques' | 'caracteristicas'
   | 'grafico_evolucao' | 'grafico_cotas' | 'grafico_rent_mes' | 'grafico_rent_acum'
   | 'grafico_dividendos_mes' | 'grafico_dy_mes' | 'grafico_ultimos_dividendos'
-  | 'magic_number' | 'dy_yoc' | 'valuation_acoes' | 'protecao_poder_compra' | 'operacoes'
+  | 'magic_number' | 'dy_yoc' | 'valuation_acoes' | 'protecao_poder_compra' | 'relatorios_fii' | 'operacoes'
 // Gráficos vêm em meia largura por padrão (lado a lado, como antes de virarem
 // quadros independentes) — os demais em largura total, como sempre foram.
 const QUADROS_GRAFICO: QuadroDetalheKey[] = [
@@ -133,8 +137,16 @@ export default function DetalheInvestimentoPage() {
   // AppLayout restaura a posição de scroll da página de origem. Sem histórico
   // (link direto/refresh), navega para o caminho conhecido.
   const voltar = () => {
-    if ((window.history.state?.idx ?? 0) > 0) navigate(-1)
-    else navigate(voltarPara)
+    if ((window.history.state?.idx ?? 0) > 0) { navigate(-1); return }
+    // Aba aberta por link "em nova aba" (sem histórico próprio): fecha a aba e
+    // devolve o foco à de origem. Se o navegador não deixar fechar (link direto,
+    // F5 numa aba com histórico), cai no caminho conhecido.
+    if (window.history.length <= 1) {
+      window.close()
+      setTimeout(() => { if (!window.closed) navigate(voltarPara) }, 200)
+      return
+    }
+    navigate(voltarPara)
   }
   const ativoId = id ?? null
   const [toast, setToast] = useState<string | null>(null)
@@ -147,6 +159,7 @@ export default function DetalheInvestimentoPage() {
   const [excluindo, setExcluindo] = useState(false)
   const [salvandoExclusao, setSalvandoExclusao] = useState(false)
   const [gerenciar, setGerenciar] = useState(false)
+  const [transferindo, setTransferindo] = useState(false)
   // Operação a editar ao abrir o drawer de movimentações (botão do quadro "Operações recentes").
   const [editarOperacaoId, setEditarOperacaoId] = useState<string | undefined>(undefined)
   const [simulando, setSimulando] = useState(false)
@@ -170,6 +183,7 @@ export default function DetalheInvestimentoPage() {
   const { dashboard } = useInvestimentosDashboard()
 
   const emEspacoAgregado = useEmEspacoDeAgregado()
+  const { porAtivo: alertasPorAtivo } = useAlertasFii()
   const permissaoInvestimentos = usePermissaoModulo('INVESTIMENTOS')
   const podeEscrever = !emEspacoAgregado || permissaoInvestimentos?.pode_escrever === true
 
@@ -608,9 +622,11 @@ export default function DetalheInvestimentoPage() {
     const podeSimularCompraVenda = !ehRFAtivo && !!precoAtualEstimado && precoAtualEstimado > 0
     if (dySimuladoPvp1 || podeSimularCompraVenda) ks.push('dy_yoc')
     if (ehFIIAtivo && magicNumberFII) ks.push('protecao_poder_compra')
+    // Análise gasta a chave de IA de quem pede → só em "Meus dados".
+    if (ehFIIAtivo && !emEspacoAgregado) ks.push('relatorios_fii')
     ks.push('operacoes')
     return ks
-  }, [ativo, magicNumberFII, dySimuladoPvp1, dyPorMes, precoAtualEstimado, precoTetoBazin, qtdAtual])
+  }, [ativo, emEspacoAgregado, magicNumberFII, dySimuladoPvp1, dyPorMes, precoAtualEstimado, precoTetoBazin, qtdAtual])
   const { blob: ordemQuadrosDb, salvar: salvarOrdemQuadrosDb } = usePreferenciasOrdemQuadros()
   const chaveOrdemQuadros = `detalhe-${ativo?.tipo_ativo ?? 'generico'}`
   const {
@@ -879,6 +895,12 @@ export default function DetalheInvestimentoPage() {
               <Plus size={14} /> Nova movimentação
             </button>
           )}
+          {podeEscrever && !ehRendaFixaAtivo && (
+            <button onClick={() => setTransferindo(true)} title="Migrar a posição para outro ativo (liquidação, incorporação, troca de ticker)"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
+              <ArrowRightLeft size={14} style={{ color: MUTED }} /> Transferir
+            </button>
+          )}
           {!ehRendaFixaAtivo && (
             <button onClick={() => setSimulando(true)} title="Simular quantas cotas/ações dá para comprar com um valor"
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-[13px] text-white hover:border-white/25">
@@ -939,6 +961,11 @@ export default function DetalheInvestimentoPage() {
             </span>
           )}
         </div>
+      )}
+
+      {/* Alerta especial: FII em liquidação/fusão/transformação/troca de código */}
+      {ativo.tipo_ativo === 'FII' && (
+        <div className="mb-3"><BannerFiiMigracao alertas={alertasPorAtivo.get(ativo.id) ?? []} ehPosicaoDoUsuario={!emEspacoAgregado} /></div>
       )}
 
       {/* Controle fixo (não é um quadro, não é arrastável) — vale pra todos
@@ -1597,6 +1624,13 @@ export default function DetalheInvestimentoPage() {
           </Quadro>
         )
 
+        if (chave === 'relatorios_fii') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <QuadroRelatoriosFii key={ativo.id} ativoId={ativo.id} ticker={ativo.ticker} />
+          </Quadro>
+        )
+
         if (chave === 'operacoes') return (
           <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
             largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
@@ -1759,6 +1793,10 @@ export default function DetalheInvestimentoPage() {
       {gerenciar && (
         <DrawerMovimentacoes ativo={ativo} onClose={() => { setGerenciar(false); setPrefilCompra(null); setEditarOperacaoId(undefined) }}
           onToast={showToast} valoresIniciais={prefilCompra ?? undefined} editarOperacaoId={editarOperacaoId} />
+      )}
+
+      {transferindo && (
+        <DrawerTransferenciaAtivo ativo={ativo} onClose={() => setTransferindo(false)} onToast={showToast} />
       )}
 
       {simulando && (

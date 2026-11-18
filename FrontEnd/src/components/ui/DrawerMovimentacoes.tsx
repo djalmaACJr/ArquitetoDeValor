@@ -3,6 +3,7 @@ import { Plus, Trash2, Pencil, X, CircleSlash } from 'lucide-react'
 import { Drawer, Field, Input, SelectDark } from './shared'
 import { useInvestimentosPosicoes } from '../../hooks/useInvestimentosPosicoes'
 import { useInvestimentosOperacoes, type CriarOperacaoInput } from '../../hooks/useInvestimentosOperacoes'
+import { useTransferenciaAtivo } from '../../hooks/useTransferenciaAtivo'
 import { useBackfillHistorico } from '../../hooks/useInvestimentosHistorico'
 import { useContas } from '../../hooks/useContas'
 import { formatMoeda, formatData } from '../../lib/utils'
@@ -33,6 +34,7 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
   const { posicoes } = useInvestimentosPosicoes({ ativo_id: ativo.id })
   const { operacoes, loading, criar, editar, excluir } = useInvestimentosOperacoes({ ativo_id: ativo.id })
   const { contas } = useContas()
+  const { excluir: excluirTransferencia } = useTransferenciaAtivo()
   const { preencher } = useBackfillHistorico()
   // Movimentações aplicáveis ao tipo do ativo (bolsa → Compra/Venda; RF/Tesouro → Aplicação/Resgate).
   const tiposDisp = tiposOperacaoPara(ativo.tipo_ativo)
@@ -105,7 +107,6 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
   // logo depois de salvar), então a conta some só se o usuário limpar/trocar.
   useEffect(() => {
     if (!editId && !form.conta_id && saldos.length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm((f) => ({ ...f, conta_id: saldos[0].conta_id }))
     }
   }, [editId, form.conta_id, saldos])
@@ -242,7 +243,9 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
   }
 
   async function remover(id: string) {
-    const res = await excluir(id)
+    const par = operacoes.find((o) => o.id === id)?.id_par_transferencia
+    if (par && !window.confirm('Esta movimentação faz parte de uma transferência de ativo. Excluir remove as duas pontas (saída e entrada). Continuar?')) return
+    const res = par ? await excluirTransferencia(par) : await excluir(id)
     if (editId === id) cancelarEdicao()
     if (res.ok) preencher({ ativo_id: ativo.id })
     onToast(res.ok ? 'Movimentação removida.' : (res.erro ?? 'Erro ao remover'))
@@ -430,6 +433,11 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
               <div>
                 <p className="text-white text-[14px] font-medium flex items-center gap-1.5">
                   {TIPO_OPERACAO_LABEL[o.tipo_operacao]} · {nomeConta(o.conta_id)}
+                  {o.id_par_transferencia && (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ color: '#93c5fd', background: 'rgba(59,130,246,0.14)' }}>
+                      TRANSFERÊNCIA
+                    </span>
+                  )}
                   {programado && (
                     <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ color: '#f0b429', background: 'rgba(240,180,41,0.12)' }}>
                       PROGRAMADO
@@ -448,10 +456,10 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
               </div>
               {!programado && (
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <button onClick={() => iniciarEdicao(o)} title="Editar"
+                  {!o.id_par_transferencia && <button onClick={() => iniciarEdicao(o)} title="Editar"
                     className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-white/25" style={{ color: MUTED }}>
                     <Pencil size={13} />
-                  </button>
+                  </button>}
                   <button onClick={() => remover(o.id)} title="Excluir"
                     className="w-7 h-7 rounded-md border border-white/10 flex items-center justify-center hover:border-red-400/40" style={{ color: '#ff5c7a' }}>
                     <Trash2 size={13} />

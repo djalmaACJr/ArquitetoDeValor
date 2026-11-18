@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { CampoSenha } from '../components/ui/CampoSenha'
+import { traduzirErroAuth } from '../lib/errosAuth'
 
 const Logo = () => (
   <svg width="48" height="48" viewBox="0 0 64 64">
@@ -62,11 +63,7 @@ export default function CadastroPage() {
 
     if (err) {
       console.error('[CadastroPage] signUp error:', err.message, err)
-      if (err.message.includes('already registered') || err.message.includes('already been registered')) {
-        setError('Este e-mail já está cadastrado.')
-      } else {
-        setError(`Erro ao criar conta: ${err.message}`)
-      }
+      setError(`Erro ao criar conta: ${traduzirErroAuth(err)}`)
       return
     }
 

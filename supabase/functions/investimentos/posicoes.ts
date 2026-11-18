@@ -235,7 +235,10 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
 
     // Estado anterior: posição dona (pode mudar) e qtd/preço (p/ recompor valor_total)
     const { data: antes } = await c.from("inv_operacoes")
-      .select("posicao_id, quantidade, preco_unitario").eq("id", id).maybeSingle();
+      .select("posicao_id, quantidade, preco_unitario, id_par_transferencia").eq("id", id).maybeSingle();
+    if (antes?.id_par_transferencia) {
+      return erro("Esta operação faz parte de uma transferência de ativo — exclua a transferência e refaça.", 409);
+    }
 
     const campos = camposParaAtualizar(body, [
       "posicao_id", "tipo_operacao", "conta_id", "quantidade", "preco_unitario", "valor_total", "data_operacao",
@@ -259,8 +262,11 @@ export async function rotaOperacoes(c: Db, req: Request, m: string, userId: stri
 
   if (m === "DELETE" && id) {
     logRequest("DELETE", `/investimentos/operacoes/${id}`);
-    const { data: op } = await c.from("inv_operacoes").select("posicao_id").eq("id", id).eq("user_id", userId).maybeSingle();
+    const { data: op } = await c.from("inv_operacoes").select("posicao_id, id_par_transferencia").eq("id", id).eq("user_id", userId).maybeSingle();
     if (!op) return erro("Operação não encontrada", 404);
+    if (op.id_par_transferencia) {
+      return erro("Esta operação faz parte de uma transferência de ativo — exclua a transferência inteira.", 409);
+    }
     const { error } = await c.from("inv_operacoes").delete().eq("id", id);
     if (error) { logError("Excluir operacao", error); return erro(error.message); }
     await recomputarPosicao(c, String(op.posicao_id));
@@ -515,3 +521,93 @@ export async function fecharPosicoesVencidas(c: Db, userId: string): Promise<voi
 // passado/hoje → PAGO. O vínculo fica em inv_dividendos.transacao_extrato_id.
 // ============================================================
 
+
+// ============================================================
+// /investimentos/transferencias-ativo — migra posição de um ativo para outro
+// carregando o custo (liquidação com entrega de cotas, incorporação, troca de
+// ticker). Sem ganho/perda: o par é VENDA(origem) + COMPRA(destino) ao MESMO
+// custo total, ligados por id_par_transferencia (migration 20261118000001).
+// ============================================================
+const TIPOS_TRANSFERIVEIS = ["ACOES", "ETF", "FII", "STOCKS", "ETF_INTERNACIONAL", "CRIPTOMOEDAS"];
+
+export async function rotaTransferenciaAtivo(c: Db, req: Request, m: string, userId: string, criadoPor: string = userId) {
+  const par = extrairId(req, "transferencias-ativo");
+
+  if (m === "POST" && !par) {
+    const body = await req.json();
+    logRequest("POST", "/investimentos/transferencias-ativo", body);
+
+    const dataOp = String(body.data_operacao ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataOp)) return erro("data_operacao inválida (YYYY-MM-DD)");
+    if (!body.ativo_origem_id || !body.conta_origem_id || !body.ativo_destino_id) {
+      return erro("Campos obrigatórios: ativo_origem_id, conta_origem_id, ativo_destino_id, quantidade_entrada, data_operacao");
+    }
+    const contaDestinoId = String(body.conta_destino_id ?? body.conta_origem_id);
+    const qtdEntrada = Number(body.quantidade_entrada);
+    if (!Number.isFinite(qtdEntrada) || qtdEntrada <= 0) return erro("quantidade_entrada deve ser > 0");
+    if (String(body.ativo_origem_id) === String(body.ativo_destino_id)) {
+      return erro("Origem e destino devem ser ativos diferentes (para mudar de conta use migrar-conta)");
+    }
+    if (!(await contaExiste(c, String(body.conta_origem_id), userId))) return erro("Conta de origem não encontrada", 404);
+    if (!(await contaExiste(c, contaDestinoId, userId))) return erro("Conta de destino não encontrada", 404);
+
+    const { data: ativos } = await c.from("inv_ativos")
+      .select("id, ticker, tipo_ativo, moeda")
+      .in("id", [String(body.ativo_origem_id), String(body.ativo_destino_id)]).eq("user_id", userId);
+    const origem  = (ativos ?? []).find((a) => String(a.id) === String(body.ativo_origem_id));
+    const destino = (ativos ?? []).find((a) => String(a.id) === String(body.ativo_destino_id));
+    if (!origem || !destino) return erro("Ativo de origem ou destino não encontrado", 404);
+    if (!TIPOS_TRANSFERIVEIS.includes(String(origem.tipo_ativo)) || !TIPOS_TRANSFERIVEIS.includes(String(destino.tipo_ativo))) {
+      return erro("Renda fixa e Tesouro Direto não suportam transferência de ativo");
+    }
+    if (String(origem.moeda ?? "BRL") !== String(destino.moeda ?? "BRL")) {
+      return erro("Origem e destino precisam estar na mesma moeda (o custo é carregado sem conversão)");
+    }
+
+    const { data: posicoes } = await c.from("inv_posicoes")
+      .select("id, quantidade, preco_custo")
+      .eq("ativo_id", origem.id).eq("conta_id", String(body.conta_origem_id)).eq("status", "ATIVA").eq("user_id", userId);
+    if (!posicoes || posicoes.length !== 1) return erro("O ativo de origem precisa ter exatamente uma posição ativa nessa conta", 400);
+    const posOrigem = posicoes[0];
+    const qtdDisponivel = Number(posOrigem.quantidade) || 0;
+
+    const qtdSaida = body.quantidade_saida != null ? Number(body.quantidade_saida) : qtdDisponivel;
+    if (!Number.isFinite(qtdSaida) || qtdSaida <= 0) return erro("quantidade_saida deve ser > 0");
+    if (qtdSaida > qtdDisponivel + 1e-8) return erro(`quantidade_saida excede a posição (${qtdDisponivel})`);
+
+    const custoPadrao = Math.round(qtdSaida * (Number(posOrigem.preco_custo) || 0) * 100) / 100;
+    const custo = body.custo_total != null ? Number(body.custo_total) : custoPadrao;
+    if (!Number.isFinite(custo) || custo < 0) return erro("custo_total deve ser >= 0");
+
+    const posDestino = await acharOuCriarPosicao(c, userId, String(destino.id), contaDestinoId, dataOp);
+    if (posDestino instanceof Response) return posDestino;
+
+    const idPar = crypto.randomUUID();
+    const base = { user_id: userId, criado_por: criadoPor, data_operacao: dataOp, id_par_transferencia: idPar };
+    const { data: criadas, error } = await c.from("inv_operacoes").insert([
+      { ...base, posicao_id: String(posOrigem.id), conta_id: String(body.conta_origem_id), tipo_operacao: "VENDA",
+        quantidade: qtdSaida, preco_unitario: custo / qtdSaida, valor_total: custo },
+      { ...base, posicao_id: posDestino, conta_id: contaDestinoId, tipo_operacao: "COMPRA",
+        quantidade: qtdEntrada, preco_unitario: custo / qtdEntrada, valor_total: custo },
+    ]).select();
+    if (error) { logError("Criar transferência de ativo", error); return erro(error.message); }
+
+    await recomputarPosicao(c, String(posOrigem.id));
+    await recomputarPosicao(c, posDestino);
+    logSuccess("Transferência de ativo criada", { id_par: idPar, de: origem.ticker, para: destino.ticker });
+    return json({ dados: { id_par_transferencia: idPar, operacoes: criadas, custo_transferido: custo } }, 201);
+  }
+
+  if (m === "DELETE" && par) {
+    logRequest("DELETE", `/investimentos/transferencias-ativo/${par}`);
+    const { data: ops } = await c.from("inv_operacoes")
+      .select("id, posicao_id").eq("id_par_transferencia", par).eq("user_id", userId);
+    if (!ops || ops.length === 0) return erro("Transferência não encontrada", 404);
+    const { error } = await c.from("inv_operacoes").delete().eq("id_par_transferencia", par).eq("user_id", userId);
+    if (error) { logError("Excluir transferência de ativo", error); return erro(error.message); }
+    for (const pid of new Set(ops.map((o) => String(o.posicao_id)))) await recomputarPosicao(c, pid);
+    return json({ mensagem: "Transferência excluída com sucesso" });
+  }
+
+  return erro("Método não permitido", 405);
+}

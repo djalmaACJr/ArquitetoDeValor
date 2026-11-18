@@ -11,6 +11,8 @@ import {
 } from '../../lib/protecaoPoderCompra'
 import { useDividendos } from '../../hooks/useDividendos'
 import { useInvestimentosOperacoes } from '../../hooks/useInvestimentosOperacoes'
+import { useAnalisesNaoVistas } from '../../hooks/useRelatoriosFii'
+import { useAlertasFii } from '../../hooks/useAlertasFii'
 import { TIPO_ATIVO_LABEL, TIPO_ATIVO_COR, setorLabel, INDEXADOR_RF_LABEL, INDICE_RF_LABEL } from '../../lib/constants'
 import type { AtivoLinha } from '../../lib/ativosLinha'
 import type {
@@ -230,6 +232,9 @@ export default function QuadroTipoAtivos({
   ipca12mPct?:   number | null
 }) {
   const location = useLocation()
+  // FIIs com análise de relatório gerencial ainda não lida → selo "NOVA ANÁLISE" na linha.
+  const { ativosComNova } = useAnalisesNaoVistas()
+  const { porAtivo: alertasPorAtivo } = useAlertasFii() // selo vermelho: FII em liquidação/fusão/troca
   // Origem para o botão "voltar" da página de detalhe — preserva de qual página
   // (Meus ativos, Investimentos, …) o usuário abriu o ativo.
   const origem = location.pathname + location.search
@@ -472,12 +477,20 @@ export default function QuadroTipoAtivos({
     sortKey?: SortKey; title?: string; cell: (l: AtivoLinha) => ReactNode
   }
   const traco = <span style={{ color: MUTED }}>—</span>
-  const linkAtivo = (l: AtivoLinha, texto: ReactNode) => (
+  const linkAtivo = (l: AtivoLinha, texto: ReactNode) => (<>
     <Link to={`/investimentos/ativos/${l.ativo_id}`} state={{ from: origem }} target="_blank" rel="noopener noreferrer"
       className="inline-flex items-center gap-2 text-white font-semibold hover:underline">
       <LogoAtivo url={l.logo_url} tipoAtivo={l.tipo_ativo} />{texto}
     </Link>
-  )
+    {l.tipo_ativo === 'FII' && alertasPorAtivo.has(l.ativo_id) && (
+      <span title={alertasPorAtivo.get(l.ativo_id)!.map((a) => a.rotulo).join(' · ')} className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded align-middle"
+        style={{ color: '#ff8aa0', background: 'rgba(255,92,122,0.18)' }}>ALERTA</span>
+    )}
+    {l.tipo_ativo === 'FII' && ativosComNova.has(l.ativo_id) && (
+      <span title="Há análise nova de relatório gerencial para verificar" className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded align-middle"
+        style={{ color: '#93c5fd', background: 'rgba(59,130,246,0.18)' }}>NOVA ANÁLISE</span>
+    )}
+  </>)
   const celNome = (l: AtivoLinha): ReactNode => (
     <>
       <span className="block truncate max-w-[220px]" title={l.nome ?? ''}>

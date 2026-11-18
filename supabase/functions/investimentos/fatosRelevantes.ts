@@ -31,7 +31,7 @@ import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
 import { Db, hojeISO, recuarDias } from "./shared.ts";
 
 const FNET_BASE = "https://fnet.bmfbovespa.com.br/fnet/publico/";
-const FNET_HEADERS = {
+export const FNET_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
   "Accept": "application/json, text/plain, */*",
   "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
@@ -45,23 +45,25 @@ const CATEGORIAS_FNET: Record<string, number> = {
 };
 const TIPO_FUNDO_FII = 1;
 
-interface LinhaFnet {
+export interface LinhaFnet {
   id: number;
   categoriaDocumento: string;
+  tipoDocumento?: string;
+  dataReferencia?: string; // "dd/MM/yyyy" ou "MM/yyyy" (varia por documento)
   descricaoFundo: string;
   nomePregao: string;
   informacoesAdicionais: string;
   dataEntrega: string; // "dd/MM/yyyy HH:mm"
 }
 
-function ddmmyyyy(iso: string): string {
+export function ddmmyyyy(iso: string): string {
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
 }
 
 // "26/08/2026 20:23" → ISO 8601 (assume horário de Brasília, igual ao
 // resto do backend — ver seção "Fuso horário" do CLAUDE.md).
-function dataEntregaParaISO(s: string): string | null {
+export function dataEntregaParaISO(s: string): string | null {
   const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2}))?/);
   if (!m) return null;
   const [, d, mo, y, h = "00", mi = "00"] = m;
@@ -70,7 +72,7 @@ function dataEntregaParaISO(s: string): string | null {
 
 // GET JSON no Fundos.NET com timeout + 1 retry, tolerando o 302 do WAF.
 // null = "sem dado agora" (nunca lança — quem chama decide se ignora).
-async function fetchFnet(url: string): Promise<{ data: LinhaFnet[]; recordsTotal: number } | null> {
+export async function fetchFnet(url: string): Promise<{ data: LinhaFnet[]; recordsTotal: number } | null> {
   for (let tentativa = 1; tentativa <= 2; tentativa++) {
     try {
       const res = await fetch(url, {
@@ -97,7 +99,7 @@ async function fetchFnet(url: string): Promise<{ data: LinhaFnet[]; recordsTotal
   return null;
 }
 
-function montarUrlBusca(categoriaId: number, skip: number, limite: number, dataInicial: string, dataFinal: string): string {
+export function montarUrlBusca(categoriaId: number, skip: number, limite: number, dataInicial: string, dataFinal: string): string {
   const params = new URLSearchParams({
     "d": "1",
     "s": String(skip),
@@ -215,13 +217,13 @@ export interface FatoRelevante {
   resumo: string | null;
 }
 
-function normaliza(s: string): string {
+export function normaliza(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 // Núcleo do ticker de FII: remove o sufixo numérico de cota (ex.:
 // "KNRI11" → "KNRI"; "HGLG11" → "HGLG").
-function nucleoTicker(ticker: string): string {
+export function nucleoTicker(ticker: string): string {
   return normaliza(ticker).replace(/\d+$/, "");
 }
 

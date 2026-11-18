@@ -35,7 +35,7 @@ import { logError } from "../_shared/logger.ts";
 
 import { rotaAtivos, rotaAlocacoes } from "./ativos.ts";
 import { rotaQuestionarios, rotaAvaliacoes } from "./avaliacoes.ts";
-import { rotaPosicoes, rotaOperacoes } from "./posicoes.ts";
+import { rotaPosicoes, rotaOperacoes, rotaTransferenciaAtivo } from "./posicoes.ts";
 import { rotaPtax, sincronizarPtaxResposta, rotaIndices, sincronizarIndicesResposta, rotaTesouro, sincronizarTesouroResposta, buscaExterna } from "./mercado.ts";
 import {
   rotaDividendos, rotaDividendosBuscarBr, rotaDividendosBuscarUsd,
@@ -46,6 +46,8 @@ import {
 import { rotaHistorico, rotaSnapshotAuto, rotaSnapshotBackfill, rotaSnapshotCron } from "./snapshot.ts";
 import { rotaRendimentoCripto, rotaRendimentoCriptoCron } from "./rendimento-cripto.ts";
 import { rotaFatosRelevantesCron } from "./fatosRelevantes.ts";
+import { rotaRelatoriosFiiCron, rotaRelatoriosFii } from "./relatoriosFii.ts";
+import { rotaAlertasFii } from "./alertasFii.ts";
 import { rotaCvmFiiCron } from "./cvm.ts";
 import { rotaCvmAcoesCron } from "./cvmAcoes.ts";
 import { rotaChatMentor } from "./chatMentor.ts";
@@ -115,6 +117,13 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
     catch (e) { logError("Handler fatos-relevantes-cron", e); return erro("Erro interno", 500); }
   }
 
+  // Job do servidor: relatórios gerenciais de FIIs (Fundos.NET) + análise por
+  // IA para quem ligou a análise automática. Sem JWT — x-cron-secret.
+  if (recurso === "relatorios-fii-cron") {
+    try { return await executarComLogDeCron("relatorios-fii-diario", () => rotaRelatoriosFiiCron(req, m)); }
+    catch (e) { logError("Handler relatorios-fii-cron", e); return erro("Erro interno", 500); }
+  }
+
   // Job do servidor: Valor Patrimonial por cota (VP) de FIIs a partir do
   // Informe Mensal da CVM (dado público oficial, sem chave) — alimenta o
   // indicador P/VP. Sem JWT — x-cron-secret. Ver cvm.ts.
@@ -180,6 +189,13 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
         return await rotaAvaliacoes(c, req, m, ctx.userId);
       }
       case "chat-mentor":     return await rotaChatMentor(c, req, m, userId);
+      // Gasta a chave de IA de quem pede → sempre o próprio usuário, nunca o contexto de um dono.
+      case "relatorios-fii":  return await rotaRelatoriosFii(c, req, m, userId);
+      case "alertas-fii": {
+        const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"]);
+        if (ctx instanceof Response) return ctx;
+        return await rotaAlertasFii(c, m, ctx.userId);
+      }
       case "posicoes": {
         const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"], m !== "GET");
         if (ctx instanceof Response) return ctx;
@@ -189,6 +205,11 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
         const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"], m !== "GET");
         if (ctx instanceof Response) return ctx;
         return await rotaOperacoes(c, req, m, ctx.userId, userId);
+      }
+      case "transferencias-ativo": {
+        const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"], m !== "GET");
+        if (ctx instanceof Response) return ctx;
+        return await rotaTransferenciaAtivo(c, req, m, ctx.userId, userId);
       }
       case "dividendos": {
         const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"], m !== "GET");
