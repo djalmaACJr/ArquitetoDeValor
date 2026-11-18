@@ -139,11 +139,13 @@ export default function DetalheInvestimentoPage() {
   const voltar = () => {
     if ((window.history.state?.idx ?? 0) > 0) { navigate(-1); return }
     // Aba aberta por link "em nova aba" (sem histórico próprio): fecha a aba e
-    // devolve o foco à de origem. Se o navegador não deixar fechar (link direto,
-    // F5 numa aba com histórico), cai no caminho conhecido.
+    // devolve o foco à de origem. Se a aba fecha, o timer abaixo nunca roda; se o
+    // navegador não deixar fechar (link direto, F5), cai no caminho conhecido.
+    // Não checar `window.closed`: não é confiável (Firefox o reporta como true
+    // mesmo quando o fechamento é negado — quebrou o E2E-INV12 na CI da 7.7.0).
     if (window.history.length <= 1) {
       window.close()
-      setTimeout(() => { if (!window.closed) navigate(voltarPara) }, 200)
+      setTimeout(() => navigate(voltarPara), 200)
       return
     }
     navigate(voltarPara)
