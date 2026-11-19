@@ -27,7 +27,7 @@ FONTE_TXT.REIT = FONTE_TXT.STOCKS
 
 export default function QuadroRelatoriosFii({ ativoId, ticker, tipo = 'FII' }: { ativoId: string; ticker: string; tipo?: string }) {
   const txt = FONTE_TXT[tipo] ?? FONTE_TXT.FII
-  const { analises, loading, analisar, marcarVisto, excluir } = useRelatoriosFii(ativoId)
+  const { analises, loading, analisar, personalizar, marcarVisto, excluir } = useRelatoriosFii(ativoId)
   const [disponiveis, setDisponiveis] = useState<RelatorioFiiDisponivel[]>([])
   const [carregando, setCarregando] = useState(true)
   const [ocupado, setOcupado] = useState<string | null>(null) // 'sync' ou id do relatório
@@ -126,7 +126,7 @@ export default function QuadroRelatoriosFii({ ativoId, ticker, tipo = 'FII' }: {
       )}
 
       {loading ? null : analisesOrdenadas.map((a) => (
-        <CartaoAnaliseRelatorio key={a.id} a={a} semLinkAtivo
+        <CartaoAnaliseRelatorio key={a.id} a={a} semLinkAtivo onPersonalizar={() => personalizar(a.id)}
           onVisto={async () => { await marcarVisto(a.id) }}
           onExcluir={async () => { const r = await excluir(a.id); if (!r.ok) setMsg(r.erro ?? 'Erro ao excluir'); else void carregar() }} />
       ))}

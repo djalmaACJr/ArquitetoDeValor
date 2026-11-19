@@ -36,6 +36,13 @@ export function useRelatoriosFii(ativoId?: string) {
     return { ok: res.ok, dados: res.dados, erro: res.erro }
   }
 
+  // Etapa 2: personaliza uma análise já feita (perfil, posição, peso na carteira, tempo de casa).
+  const personalizar = async (analise_id: string, config_id?: string): Promise<OpResult<AnaliseRelatorioFii>> => {
+    const res = await apiMutate<AnaliseRelatorioFii>('/investimentos/relatorios-fii/analise-pessoal', 'POST', { analise_id, config_id })
+    if (res.ok) await invalidar()
+    return { ok: res.ok, dados: res.dados, erro: res.erro }
+  }
+
   const marcarVisto = async (id: string, visto = true): Promise<OpResult> => {
     const res = await apiMutate(`/investimentos/relatorios-fii/${id}`, 'PUT', { visto })
     if (res.ok) await invalidar()
@@ -48,7 +55,7 @@ export function useRelatoriosFii(ativoId?: string) {
     return { ok: res.ok, dados: null, erro: res.erro }
   }
 
-  return { analises, loading, analisar, marcarVisto, excluir }
+  return { analises, loading, analisar, personalizar, marcarVisto, excluir }
 }
 
 export async function listarRelatoriosDisponiveis(ativoId: string): Promise<RelatorioFiiDisponivel[]> {

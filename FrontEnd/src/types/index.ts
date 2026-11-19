@@ -684,6 +684,18 @@ export interface TxCandidata {
 // ── Análise de Relatórios Gerenciais de FIIs (v7.7.0) ──────────────────────
 export type VereditoRelatorio = 'POSITIVO' | 'NEUTRO' | 'ATENCAO' | 'NEGATIVO'
 
+// Etapa 2 da análise (v7.9.0): "o que isso significa para mim" — perfil, posição, peso na carteira e tempo de casa.
+export type AlinhamentoPessoal = 'ADEQUADO' | 'ATENCAO' | 'REVISAR'
+export interface AnalisePessoalRelatorio {
+  alinhamento: AlinhamentoPessoal
+  resumo:      string
+  pontos:      string[]
+  gerada_em:   string
+  provedor:    string | null
+  modelo:      string | null
+  mentor_nome: string | null
+}
+
 export interface AnaliseRelatorioFii {
   id:              string
   ativo_id:        string
@@ -699,6 +711,7 @@ export interface AnaliseRelatorioFii {
   provedor:        string | null
   modelo:          string | null
   mentor_nome?:    string | null   // apelido do mentor (config de IA) que fez a análise
+  analise_pessoal?: AnalisePessoalRelatorio | null   // etapa 2 (sob demanda); null = ainda não gerada
   origem:          'CRON' | 'MANUAL'
   visto_em:        string | null
   created_at:      string

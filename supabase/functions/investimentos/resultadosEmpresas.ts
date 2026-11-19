@@ -286,7 +286,7 @@ export async function analisarESalvarDocumento(
     user_id: userId, ativo_id: ativo.id, documento_id: doc.id, relatorio_id: null, data_referencia: doc.data_referencia,
     veredito: analise.veredito, resumo: analise.resumo, pontos_fortes: analise.pontos_fortes,
     pontos_atencao: analise.pontos_atencao, inconsistencias: analise.inconsistencias, mudancas: analise.mudancas,
-    provedor: cfg.provedor, modelo: cfg.modelo, mentor_nome: cfg.nome ?? null, origem, visto_em: null,
+    provedor: cfg.provedor, modelo: cfg.modelo, mentor_nome: cfg.nome ?? null, origem, visto_em: null, analise_pessoal: null,
   }, { onConflict: "user_id,ativo_id,documento_id" }).select().single();
   if (error) { logError("Salvar análise de resultado", error); return { ok: false, erro: error.message, status: 500 }; }
   return { ok: true, analise: data };

@@ -32,7 +32,7 @@ export default function RelatoriosFiiPage() {
   const { ativos: todosAtivos } = useInvestimentosAtivos()
   const ativos = useMemo(() => todosAtivos.filter((a) => TIPOS_ANALISAVEIS.includes(a.tipo_ativo)), [todosAtivos])
   const { posicoes } = useInvestimentosPosicoes({ status: 'ATIVA' })
-  const { analises, loading, analisar, marcarVisto, excluir } = useRelatoriosFii()
+  const { analises, loading, analisar, personalizar, marcarVisto, excluir } = useRelatoriosFii()
   const auto = useRelatoriosAuto()
 
   const fiisEmCarteira = useMemo(() => {
@@ -294,7 +294,7 @@ export default function RelatoriosFiiPage() {
           ) : (
             <div className="space-y-3">
               {analisesFiltradas.map((a) => (
-                <CartaoAnalise key={a.id} a={a}
+                <CartaoAnalise key={a.id} a={a} onPersonalizar={() => personalizar(a.id)}
                   onVisto={async () => { await marcarVisto(a.id) }}
                   onExcluir={async () => { const r = await excluir(a.id); if (!r.ok) showToast(r.erro ?? 'Erro ao excluir') }} />
               ))}
