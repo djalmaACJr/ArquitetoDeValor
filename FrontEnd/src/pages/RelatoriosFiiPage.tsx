@@ -40,6 +40,8 @@ export default function RelatoriosFiiPage() {
     return ativos.filter((a) => comSaldo.has(a.id)).sort((a, b) => a.ticker.localeCompare(b.ticker))
   }, [ativos, posicoes])
 
+  const [tipoRun, setTipoRun] = useState('')
+  const [resumo, setResumo] = useState<string | null>(null)
   const [ativoId, setAtivoId] = useState('')
   const [disponiveis, setDisponiveis] = useState<RelatorioFiiDisponivel[]>([])
   const [relatorioId, setRelatorioId] = useState('')
@@ -50,7 +52,9 @@ export default function RelatoriosFiiPage() {
   const { configs: motores, ativa: motorAtivo } = useIAPreferencia()
   const outrosMotores = useMemo(() => motores.filter((c) => c.id !== motorAtivo?.id), [motores, motorAtivo])
   const motorSel = configId || outrosMotores[0]?.id || ''
-  const ativoSel = ativoId || (fiisEmCarteira.length > 1 ? TODOS : fiisEmCarteira[0]?.id) || ''
+  const tiposEmCarteira = useMemo(() => TIPOS_ANALISAVEIS.filter((t) => fiisEmCarteira.some((a) => a.tipo_ativo === t)), [fiisEmCarteira])
+  const candidatos = useMemo(() => fiisEmCarteira.filter((a) => !tipoRun || a.tipo_ativo === tipoRun), [fiisEmCarteira, tipoRun])
+  const ativoSel = (ativoId && (ativoId === TODOS || candidatos.some((a) => a.id === ativoId)) ? ativoId : '') || (candidatos.length > 1 ? TODOS : candidatos[0]?.id) || ''
   const todos = ativoSel === TODOS
 
   // Filtros da lista de análises
@@ -81,6 +85,10 @@ export default function RelatoriosFiiPage() {
     (!filtroMes || (a.data_referencia ?? '').slice(0, 7) === filtroMes) &&
     (!soNovos || !a.visto_em)), [analises, filtroTipo, tipoDoAtivo, filtroFii, filtroMes, soNovos])
 
+  function trocarTipoRun(tipo: string) {
+    setTipoRun(tipo); setAtivoId(''); setDisponiveis([]); setRelatorioId('')
+  }
+
   async function trocarAtivo(id: string) {
     setAtivoId(id); setDisponiveis([])
     // "Todos os ativos" só aceita as opções genéricas (mais recente / 3 últimos).
@@ -92,8 +100,8 @@ export default function RelatoriosFiiPage() {
   async function rodar() {
     if (!ativoSel) return
     if (modo === 'OUTRO' && !motorSel) { showToast('Cadastre outro mentor de IA em Perfil → Integração com IA.'); return }
-    setAnalisando(true)
-    const alvos = todos ? fiisEmCarteira : fiisEmCarteira.filter((a) => a.id === ativoSel)
+    setAnalisando(true); setResumo(null)
+    const alvos = todos ? candidatos : candidatos.filter((a) => a.id === ativoSel)
     const cfg = modo === 'OUTRO' ? motorSel : undefined
     let ok = 0, puladas = 0
     const erros: string[] = []
@@ -133,12 +141,13 @@ export default function RelatoriosFiiPage() {
       }
     }
     setAnalisando(false); setProgresso('')
-    if (ok === 1 && erros.length === 0 && puladas === 0) { showToast('Análise concluída!'); return }
-    if (ok === 0 && erros.length === 0 && puladas > 0) { showToast('Tudo já estava analisado. Use "Refazer análises" para gerar de novo.'); return }
-    const partes = [`${ok} análise(s) concluída(s)`]
-    if (puladas > 0) partes.push(`${puladas} já analisada(s)`)
+    const rotulo = modo === 'NOVOS' ? (ok === 1 ? 'análise nova feita' : 'análises novas feitas') : (ok === 1 ? 'análise refeita' : 'análises refeitas')
+    const partes = [`${ok} ${rotulo}`]
+    if (puladas > 0) partes.push(`${puladas} já estava(m) analisada(s)`)
     if (erros.length > 0) partes.push(`${erros.length} falha(s): ${erros[0]}`)
-    showToast(partes.join(' · '))
+    const msg = partes.join(' · ')
+    setResumo(msg)   // fica na tela até ser dispensado (o toast some em 4s)
+    showToast(msg)
   }
 
   async function alternarAuto() {
@@ -177,12 +186,19 @@ export default function RelatoriosFiiPage() {
             </label>
 
             <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-white/10">
+              <div className="min-w-[160px]">
+                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Tipo de ativo</p>
+                <SelectDark value={tipoRun} onChange={(e) => trocarTipoRun(e.target.value)}>
+                  <option value="">Todos os tipos</option>
+                  {tiposEmCarteira.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t as keyof typeof TIPO_ATIVO_LABEL] ?? t}</option>)}
+                </SelectDark>
+              </div>
               <div className="min-w-[200px]">
                 <p className="text-[12px] mb-1" style={{ color: MUTED }}>Ativo</p>
                 <SelectDark value={ativoSel} onChange={(e) => trocarAtivo(e.target.value)}>
-                  {fiisEmCarteira.length === 0 && <option value="">Nenhum ativo analisável em carteira</option>}
-                  {fiisEmCarteira.length > 1 && <option value={TODOS}>Todos os ativos</option>}
-                  {fiisEmCarteira.map((a) => <option key={a.id} value={a.id}>{a.ticker}</option>)}
+                  {candidatos.length === 0 && <option value="">Nenhum ativo analisável em carteira</option>}
+                  {candidatos.length > 1 && <option value={TODOS}>{tipoRun ? 'Todos deste tipo' : 'Todos os ativos'}</option>}
+                  {candidatos.map((a) => <option key={a.id} value={a.id}>{a.ticker}</option>)}
                 </SelectDark>
               </div>
               <div className="min-w-[240px]">
@@ -226,6 +242,12 @@ export default function RelatoriosFiiPage() {
               </button>
             </div>
             <p className="text-[12px]" style={{ color: MUTED }}>{DESCRICAO_MODO[modo]}</p>
+            {resumo && (
+              <div role="status" className="flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-[13px] text-white" style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.4)' }}>
+                <span>✅ {resumo}</span>
+                <button onClick={() => setResumo(null)} className="text-[12px] underline shrink-0" style={{ color: MUTED }}>Fechar</button>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between">
