@@ -184,7 +184,7 @@ test.describe('Investimentos (E2E)', () => {
     test.skip(!ativoId, 'Ativo de teste não foi criado (E2E-INV03 falhou)')
 
     await page.goto(`/investimentos/ativos/${ativoId}`)
-    await expect(page.getByRole('heading', { name: TICKER })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: TICKER, exact: true })).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('button', { name: /nova movimentação/i }).click()
     const drawer = page.getByRole('dialog')
@@ -209,7 +209,7 @@ test.describe('Investimentos (E2E)', () => {
     test.skip(!ativoId, 'Ativo de teste não foi criado (E2E-INV03 falhou)')
 
     await page.goto(`/investimentos/ativos/${ativoId}`)
-    await expect(page.getByRole('heading', { name: TICKER })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: TICKER, exact: true })).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('button', { name: /^editar$/i }).click()
     const drawer = page.getByRole('dialog')
@@ -346,7 +346,7 @@ test.describe('Investimentos (E2E)', () => {
     test.skip(!ativoId, 'Ativo de teste não foi criado (E2E-INV03 falhou)')
 
     await page.goto(`/investimentos/ativos/${ativoId}`)
-    await expect(page.getByRole('heading', { name: TICKER })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: TICKER, exact: true })).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('button', { name: /^excluir$/i }).click()
     const modal = page.getByRole('dialog', { name: new RegExp(`excluir.*${TICKER}`, 'i') })
