@@ -23,7 +23,7 @@ if "%SEC_EMAIL%"=="" (
   pause
   goto fim
 )
-echo %SEC_EMAIL% | findstr /r /c:"^[^ @]*@[^ @]*\.[^ @]*$" >nul
+echo %SEC_EMAIL%| findstr /r /c:"^[^ @]*@[^ @]*\.[^ @]*$" >nul
 if errorlevel 1 (
   echo "%SEC_EMAIL%" nao parece um e-mail valido. Nada foi alterado.
   pause
