@@ -10,10 +10,12 @@ import { useIAPreferencia } from '../hooks/useIAPreferencia'
 import { provedorPorId } from '../lib/iaProvedores'
 import CartaoAnalise from '../components/ui/CartaoAnaliseRelatorio'
 import { formatData } from '../lib/utils'
+import { TIPO_ATIVO_LABEL } from '../lib/constants'
 import type { RelatorioFiiDisponivel } from '../types'
 
 const MUTED = '#8b92a8'
 const TODOS = 'TODOS'
+const TIPOS_ANALISAVEIS: string[] = ['FII', 'ACOES', 'STOCKS', 'REIT']
 const ULTIMOS_3 = 'ULTIMOS3'
 type ModoAnalise = 'NOVOS' | 'REFAZER' | 'OUTRO'
 const DESCRICAO_MODO: Record<ModoAnalise, string> = {
@@ -27,7 +29,8 @@ export default function RelatoriosFiiPage() {
   const [toast, setToast] = useState<string | null>(null)
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 4000) }
 
-  const { ativos } = useInvestimentosAtivos({ tipo: 'FII' })
+  const { ativos: todosAtivos } = useInvestimentosAtivos()
+  const ativos = useMemo(() => todosAtivos.filter((a) => TIPOS_ANALISAVEIS.includes(a.tipo_ativo)), [todosAtivos])
   const { posicoes } = useInvestimentosPosicoes({ status: 'ATIVA' })
   const { analises, loading, analisar, marcarVisto, excluir } = useRelatoriosFii()
   const auto = useRelatoriosAuto()
@@ -51,27 +54,36 @@ export default function RelatoriosFiiPage() {
   const todos = ativoSel === TODOS
 
   // Filtros da lista de análises
+  const [filtroTipo, setFiltroTipo] = useState('')
   const [filtroFii, setFiltroFii] = useState('')
   const [filtroMes, setFiltroMes] = useState('')
   const [soNovos, setSoNovos] = useState(false)
+  // A lista de análises não traz o tipo: cruza com os ativos já carregados.
+  const tipoDoAtivo = useMemo(() => new Map(todosAtivos.map((a) => [a.id, a.tipo_ativo as string])), [todosAtivos])
+  const tiposDasAnalises = useMemo(() => {
+    const s = new Set<string>()
+    for (const a of analises) { const t = tipoDoAtivo.get(a.ativo_id); if (t) s.add(t) }
+    return TIPOS_ANALISAVEIS.filter((t) => s.has(t))
+  }, [analises, tipoDoAtivo])
   const fiisDasAnalises = useMemo(() => {
     const m = new Map<string, string>()
-    for (const a of analises) m.set(a.ativo_id, a.inv_ativos?.ticker ?? '—')
+    for (const a of analises) if (!filtroTipo || tipoDoAtivo.get(a.ativo_id) === filtroTipo) m.set(a.ativo_id, a.inv_ativos?.ticker ?? '—')
     return [...m.entries()].sort((x, y) => x[1].localeCompare(y[1]))
-  }, [analises])
+  }, [analises, filtroTipo, tipoDoAtivo])
   const mesesDasAnalises = useMemo(() => {
     const s = new Set<string>()
     for (const a of analises) if (a.data_referencia) s.add(a.data_referencia.slice(0, 7))
     return [...s].sort().reverse()
   }, [analises])
   const analisesFiltradas = useMemo(() => analises.filter((a) =>
+    (!filtroTipo || tipoDoAtivo.get(a.ativo_id) === filtroTipo) &&
     (!filtroFii || a.ativo_id === filtroFii) &&
     (!filtroMes || (a.data_referencia ?? '').slice(0, 7) === filtroMes) &&
-    (!soNovos || !a.visto_em)), [analises, filtroFii, filtroMes, soNovos])
+    (!soNovos || !a.visto_em)), [analises, filtroTipo, tipoDoAtivo, filtroFii, filtroMes, soNovos])
 
   async function trocarAtivo(id: string) {
     setAtivoId(id); setDisponiveis([])
-    // "Todos os FIIs" só aceita as opções genéricas (mais recente / 3 últimos).
+    // "Todos os ativos" só aceita as opções genéricas (mais recente / 3 últimos).
     if (id === TODOS) { if (relatorioId && relatorioId !== ULTIMOS_3) setRelatorioId(''); return }
     setRelatorioId('')
     if (id) setDisponiveis(await listarRelatoriosDisponiveis(id))
@@ -88,27 +100,28 @@ export default function RelatoriosFiiPage() {
     // O cron diário só guarda ~12 dias de relatórios; se faltar, busca uma
     // janela maior no Fundos.NET (uma única vez por execução).
     let sincronizado = false
-    const garantirCache = async () => {
+    const garantirCache = async (a: { id: string; tipo_ativo: string }) => {
+      if (a.tipo_ativo !== 'FII') { setProgresso(`${a.tipo_ativo === 'ACOES' ? 'Buscando resultado na CVM' : 'Buscando relatórios na SEC'}…`); await sincronizarRelatoriosFii(100, a.id); return }
       if (sincronizado) return
       sincronizado = true
       setProgresso('Buscando relatórios no Fundos.NET… (até 2 min)')
       await sincronizarRelatoriosFii()
     }
-    const ordenar = (l: RelatorioFiiDisponivel[]) => [...l].sort((x, y) => y.data_entrega.localeCompare(x.data_entrega))
+    const ordenar = (l: RelatorioFiiDisponivel[]) => [...l].sort((x, y) => (y.data_referencia ?? y.data_entrega).localeCompare(x.data_referencia ?? x.data_entrega))
     for (let i = 0; i < alvos.length; i++) {
       const a = alvos[i]
       const prefixo = alvos.length > 1 ? `${a.ticker} (${i + 1}/${alvos.length}) — ` : ''
       setProgresso(`${prefixo}buscando relatórios…`)
       let lista = ordenar(await listarRelatoriosDisponiveis(a.id))
-      if (lista.length < (relatorioId === ULTIMOS_3 ? 3 : 1)) { await garantirCache(); lista = ordenar(await listarRelatoriosDisponiveis(a.id)) }
+      if (lista.length < (relatorioId === ULTIMOS_3 ? 3 : 1)) { await garantirCache(a); lista = ordenar(await listarRelatoriosDisponiveis(a.id)) }
 
       // Do mais antigo para o mais novo, para a análise de cada mês poder
       // comparar com a do mês anterior.
       let alvoRel: RelatorioFiiDisponivel[]
       if (relatorioId === ULTIMOS_3) alvoRel = lista.slice(0, 3).reverse()
-      else if (relatorioId) alvoRel = lista.filter((r) => r.id === Number(relatorioId))
+      else if (relatorioId) alvoRel = lista.filter((r) => String(r.id) === relatorioId)
       else alvoRel = lista.slice(0, 1)
-      if (alvoRel.length === 0) { erros.push(`${a.ticker}: sem relatório gerencial disponível`); continue }
+      if (alvoRel.length === 0) { erros.push(`${a.ticker}: sem relatório disponível`); continue }
 
       // "Somente novos" pula o que já tem análise; os outros modos refazem (a análise anterior é substituída).
       const fazer = modo === 'NOVOS' ? alvoRel.filter((r) => !r.analisado) : alvoRel
@@ -139,10 +152,10 @@ export default function RelatoriosFiiPage() {
     <div className="space-y-5">
       <InvestimentosNav />
       <div>
-        <h1 className="text-white text-[22px] font-semibold flex items-center gap-2"><FileSearch size={22} style={{ color: '#3b82f6' }} /> Análise Relatórios de FIIs</h1>
+        <h1 className="text-white text-[22px] font-semibold flex items-center gap-2"><FileSearch size={22} style={{ color: '#3b82f6' }} /> Análise de Relatórios</h1>
         <p className="text-[13px] mt-1" style={{ color: MUTED }}>
-          A IA lê o Relatório Gerencial mensal de cada FII da sua carteira e aponta pontos fortes, pontos de atenção e inconsistências,
-          comparando com o mês anterior. É uma leitura de apoio — confira o PDF e não trate como recomendação de investimento.
+          A IA lê o Relatório Gerencial dos seus FIIs, o resultado trimestral das suas ações (dados da CVM) e os relatórios 10-Q/10-K das suas stocks (SEC),
+          e aponta pontos fortes, pontos de atenção e inconsistências, comparando com o período anterior. É uma leitura de apoio — confira o PDF e não trate como recomendação de investimento.
         </p>
       </div>
 
@@ -158,17 +171,17 @@ export default function RelatoriosFiiPage() {
               <span>
                 <span className="text-white text-[14px] font-medium">Analisar automaticamente quando sair um relatório novo</span>
                 <span className="block text-[12px]" style={{ color: MUTED }}>
-                  Roda todo dia de manhã para os FIIs que você possui. Usa a sua IA ativa (Perfil → Integração com IA) e consome tokens da sua chave — cerca de 1 chamada por FII por mês.
+                  Roda todo dia de manhã para os FIIs, ações e stocks que você possui. Usa a sua IA ativa (Perfil → Integração com IA) e consome tokens da sua chave — cerca de 1 chamada por ativo a cada divulgação (mensal nos FIIs, trimestral nas ações e stocks).
                 </span>
               </span>
             </label>
 
             <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-white/10">
               <div className="min-w-[200px]">
-                <p className="text-[12px] mb-1" style={{ color: MUTED }}>FII</p>
+                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Ativo</p>
                 <SelectDark value={ativoSel} onChange={(e) => trocarAtivo(e.target.value)}>
-                  {fiisEmCarteira.length === 0 && <option value="">Nenhum FII em carteira</option>}
-                  {fiisEmCarteira.length > 1 && <option value={TODOS}>Todos os FIIs</option>}
+                  {fiisEmCarteira.length === 0 && <option value="">Nenhum ativo analisável em carteira</option>}
+                  {fiisEmCarteira.length > 1 && <option value={TODOS}>Todos os ativos</option>}
                   {fiisEmCarteira.map((a) => <option key={a.id} value={a.id}>{a.ticker}</option>)}
                 </SelectDark>
               </div>
@@ -222,7 +235,14 @@ export default function RelatoriosFiiPage() {
           {analises.length > 0 && (
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-[160px]">
-                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Filtrar por FII</p>
+                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Filtrar por tipo</p>
+                <SelectDark value={filtroTipo} onChange={(e) => { setFiltroTipo(e.target.value); setFiltroFii('') }}>
+                  <option value="">Todos</option>
+                  {tiposDasAnalises.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t as keyof typeof TIPO_ATIVO_LABEL] ?? t}</option>)}
+                </SelectDark>
+              </div>
+              <div className="min-w-[160px]">
+                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Filtrar por ativo</p>
                 <SelectDark value={filtroFii} onChange={(e) => setFiltroFii(e.target.value)}>
                   <option value="">Todos</option>
                   {fiisDasAnalises.map(([id, tk]) => <option key={id} value={id}>{tk}</option>)}
@@ -245,7 +265,7 @@ export default function RelatoriosFiiPage() {
             <p className="text-[13px]" style={{ color: MUTED }}>Carregando…</p>
           ) : analises.length === 0 ? (
             <p className="text-[13px] text-center py-8" style={{ color: MUTED }}>
-              Nenhuma análise ainda. Escolha um FII e clique em "Analisar agora", ou ligue a análise automática.
+              Nenhuma análise ainda. Escolha um ativo e clique em "Analisar agora", ou ligue a análise automática.
             </p>
           ) : analisesFiltradas.length === 0 ? (
             <p className="text-[13px] text-center py-8" style={{ color: MUTED }}>Nenhuma análise com esses filtros.</p>

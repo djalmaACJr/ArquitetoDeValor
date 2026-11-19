@@ -672,6 +672,37 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     }
   }, 60000);
 
+  // v7.8.0 — análise de relatórios também para stocks/REITs (EDGAR) e ações (CVM).
+  // Sem depender de rede/IA: só o contrato das rotas (tipos aceitos, ativo inexistente,
+  // sincronização por ativo sem documento) — a leitura real da SEC/CVM é coberta pelos
+  // testes Deno (textoResultados/fundamentosAcao) e por validação manual.
+  test("CA-INV34 — relatórios: stocks entram no fluxo (disponíveis/sincronizar), ETF e ativo inexistente são rejeitados", async () => {
+    const { data: dS } = await api("/investimentos/ativos", "POST", { ticker: "JESTRELSTK", nome: "Jest Stock Relatorio", tipo_ativo: "STOCKS" });
+    const { data: dE } = await api("/investimentos/ativos", "POST", { ticker: "JESTRELETF", nome: "Jest ETF Relatorio", tipo_ativo: "ETF" });
+    const sId = dS.dados.id as string, eId = dE.dados.id as string;
+
+    // stock: lista de documentos disponíveis vem vazia (ticker fictício fora da SEC), mas a rota aceita o tipo
+    const disp = await api(`/investimentos/relatorios-fii/disponiveis?ativo_id=${sId}`);
+    expect(disp.status).toBe(200);
+    expect(Array.isArray(disp.data.dados)).toBe(true);
+    expect(disp.data.dados).toHaveLength(0);
+
+    // sincronizar por ativo: não falha e não insere nada para um ticker inexistente na SEC
+    const sync = await api("/investimentos/relatorios-fii/sincronizar", "POST", { ativo_id: sId });
+    expect(sync.status).toBe(200);
+    expect(sync.data.dados.inseridos).toBe(0);
+
+    // analisar sem nenhum documento: nunca cria análise (404 sem documento ou 4xx de config de IA)
+    const an = await api("/investimentos/relatorios-fii/analisar", "POST", { ativo_id: sId });
+    expect([400, 404, 422]).toContain(an.status);
+
+    // ETF não tem relatório periódico; ativo inexistente → 404
+    expect((await api("/investimentos/relatorios-fii/analisar", "POST", { ativo_id: eId })).status).toBe(400);
+    expect((await api("/investimentos/relatorios-fii/analisar", "POST", { ativo_id: "00000000-0000-0000-0000-000000000000" })).status).toBe(404);
+
+    for (const id of [sId, eId]) await api(`/investimentos/ativos/${id}`, "DELETE");
+  }, 90000);
+
   // O pré-agendamento do RESGATE no vencimento foi REMOVIDO do backend
   // (poluía a lista de operações e distorcia totais sem filtro de data —
   // ver comentário em fecharPosicoesVencidas). Hoje o fechamento é só via

@@ -10,7 +10,7 @@ const MUTED = '#8b92a8'
 const COR: Record<VereditoRelatorio, string> = { POSITIVO: '#22c55e', NEUTRO: '#8b92a8', ATENCAO: '#f0b429', NEGATIVO: '#ff5c7a' }
 const ROTULO: Record<VereditoRelatorio, string> = { POSITIVO: 'Positivo', NEUTRO: 'Neutro', ATENCAO: 'Atenção', NEGATIVO: 'Negativo' }
 
-// Aviso de login: há análises de Relatório Gerencial de FII ainda não lidas
+// Aviso de login: há análises de relatórios/resultados (FIIs, ações, stocks) ainda não lidas
 // (geradas pela análise automática ou manualmente em outro lugar). Montado em
 // AppLayout. "Dispensar" só esconde nesta sessão — a análise continua marcada
 // como NOVA até ser aberta/lida na página de análises.
@@ -43,7 +43,7 @@ export default function AvisoAnaliseRelatorio() {
         <div className="flex-1 min-w-0">
           <p className="text-[14px] font-semibold text-white">{n === 1 ? 'Nova análise de relatório' : `${n} novas análises de relatórios`}</p>
           <p className="text-[13px] mt-0.5" style={{ color: MUTED }}>
-            {quem} {n === 1 ? 'um relatório gerencial' : 'relatórios gerenciais'} de FII da sua carteira.
+            {quem} {n === 1 ? 'um relatório de resultado' : 'relatórios de resultado'} de ativos da sua carteira (FIIs, ações e stocks).
           </p>
         </div>
         <button onClick={() => setDispensado(true)} aria-label="Fechar" className="shrink-0 p-1 rounded-md hover:bg-white/10" style={{ color: MUTED }}>
