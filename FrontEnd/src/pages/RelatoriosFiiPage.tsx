@@ -10,6 +10,7 @@ import { useIAPreferencia } from '../hooks/useIAPreferencia'
 import { provedorPorId } from '../lib/iaProvedores'
 import CartaoAnalise from '../components/ui/CartaoAnaliseRelatorio'
 import { formatData } from '../lib/utils'
+import { TIPO_ATIVO_LABEL } from '../lib/constants'
 import type { RelatorioFiiDisponivel } from '../types'
 
 const MUTED = '#8b92a8'
@@ -53,23 +54,32 @@ export default function RelatoriosFiiPage() {
   const todos = ativoSel === TODOS
 
   // Filtros da lista de análises
+  const [filtroTipo, setFiltroTipo] = useState('')
   const [filtroFii, setFiltroFii] = useState('')
   const [filtroMes, setFiltroMes] = useState('')
   const [soNovos, setSoNovos] = useState(false)
+  // A lista de análises não traz o tipo: cruza com os ativos já carregados.
+  const tipoDoAtivo = useMemo(() => new Map(todosAtivos.map((a) => [a.id, a.tipo_ativo as string])), [todosAtivos])
+  const tiposDasAnalises = useMemo(() => {
+    const s = new Set<string>()
+    for (const a of analises) { const t = tipoDoAtivo.get(a.ativo_id); if (t) s.add(t) }
+    return TIPOS_ANALISAVEIS.filter((t) => s.has(t))
+  }, [analises, tipoDoAtivo])
   const fiisDasAnalises = useMemo(() => {
     const m = new Map<string, string>()
-    for (const a of analises) m.set(a.ativo_id, a.inv_ativos?.ticker ?? '—')
+    for (const a of analises) if (!filtroTipo || tipoDoAtivo.get(a.ativo_id) === filtroTipo) m.set(a.ativo_id, a.inv_ativos?.ticker ?? '—')
     return [...m.entries()].sort((x, y) => x[1].localeCompare(y[1]))
-  }, [analises])
+  }, [analises, filtroTipo, tipoDoAtivo])
   const mesesDasAnalises = useMemo(() => {
     const s = new Set<string>()
     for (const a of analises) if (a.data_referencia) s.add(a.data_referencia.slice(0, 7))
     return [...s].sort().reverse()
   }, [analises])
   const analisesFiltradas = useMemo(() => analises.filter((a) =>
+    (!filtroTipo || tipoDoAtivo.get(a.ativo_id) === filtroTipo) &&
     (!filtroFii || a.ativo_id === filtroFii) &&
     (!filtroMes || (a.data_referencia ?? '').slice(0, 7) === filtroMes) &&
-    (!soNovos || !a.visto_em)), [analises, filtroFii, filtroMes, soNovos])
+    (!soNovos || !a.visto_em)), [analises, filtroTipo, tipoDoAtivo, filtroFii, filtroMes, soNovos])
 
   async function trocarAtivo(id: string) {
     setAtivoId(id); setDisponiveis([])
@@ -224,6 +234,13 @@ export default function RelatoriosFiiPage() {
 
           {analises.length > 0 && (
             <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[160px]">
+                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Filtrar por tipo</p>
+                <SelectDark value={filtroTipo} onChange={(e) => { setFiltroTipo(e.target.value); setFiltroFii('') }}>
+                  <option value="">Todos</option>
+                  {tiposDasAnalises.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t as keyof typeof TIPO_ATIVO_LABEL] ?? t}</option>)}
+                </SelectDark>
+              </div>
               <div className="min-w-[160px]">
                 <p className="text-[12px] mb-1" style={{ color: MUTED }}>Filtrar por ativo</p>
                 <SelectDark value={filtroFii} onChange={(e) => setFiltroFii(e.target.value)}>

@@ -196,6 +196,12 @@ export async function sincronizarDocumentosAtivo(ativo: AtivoEmpresa): Promise<{
     return { inseridos: r.inseridos, falhas: r.falhas, ...(r.desligado ? { aviso: "Fonte da SEC não configurada (secret SEC_CONTACT_EMAIL)." } : {}) };
   }
   if (fonte === "CVM") {
+    // Cada sync lê CSVs de dezenas de MB da CVM: sem este freio, cliques repetidos
+    // (ou um script) fariam a Edge Function reprocessar tudo a cada chamada.
+    const { data: recente } = await dbAdmin().from("inv_documentos_resultado").select("baixado_em")
+      .eq("fonte", "CVM").eq("ticker_ref", refDoAtivo(ativo))
+      .gte("baixado_em", new Date(Date.now() - 6 * 3_600_000).toISOString()).limit(1).maybeSingle();
+    if (recente) return { inseridos: 0, falhas: 0 };
     const r = await sincronizarCvm([ativo]);
     return { inseridos: r.gravados, falhas: r.falhas };
   }

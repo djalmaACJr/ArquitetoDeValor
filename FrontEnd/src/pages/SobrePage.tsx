@@ -24,6 +24,18 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.7.0',
+    data:   '2026-11-18',
+    titulo: 'Análise de relatórios de FIIs',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '🤖 Análise de Relatórios de FIIs', d: 'a IA lê o Relatório Gerencial mensal dos seus FIIs e explica em linguagem simples se o fundo está bem, com pontos fortes, pontos de atenção e o que mudou. Pode rodar automática (opção na própria página) ou sob demanda, escolhendo o mentor.' },
+      { t: '🔔 Aviso de novas análises', d: 'ao entrar, o sistema mostra o que o mentor analisou e destaca os FIIs com análise nova; o ticker abre a página do ativo já na seção do relatório.' },
+      { t: '🚨 Alerta de FII em migração', d: 'avisa quando um FII da carteira entra em liquidação, incorporação, transformação ou troca de código, com base nos fatos relevantes.' },
+      { t: '🔁 Transferir posição entre ativos', d: 'migre a posição de um ativo para outro (ex.: RBRR11 → PCIP11) mantendo o histórico, sem lançar venda e compra à mão.' },
+    ],
+  },
+  {
     versao: '7.6.1',
     data:   '2026-11-10',
     titulo: 'Escolher parcelas na lista',
@@ -404,13 +416,12 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.7.0) */}
+        {/* Detalhe das novidades desta versão (7.8.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🤖 Análise de Relatórios de FIIs', d: 'a IA lê o Relatório Gerencial mensal dos seus FIIs e explica em linguagem simples se o fundo está bem, com pontos fortes, pontos de atenção e o que mudou. Pode rodar automática (opção na própria página) ou sob demanda, escolhendo o mentor.' },
-            { t: '🔔 Aviso de novas análises', d: 'ao entrar, o sistema mostra o que o mentor analisou e destaca os FIIs com análise nova; o ticker abre a página do ativo já na seção do relatório.' },
-            { t: '🚨 Alerta de FII em migração', d: 'avisa quando um FII da carteira entra em liquidação, incorporação, transformação ou troca de código, com base nos fatos relevantes.' },
-            { t: '🔁 Transferir posição entre ativos', d: 'migre a posição de um ativo para outro (ex.: RBRR11 → PCIP11) mantendo o histórico, sem lançar venda e compra à mão.' },
+            { t: '📊 Análise de resultados de Ações e Stocks', d: 'a análise por IA, antes só dos FIIs, agora também lê os resultados trimestrais das suas ações brasileiras (dados da CVM) e dos stocks e REITs americanos (relatórios 10-Q/10-K da SEC), explicando em português simples se a empresa vai bem. Mesmos avisos, histórico e escolha de mentor.' },
+            { t: '🧮 Preço justo (Graham) corrigido', d: 'o Valor Justo das ações estava muito distante da realidade por um erro de escala nos dados. Agora usa lucro e patrimônio dos controladores, lucro dos últimos 12 meses e o número real de ações (bancos e units tratados à parte).' },
+            { t: '🔎 Página do ativo', d: 'ações, stocks e REITs ganham o quadro de análise dos relatórios na própria página do ativo.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
