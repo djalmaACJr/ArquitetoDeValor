@@ -14,6 +14,7 @@ import AvisoAgregadoSaiu from '../ui/AvisoAgregadoSaiu'
 import AvisoConviteRecebido from '../ui/AvisoConviteRecebido'
 import AvisosCronAdmin from '../ui/AvisosCronAdmin'
 import AvisoFecharAba from '../ui/AvisoFecharAba'
+import Arrastavel from '../ui/Arrastavel'
 import GuardaModuloAgregado from '../ui/GuardaModuloAgregado'
 import { prefetchLancamentosVizinhos } from '../../hooks/useLancamentos'
 import { useMascotePreferido } from '../../hooks/useMascotePreferido'
@@ -211,26 +212,26 @@ export default function AppLayout() {
           os cards; cada card reativa pointer-events-auto em si mesmo. */}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col-reverse gap-3 pointer-events-none">
         {/* Proventos provisionados pelo job BRL (já mostra a Data COM quando a fonte tem) */}
-        <NovidadesProventos />
+        <Arrastavel><NovidadesProventos /></Arrastavel>
         {/* Análises de relatórios gerenciais de FII ainda não lidas */}
-        <AvisoAnaliseRelatorio />
+        <Arrastavel><AvisoAnaliseRelatorio /></Arrastavel>
         {/* FII da carteira em liquidação / fusão / troca de código (alerta especial) */}
-        <AvisoFiiMigracao />
+        <Arrastavel><AvisoFiiMigracao /></Arrastavel>
         {/* Ativos da carteira com Data COM próxima (próximos dias) */}
-        <AvisoDataComProxima />
+        <Arrastavel><AvisoDataComProxima /></Arrastavel>
         {/* Algum dono revogou meu acesso de agregado desde a última vez que vi */}
-        <AvisoRevogacaoAgregado />
+        <Arrastavel><AvisoRevogacaoAgregado /></Arrastavel>
         {/* Dono: alguém aceitou meu convite de compartilhamento */}
-        <AvisoAgregadoAceitou />
+        <Arrastavel><AvisoAgregadoAceitou /></Arrastavel>
         {/* Dono: um agregado saiu por conta própria */}
-        <AvisoAgregadoSaiu />
+        <Arrastavel><AvisoAgregadoSaiu /></Arrastavel>
         {/* Convidado: convite de agregado pendente de resposta */}
-        <AvisoConviteRecebido />
+        <Arrastavel><AvisoConviteRecebido /></Arrastavel>
         {/* Aviso de login (só admin): cron com falha, inclusive falhas que nem
             chegaram a invocar a Edge Function (pg_cron/pg_net). Achado real: ficava
             sozinho em `bottom-4 left-4`, exatamente embaixo da Sidebar (z-[60] vence
             o z-50 dele) — movido pra dentro da mesma pilha do canto direito. */}
-        <AvisosCronAdmin />
+        <Arrastavel><AvisosCronAdmin /></Arrastavel>
       </div>
       {/* Modal de decisão ao expirar por inatividade nesta aba (ver useAutoLogout) */}
       <AvisoFecharAba />
