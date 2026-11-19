@@ -22,7 +22,7 @@ import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
 import { chamarProvedorIA, lerConfigIAAtiva, ErroIA, type ConfigIAAtiva } from "../_shared/ia.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@1.3.0";
 import { Db, hojeISO, recuarDias } from "./shared.ts";
-import { carregarContextoPessoal, gerarAnalisePessoal } from "./analisePessoal.ts";
+import { carregarContextoPessoal, gerarAnalisePessoal, personalizarAnaliseSalva } from "./analisePessoal.ts";
 import {
   TIPOS_COM_RESULTADO, analisarESalvarDocumento, documentosDoAtivo, listarDisponiveis,
   processarResultadosCron, sincronizarDocumentosAtivo,
@@ -264,9 +264,11 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
   const admin = dbAdmin();
 
   // FIIs com posição ativa de usuários que ligaram a análise automática.
-  const { data: autos } = await admin.from("usuarios").select("id").eq("inv_relatorios_auto", true);
+  const { data: autos } = await admin.from("usuarios").select("id, inv_relatorios_pessoal_auto").eq("inv_relatorios_auto", true);
   const idsAuto = new Set((autos ?? []).map((u) => String(u.id)));
-  let analisados = 0, ignorados = 0, falhasIA = 0;
+  // Subordinado à análise automática: só quem ligou as duas ganha a etapa 2 junto.
+  const idsPessoal = new Set((autos ?? []).filter((u) => u.inv_relatorios_pessoal_auto === true).map((u) => String(u.id)));
+  let analisados = 0, ignorados = 0, falhasIA = 0, personalizados = 0;
 
   if (idsAuto.size > 0) {
     const { data: pos } = await admin.from("inv_posicoes")
@@ -303,14 +305,17 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
 
       if (analisados >= MAX_ANALISES_POR_CRON || Date.now() - inicio > ORCAMENTO_CRON_MS) break externo; // o resto fica pro próximo dia
       const r = await analisarESalvar(admin, ativo.user_id, cfg, ativo, rel, "CRON");
-      if (r.ok) analisados++; else falhasIA++;
+      if (r.ok) {
+        analisados++;
+        if (idsPessoal.has(ativo.user_id) && await personalizarAnaliseSalva(admin, ativo.user_id, cfg, String(r.analise.id)) === "ok") personalizados++;
+      } else falhasIA++;
     }
   }
 
   // Ações BR (CVM) e Stocks/REITs (EDGAR): mesmo job, mesmo orçamento de tempo/IA.
   let resultados: Record<string, unknown> = {};
   try {
-    resultados = await processarResultadosCron(idsAuto, {
+    resultados = await processarResultadosCron(idsAuto, idsPessoal, {
       analisesRestantes: Math.max(MAX_ANALISES_POR_CRON - analisados, 0), prazoMs: inicio + ORCAMENTO_CRON_MS,
     });
   } catch (e) { logError("Resultados de empresas (cron)", e); resultados = { erro: String(e) }; }
@@ -320,7 +325,7 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
   const { count: expA } = await admin.from("inv_analises_relatorio").delete({ count: "exact" }).lt("data_referencia", corte);
   const { count: expB } = await admin.from("inv_analises_relatorio").delete({ count: "exact" }).is("data_referencia", null).lt("created_at", `${corte}T00:00:00Z`);
 
-  const resumo = { ...sync, analisados, expurgadas: (expA ?? 0) + (expB ?? 0), ignorados, falhas_analise: falhasIA, resultados, duracao_ms: Date.now() - inicio };
+  const resumo = { ...sync, analisados, personalizados: personalizados + Number((resultados as { personalizados?: number }).personalizados ?? 0), expurgadas: (expA ?? 0) + (expB ?? 0), ignorados, falhas_analise: falhasIA, resultados, duracao_ms: Date.now() - inicio };
   logSuccess("Relatórios FII processados", resumo);
   return json({ dados: resumo });
 }

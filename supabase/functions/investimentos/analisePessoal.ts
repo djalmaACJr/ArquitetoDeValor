@@ -208,3 +208,27 @@ export async function gerarAnalisePessoal(
   if (!a) throw new ErroIA("A IA devolveu uma resposta fora do formato esperado. Tente novamente.", 502);
   return { ...a, gerada_em: new Date().toISOString(), provedor: cfg.provedor, modelo: cfg.modelo ?? null, mentor_nome: cfg.nome ?? null };
 }
+
+/** Gera e grava a etapa 2 de uma análise já salva. Usada pelo cron (sem JWT, via `admin`)
+ *  quando o usuário ligou `inv_relatorios_pessoal_auto`. Nunca lança: falha só é logada. */
+export async function personalizarAnaliseSalva(
+  c: Db, userId: string, cfg: ConfigIAAtiva, analiseId: string,
+): Promise<"ok" | "sem_posicao" | "falha"> {
+  try {
+    const { data: base } = await c.from("inv_analises_relatorio")
+      .select("id, ativo_id, veredito, resumo, pontos_fortes, pontos_atencao, inconsistencias, mudancas")
+      .eq("id", analiseId).eq("user_id", userId).maybeSingle();
+    if (!base) return "falha";
+    const { data: ativo } = await c.from("inv_ativos").select("id, ticker, tipo_ativo")
+      .eq("id", String(base.ativo_id)).eq("user_id", userId).maybeSingle();
+    if (!ativo) return "falha";
+    const ctx = await carregarContextoPessoal(c, userId, { id: String(ativo.id), ticker: String(ativo.ticker), tipo_ativo: String(ativo.tipo_ativo) });
+    if (!ctx) return "sem_posicao";
+    const pessoal = await gerarAnalisePessoal(cfg, ctx, base as unknown as AnaliseBase);
+    const { error } = await c.from("inv_analises_relatorio").update({ analise_pessoal: pessoal }).eq("id", analiseId).eq("user_id", userId);
+    return error ? "falha" : "ok";
+  } catch (e) {
+    logError("Análise pessoal automática (cron)", e);
+    return "falha";
+  }
+}

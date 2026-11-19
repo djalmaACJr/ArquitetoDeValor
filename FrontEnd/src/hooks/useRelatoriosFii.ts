@@ -99,12 +99,12 @@ export function useRelatoriosAuto() {
   const { session } = useAuth()
   const uid = session?.user?.id ?? null
 
-  const { data: ativo = false, isLoading } = useQuery({
+  const { data: flags = { auto: false, pessoal: false }, isLoading } = useQuery({
     queryKey: qk.invRelatoriosFiiAuto(uid),
     queryFn: async () => {
-      const { data, error } = await supabase.schema('arqvalor').from('usuarios').select('inv_relatorios_auto').eq('id', uid!).single()
+      const { data, error } = await supabase.schema('arqvalor').from('usuarios').select('inv_relatorios_auto, inv_relatorios_pessoal_auto').eq('id', uid!).single()
       if (error) throw error
-      return !!data?.inv_relatorios_auto
+      return { auto: !!data?.inv_relatorios_auto, pessoal: !!data?.inv_relatorios_pessoal_auto }
     },
     enabled: !!uid,
     staleTime: 60_000,
@@ -117,5 +117,13 @@ export function useRelatoriosAuto() {
     return true
   }
 
-  return { ativo, loading: isLoading, definir }
+  // Etapa 2 automática: subordinada à análise automática (só vale com ela ligada).
+  const definirPessoal = async (valor: boolean): Promise<boolean> => {
+    const { error } = await supabase.schema('arqvalor').from('usuarios').update({ inv_relatorios_pessoal_auto: valor }).eq('id', uid!)
+    if (error) return false
+    await qc.invalidateQueries({ queryKey: qk.invRelatoriosFiiAuto(uid) })
+    return true
+  }
+
+  return { ativo: flags.auto, pessoal: flags.auto && flags.pessoal, loading: isLoading, definir, definirPessoal }
 }
