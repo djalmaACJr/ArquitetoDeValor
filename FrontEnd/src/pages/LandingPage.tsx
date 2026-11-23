@@ -18,6 +18,7 @@ import { Link } from 'react-router-dom'
 import {
   Wallet, Repeat, ArrowLeftRight, FolderTree, BarChart3, FileUp,
   Target, TrendingUp, LineChart, Coins, Landmark, Sparkles, ArrowRight,
+  Layers, FileText, Users, ShieldCheck, UserRound, Calculator,
 } from 'lucide-react'
 import { APP_VERSION } from '../config/version'
 
@@ -333,6 +334,20 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Diferenciais */}
+      <section className="relative max-w-5xl mx-auto px-4 pb-12">
+        <p className="text-av-green text-[13px] font-semibold tracking-[3px] mb-2 text-center">POR QUE O ARQUITETO DE VALOR</p>
+        <h2 className="text-white text-2xl md:text-3xl font-bold text-center mb-8">Seu dinheiro e seus investimentos, juntos e sem complicação</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {([
+            { icon: Layers, titulo: 'Tudo em um lugar', descricao: 'Extrato, objetivos e carteira de investimentos na mesma base: um provento vira lançamento e entra no seu patrimônio.' },
+            { icon: FileText, titulo: 'IA que lê os relatórios', descricao: 'Lê os relatórios dos seus FIIs, ações e stocks e explica em português simples se vão bem — e o que isso significa para você.' },
+            { icon: Users, titulo: 'Conta conjunta', descricao: 'Compartilhe só o que quiser, escolhendo módulos, contas e se a pessoa apenas vê ou também edita.' },
+            { icon: ShieldCheck, titulo: 'Seus dados, só seus', descricao: 'Cada usuário enxerga apenas o que é seu. A IA usa a sua própria chave, e o app Android tem login por digital.' },
+          ] as Feature[]).map(f => <CardFeature key={f.titulo} {...f} />)}
+        </div>
+      </section>
+
       {/* Financeiro básico */}
       <Secao
         eyebrow="FINANCEIRO BÁSICO"
@@ -375,7 +390,7 @@ export default function LandingPage() {
       {/* Investimentos */}
       <Secao
         eyebrow="INVESTIMENTOS"
-        titulo="Sua carteira, seus dividendos e uma avaliação por IA"
+        titulo="Sua carteira, seus dividendos e uma IA que lê os relatórios por você"
         cor="#00c896"
         mockup={<MockupInvestimentos/>}
         mascote={
@@ -386,6 +401,9 @@ export default function LandingPage() {
           { icon: LineChart, titulo: 'Carteira completa', descricao: 'Ações, FIIs, renda fixa, tesouro direto, cripto e stocks/ETFs num só painel.' },
           { icon: Landmark, titulo: 'Dividendos e DY/YoC', descricao: 'Proventos organizados com Dividend Yield e Yield on Cost calculados automaticamente.' },
           { icon: Sparkles, titulo: 'Avaliação por IA', descricao: 'Peça a opinião de mentores de investimento por IA sobre os ativos da sua carteira.' },
+          { icon: FileText, titulo: 'Análise de relatórios', descricao: 'A IA lê o relatório gerencial dos FIIs, o resultado das ações (CVM) e os 10-Q/10-K das stocks (SEC) e aponta pontos fortes e de atenção.' },
+          { icon: UserRound, titulo: 'Análise "Para você"', descricao: 'Cruza a análise com o seu perfil, o peso do ativo na carteira e há quanto tempo você o tem. Não é recomendação de compra ou venda.' },
+          { icon: Calculator, titulo: 'Preço Teto e Valor Justo', descricao: 'Para ações, o preço teto (Bazin) e o valor justo (Graham), calculados com os seus dividendos e os dados oficiais.' },
         ]}
       />
 

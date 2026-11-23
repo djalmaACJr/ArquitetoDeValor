@@ -74,15 +74,6 @@ const LogoSVG = () => (
 const bgGrid = 'repeating-linear-gradient(0deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px),repeating-linear-gradient(90deg,transparent,transparent 19px,#4da6ff 19px,#4da6ff 20px)'
 const inputCls = 'w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-[17px] text-white placeholder-white/30 focus:outline-none focus:bg-white/10 focus:border-av-green/70 transition-colors'
 
-// Pontos fortes mostrados na página de entrada (mesmo conteúdo do e-mail de convite).
-const DESTAQUES = [
-  { i: '🧩', t: 'Tudo em um lugar', d: 'extrato, objetivos e investimentos juntos' },
-  { i: '🤖', t: 'IA que lê os relatórios', d: 'de FIIs, ações e stocks, em português simples e pensando em você' },
-  { i: '🧾', t: 'Fatura do cartão', d: 'importe o PDF e revise com sugestão automática' },
-  { i: '👥', t: 'Conta conjunta', d: 'compartilhe só o que quiser, com permissões' },
-  { i: '🔒', t: 'Seus dados, só seus', d: 'isolados por usuário, com login por digital no Android' },
-]
-
 export default function LoginPage() {
   const { signIn } = useAuth()
   const navigate   = useNavigate()
@@ -415,17 +406,6 @@ export default function LoginPage() {
             </>
           )}
         </div>
-
-        {modo === 'login' && (
-          <ul className="mt-4 space-y-1.5 text-[14px] text-white/55">
-            {DESTAQUES.map((d) => (
-              <li key={d.t} className="flex gap-2">
-                <span aria-hidden>{d.i}</span>
-                <span><span className="text-white/80 font-medium">{d.t}</span> — {d.d}</span>
-              </li>
-            ))}
-          </ul>
-        )}
 
         <p className="text-center text-[15px] text-white/20 mt-4">
           Arquiteto de Valor · BLUEPRINT · v{APP_VERSION}
