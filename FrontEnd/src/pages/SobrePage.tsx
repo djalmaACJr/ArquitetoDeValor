@@ -434,6 +434,8 @@ export default function SobrePage() {
             { t: '⚙️ Automático, se você quiser', d: 'um novo check na página de Análise de Relatórios faz a análise “Para você” junto de cada análise automática. Só funciona com a análise automática ligada e gasta mais uma chamada de IA por análise.' },
             { t: '💰 Preço Teto (Bazin) mais fiel', d: 'o teto agora usa o dividendo por ação de fato pago nos últimos 12 meses, como o investidor10, em vez de dividir o total recebido pela quantidade atual de ações.' },
             { t: '🧮 Valor Justo atualizado', d: 'os fundamentos das ações foram recalculados na base da CVM, corrigindo valores que ainda estavam errados.' },
+            { t: '📑 Relatórios por mês e fundo certo', d: 'a lista de relatórios fica sempre do mês mais novo para o mais velho, e o sistema não confunde mais fundos de nomes parecidos (ex.: vários fundos da mesma gestora).' },
+            { t: '✨ Pontos fortes em destaque', d: 'a página de entrada e os convites por e-mail e WhatsApp passam a mostrar o que o sistema tem de melhor.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

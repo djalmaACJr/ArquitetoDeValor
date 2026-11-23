@@ -557,12 +557,12 @@ function SecaoConvite() {
     // WhatsApp aceita *negrito* e quebra de linha no texto pré-preenchido.
     const texto =
       `🏗️ *Arquiteto de Valor* — organize suas finanças sem planilha complicada.\n\n` +
-      `📊 Dashboard completo\n` +
-      `🎯 Metas e objetivos\n` +
-      `📈 Relatórios inteligentes\n` +
-      `💹 Investimentos e carteira\n` +
-      `🤖 Mentor com IA de graça\n` +
-      `👥 Conta conjunta: compartilhe contas e módulos com quem você quiser\n\n` +
+      `🧩 Extrato, objetivos e investimentos num lugar só\n` +
+      `🤖 IA que lê os relatórios dos seus FIIs, ações e stocks e explica em português simples\n` +
+      `💹 Dividendos, DY e YoC, renda fixa, tesouro e cripto\n` +
+      `🧾 Importa a fatura do cartão em PDF\n` +
+      `👥 Conta conjunta: compartilhe contas e módulos com quem você quiser\n` +
+      `🔒 Seus dados só seus, com login por digital no Android\n\n` +
       `Migrei minhas finanças pra lá e tá valendo muito. Bora?\n` +
       `👉 ${linkCadastro}`
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank', 'noopener,noreferrer')

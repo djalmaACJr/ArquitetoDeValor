@@ -33,12 +33,12 @@ function escapeHtml(s: string): string {
 // Vitrine curta de recursos — mesmo conteúdo/tom de FrontEnd/src/pages/SobrePage.tsx,
 // condensado para caber num e-mail.
 const RECURSOS_EMAIL = [
-  { emoji: "📊", titulo: "Dashboard",     texto: "Visão geral do mês: saldo, calendário e evolução." },
-  { emoji: "🎯", titulo: "Objetivos",     texto: "Patrimônio e renda recorrente com progresso mês a mês." },
-  { emoji: "📈", titulo: "Relatórios",    texto: "Receitas e despesas por categoria, em qualquer período." },
-  { emoji: "💹", titulo: "Investimentos", texto: "Ativos, dividendos e evolução da carteira num só lugar." },
-  { emoji: "🤖", titulo: "Mentor com IA", texto: "Converse com um mentor financeiro escolhido por você." },
-  { emoji: "👥", titulo: "Conta conjunta", texto: "Convide alguém como agregado e escolha quais módulos e contas ela pode ver ou editar." },
+  { emoji: "🧩", titulo: "Tudo em um lugar",        texto: "Extrato, objetivos e carteira de investimentos juntos: um provento já vira lançamento e entra no seu patrimônio." },
+  { emoji: "🤖", titulo: "IA que lê os relatórios", texto: "Lê os relatórios dos seus FIIs, ações e stocks e explica em português simples se vão bem — e o que isso significa para você." },
+  { emoji: "💹", titulo: "Carteira completa",       texto: "Dividendos, DY e YoC, renda fixa, tesouro, cripto e evolução do patrimônio." },
+  { emoji: "🧾", titulo: "Fatura do cartão",        texto: "Importe o PDF da fatura (Nubank, C6, Inter, Itaú e outros) e revise os lançamentos com sugestão automática." },
+  { emoji: "👥", titulo: "Conta conjunta",          texto: "Compartilhe com quem quiser, escolhendo módulos e contas e se a pessoa só vê ou também edita." },
+  { emoji: "🔒", titulo: "Seus dados, só seus",     texto: "Cada usuário enxerga apenas o que é seu. A IA usa a sua própria chave, e o app Android tem login por digital." },
 ];
 
 Deno.serve((req: Request) => comOrigem(req, async () => {
