@@ -1,3 +1,4 @@
+import { personalizarAnaliseSalva } from "./analisePessoal.ts";
 // supabase/functions/investimentos/resultadosEmpresas.ts
 //
 // Análise de resultados de empresas — Ações BR e Stocks/REITs dos EUA (v7.8.0).
@@ -286,7 +287,7 @@ export async function analisarESalvarDocumento(
     user_id: userId, ativo_id: ativo.id, documento_id: doc.id, relatorio_id: null, data_referencia: doc.data_referencia,
     veredito: analise.veredito, resumo: analise.resumo, pontos_fortes: analise.pontos_fortes,
     pontos_atencao: analise.pontos_atencao, inconsistencias: analise.inconsistencias, mudancas: analise.mudancas,
-    provedor: cfg.provedor, modelo: cfg.modelo, mentor_nome: cfg.nome ?? null, origem, visto_em: null,
+    provedor: cfg.provedor, modelo: cfg.modelo, mentor_nome: cfg.nome ?? null, origem, visto_em: null, analise_pessoal: null,
   }, { onConflict: "user_id,ativo_id,documento_id" }).select().single();
   if (error) { logError("Salvar análise de resultado", error); return { ok: false, erro: error.message, status: 500 }; }
   return { ok: true, analise: data };
@@ -297,10 +298,10 @@ export async function analisarESalvarDocumento(
 // os documentos dos ativos de quem ligou a análise automática e analisa o mais recente
 // de cada um. Respeita o orçamento de tempo/nº de análises do cron.
 export async function processarResultadosCron(
-  idsAuto: Set<string>, limites: { analisesRestantes: number; prazoMs: number },
-): Promise<{ docs_edgar: number; docs_cvm: number; analisados: number; ignorados: number; falhas_analise: number; expurgados: number; desligado_sec: boolean }> {
+  idsAuto: Set<string>, idsPessoal: Set<string>, limites: { analisesRestantes: number; prazoMs: number },
+): Promise<{ personalizados: number; docs_edgar: number; docs_cvm: number; analisados: number; ignorados: number; falhas_analise: number; expurgados: number; desligado_sec: boolean }> {
   const admin = dbAdmin();
-  const res = { docs_edgar: 0, docs_cvm: 0, analisados: 0, ignorados: 0, falhas_analise: 0, expurgados: 0, desligado_sec: false };
+  const res = { personalizados: 0, docs_edgar: 0, docs_cvm: 0, analisados: 0, ignorados: 0, falhas_analise: 0, expurgados: 0, desligado_sec: false };
   if (idsAuto.size === 0) return res;
 
   const { data: pos } = await admin.from("inv_posicoes")
@@ -347,7 +348,10 @@ export async function processarResultadosCron(
     const cfg = cfgPorUsuario.get(ativo.user_id);
     if (!cfg) { res.ignorados++; continue; }
     const r = await analisarESalvarDocumento(admin, ativo.user_id, cfg, ativo, doc, "CRON");
-    if (r.ok) { res.analisados++; restantes--; } else res.falhas_analise++;
+    if (r.ok) {
+      res.analisados++; restantes--;
+      if (idsPessoal.has(ativo.user_id) && await personalizarAnaliseSalva(admin, ativo.user_id, cfg, String(r.analise.id)) === "ok") res.personalizados++;
+    } else res.falhas_analise++;
   }
 
   const { count } = await admin.from("inv_documentos_resultado").delete({ count: "exact" }).lt("data_entrega", `${recuarDias(hojeISO(), 400)}T00:00:00Z`);

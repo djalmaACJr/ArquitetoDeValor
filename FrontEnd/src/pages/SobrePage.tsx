@@ -24,6 +24,17 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.8.0',
+    data:   '2026-11-19',
+    titulo: 'Análise de resultados de Ações e Stocks',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '📊 Análise de resultados de Ações e Stocks', d: 'a análise por IA, antes só dos FIIs, agora também lê os resultados trimestrais das suas ações brasileiras (dados da CVM) e dos stocks e REITs americanos (relatórios 10-Q/10-K da SEC), explicando em português simples se a empresa vai bem. Mesmos avisos, histórico e escolha de mentor.' },
+      { t: '🧮 Preço justo (Graham) corrigido', d: 'o Valor Justo das ações estava muito distante da realidade por um erro de escala nos dados. Agora usa lucro e patrimônio dos controladores, lucro dos últimos 12 meses e o número real de ações (bancos e units tratados à parte).' },
+      { t: '🔎 Página do ativo', d: 'ações, stocks e REITs ganham o quadro de análise dos relatórios na própria página do ativo.' },
+    ],
+  },
+  {
     versao: '7.7.0',
     data:   '2026-11-18',
     titulo: 'Análise de relatórios de FIIs',
@@ -416,12 +427,13 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.8.0) */}
+        {/* Detalhe das novidades desta versão (7.9.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '📊 Análise de resultados de Ações e Stocks', d: 'a análise por IA, antes só dos FIIs, agora também lê os resultados trimestrais das suas ações brasileiras (dados da CVM) e dos stocks e REITs americanos (relatórios 10-Q/10-K da SEC), explicando em português simples se a empresa vai bem. Mesmos avisos, histórico e escolha de mentor.' },
-            { t: '🧮 Preço justo (Graham) corrigido', d: 'o Valor Justo das ações estava muito distante da realidade por um erro de escala nos dados. Agora usa lucro e patrimônio dos controladores, lucro dos últimos 12 meses e o número real de ações (bancos e units tratados à parte).' },
-            { t: '🔎 Página do ativo', d: 'ações, stocks e REITs ganham o quadro de análise dos relatórios na própria página do ativo.' },
+            { t: '🧑‍💼 Análise “Para você”', d: 'depois da leitura do relatório, o botão “Personalizar para mim” explica o que ele significa para a sua situação: seu perfil de investidor, quanto você tem, o peso do ativo na carteira e há quanto tempo ele está com você. Não é recomendação de compra ou venda.' },
+            { t: '⚙️ Automático, se você quiser', d: 'um novo check na página de Análise de Relatórios faz a análise “Para você” junto de cada análise automática. Só funciona com a análise automática ligada e gasta mais uma chamada de IA por análise.' },
+            { t: '💰 Preço Teto (Bazin) mais fiel', d: 'o teto agora usa o dividendo por ação de fato pago nos últimos 12 meses, como o investidor10, em vez de dividir o total recebido pela quantidade atual de ações.' },
+            { t: '🧮 Valor Justo atualizado', d: 'os fundamentos das ações foram recalculados na base da CVM, corrigindo valores que ainda estavam errados.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

@@ -703,6 +703,14 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     for (const id of [sId, eId]) await api(`/investimentos/ativos/${id}`, "DELETE");
   }, 90000);
 
+  // Etapa 2 da análise (v7.9.0): validações da rota sem gastar IA — a conta de
+  // pesos/rentabilidade/tempo de casa é coberta pelos testes Deno (analisePessoal).
+  test("CA-INV35 — análise pessoal (etapa 2): exige analise_id válido, 404 para análise inexistente/de outro usuário", async () => {
+    expect((await api("/investimentos/relatorios-fii/analise-pessoal", "POST", {})).status).toBe(400);
+    expect((await api("/investimentos/relatorios-fii/analise-pessoal", "POST", { analise_id: "nao-e-uuid" })).status).toBe(400);
+    expect((await api("/investimentos/relatorios-fii/analise-pessoal", "POST", { analise_id: "00000000-0000-0000-0000-000000000000" })).status).toBe(404);
+  }, 60000);
+
   // O pré-agendamento do RESGATE no vencimento foi REMOVIDO do backend
   // (poluía a lista de operações e distorcia totais sem filtro de data —
   // ver comentário em fecharPosicoesVencidas). Hoje o fechamento é só via

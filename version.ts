@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "7.8.0"
+export const APP_VERSION = "7.9.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -19,8 +19,8 @@ export const getVersionInfo = () => ({
     // Data de lançamento (AAAA-MM-DD) — exibida em Sobre › Versão atual.
     // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
     // em FrontEnd/src/pages/SobrePage.tsx.
-    date: "2026-11-19",
-    description: "Novo: análise por IA dos resultados de ações (CVM) e stocks/REITs (SEC) e correção do Valor Justo (Graham) das ações"
+    date: "2026-11-23",
+    description: "Novo: análise em 2 etapas — além da leitura do relatório, a IA explica o que ele significa para você (perfil, posição, peso na carteira e tempo de casa)"
   }
 })
 

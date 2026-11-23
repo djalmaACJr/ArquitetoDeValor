@@ -22,6 +22,7 @@ import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
 import { chamarProvedorIA, lerConfigIAAtiva, ErroIA, type ConfigIAAtiva } from "../_shared/ia.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@1.3.0";
 import { Db, hojeISO, recuarDias } from "./shared.ts";
+import { carregarContextoPessoal, gerarAnalisePessoal, personalizarAnaliseSalva } from "./analisePessoal.ts";
 import {
   TIPOS_COM_RESULTADO, analisarESalvarDocumento, documentosDoAtivo, listarDisponiveis,
   processarResultadosCron, sincronizarDocumentosAtivo,
@@ -244,7 +245,7 @@ async function analisarESalvar(
     veredito: analise.veredito, resumo: analise.resumo,
     pontos_fortes: analise.pontos_fortes, pontos_atencao: analise.pontos_atencao,
     inconsistencias: analise.inconsistencias, mudancas: analise.mudancas,
-    provedor: cfg.provedor, modelo: cfg.modelo, mentor_nome: cfg.nome ?? null, origem, visto_em: null,
+    provedor: cfg.provedor, modelo: cfg.modelo, mentor_nome: cfg.nome ?? null, origem, visto_em: null, analise_pessoal: null,
   }, { onConflict: "user_id,ativo_id,relatorio_id" }).select().single();
   if (error) { logError("Salvar análise de relatório FII", error); return { ok: false, erro: error.message, status: 500 }; }
   return { ok: true, analise: data };
@@ -263,9 +264,11 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
   const admin = dbAdmin();
 
   // FIIs com posição ativa de usuários que ligaram a análise automática.
-  const { data: autos } = await admin.from("usuarios").select("id").eq("inv_relatorios_auto", true);
+  const { data: autos } = await admin.from("usuarios").select("id, inv_relatorios_pessoal_auto").eq("inv_relatorios_auto", true);
   const idsAuto = new Set((autos ?? []).map((u) => String(u.id)));
-  let analisados = 0, ignorados = 0, falhasIA = 0;
+  // Subordinado à análise automática: só quem ligou as duas ganha a etapa 2 junto.
+  const idsPessoal = new Set((autos ?? []).filter((u) => u.inv_relatorios_pessoal_auto === true).map((u) => String(u.id)));
+  let analisados = 0, ignorados = 0, falhasIA = 0, personalizados = 0;
 
   if (idsAuto.size > 0) {
     const { data: pos } = await admin.from("inv_posicoes")
@@ -302,14 +305,17 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
 
       if (analisados >= MAX_ANALISES_POR_CRON || Date.now() - inicio > ORCAMENTO_CRON_MS) break externo; // o resto fica pro próximo dia
       const r = await analisarESalvar(admin, ativo.user_id, cfg, ativo, rel, "CRON");
-      if (r.ok) analisados++; else falhasIA++;
+      if (r.ok) {
+        analisados++;
+        if (idsPessoal.has(ativo.user_id) && await personalizarAnaliseSalva(admin, ativo.user_id, cfg, String(r.analise.id)) === "ok") personalizados++;
+      } else falhasIA++;
     }
   }
 
   // Ações BR (CVM) e Stocks/REITs (EDGAR): mesmo job, mesmo orçamento de tempo/IA.
   let resultados: Record<string, unknown> = {};
   try {
-    resultados = await processarResultadosCron(idsAuto, {
+    resultados = await processarResultadosCron(idsAuto, idsPessoal, {
       analisesRestantes: Math.max(MAX_ANALISES_POR_CRON - analisados, 0), prazoMs: inicio + ORCAMENTO_CRON_MS,
     });
   } catch (e) { logError("Resultados de empresas (cron)", e); resultados = { erro: String(e) }; }
@@ -319,7 +325,7 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
   const { count: expA } = await admin.from("inv_analises_relatorio").delete({ count: "exact" }).lt("data_referencia", corte);
   const { count: expB } = await admin.from("inv_analises_relatorio").delete({ count: "exact" }).is("data_referencia", null).lt("created_at", `${corte}T00:00:00Z`);
 
-  const resumo = { ...sync, analisados, expurgadas: (expA ?? 0) + (expB ?? 0), ignorados, falhas_analise: falhasIA, resultados, duracao_ms: Date.now() - inicio };
+  const resumo = { ...sync, analisados, personalizados: personalizados + Number((resultados as { personalizados?: number }).personalizados ?? 0), expurgadas: (expA ?? 0) + (expB ?? 0), ignorados, falhas_analise: falhasIA, resultados, duracao_ms: Date.now() - inicio };
   logSuccess("Relatórios FII processados", resumo);
   return json({ dados: resumo });
 }
@@ -330,6 +336,7 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
 //   GET  /relatorios-fii[?ativo_id=&limite=&nao_vistas=1]   análises salvas (nao_vistas: só as ainda não lidas)
 //   GET  /relatorios-fii/disponiveis?ativo_id= relatórios do fundo (analisados ou não)
 //   POST /relatorios-fii/analisar {ativo_id, relatorio_id?, config_id?}
+//   POST /relatorios-fii/analise-pessoal {analise_id, config_id?}   etapa 2: personaliza a análise (perfil, posição, peso, tempo de carteira)
 //   PUT  /relatorios-fii/:id {visto:boolean}
 //   DELETE /relatorios-fii/:id
 // ============================================================
@@ -444,6 +451,37 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
     const r = await analisarESalvar(c, userId, cfgRes.config, { id: String(ativo.id), user_id: userId, ticker: String(ativo.ticker), nome: ativo.nome as string | null }, rel, "MANUAL");
     if (!r.ok) return erro(r.erro, r.status);
     return json({ dados: r.analise }, 201);
+  }
+
+  // Etapa 2: parte da análise da etapa 1 já salva (não relê o relatório) e cruza com o
+  // contexto do dono. Gasta a chave de IA de quem pede, por isso é sempre sob demanda.
+  if (m === "POST" && sub === "analise-pessoal") {
+    const body = await req.json().catch(() => ({}));
+    if (!body.analise_id || !UUID.test(String(body.analise_id))) return erro("analise_id obrigatório");
+    const { data: base } = await c.from("inv_analises_relatorio")
+      .select("id, ativo_id, veredito, resumo, pontos_fortes, pontos_atencao, inconsistencias, mudancas")
+      .eq("id", String(body.analise_id)).eq("user_id", userId).maybeSingle();
+    if (!base) return erro("Análise não encontrada", 404);
+    const { data: ativo } = await c.from("inv_ativos").select("id, ticker, tipo_ativo")
+      .eq("id", String(base.ativo_id)).eq("user_id", userId).maybeSingle();
+    if (!ativo) return erro("Ativo não encontrado", 404);
+
+    const ctx = await carregarContextoPessoal(c, userId, { id: String(ativo.id), ticker: String(ativo.ticker), tipo_ativo: String(ativo.tipo_ativo) });
+    if (!ctx) return erro("Você não tem posição ativa neste ativo — não há o que personalizar.", 409);
+
+    const cfgRes = await lerConfigIAAtiva(c, userId, body.config_id ? String(body.config_id) : undefined);
+    if (!cfgRes.ok) return erro(cfgRes.erro, cfgRes.status);
+    let pessoal;
+    try {
+      pessoal = await gerarAnalisePessoal(cfgRes.config, ctx, base as never);
+    } catch (e) {
+      logError("Análise pessoal (IA)", e);
+      return erro(e instanceof ErroIA ? e.message : "Falha ao consultar a IA.", e instanceof ErroIA ? e.statusResposta : 502);
+    }
+    const { data, error } = await c.from("inv_analises_relatorio").update({ analise_pessoal: pessoal })
+      .eq("id", base.id).eq("user_id", userId).select().single();
+    if (error) { logError("Salvar análise pessoal", error); return erro(error.message, 500); }
+    return json({ dados: data }, 201);
   }
 
   if (m === "PUT" && UUID.test(sub)) {

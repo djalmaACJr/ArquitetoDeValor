@@ -32,7 +32,7 @@ export default function RelatoriosFiiPage() {
   const { ativos: todosAtivos } = useInvestimentosAtivos()
   const ativos = useMemo(() => todosAtivos.filter((a) => TIPOS_ANALISAVEIS.includes(a.tipo_ativo)), [todosAtivos])
   const { posicoes } = useInvestimentosPosicoes({ status: 'ATIVA' })
-  const { analises, loading, analisar, marcarVisto, excluir } = useRelatoriosFii()
+  const { analises, loading, analisar, personalizar, marcarVisto, excluir } = useRelatoriosFii()
   const auto = useRelatoriosAuto()
 
   const fiisEmCarteira = useMemo(() => {
@@ -150,6 +150,11 @@ export default function RelatoriosFiiPage() {
     showToast(msg)
   }
 
+  async function alternarPessoal() {
+    const ok = await auto.definirPessoal(!auto.pessoal)
+    showToast(ok ? (auto.pessoal ? 'Análise "Para você" automática desligada.' : 'Análise "Para você" automática ligada.') : 'Não foi possível salvar.')
+  }
+
   async function alternarAuto() {
     const ok = await auto.definir(!auto.ativo)
     showToast(ok ? (auto.ativo ? 'Análise automática desligada.' : 'Análise automática ligada.') : 'Não foi possível salvar.')
@@ -181,6 +186,16 @@ export default function RelatoriosFiiPage() {
                 <span className="text-white text-[14px] font-medium">Analisar automaticamente quando sair um relatório novo</span>
                 <span className="block text-[12px]" style={{ color: MUTED }}>
                   Roda todo dia de manhã para os FIIs, ações e stocks que você possui. Usa a sua IA ativa (Perfil → Integração com IA) e consome tokens da sua chave — cerca de 1 chamada por ativo a cada divulgação (mensal nos FIIs, trimestral nas ações e stocks).
+                </span>
+              </span>
+            </label>
+
+            <label className={`flex items-start gap-3 ml-7 ${auto.ativo ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`} data-tutorial="analise-pessoal-auto">
+              <input type="checkbox" className="mt-1" checked={auto.pessoal} disabled={auto.loading || !auto.ativo} onChange={alternarPessoal} />
+              <span>
+                <span className="text-white text-[14px] font-medium">Já fazer também a análise "Para você"</span>
+                <span className="block text-[12px]" style={{ color: MUTED }}>
+                  Junto de cada análise nova, personaliza pelo seu perfil, quanto você tem, o peso na carteira e o tempo de casa (só para ativos com posição ativa). Só funciona com a análise automática ligada e gasta mais 1 chamada de IA por análise.
                 </span>
               </span>
             </label>
@@ -294,7 +309,7 @@ export default function RelatoriosFiiPage() {
           ) : (
             <div className="space-y-3">
               {analisesFiltradas.map((a) => (
-                <CartaoAnalise key={a.id} a={a}
+                <CartaoAnalise key={a.id} a={a} onPersonalizar={() => personalizar(a.id)}
                   onVisto={async () => { await marcarVisto(a.id) }}
                   onExcluir={async () => { const r = await excluir(a.id); if (!r.ok) showToast(r.erro ?? 'Erro ao excluir') }} />
               ))}

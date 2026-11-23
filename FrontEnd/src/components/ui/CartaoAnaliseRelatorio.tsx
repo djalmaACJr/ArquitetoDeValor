@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ExternalLink, Trash2, Check, AlertTriangle, ThumbsUp, ShieldAlert } from 'lucide-react'
+import { ExternalLink, Trash2, Check, AlertTriangle, ThumbsUp, ShieldAlert, UserRound, Sparkles } from 'lucide-react'
 import { formatData } from '../../lib/utils'
-import type { AnaliseRelatorioFii, VereditoRelatorio } from '../../types'
+import type { AnaliseRelatorioFii, AlinhamentoPessoal, VereditoRelatorio } from '../../types'
 
 const MUTED = '#8b92a8'
 
@@ -10,6 +11,12 @@ const VEREDITO: Record<VereditoRelatorio, { label: string; cor: string }> = {
   NEUTRO:   { label: 'Neutro',    cor: '#8b92a8' },
   ATENCAO:  { label: 'Atenção',   cor: '#f0b429' },
   NEGATIVO: { label: 'Negativo',  cor: '#ff5c7a' },
+}
+
+const ALINHAMENTO: Record<AlinhamentoPessoal, { label: string; cor: string }> = {
+  ADEQUADO: { label: 'Combina com você', cor: '#22c55e' },
+  ATENCAO:  { label: 'Acompanhar',       cor: '#f0b429' },
+  REVISAR:  { label: 'Vale revisar',     cor: '#ff5c7a' },
 }
 
 function Lista({ titulo, itens, cor, Icone }: { titulo: string; itens: string[]; cor: string; Icone: typeof Check }) {
@@ -29,9 +36,21 @@ function Lista({ titulo, itens, cor, Icone }: { titulo: string; itens: string[];
 // Cartão de uma análise de Relatório Gerencial de FII. Usado na página
 // "Análise de Relatórios" e no quadro da página do ativo.
 // `semLinkAtivo`: na página do próprio ativo o ticker não precisa ser link.
-export default function CartaoAnaliseRelatorio({ a, onVisto, onExcluir, semLinkAtivo = false }: {
+export default function CartaoAnaliseRelatorio({ a, onVisto, onExcluir, onPersonalizar, semLinkAtivo = false }: {
   a: AnaliseRelatorioFii; onVisto: () => void; onExcluir: () => void; semLinkAtivo?: boolean
+  // Etapa 2 (opcional): gera/refaz "o que isso significa para mim". Devolve o erro, se houver.
+  onPersonalizar?: () => Promise<{ ok: boolean; erro?: string | null }>
 }) {
+  const [gerando, setGerando] = useState(false)
+  const [erroPessoal, setErroPessoal] = useState<string | null>(null)
+  const p = a.analise_pessoal ?? null
+  async function personalizar() {
+    if (!onPersonalizar) return
+    setGerando(true); setErroPessoal(null)
+    const r = await onPersonalizar()
+    setGerando(false)
+    if (!r.ok) setErroPessoal(r.erro ?? 'Não foi possível personalizar agora.')
+  }
   const v = VEREDITO[a.veredito]
   const nova = !a.visto_em
   const ticker = a.inv_ativos?.ticker ?? '—'
@@ -79,6 +98,41 @@ export default function CartaoAnaliseRelatorio({ a, onVisto, onExcluir, semLinkA
         <Lista titulo="Pontos de atenção" itens={a.pontos_atencao} cor="#f0b429" Icone={AlertTriangle} />
         <Lista titulo="Inconsistências" itens={a.inconsistencias} cor="#ff5c7a" Icone={ShieldAlert} />
       </div>
+
+      {onPersonalizar && (
+        <div className="rounded-lg border border-white/10 p-3 space-y-2" style={{ background: 'rgba(255,255,255,0.02)' }} data-tutorial="analise-pessoal">
+          {p ? (
+            <>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-[12px] font-semibold uppercase tracking-wide flex items-center gap-1.5 text-white/80">
+                  <UserRound size={13} /> Para você
+                  <span className="text-[11px] normal-case font-semibold px-2 py-0.5 rounded" style={{ color: ALINHAMENTO[p.alinhamento].cor, background: `${ALINHAMENTO[p.alinhamento].cor}1f` }}>
+                    {ALINHAMENTO[p.alinhamento].label}
+                  </span>
+                </p>
+                <button onClick={personalizar} disabled={gerando} className="text-[12px] underline disabled:opacity-50" style={{ color: MUTED }}>
+                  {gerando ? 'Refazendo…' : 'Refazer'}
+                </button>
+              </div>
+              <p className="text-[14px] text-white/90" style={{ lineHeight: 1.5 }}>{p.resumo}</p>
+              <Lista titulo="O que observar" itens={p.pontos} cor="#93c5fd" Icone={AlertTriangle} />
+              <p className="text-[11px]" style={{ color: MUTED }}>
+                Leva em conta seu perfil, quanto você tem, o peso na carteira e há quanto tempo o ativo está com você
+                {p.mentor_nome || p.provedor ? ` · ${p.mentor_nome || p.provedor}` : ''}. Não é recomendação de compra ou venda.
+              </p>
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-[13px]" style={{ color: MUTED }}>O que essa análise significa para a sua carteira, o seu perfil e o tempo que você está com o ativo?</p>
+              <button onClick={personalizar} disabled={gerando}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50" style={{ background: '#3b82f6' }}>
+                <Sparkles size={13} className={gerando ? 'animate-pulse' : ''} /> {gerando ? 'Personalizando…' : 'Personalizar para mim'}
+              </button>
+            </div>
+          )}
+          {erroPessoal && <p className="text-[12px]" style={{ color: '#ff5c7a' }}>{erroPessoal}</p>}
+        </div>
+      )}
     </div>
   )
 }
