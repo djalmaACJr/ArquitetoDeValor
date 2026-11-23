@@ -53,6 +53,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
           TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+          LIMPEZA_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
       # O outputFolder do reporter é relativo à pasta da config (FrontEnd/e2e), então o
       # HTML sai em FrontEnd/e2e/e2e/report — o caminho antigo (e2e/report) nunca existia

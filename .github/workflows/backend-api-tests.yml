@@ -54,6 +54,9 @@ jobs:
           # Cadastre como Secrets no GitHub: Settings → Secrets → Actions.
           TEST_EMAIL_B: ${{ secrets.TEST_EMAIL_B }}
           TEST_PASSWORD_B: ${{ secrets.TEST_PASSWORD_B }}
+          # Só a limpeza prévia (tests/limpezaPrevia.ts) recebe a chave de administrador — com outro nome de
+          # propósito, para não ligar os testes que já dependem de SUPABASE_SERVICE_ROLE_KEY.
+          LIMPEZA_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
       - name: Salvar resultado dos testes
         if: always()
@@ -97,6 +100,9 @@ jobs:
           TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
           TEST_EMAIL_B: ${{ secrets.TEST_EMAIL_B }}
           TEST_PASSWORD_B: ${{ secrets.TEST_PASSWORD_B }}
+          # Só a limpeza prévia (tests/limpezaPrevia.ts) recebe a chave de administrador — com outro nome de
+          # propósito, para não ligar os testes que já dependem de SUPABASE_SERVICE_ROLE_KEY.
+          LIMPEZA_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
       - name: Salvar resultado dos testes
         if: always()

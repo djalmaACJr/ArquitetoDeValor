@@ -57,7 +57,9 @@ export async function limparLixoDeExecucoesInterrompidas(
   const anon = process.env.SUPABASE_ANON_KEY;
   const email = process.env.TEST_EMAIL;
   const senha = process.env.TEST_PASSWORD;
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // LIMPEZA_SERVICE_ROLE_KEY: nome próprio para a CI poder dar a chave SÓ à limpeza, sem ligar os testes
+  // que já dependem de SUPABASE_SERVICE_ROLE_KEY (hoje pulados na CI).
+  const service = process.env.LIMPEZA_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !anon || !email || !senha) {
     resumo.pulado = "faltam variáveis (SUPABASE_URL/ANON/TEST_EMAIL/TEST_PASSWORD)";
     log(`${rotulo} pulada: ${resumo.pulado}`);
