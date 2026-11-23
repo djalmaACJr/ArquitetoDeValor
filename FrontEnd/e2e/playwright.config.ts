@@ -40,6 +40,12 @@ export default defineConfig({
   } : undefined,
 
   projects: [
+    // Primeiro passo: limpa o lixo de execuções interrompidas (conta de teste) — ver tests/limpezaPrevia.ts
+    {
+      name: 'limpeza',
+      testMatch: /limpeza\.setup\.ts/,
+      use: { ...devices['Desktop Firefox'] },
+    },
     // Setup: faz login uma vez e salva sessão
     {
       name: 'auth',
@@ -47,6 +53,7 @@ export default defineConfig({
       use: {
         ...devices['Desktop Firefox'],
       },
+      dependencies: ['limpeza'],
     },
     // Setup: cria dados básicos (contas, categorias)
     {

@@ -7,6 +7,8 @@ module.exports = {
   testMatch: ['<rootDir>/tests/[0-9][0-9]_*.test.ts'],
   testPathIgnorePatterns: ['99_limpar'],
   setupFiles: ['dotenv/config'],
+  // Primeiro passo: apaga o lixo de execuções interrompidas (ver tests/limpezaPrevia.ts). Nunca falha a suíte.
+  globalSetup: '<rootDir>/tests/globalSetup.ts',
   // 60s (não 30s): testes de integração batem no Supabase real (e alguns,
   // como os de renda fixa em 12_investimentos, também sincronizam índices
   // reais do BCB/SGS em cadeias de várias chamadas HTTP sequenciais). Em
