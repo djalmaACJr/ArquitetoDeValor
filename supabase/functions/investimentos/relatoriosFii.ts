@@ -77,15 +77,19 @@ function tokensDistintivos(s: string): string[] {
 }
 
 // Casamento ativo ↔ relatório por TEXTO (não há CNPJ em inv_ativos): (a) o núcleo
-// do ticker aparece no pregão/nome do fundo, ou (b) ≥2 palavras distintivas do
+// do ticker é uma PALAVRA INTEIRA do pregão/nome do fundo (não um pedaço de palavra:
+// "MANA" de MANA11 não pode casar com "MANATÍ RENDA CDI", outro fundo da mesma
+// gestora — bug real, v7.9.0), ou (b) ≥2 palavras distintivas do
 // nome do ativo (ex.: "RBR", "Rendimento", "High", "Grade") aparecem TODAS no
 // nome/pregão do relatório. O pregão da B3 raramente é o ticker ("FII RBRESID2"),
 // por isso (b) existe. Pode errar para fundos com nomes parecidos — a UI mostra
 // de qual relatório a análise veio (link do PDF) para o usuário conferir.
 export function relatorioCasaComAtivo(ativo: { ticker: string; nome: string | null }, rel: { fundo_nome: string; fundo_pregao: string | null }): boolean {
   const nucleo = nucleoTicker(ativo.ticker);
-  const alvo = normaliza(`${rel.fundo_pregao ?? ""} ${rel.fundo_nome}`);
-  if (nucleo.length >= 3 && alvo.includes(nucleo)) return true;
+  const palavras = new Set(
+    `${rel.fundo_pregao ?? ""} ${rel.fundo_nome}`.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean),
+  );
+  if (nucleo.length >= 3 && palavras.has(nucleo)) return true;
   const toks = ativo.nome ? tokensDistintivos(ativo.nome) : [];
   if (toks.length < 2) return false;
   const alvoToks = new Set(tokensDistintivos(`${rel.fundo_pregao ?? ""} ${rel.fundo_nome}`));

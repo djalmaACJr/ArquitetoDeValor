@@ -29,3 +29,10 @@ Deno.test("parsearAnaliseIA extrai JSON mesmo com texto em volta e valida veredi
   assertEquals(parsearAnaliseIA('{"veredito":"TALVEZ","resumo":"x"}'), null);
   assertEquals(parsearAnaliseIA("sem json"), null);
 });
+
+Deno.test("relatorioCasaComAtivo: MANA11 não casa com outros fundos Manatí (núcleo é palavra inteira)", () => {
+  const ativo = { ticker: "MANA11", nome: "Manati Capital Hedge Fund Fundo de Investimento Imobiliario" };
+  assertEquals(relatorioCasaComAtivo(ativo, { fundo_nome: "MANATÍ CAPITAL HEDGE FUND FUNDO DE INVESTIMENTO IMOBILIÁRIO DE RESPONSABILIDADE LIMITADA", fundo_pregao: "FII MANATI" }), true);
+  assertEquals(relatorioCasaComAtivo(ativo, { fundo_nome: "MANATÍ RENDA CDI PLUS FUNDO DE INVESTIMENTO IMOBILIÁRIO RESPONSABILIDADE LIMITADA", fundo_pregao: null }), false);
+  assertEquals(relatorioCasaComAtivo(ativo, { fundo_nome: "MANATÍ RECEBÍVEIS ESTRUTURADOS FUNDO DE INVESTIMENTO IMOBILIÁRIO DE RESPONSABILIDADE LIMITADA", fundo_pregao: null }), false);
+});
