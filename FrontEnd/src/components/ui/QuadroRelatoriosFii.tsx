@@ -13,6 +13,11 @@ const MUTED = '#8b92a8'
 const dataAnalise = (a: AnaliseRelatorioFii) =>
   a.data_referencia ?? a.inv_relatorios_fii?.data_entrega?.slice(0, 10) ?? a.inv_documentos_resultado?.data_entrega?.slice(0, 10) ?? a.created_at.slice(0, 10)
 const dataDisponivel = (r: RelatorioFiiDisponivel) => r.data_referencia ?? r.data_entrega.slice(0, 10)
+const entregaAnalise = (a: AnaliseRelatorioFii) =>
+  a.inv_relatorios_fii?.data_entrega ?? a.inv_documentos_resultado?.data_entrega ?? a.created_at
+type ItemLista =
+  | { tipo: 'pendente'; r: RelatorioFiiDisponivel; mes: string; entrega: string }
+  | { tipo: 'analise'; a: AnaliseRelatorioFii; mes: string; entrega: string }
 
 // Quadro da página de um FII: relatórios gerenciais (Fundos.NET) disponíveis
 // com link pro PDF + análises da IA já feitas. Sempre sobre o ativo do PRÓPRIO
@@ -68,8 +73,16 @@ export default function QuadroRelatoriosFii({ ativoId, ticker, tipo = 'FII' }: {
     if (!res.ok) setMsg(res.erro ?? 'Erro ao analisar')
   }
 
-  const pendentes = disponiveis.filter((r) => !r.analisado).sort((x, y) => dataDisponivel(y).localeCompare(dataDisponivel(x)))
-  const analisesOrdenadas = [...analises].sort((x, y) => dataAnalise(y).localeCompare(dataAnalise(x)) || y.created_at.localeCompare(x.created_at))
+  // Lista única, sempre do mês mais novo para o mais velho (analisado ou não). No mesmo mês
+  // (reapresentações/mais de uma entrega), a entrega mais recente vem primeiro.
+  const itens: ItemLista[] = [
+    ...disponiveis.filter((r) => !r.analisado).map((r): ItemLista => ({ tipo: 'pendente', r, mes: dataDisponivel(r).slice(0, 7), entrega: r.data_entrega })),
+    ...analises.map((a): ItemLista => ({ tipo: 'analise', a, mes: dataAnalise(a).slice(0, 7), entrega: entregaAnalise(a) })),
+  ].sort((x, y) => y.mes.localeCompare(x.mes) || y.entrega.localeCompare(x.entrega))
+  const porMes = new Map<string, number>()
+  for (const i of itens) porMes.set(i.mes, (porMes.get(i.mes) ?? 0) + 1)
+  const maisDeUm = (mes: string) => (porMes.get(mes) ?? 0) > 1
+  const rotuloEntrega = (entrega: string) => `entregue em ${formatData(entrega.slice(0, 10))}${entrega.length > 10 ? ` às ${new Date(entrega).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : ''}`
   const novas = analises.filter((a) => !a.visto_em).length
 
   return (
@@ -98,37 +111,37 @@ export default function QuadroRelatoriosFii({ ativoId, ticker, tipo = 'FII' }: {
         <p className="text-[13px]" style={{ color: MUTED }}>
           {txt.vazio}
         </p>
-      ) : (
-        pendentes.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-[12px]" style={{ color: MUTED }}>Relatórios ainda não analisados</p>
-            {pendentes.map((r) => (
-              <div key={r.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 px-3 py-2">
-                <span className="text-[13px] text-white/85">
-                  {r.data_referencia ? formatData(r.data_referencia) : formatData(r.data_entrega.slice(0, 10))}
-                </span>
-                <span className="flex items-center gap-1.5">
-                  {r.url_documento && (
-                    <a href={r.url_documento} target="_blank" rel="noreferrer"
-                      className="flex items-center gap-1 text-[12px] px-2 py-1 rounded-md border border-white/10 hover:border-white/25 text-white/80">
-                      <ExternalLink size={12} /> {r.fonte === 'CVM' ? 'Fonte' : r.fonte === 'EDGAR' ? (r.tipo_doc ?? 'SEC') : 'PDF'}
-                    </a>
-                  )}
-                  <button onClick={() => rodar(r.id)} disabled={ocupado !== null}
-                    className="flex items-center gap-1 text-[12px] px-2 py-1 rounded-md font-semibold text-white disabled:opacity-50" style={{ background: '#3b82f6' }}>
-                    <Sparkles size={12} className={ocupado === String(r.id) ? 'animate-pulse' : ''} /> {ocupado === String(r.id) ? 'Analisando…' : 'Analisar'}
-                  </button>
-                </span>
-              </div>
-            ))}
-          </div>
-        )
-      )}
+      ) : null}
 
-      {loading ? null : analisesOrdenadas.map((a) => (
-        <CartaoAnaliseRelatorio key={a.id} a={a} semLinkAtivo onPersonalizar={() => personalizar(a.id)}
-          onVisto={async () => { await marcarVisto(a.id) }}
-          onExcluir={async () => { const r = await excluir(a.id); if (!r.ok) setMsg(r.erro ?? 'Erro ao excluir'); else void carregar() }} />
+      {loading ? null : itens.map((i) => (
+        <div key={i.tipo === 'pendente' ? `p${i.r.id}` : `a${i.a.id}`} className="space-y-1">
+          {maisDeUm(i.mes) && (
+            <p className="text-[11px]" style={{ color: MUTED }}>{rotuloEntrega(i.entrega)}</p>
+          )}
+          {i.tipo === 'pendente' ? (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-white/10 px-3 py-2">
+              <span className="text-[13px] text-white/85">
+                {formatData(dataDisponivel(i.r))} <span className="text-[11px] ml-1" style={{ color: MUTED }}>· não analisado</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                {i.r.url_documento && (
+                  <a href={i.r.url_documento} target="_blank" rel="noreferrer"
+                    className="flex items-center gap-1 text-[12px] px-2 py-1 rounded-md border border-white/10 hover:border-white/25 text-white/80">
+                    <ExternalLink size={12} /> {i.r.fonte === 'CVM' ? 'Fonte' : i.r.fonte === 'EDGAR' ? (i.r.tipo_doc ?? 'SEC') : 'PDF'}
+                  </a>
+                )}
+                <button onClick={() => rodar(i.r.id)} disabled={ocupado !== null}
+                  className="flex items-center gap-1 text-[12px] px-2 py-1 rounded-md font-semibold text-white disabled:opacity-50" style={{ background: '#3b82f6' }}>
+                  <Sparkles size={12} className={ocupado === String(i.r.id) ? 'animate-pulse' : ''} /> {ocupado === String(i.r.id) ? 'Analisando…' : 'Analisar'}
+                </button>
+              </span>
+            </div>
+          ) : (
+            <CartaoAnaliseRelatorio a={i.a} semLinkAtivo onPersonalizar={() => personalizar(i.a.id)}
+              onVisto={async () => { await marcarVisto(i.a.id) }}
+              onExcluir={async () => { const r = await excluir(i.a.id); if (!r.ok) setMsg(r.erro ?? 'Erro ao excluir'); else void carregar() }} />
+          )}
+        </div>
       ))}
     </section>
   )
