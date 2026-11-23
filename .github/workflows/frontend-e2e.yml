@@ -48,6 +48,11 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           E2E_BASE_URL: http://localhost:5173
+          # Limpeza prévia do lixo de execuções interrompidas (e2e/limpezaPrevia.ts)
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
 
       # O outputFolder do reporter é relativo à pasta da config (FrontEnd/e2e), então o
       # HTML sai em FrontEnd/e2e/e2e/report — o caminho antigo (e2e/report) nunca existia
