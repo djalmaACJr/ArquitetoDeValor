@@ -375,11 +375,24 @@ export default function DetalheInvestimentoPage() {
     if (ativo?.tipo_ativo !== 'ACOES' || qtdAtual <= 0) return null
     const hoje = new Date()
     const corte12m = new Date(hoje.getFullYear(), hoje.getMonth() - 12, hoje.getDate())
-    const dividendo12m = dividendos
-      .filter((d) => new Date(d.data_pagamento) >= corte12m)
-      .reduce((s, d) => s + Number(d.valor), 0)
-    if (dividendo12m <= 0) return null
-    const dividendoPorAcao = dividendo12m / qtdAtual
+    // Dividendo POR AÇÃO realmente pago (valor_por_cota, 1× por pagamento — há 1 linha por conta),
+    // como o investidor10. Total recebido ÷ quantidade ATUAL subestimava o teto de quem
+    // aumentou a posição no período (parte dos proventos foi paga sobre menos ações).
+    // Sem valor_por_cota gravado, cai no recebido ÷ quantidade atual.
+    const vistos = new Set<string>()
+    let porAcao = 0, semRate = 0
+    for (const d of dividendos) {
+      if (new Date(d.data_pagamento) < corte12m) continue
+      const vpc = d.valor_por_cota != null ? Number(d.valor_por_cota) : NaN
+      if (Number.isFinite(vpc) && vpc > 0) {
+        const k = `${d.data_pagamento}|${d.tipo_dividendo_id ?? ''}`
+        if (vistos.has(k)) continue
+        vistos.add(k)
+        porAcao += vpc
+      } else semRate += Number(d.valor)
+    }
+    const dividendoPorAcao = porAcao + semRate / qtdAtual
+    if (dividendoPorAcao <= 0) return null
     return dividendoPorAcao / PRECO_TETO_BAZIN_YIELD_MINIMO
   }, [ativo?.tipo_ativo, dividendos, qtdAtual])
 
