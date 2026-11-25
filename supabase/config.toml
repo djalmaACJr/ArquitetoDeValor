@@ -534,3 +534,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/app_updates/deno.json"
 entrypoint = "./functions/app_updates/index.ts"
+
+[functions.entrada_email]
+enabled = true
+verify_jwt = false
+import_map = "./functions/entrada_email/deno.json"
+entrypoint = "./functions/entrada_email/index.ts"

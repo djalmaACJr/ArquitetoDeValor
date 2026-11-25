@@ -637,6 +637,10 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, quantidade_entrada: 0 })).status).toBe(400);
     expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, ativo_destino_id: oId })).status).toBe(400);
     expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, quantidade_saida: 999 })).status).toBe(400);
+    // destino de OUTRO tipo (ação) é recusado
+    const { data: dA } = await api("/investimentos/ativos", "POST", { ticker: "JESTINVTA", nome: "Jest Transf Acao", tipo_ativo: "ACOES" });
+    expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, ativo_destino_id: dA.dados.id })).status).toBe(400);
+    await api(`/investimentos/ativos/${dA.dados.id}`, "DELETE");
 
     // transferência total: 10 cotas (custo 500) → 25 cotas do destino
     const { status, data } = await api("/investimentos/transferencias-ativo", "POST", base);
@@ -709,6 +713,49 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect((await api("/investimentos/relatorios-fii/analise-pessoal", "POST", {})).status).toBe(400);
     expect((await api("/investimentos/relatorios-fii/analise-pessoal", "POST", { analise_id: "nao-e-uuid" })).status).toBe(400);
     expect((await api("/investimentos/relatorios-fii/analise-pessoal", "POST", { analise_id: "00000000-0000-0000-0000-000000000000" })).status).toBe(404);
+  }, 60000);
+
+  // Assembleias de FIIs (v8.0.0): só o contrato das rotas, sem rede/IA — a leitura do Fundos.NET
+  // e o resumo por IA são validados manualmente; as funções puras têm testes Deno (assembleiasFii.test.ts).
+  test("CA-INV36 — assembleias de FIIs: lista do próprio usuário; analisar valida ativo_id, tipo (só FII) e existência", async () => {
+    const lista = await api("/investimentos/assembleias-fii");
+    expect(lista.status).toBe(200);
+    expect(Array.isArray(lista.data.dados)).toBe(true);
+    expect((await api("/investimentos/assembleias-fii?nao_vistas=1")).status).toBe(200);
+
+    expect((await api("/investimentos/assembleias-fii/analisar", "POST", {})).status).toBe(400);
+    expect((await api("/investimentos/assembleias-fii/analisar", "POST", { ativo_id: "nao-e-uuid" })).status).toBe(400);
+    expect((await api("/investimentos/assembleias-fii/analisar", "POST", { ativo_id: "00000000-0000-0000-0000-000000000000" })).status).toBe(404);
+
+    const { data: dE } = await api("/investimentos/ativos", "POST", { ticker: "JESTASSETF", nome: "Jest ETF Assembleia", tipo_ativo: "ETF" });
+    const eId = dE.dados.id as string;
+    expect((await api("/investimentos/assembleias-fii/analisar", "POST", { ativo_id: eId })).status).toBe(400); // só FII
+    await api(`/investimentos/ativos/${eId}`, "DELETE");
+
+    expect((await api("/investimentos/assembleias-fii/00000000-0000-0000-0000-000000000000", "PUT", { visto: true })).status).toBe(404);
+  }, 60000);
+
+  // E-mail de entrada (v8.0.0, fase 2): só o contrato das rotas do usuário. O webhook (`entrada_email`)
+  // é do provedor e tem testes Deno (assinatura, remetentes); aqui não se cria endereço (ficaria na conta de teste).
+  test("CA-INV37 — e-mail de entrada: lista, valida retenção (7–365), apelido, remetente e ações de mensagem", async () => {
+    const lista = await api("/investimentos/email-entrada");
+    expect(lista.status).toBe(200);
+    expect(Array.isArray(lista.data.dados.remetentes)).toBe(true);
+    expect(Array.isArray(lista.data.dados.mensagens)).toBe(true);
+
+    expect((await api("/investimentos/email-entrada/config", "PUT", { retencao_dias: 3 })).status).toBe(400);
+    expect((await api("/investimentos/email-entrada/config", "PUT", { retencao_dias: 400 })).status).toBe(400);
+    expect((await api("/investimentos/email-entrada/config", "PUT", {})).status).toBe(400);
+    expect((await api("/investimentos/email-entrada/endereco", "POST", { apelido: "A" })).status).toBe(400);
+
+    expect((await api("/investimentos/email-entrada/remetentes", "POST", { padrao: "sem-arroba" })).status).toBe(400);
+    const { status: sR, data: dR } = await api("/investimentos/email-entrada/remetentes", "POST", { padrao: "@jest-teste.com.br" });
+    expect(sR).toBe(201);
+    expect((await api(`/investimentos/email-entrada/remetentes/${dR.dados.id}`, "DELETE")).status).toBe(200);
+
+    const inexistente = "00000000-0000-0000-0000-000000000000";
+    expect((await api(`/investimentos/email-entrada/mensagens/${inexistente}`, "PUT", { acao: "aprovar" })).status).toBe(404);
+    expect((await api(`/investimentos/email-entrada/mensagens/${inexistente}`, "PUT", { acao: "xyz" })).status).toBe(400);
   }, 60000);
 
   // O pré-agendamento do RESGATE no vencimento foi REMOVIDO do backend

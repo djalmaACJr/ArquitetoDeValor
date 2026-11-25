@@ -550,6 +550,13 @@ export async function rotaTransferenciaAtivo(c: Db, req: Request, m: string, use
     }
     if (!(await contaExiste(c, String(body.conta_origem_id), userId))) return erro("Conta de origem não encontrada", 404);
     if (!(await contaExiste(c, contaDestinoId, userId))) return erro("Conta de destino não encontrada", 404);
+    if (contaDestinoId !== String(body.conta_origem_id)) {
+      const { data: cts } = await c.from("contas").select("id, tipo, ativa").in("id", [String(body.conta_origem_id), contaDestinoId]);
+      const co = (cts ?? []).find((x) => String(x.id) === String(body.conta_origem_id));
+      const cd = (cts ?? []).find((x) => String(x.id) === contaDestinoId);
+      if (!co || !cd || String(co.tipo) !== String(cd.tipo)) return erro("Conta de destino precisa ser do mesmo tipo da conta de origem");
+      if (cd.ativa === false) return erro("Conta de destino está inativa");
+    }
 
     const { data: ativos } = await c.from("inv_ativos")
       .select("id, ticker, tipo_ativo, moeda")
@@ -559,6 +566,9 @@ export async function rotaTransferenciaAtivo(c: Db, req: Request, m: string, use
     if (!origem || !destino) return erro("Ativo de origem ou destino não encontrado", 404);
     if (!TIPOS_TRANSFERIVEIS.includes(String(origem.tipo_ativo)) || !TIPOS_TRANSFERIVEIS.includes(String(destino.tipo_ativo))) {
       return erro("Renda fixa e Tesouro Direto não suportam transferência de ativo");
+    }
+    if (String(origem.tipo_ativo) !== String(destino.tipo_ativo)) {
+      return erro("Origem e destino precisam ser do mesmo tipo de ativo");
     }
     if (String(origem.moeda ?? "BRL") !== String(destino.moeda ?? "BRL")) {
       return erro("Origem e destino precisam estar na mesma moeda (o custo é carregado sem conversão)");

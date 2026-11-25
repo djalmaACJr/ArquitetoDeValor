@@ -13,6 +13,7 @@ import MascoteTutorial from '../components/ui/MascoteTutorial'
 import LoadingMascote from '../components/ui/LoadingMascote'
 import TutorialTour from '../components/ui/TutorialTour'
 import { useMascotePreferido } from '../hooks/useMascotePreferido'
+import { useCategorias } from '../hooks/useCategorias'
 import { registrarResetCliente } from '../lib/clientCache'
 import { useRegistrarContextoIA } from '../context/ContextoIAContext'
 import { TUTORIAL_PROJECAO } from '../lib/tutoriaisPaginas'
@@ -107,6 +108,18 @@ export default function ProjecaoEconomiaPage() {
   const [lancamentos, setLancamentos] = useState<Lancamento[]>(() => _saved?.lancamentos ?? [])
   const [loading, setLoading]         = useState(!_saved)
   const { mascote } = useMascotePreferido()
+  const { categorias: todasCategorias } = useCategorias()
+
+  // Categorias marcadas como despesa esporádica (a marca da categoria pai vale
+  // para as filhas): ficam fora das médias de despesa/economia desta projeção.
+  const esporadicas = useMemo(() => {
+    const pais = new Set(todasCategorias.filter(c => !c.id_pai && c.despesa_esporadica).map(c => c.id))
+    return new Set(
+      todasCategorias
+        .filter(c => c.despesa_esporadica || (c.id_pai && pais.has(c.id_pai)))
+        .map(c => c.id),
+    )
+  }, [todasCategorias])
 
   // Simulador
   const [rendimento,  setRendimento]  = useState(0.8)   // % a.m.
@@ -143,6 +156,7 @@ export default function ProjecaoEconomiaPage() {
     const byMes = new Map<string, DadosMes>()
     for (const l of lancamentos) {
       if (isTransf(l)) continue
+      if (l.tipo !== 'RECEITA' && l.categoria_id && esporadicas.has(l.categoria_id)) continue
       const m = l.data.substring(0, 7)
       if (!byMes.has(m)) byMes.set(m, { mes: m, receitas: 0, despesas: 0, economia: 0, porCategoria: {} })
       const d = byMes.get(m)!
@@ -156,7 +170,7 @@ export default function ProjecaoEconomiaPage() {
     }
     for (const d of byMes.values()) d.economia = d.receitas - d.despesas
     return [...byMes.values()].sort((a, b) => a.mes.localeCompare(b.mes))
-  }, [lancamentos])
+  }, [lancamentos, esporadicas])
 
   const medias = useMemo(() => {
     if (!dadosMensais.length) return { receitas: 0, despesas: 0, economia: 0, taxaPoupanca: 0 }

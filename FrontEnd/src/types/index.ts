@@ -45,6 +45,8 @@ export interface Categoria {
   cor:       string | null
   ativa:     boolean
   protegida: boolean
+  /** Fora das médias de gasto (Reserva, Projeção). Na categoria pai vale para as filhas. */
+  despesa_esporadica?: boolean
   subcategorias?: Categoria[]
 }
 
@@ -744,4 +746,40 @@ export interface RelatorioFiiDisponivel {
   tipo_doc?:       string            // 10-Q | 10-K | ITR | DFP (ações/stocks)
   fonte?:          'EDGAR' | 'CVM'
   analisado:       boolean
+}
+
+// Assembleias de FIIs (Fundos.NET, categoria Assembleia) — GET /investimentos/assembleias-fii (v8.0.0).
+// E-mail de entrada (v8.0.0, fase 2)
+export interface EmailEntradaEndereco { apelido: string; codigo: string; ativo: boolean; retencao_dias: number; resumo_ia: boolean; email: string }
+export interface EmailEntradaRemetente { id: string; padrao: string; status: 'PERMITIDO' | 'BLOQUEADO'; origem: 'PADRAO' | 'USUARIO' | 'APROVADO'; created_at: string }
+export interface EmailEntradaMensagem {
+  id: string; remetente: string; assunto: string; recebido_em: string
+  status: 'PENDENTE' | 'PROCESSADO' | 'QUARENTENA' | 'IGNORADO' | 'ERRO'
+  classificacao: 'ASSEMBLEIA' | 'RENDIMENTO' | 'FATO_RELEVANTE' | 'OUTRO' | null
+  resumo: string | null; trecho: string | null; visto_em: string | null
+  ativo_id: string | null; inv_ativos?: { ticker: string } | null
+}
+export interface EmailEntrada { endereco: EmailEntradaEndereco | null; remetentes: EmailEntradaRemetente[]; mensagens: EmailEntradaMensagem[] }
+
+export interface AnaliseAssembleiaFii {
+  id:              string
+  ativo_id:        string
+  assembleia_id:   number
+  data_evento:     string | null
+  relevancia:      'ROTINA' | 'IMPORTANTE'
+  resumo:          string
+  quando:          string | null
+  como_participar: string | null
+  prazo_voto:      string | null
+  prazo_voto_em:   string | null   // prazo do voto à distância, estruturado (calendário)
+  pauta:           { item: string; explicacao: string }[]
+  pontos_atencao:  string[]
+  provedor:        string | null
+  modelo:          string | null
+  mentor_nome?:    string | null
+  origem:          'CRON' | 'MANUAL'
+  visto_em:        string | null
+  created_at:      string
+  inv_ativos?:          { ticker: string; nome: string } | null
+  inv_assembleias_fii?: { url_documento: string; tipo: string; especie: string; fundo_nome: string; links?: { tipo: 'link' | 'email'; valor: string }[] | null } | null
 }

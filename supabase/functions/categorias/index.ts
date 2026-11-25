@@ -132,6 +132,7 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
     user_id: userId, descricao: body.descricao,
     id_pai: body.id_pai ?? null, icone: body.icone ?? null,
     cor: body.cor ?? null, ativa: true,
+    despesa_esporadica: body.despesa_esporadica === true,
   }).select().single();
 
   if (error) {
@@ -179,7 +180,7 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
   if (corInvalida) return corInvalida;
 
   // id_pai incluído para permitir mover subcategoria para outro pai
-  const campos = camposParaAtualizar(body, ["descricao","icone","cor","ativa","id_pai"]);
+  const campos = camposParaAtualizar(body, ["descricao","icone","cor","ativa","id_pai","despesa_esporadica"]);
   const { data, error } = await c.from("categorias").update(campos).eq("id", id).select().single();
 
   if (error) {

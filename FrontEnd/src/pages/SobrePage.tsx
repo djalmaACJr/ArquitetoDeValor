@@ -24,6 +24,20 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '7.9.0',
+    data:   '2026-11-23',
+    titulo: 'Análise em 2 etapas',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '🧑‍💼 Análise “Para você”', d: 'depois da leitura do relatório, o botão “Personalizar para mim” explica o que ele significa para a sua situação: seu perfil de investidor, quanto você tem, o peso do ativo na carteira e há quanto tempo ele está com você. Não é recomendação de compra ou venda.' },
+      { t: '⚙️ Automático, se você quiser', d: 'um novo check na página de Análise de Relatórios faz a análise “Para você” junto de cada análise automática. Só funciona com a análise automática ligada e gasta mais uma chamada de IA por análise.' },
+      { t: '💰 Preço Teto (Bazin) mais fiel', d: 'o teto agora usa o dividendo por ação de fato pago nos últimos 12 meses, como o investidor10, em vez de dividir o total recebido pela quantidade atual de ações.' },
+      { t: '🧮 Valor Justo atualizado', d: 'os fundamentos das ações foram recalculados na base da CVM, corrigindo valores que ainda estavam errados.' },
+      { t: '📑 Relatórios por mês e fundo certo', d: 'a lista de relatórios fica sempre do mês mais novo para o mais velho, e o sistema não confunde mais fundos de nomes parecidos (ex.: vários fundos da mesma gestora).' },
+      { t: '✨ Pontos fortes em destaque', d: 'a página de entrada e os convites por e-mail e WhatsApp passam a mostrar o que o sistema tem de melhor.' },
+    ],
+  },
+  {
     versao: '7.8.0',
     data:   '2026-11-19',
     titulo: 'Análise de resultados de Ações e Stocks',
@@ -427,15 +441,15 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (7.9.0) */}
+        {/* Detalhe das novidades desta versão (8.0.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🧑‍💼 Análise “Para você”', d: 'depois da leitura do relatório, o botão “Personalizar para mim” explica o que ele significa para a sua situação: seu perfil de investidor, quanto você tem, o peso do ativo na carteira e há quanto tempo ele está com você. Não é recomendação de compra ou venda.' },
-            { t: '⚙️ Automático, se você quiser', d: 'um novo check na página de Análise de Relatórios faz a análise “Para você” junto de cada análise automática. Só funciona com a análise automática ligada e gasta mais uma chamada de IA por análise.' },
-            { t: '💰 Preço Teto (Bazin) mais fiel', d: 'o teto agora usa o dividendo por ação de fato pago nos últimos 12 meses, como o investidor10, em vez de dividir o total recebido pela quantidade atual de ações.' },
-            { t: '🧮 Valor Justo atualizado', d: 'os fundamentos das ações foram recalculados na base da CVM, corrigindo valores que ainda estavam errados.' },
-            { t: '📑 Relatórios por mês e fundo certo', d: 'a lista de relatórios fica sempre do mês mais novo para o mais velho, e o sistema não confunde mais fundos de nomes parecidos (ex.: vários fundos da mesma gestora).' },
-            { t: '✨ Pontos fortes em destaque', d: 'a página de entrada e os convites por e-mail e WhatsApp passam a mostrar o que o sistema tem de melhor.' },
+            { t: '🗳️ Assembleias de FIIs', d: 'o sistema avisa quando um FII da carteira convoca assembleia, com a data, o prazo para votar, a pauta e o caminho para participar. A IA resume o que está em votação e o que muda para você.' },
+            { t: '📧 E-mail de entrada', d: 'encaminhe para o seu endereço do sistema os e-mails de proventos e comunicados das corretoras e gestoras: o conteúdo é lido, resumido pela IA e fica guardado para consulta.' },
+            { t: '📉 Média de despesas mensais', d: 'a projeção de economia passa a usar a média real das suas despesas, ignorando as categorias que você marcar como fora do dia a dia.' },
+            { t: '💵 Dividendos de FIIs corrigidos', d: 'a B3 lista, junto do rendimento, séries que não são a sua cota (recibos de subscrição) e elas estavam sendo somadas. Agora só vale a cota: o valor por cota e o DY ficam iguais ao investidor10.' },
+            { t: '📑 Relatórios de mais FIIs', d: 'o sistema passa a guardar o nome de pregão do fundo na B3 e casa o ativo com o relatório e a assembleia pelo nome exato, em vez de adivinhar pelo texto (XPML11, XPLG11, GARE11 e outros não apareciam).' },
+            { t: '🔁 Transferir posição, mais seguro', d: 'o destino precisa ser do mesmo tipo do ativo de origem e ter posição ativa na conta escolhida, e a conta de destino é do mesmo tipo da origem. Se o ativo ainda não existe, dá para cadastrá-lo na própria tela.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

@@ -22,7 +22,9 @@ import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
 import { chamarProvedorIA, lerConfigIAAtiva, ErroIA, type ConfigIAAtiva } from "../_shared/ia.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@1.3.0";
 import { Db, hojeISO, recuarDias } from "./shared.ts";
+import { buscarPregaoFundoB3, emissorB3 } from "./dividendos.ts";
 import { carregarContextoPessoal, gerarAnalisePessoal, personalizarAnaliseSalva } from "./analisePessoal.ts";
+import { processarAssembleiasCron } from "./assembleiasFii.ts";
 import {
   TIPOS_COM_RESULTADO, analisarESalvarDocumento, documentosDoAtivo, listarDisponiveis,
   processarResultadosCron, sincronizarDocumentosAtivo,
@@ -85,6 +87,58 @@ function tokensDistintivos(s: string): string[] {
 // por isso (b) existe. Pode errar para fundos com nomes parecidos — a UI mostra
 // de qual relatório a análise veio (link do PDF) para o usuário conferir.
 export function relatorioCasaComAtivo(ativo: { ticker: string; nome: string | null }, rel: { fundo_nome: string; fundo_pregao: string | null }): boolean {
+  return casaPorRegrasFortes(ativo, rel) || casaPorSigla(ativo, rel);
+}
+
+// Sigla: o núcleo do ticker é abreviação do PREGÃO ("XPML" ↔ "FII XP MALLS",
+// "XPLG" ↔ "FII XP LOG", "KNCR" ↔ "FII KINEA CR"): as letras do núcleo aparecem em
+// ordem no pregão (sem "FII"), começando pela 1ª letra, e o pregão não é bem maior
+// que a sigla ("MANA" não casa com "FII MANATI RENDA CDI"). Só o pregão (curto),
+// nunca o nome longo. É regra FRACA (pode casar fundo parecido, ex.: RBRR ↔ "RBR PR"):
+// `filtrarRelatoriosDoAtivo` só a usa quando as regras fortes não acham nada.
+function casaPorSigla(ativo: { ticker: string }, rel: { fundo_pregao: string | null }): boolean {
+  const nucleo = nucleoTicker(ativo.ticker);
+  if (nucleo.length < 4 || !rel.fundo_pregao) return false;
+  const alvo = rel.fundo_pregao.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .split(/[^a-z0-9]+/).filter((p) => p && p !== "fii" && p !== "fiagro").join("");
+  if (alvo[0] !== nucleo[0] || alvo.length > nucleo.length * 2) return false;
+  let i = 0;
+  for (const ch of alvo) if (ch === nucleo[i]) i++;
+  return i === nucleo.length;
+}
+
+function normalizaPregao(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join(" ");
+}
+
+/** Pregão do fundo na B3 (ex.: "FII XP MALLS"): lê de inv_ativos.fii_pregao; se ainda
+ *  não resolvido, busca na B3 e grava. null = indisponível agora (cai nas regras por texto). */
+export async function pregaoDoFii(admin: Db, ativo: { id?: string; ticker: string }): Promise<string | null> {
+  try {
+    if (ativo.id) {
+      const { data } = await admin.from("inv_ativos").select("fii_pregao").eq("id", ativo.id).maybeSingle();
+      const salvo = String((data as { fii_pregao?: string | null } | null)?.fii_pregao ?? "").trim();
+      if (salvo) return salvo;
+    }
+    const pregao = await buscarPregaoFundoB3(emissorB3(ativo.ticker));
+    if (pregao && ativo.id) await admin.from("inv_ativos").update({ fii_pregao: pregao }).eq("id", ativo.id);
+    return pregao;
+  } catch (e) { logError("pregaoDoFii", e); return null; }
+}
+
+/** Relatórios do ativo: 1º pelo pregão EXATO da B3 (`ativo.pregao`); sem isso, pelas
+ *  regras fortes por texto; só se não houver nenhum, pela sigla. */
+export function filtrarRelatoriosDoAtivo<T extends { fundo_nome: string; fundo_pregao: string | null }>(ativo: { ticker: string; nome: string | null; pregao?: string | null }, lista: T[]): T[] {
+  if (ativo.pregao) {
+    const alvo = normalizaPregao(ativo.pregao);
+    const exatos = lista.filter((r) => r.fundo_pregao && normalizaPregao(r.fundo_pregao) === alvo);
+    if (exatos.length > 0) return exatos;
+  }
+  const fortes = lista.filter((r) => casaPorRegrasFortes(ativo, r));
+  return fortes.length > 0 ? fortes : lista.filter((r) => casaPorSigla(ativo, r));
+}
+
+function casaPorRegrasFortes(ativo: { ticker: string; nome: string | null }, rel: { fundo_nome: string; fundo_pregao: string | null }): boolean {
   const nucleo = nucleoTicker(ativo.ticker);
   const palavras = new Set(
     `${rel.fundo_pregao ?? ""} ${rel.fundo_nome}`.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean),
@@ -292,7 +346,7 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
 
     const cfgPorUsuario = new Map<string, ConfigIAAtiva | null>();
     externo: for (const ativo of ativos) {
-      const candidatos = relatorios.filter((r) => relatorioCasaComAtivo(ativo, r));
+      const candidatos = filtrarRelatoriosDoAtivo({ ...ativo, pregao: await pregaoDoFii(admin, ativo) }, relatorios);
       // só o relatório mais recente por ativo na janela (evita reanalisar reapresentações)
       const rel = candidatos[0];
       if (!rel) continue;
@@ -324,12 +378,27 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
     });
   } catch (e) { logError("Resultados de empresas (cron)", e); resultados = { erro: String(e) }; }
 
+  // Assembleias de FIIs (Fundos.NET): mesmo job e mesmo orçamento; só para quem ligou a análise automática.
+  let assembleias: Record<string, unknown> = {};
+  try {
+    assembleias = await processarAssembleiasCron(idsAuto, {
+      analisesRestantes: Math.max(MAX_ANALISES_POR_CRON - analisados, 0), prazoMs: inicio + ORCAMENTO_CRON_MS,
+    });
+  } catch (e) { logError("Assembleias de FIIs (cron)", e); assembleias = { erro: String(e) }; }
+
   // Histórico: mantém só ~6 meses de análises (por competência; sem competência, pela data de criação).
   const corte = recuarDias(hojeISO(), DIAS_HISTORICO_ANALISES);
   const { count: expA } = await admin.from("inv_analises_relatorio").delete({ count: "exact" }).lt("data_referencia", corte);
   const { count: expB } = await admin.from("inv_analises_relatorio").delete({ count: "exact" }).is("data_referencia", null).lt("created_at", `${corte}T00:00:00Z`);
 
-  const resumo = { ...sync, analisados, personalizados: personalizados + Number((resultados as { personalizados?: number }).personalizados ?? 0), expurgadas: (expA ?? 0) + (expB ?? 0), ignorados, falhas_analise: falhasIA, resultados, duracao_ms: Date.now() - inicio };
+  // Caixa de entrada por e-mail: apaga o que passou da retenção escolhida por cada usuário (padrão 90 dias).
+  let emailsExpurgados = 0;
+  try {
+    const { data: nEmails, error: eEmails } = await admin.rpc("fn_email_purgar_mensagens");
+    if (eEmails) logError("Expurgo da caixa de entrada (cron)", eEmails); else emailsExpurgados = Number(nEmails ?? 0);
+  } catch (e) { logError("Expurgo da caixa de entrada (cron)", e); }
+
+  const resumo = { ...sync, analisados, emails_expurgados: emailsExpurgados, personalizados: personalizados + Number((resultados as { personalizados?: number }).personalizados ?? 0), expurgadas: (expA ?? 0) + (expB ?? 0), ignorados, falhas_analise: falhasIA, resultados, assembleias, duracao_ms: Date.now() - inicio };
   logSuccess("Relatórios FII processados", resumo);
   return json({ dados: resumo });
 }
@@ -403,9 +472,10 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
       .select("id, fundo_nome, fundo_pregao, data_referencia, data_entrega, url_documento")
       .gte("data_entrega", recuarDias(hojeISO(), 120)).order("data_entrega", { ascending: false }).limit(1500);
     const mapa = new Map<number, Record<string, unknown>>();
-    for (const r of [...(rels ?? []), ...(recentes ?? [])]) {
-      const rr = r as { id: number; fundo_nome: string; fundo_pregao: string | null };
-      if (relatorioCasaComAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null }, rr)) mapa.set(Number(rr.id), r);
+    const candidatos = [...(rels ?? []), ...(recentes ?? [])] as { id: number; fundo_nome: string; fundo_pregao: string | null }[];
+    const pregaoAtivo = ativo.tipo_ativo === "FII" ? await pregaoDoFii(dbAdmin(), { id: String(ativo.id), ticker: String(ativo.ticker) }) : null;
+    for (const rr of filtrarRelatoriosDoAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null, pregao: pregaoAtivo }, candidatos)) {
+      mapa.set(Number(rr.id), rr as unknown as Record<string, unknown>);
     }
     const lista = [...mapa.values()].sort((a, b) => String(b.data_entrega).localeCompare(String(a.data_entrega))).slice(0, 12);
     const { data: feitas } = await c.from("inv_analises_relatorio").select("relatorio_id").eq("user_id", userId).eq("ativo_id", ativoId);
@@ -438,17 +508,18 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
     }
 
     const admin = dbAdmin();
+    const alvoAtivo = { ticker: String(ativo.ticker), nome: ativo.nome as string | null, pregao: await pregaoDoFii(admin, { id: String(ativo.id), ticker: String(ativo.ticker) }) };
     let rel: Relatorio | null = null;
     if (body.relatorio_id != null) {
       const { data } = await admin.from("inv_relatorios_fii").select("*").eq("id", Number(body.relatorio_id)).maybeSingle();
       rel = data as Relatorio | null;
-      if (rel && !relatorioCasaComAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null }, rel)) {
+      if (rel && filtrarRelatoriosDoAtivo(alvoAtivo, [rel]).length === 0) {
         return erro("Este relatório não pertence ao fundo selecionado", 400);
       }
     } else {
       const { data: recentes } = await admin.from("inv_relatorios_fii").select("*")
         .gte("data_entrega", recuarDias(hojeISO(), 120)).order("data_entrega", { ascending: false }).limit(1500);
-      rel = ((recentes ?? []) as Relatorio[]).find((r) => relatorioCasaComAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null }, r)) ?? null;
+      rel = filtrarRelatoriosDoAtivo(alvoAtivo, (recentes ?? []) as Relatorio[])[0] ?? null;
     }
     if (!rel) return erro("Nenhum relatório gerencial recente encontrado para este fundo (o cron diário busca os publicados nos últimos dias).", 404);
 

@@ -6,6 +6,7 @@ import { Capacitor } from '@capacitor/core'
 import Sidebar from './Sidebar'
 import NovidadesProventos from '../ui/NovidadesProventos'
 import AvisoAnaliseRelatorio from '../ui/AvisoAnaliseRelatorio'
+import AvisoAssembleiaFii from '../ui/AvisoAssembleiaFii'
 import AvisoFiiMigracao from '../ui/AvisoFiiMigracao'
 import AvisoDataComProxima from '../ui/AvisoDataComProxima'
 import AvisoRevogacaoAgregado from '../ui/AvisoRevogacaoAgregado'
@@ -215,6 +216,8 @@ export default function AppLayout() {
         <Arrastavel><NovidadesProventos /></Arrastavel>
         {/* Análises de relatórios gerenciais de FII ainda não lidas */}
         <Arrastavel><AvisoAnaliseRelatorio /></Arrastavel>
+        {/* Assembleias de FIIs convocadas (ainda não lidas) */}
+        <Arrastavel><AvisoAssembleiaFii /></Arrastavel>
         {/* FII da carteira em liquidação / fusão / troca de código (alerta especial) */}
         <Arrastavel><AvisoFiiMigracao /></Arrastavel>
         {/* Ativos da carteira com Data COM próxima (próximos dias) */}

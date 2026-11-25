@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bell, CreditCard, Check, Trash2, Pencil, X, Plus, AlertTriangle, Flag, List, Coins } from 'lucide-react'
+import { Bell, CreditCard, Check, Trash2, Pencil, X, Plus, AlertTriangle, Flag, List, Coins, CalendarClock } from 'lucide-react'
 import type { Lembrete, Conta } from '../../types'
 import { MESES_ABREV, hojeLocal } from '../../lib/utils'
 
@@ -21,15 +21,18 @@ interface Props {
   ultimasParcelas?: Map<string, UltimaParcela[]>
   /** Map data (YYYY-MM-DD) → ativos com Data COM (direito a provento) nesse dia. */
   datasComProventos?: Map<string, { ticker: string; valorProjetado: number }[]>
+  /** Map data (YYYY-MM-DD) → assembleias de FIIs da carteira nesse dia (análise por IA). */
+  assembleiasFii?: Map<string, { ticker: string; hora: string; importante: boolean; prazo?: boolean }[]>
+  onAbrirAssembleia?: () => void
   onEditar:        (l: Lembrete) => void
-  onExcluir:       (id: string) => void
+  onExcluir:      (id: string) => void
   onToggle:        (id: string, status: 'PENDENTE' | 'CONCLUIDO') => void
   onNovoNoDia?:    (data: string) => void
   onAbrirTodosLembretes?: () => void
 }
 
 export default function CalendarioDashboard({
-  mes, lembretes, contas, diasNegativos, ultimasParcelas, datasComProventos,
+  mes, lembretes, contas, diasNegativos, ultimasParcelas, datasComProventos, assembleiasFii, onAbrirAssembleia,
   onEditar, onExcluir, onToggle, onNovoNoDia, onAbrirTodosLembretes,
 }: Props) {
   const [diaAberto, setDiaAberto] = useState<string | null>(null)
@@ -76,6 +79,7 @@ export default function CalendarioDashboard({
   const evsDiaAberto       = diaAberto ? eventosDia(parseInt(diaAberto.split('-')[2])) : []
   const temUltimasParcelas = (ultimasParcelas?.size ?? 0) > 0
   const temDataCom         = (datasComProventos?.size ?? 0) > 0
+  const temAssembleia      = (assembleiasFii?.size ?? 0) > 0
 
   return (
     <div
@@ -99,6 +103,9 @@ export default function CalendarioDashboard({
           )}
           {temDataCom && (
             <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#eab308' }} title="Data COM de provento" />
+          )}
+          {temAssembleia && (
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#2dd4bf' }} title="Assembleia de FII (e prazo para votar)" />
           )}
           {onAbrirTodosLembretes && (
             <button
@@ -140,7 +147,8 @@ export default function CalendarioDashboard({
           const negativo        = (diasNegativos?.get(ds)?.length ?? 0) > 0
           const ultimaParc      = (ultimasParcelas?.get(ds)?.length ?? 0) > 0
           const dataCom         = (datasComProventos?.get(ds)?.length ?? 0) > 0
-          const temEv           = lembs.length > 0 || evs.length > 0 || negativo || ultimaParc || dataCom
+          const assembleia      = (assembleiasFii?.get(ds)?.length ?? 0) > 0
+          const temEv           = lembs.length > 0 || evs.length > 0 || negativo || ultimaParc || dataCom || assembleia
           const concl           = lembs.length > 0 && lembs.every(l => l.status === 'CONCLUIDO')
 
           return (
@@ -221,6 +229,9 @@ export default function CalendarioDashboard({
                   )}
                   {dataCom && (
                     <span className="w-1 h-1 rounded-full" style={{ background: '#eab308' }} />
+                  )}
+                  {assembleia && (
+                    <span className="w-1 h-1 rounded-full" style={{ background: '#2dd4bf' }} />
                   )}
                 </div>
               )}
@@ -363,7 +374,21 @@ export default function CalendarioDashboard({
             </div>
           ))}
 
+          {/* Assembleias de FIIs */}
+          {diaAberto && (assembleiasFii?.get(diaAberto) ?? []).map((as, i) => (
+            <button key={`as-${i}`} onClick={onAbrirAssembleia} title="Ver o resumo da assembleia"
+              className="w-full flex items-center gap-1.5 py-1 px-1.5 rounded text-left"
+              style={{ background: 'rgba(45,212,191,0.08)', border: '1px solid rgba(45,212,191,0.25)' }}>
+              <CalendarClock size={9} style={{ color: '#2dd4bf', flexShrink: 0 }} />
+              <span className="flex-1 text-[14px] truncate" style={{ color: '#2dd4bf' }}>
+                {as.prazo ? 'Prazo p/ votar' : 'Assembleia'}: {as.ticker}{!as.prazo && as.importante ? ' · importante' : ''}
+              </span>
+              <span className="text-[13px] font-semibold flex-shrink-0" style={{ color: '#2dd4bf' }}>{as.hora}</span>
+            </button>
+          ))}
+
           {lembrsDiaAberto.length === 0 && evsDiaAberto.length === 0
+            && (assembleiasFii?.get(diaAberto ?? '')?.length ?? 0) === 0
             && (diasNegativos?.get(diaAberto ?? '')?.length ?? 0) === 0
             && (ultimasParcelas?.get(diaAberto ?? '')?.length ?? 0) === 0
             && (datasComProventos?.get(diaAberto ?? '')?.length ?? 0) === 0 && (

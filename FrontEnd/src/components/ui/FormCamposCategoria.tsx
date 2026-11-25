@@ -23,6 +23,8 @@ interface FormCamposCategoriaProps {
   editandoId?:     string | null
   /** Exibe o toggle Ativa/Inativa — ative apenas no modo de edição. */
   mostrarAtiva?:   boolean
+  /** Exibe o toggle "Despesa esporádica" (fora das médias de gasto). */
+  mostrarEsporadica?: boolean
   /** Mensagem de erro a exibir abaixo dos campos. */
   erro?:           string | null
 }
@@ -34,6 +36,7 @@ export default function FormCamposCategoria({
   categoriasPai,
   editandoId  = null,
   mostrarAtiva = false,
+  mostrarEsporadica = false,
   erro         = null,
 }: FormCamposCategoriaProps) {
   const set = (p: Partial<FormCategoriaState>) => onChange(p)
@@ -106,6 +109,22 @@ export default function FormCamposCategoria({
             onChange={v => set({ ativa: v })}
             label={form.ativa ? 'Ativa' : 'Inativa'}
           />
+        </Field>
+      )}
+
+      {/* Despesa esporádica — fica fora das médias de gasto */}
+      {mostrarEsporadica && (
+        <Field label="Despesa esporádica">
+          <Toggle
+            checked={form.esporadica}
+            onChange={v => set({ esporadica: v })}
+            label={form.esporadica ? 'Fora das médias de gasto' : 'Entra nas médias de gasto'}
+          />
+          <p className="text-[14px] mt-1.5" style={{ color: '#8b92a8' }}>
+            Use para gastos que não se repetem todo mês (IPVA, viagem, reforma). Ela deixa de
+            entrar na Reserva e na Projeção de economia; relatórios e extrato não mudam.
+            {form.nivel === 'pai' ? ' Vale também para as subcategorias.' : ''}
+          </p>
         </Field>
       )}
 
