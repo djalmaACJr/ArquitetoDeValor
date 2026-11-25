@@ -23,6 +23,7 @@ import { chamarProvedorIA, lerConfigIAAtiva, ErroIA, type ConfigIAAtiva } from "
 import { extractText, getDocumentProxy } from "npm:unpdf@1.3.0";
 import { Db, hojeISO, recuarDias } from "./shared.ts";
 import { carregarContextoPessoal, gerarAnalisePessoal, personalizarAnaliseSalva } from "./analisePessoal.ts";
+import { processarAssembleiasCron } from "./assembleiasFii.ts";
 import {
   TIPOS_COM_RESULTADO, analisarESalvarDocumento, documentosDoAtivo, listarDisponiveis,
   processarResultadosCron, sincronizarDocumentosAtivo,
@@ -324,12 +325,27 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
     });
   } catch (e) { logError("Resultados de empresas (cron)", e); resultados = { erro: String(e) }; }
 
+  // Assembleias de FIIs (Fundos.NET): mesmo job e mesmo orçamento; só para quem ligou a análise automática.
+  let assembleias: Record<string, unknown> = {};
+  try {
+    assembleias = await processarAssembleiasCron(idsAuto, {
+      analisesRestantes: Math.max(MAX_ANALISES_POR_CRON - analisados, 0), prazoMs: inicio + ORCAMENTO_CRON_MS,
+    });
+  } catch (e) { logError("Assembleias de FIIs (cron)", e); assembleias = { erro: String(e) }; }
+
   // Histórico: mantém só ~6 meses de análises (por competência; sem competência, pela data de criação).
   const corte = recuarDias(hojeISO(), DIAS_HISTORICO_ANALISES);
   const { count: expA } = await admin.from("inv_analises_relatorio").delete({ count: "exact" }).lt("data_referencia", corte);
   const { count: expB } = await admin.from("inv_analises_relatorio").delete({ count: "exact" }).is("data_referencia", null).lt("created_at", `${corte}T00:00:00Z`);
 
-  const resumo = { ...sync, analisados, personalizados: personalizados + Number((resultados as { personalizados?: number }).personalizados ?? 0), expurgadas: (expA ?? 0) + (expB ?? 0), ignorados, falhas_analise: falhasIA, resultados, duracao_ms: Date.now() - inicio };
+  // Caixa de entrada por e-mail: apaga o que passou da retenção escolhida por cada usuário (padrão 90 dias).
+  let emailsExpurgados = 0;
+  try {
+    const { data: nEmails, error: eEmails } = await admin.rpc("fn_email_purgar_mensagens");
+    if (eEmails) logError("Expurgo da caixa de entrada (cron)", eEmails); else emailsExpurgados = Number(nEmails ?? 0);
+  } catch (e) { logError("Expurgo da caixa de entrada (cron)", e); }
+
+  const resumo = { ...sync, analisados, emails_expurgados: emailsExpurgados, personalizados: personalizados + Number((resultados as { personalizados?: number }).personalizados ?? 0), expurgadas: (expA ?? 0) + (expB ?? 0), ignorados, falhas_analise: falhasIA, resultados, assembleias, duracao_ms: Date.now() - inicio };
   logSuccess("Relatórios FII processados", resumo);
   return json({ dados: resumo });
 }

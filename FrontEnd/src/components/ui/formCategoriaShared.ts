@@ -13,10 +13,11 @@ export type FormCategoriaState = {
   icone:     string
   cor:       string
   ativa:     boolean
+  esporadica: boolean
 }
 
 export const FORM_CATEGORIA_VAZIO: FormCategoriaState = {
-  descricao: '', nivel: 'pai', id_pai: '', icone: '🏠', cor: '#00c896', ativa: true,
+  descricao: '', nivel: 'pai', id_pai: '', icone: '🏠', cor: '#00c896', ativa: true, esporadica: false,
 }
 
 /** Preenche o formulário a partir de uma categoria existente (modo edição). */
@@ -28,6 +29,7 @@ export function formDeCategoriaExistente(c: Categoria): FormCategoriaState {
     icone:     c.icone  ?? '🏠',
     cor:       c.cor    ?? '#00c896',
     ativa:     c.ativa,
+    esporadica: c.despesa_esporadica ?? false,
   }
 }
 

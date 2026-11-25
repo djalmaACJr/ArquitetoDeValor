@@ -47,6 +47,8 @@ import { rotaHistorico, rotaSnapshotAuto, rotaSnapshotBackfill, rotaSnapshotCron
 import { rotaRendimentoCripto, rotaRendimentoCriptoCron } from "./rendimento-cripto.ts";
 import { rotaFatosRelevantesCron } from "./fatosRelevantes.ts";
 import { rotaRelatoriosFiiCron, rotaRelatoriosFii } from "./relatoriosFii.ts";
+import { rotaAssembleiasFii } from "./assembleiasFii.ts";
+import { rotaEmailEntrada } from "./emailEntrada.ts";
 import { rotaAlertasFii } from "./alertasFii.ts";
 import { rotaCvmFiiCron } from "./cvm.ts";
 import { rotaCvmAcoesCron } from "./cvmAcoes.ts";
@@ -191,6 +193,8 @@ Deno.serve((req: Request) => comOrigem(req, async () => {
       case "chat-mentor":     return await rotaChatMentor(c, req, m, userId);
       // Gasta a chave de IA de quem pede → sempre o próprio usuário, nunca o contexto de um dono.
       case "relatorios-fii":  return await rotaRelatoriosFii(c, req, m, userId);
+      case "assembleias-fii": return await rotaAssembleiasFii(c, req, m, userId);
+      case "email-entrada": return await rotaEmailEntrada(c, req, m, userId);
       case "alertas-fii": {
         const ctx = await resolverContexto(req, c, userId, ["INVESTIMENTOS"]);
         if (ctx instanceof Response) return ctx;

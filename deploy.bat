@@ -26,14 +26,16 @@ echo  16 - investimentos
 echo  17 - convite
 echo  18 - auditoria
 echo  19 - agregados (compartilhamento)
+echo  20 - entrada_email (webhook do e-mail de entrada / Resend)
 echo.
 echo  ---------------- CONFIGURACAO / OPCOES ----------------
-echo  20 - [CONFIG] Configurar nivel de logs
-echo  21 - [CONFIG] Configurar IA_KEYS_ENCRYPTION_KEY (cripto das api_keys de IA)
-echo  22 - [CONFIG] Deploy com --debug (usar nesta maquina)
+echo  21 - [CONFIG] Configurar nivel de logs
+echo  22 - [CONFIG] Configurar IA_KEYS_ENCRYPTION_KEY (cripto das api_keys de IA)
+echo  23 - [CONFIG] Deploy com --debug (usar nesta maquina)
+echo  24 - [CONFIG] Definir secrets do Resend (RESEND_API_KEY / RESEND_WEBHOOK_SECRET)
 echo  -------------------------------------------------------
 echo.
-set /p opcao="Digite a opcao desejada (1-22): "
+set /p opcao="Digite a opcao desejada (1-24): "
 
 if "%opcao%"=="1"  goto todos
 if "%opcao%"=="2"  goto contas
@@ -54,10 +56,16 @@ if "%opcao%"=="16" goto investimentos
 if "%opcao%"=="17" goto convite
 if "%opcao%"=="18" goto auditoria
 if "%opcao%"=="19" goto agregados
-if "%opcao%"=="20" goto config_log
-if "%opcao%"=="21" goto config_ia_key
-if "%opcao%"=="22" goto debug_mode
+if "%opcao%"=="20" goto entrada_email
+if "%opcao%"=="21" goto config_log
+if "%opcao%"=="22" goto config_ia_key
+if "%opcao%"=="23" goto debug_mode
+if "%opcao%"=="24" goto config_resend
 echo Opcao invalida! & pause & exit /b
+
+:config_resend
+call "%~dp0definir_secrets_resend.bat"
+exit /b
 
 :debug_mode
 echo.
@@ -85,8 +93,9 @@ echo  16 - investimentos
 echo  17 - convite
 echo  18 - auditoria
 echo  19 - agregados (compartilhamento)
+echo  20 - entrada_email
 echo.
-set /p mod_debug="Digite o modulo (1-19): "
+set /p mod_debug="Digite o modulo (1-20): "
 
 if "%mod_debug%"=="1"  goto debug_todos
 if "%mod_debug%"=="2"  goto debug_contas
@@ -107,6 +116,7 @@ if "%mod_debug%"=="16" goto debug_investimentos
 if "%mod_debug%"=="17" goto debug_convite
 if "%mod_debug%"=="18" goto debug_auditoria
 if "%mod_debug%"=="19" goto debug_agregados
+if "%mod_debug%"=="20" goto debug_entrada_email
 echo Opcao invalida! & pause & exit /b
 
 :debug_contas
@@ -235,6 +245,13 @@ call supabase functions deploy agregados --project-ref ftpelncgrakpphytfrfo --de
 echo [OK] agregados deployed
 goto fim
 
+:debug_entrada_email
+echo.
+echo [DEPLOY --debug] entrada_email...
+call supabase functions deploy entrada_email --project-ref ftpelncgrakpphytfrfo --debug
+echo [OK] entrada_email deployed
+goto fim
+
 :debug_todos
 echo.
 echo [DEPLOY --debug] contas...
@@ -290,6 +307,9 @@ call supabase functions deploy auditoria --project-ref ftpelncgrakpphytfrfo --de
 echo.
 echo [DEPLOY --debug] agregados...
 call supabase functions deploy agregados --project-ref ftpelncgrakpphytfrfo --debug
+echo.
+echo [DEPLOY --debug] entrada_email...
+call supabase functions deploy entrada_email --project-ref ftpelncgrakpphytfrfo --debug
 echo.
 echo [OK] Todos os modulos deployados com --debug
 goto fim
@@ -494,6 +514,13 @@ call supabase functions deploy agregados --project-ref ftpelncgrakpphytfrfo
 echo [OK] agregados deployed
 goto fim
 
+:entrada_email
+echo.
+echo [DEPLOY] entrada_email...
+call supabase functions deploy entrada_email --project-ref ftpelncgrakpphytfrfo
+echo [OK] entrada_email deployed
+goto fim
+
 :todos
 echo.
 echo [DEPLOY] contas...
@@ -549,6 +576,9 @@ call supabase functions deploy auditoria --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [DEPLOY] agregados...
 call supabase functions deploy agregados --project-ref ftpelncgrakpphytfrfo
+echo.
+echo [DEPLOY] entrada_email...
+call supabase functions deploy entrada_email --project-ref ftpelncgrakpphytfrfo
 echo.
 echo [OK] Todos os modulos deployados
 goto fim

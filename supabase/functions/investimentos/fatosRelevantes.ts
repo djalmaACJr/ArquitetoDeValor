@@ -49,6 +49,7 @@ export interface LinhaFnet {
   id: number;
   categoriaDocumento: string;
   tipoDocumento?: string;
+  especieDocumento?: string; // "Edital de Convocação", "Ata da Assembleia"… (categoria Assembleia)
   dataReferencia?: string; // "dd/MM/yyyy" ou "MM/yyyy" (varia por documento)
   descricaoFundo: string;
   nomePregao: string;

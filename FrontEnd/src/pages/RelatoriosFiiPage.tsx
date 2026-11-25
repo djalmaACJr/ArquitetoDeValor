@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { FileSearch, Sparkles } from 'lucide-react'
+import { useAssembleiasFii } from '../hooks/useAssembleiasFii'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
 import { Toast, SelectDark } from '../components/ui/shared'
 import { useInvestimentosAtivos } from '../hooks/useInvestimentosAtivos'
@@ -9,6 +11,9 @@ import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
 import { useIAPreferencia } from '../hooks/useIAPreferencia'
 import { provedorPorId } from '../lib/iaProvedores'
 import CartaoAnalise from '../components/ui/CartaoAnaliseRelatorio'
+import QuadroAssembleiasFii from '../components/ui/QuadroAssembleiasFii'
+import QuadroEmailEntrada from '../components/ui/QuadroEmailEntrada'
+import { useEmailEntrada } from '../hooks/useEmailEntrada'
 import { formatData } from '../lib/utils'
 import { TIPO_ATIVO_LABEL } from '../lib/constants'
 import type { RelatorioFiiDisponivel } from '../types'
@@ -161,24 +166,51 @@ export default function RelatoriosFiiPage() {
   }
 
   const naoLidas = analises.filter((a) => !a.visto_em).length
+  const { assembleias } = useAssembleiasFii()
+  const assembleiasNovas = assembleias.filter((a) => !a.visto_em).length
+  // Aba na URL (?aba=assembleias) para o aviso de login abrir direto na aba certa.
+  const [params, setParams] = useSearchParams()
+  const { mensagens: emails } = useEmailEntrada()
+  const emailsPendentes = emails.filter((m) => m.status === 'QUARENTENA').length
+  type Aba = 'relatorios' | 'assembleias' | 'emails'
+  const aba: Aba = params.get('aba') === 'assembleias' ? 'assembleias' : params.get('aba') === 'emails' ? 'emails' : 'relatorios'
+  const trocarAba = (id: Aba) => setParams(id === 'relatorios' ? {} : { aba: id }, { replace: true })
 
   return (
     <div className="space-y-5">
       <InvestimentosNav />
-      <div>
-        <h1 className="text-white text-[22px] font-semibold flex items-center gap-2"><FileSearch size={22} style={{ color: '#3b82f6' }} /> Análise de Relatórios</h1>
-        <p className="text-[13px] mt-1" style={{ color: MUTED }}>
-          A IA lê o Relatório Gerencial dos seus FIIs, o resultado trimestral das suas ações (dados da CVM) e os relatórios 10-Q/10-K das suas stocks (SEC),
-          e aponta pontos fortes, pontos de atenção e inconsistências, comparando com o período anterior. É uma leitura de apoio — confira o PDF e não trate como recomendação de investimento.
-        </p>
-      </div>
-
       {emEspacoAgregado ? (
-        <p className="text-[14px] rounded-lg border border-white/10 p-4" style={{ color: MUTED }}>
-          Esta página usa a chave de IA de quem está logado e só funciona em "Meus dados".
-        </p>
+        <>
+          <h1 className="text-white text-[22px] font-semibold flex items-center gap-2"><FileSearch size={22} style={{ color: '#3b82f6' }} /> Análise de Relatórios</h1>
+          <p className="text-[14px] rounded-lg border border-white/10 p-4" style={{ color: MUTED }}>
+            Esta página usa a chave de IA de quem está logado e só funciona em "Meus dados".
+          </p>
+        </>
       ) : (
         <>
+          <div className="flex gap-1 border-b border-white/10" role="tablist">
+            {([['relatorios', 'Relatórios', naoLidas, 'nova(s)'], ['assembleias', 'Assembleias', assembleiasNovas, 'nova(s)'], ['emails', 'E-mails', emailsPendentes, 'p/ aprovar']] as const).map(([id, rotulo, n, sufixo]) => (
+              <button key={id} role="tab" aria-selected={aba === id} onClick={() => trocarAba(id)}
+                className="px-4 py-2 text-[14px] font-medium -mb-px border-b-2 transition-colors"
+                style={{ color: aba === id ? '#fff' : MUTED, borderColor: aba === id ? '#3b82f6' : 'transparent' }}>
+                {rotulo}{n > 0 && <span className="ml-1.5 text-[11px] text-blue-300">{n} {sufixo}</span>}
+              </button>
+            ))}
+          </div>
+
+          {aba === 'emails' ? (
+            <QuadroEmailEntrada avisar={showToast} />
+          ) : aba === 'assembleias' ? (
+            <QuadroAssembleiasFii fiis={fiisEmCarteira.filter((a) => a.tipo_ativo === 'FII')} avisar={showToast} />
+          ) : (
+          <>
+          <div>
+            <h1 className="text-white text-[22px] font-semibold flex items-center gap-2"><FileSearch size={22} style={{ color: '#3b82f6' }} /> Análise de Relatórios</h1>
+            <p className="text-[13px] mt-1" style={{ color: MUTED }}>
+              A IA lê o Relatório Gerencial dos seus FIIs, o resultado trimestral das suas ações (dados da CVM) e os relatórios 10-Q/10-K das suas stocks (SEC),
+              e aponta pontos fortes, pontos de atenção e inconsistências, comparando com o período anterior. É uma leitura de apoio — confira o PDF e não trate como recomendação de investimento.
+            </p>
+          </div>
           <div className="rounded-xl border border-white/10 p-4 space-y-3" style={{ background: 'rgba(255,255,255,0.02)' }}>
             <label className="flex items-start gap-3 cursor-pointer">
               <input type="checkbox" className="mt-1" checked={auto.ativo} disabled={auto.loading} onChange={alternarAuto} />
@@ -314,6 +346,8 @@ export default function RelatoriosFiiPage() {
                   onExcluir={async () => { const r = await excluir(a.id); if (!r.ok) showToast(r.erro ?? 'Erro ao excluir') }} />
               ))}
             </div>
+          )}
+          </>
           )}
         </>
       )}

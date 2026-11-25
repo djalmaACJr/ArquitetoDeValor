@@ -32,7 +32,7 @@ export function useCategorias() {
   const carregar = async () => { await qc.invalidateQueries({ queryKey: qk.categorias(uid) }) }
 
   const criar = async (payload: {
-    descricao: string; id_pai?: string | null; icone?: string; cor?: string
+    descricao: string; id_pai?: string | null; icone?: string; cor?: string; despesa_esporadica?: boolean
   }): Promise<OpResultCat> => {
     const res = await apiMutate<Categoria>('/categorias', 'POST', payload)
     if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias(uid) })
@@ -40,10 +40,14 @@ export function useCategorias() {
   }
 
   const editar = async (id: string, payload: Partial<{
-    descricao: string; id_pai: string | null; icone: string; cor: string; ativa: boolean
+    descricao: string; id_pai: string | null; icone: string; cor: string; ativa: boolean; despesa_esporadica: boolean
   }>): Promise<OpResult> => {
     const res = await apiMutate(`/categorias/${id}`, 'PUT', payload)
-    if (res.ok) await qc.invalidateQueries({ queryKey: qk.categorias(uid) })
+    if (res.ok) {
+      await qc.invalidateQueries({ queryKey: qk.categorias(uid) })
+      // a marca "esporádica" muda a média de gastos da Reserva do Dashboard
+      await qc.invalidateQueries({ queryKey: ['media-despesas-mensais', uid] })
+    }
     return { ok: res.ok, erro: res.erro }
   }
 

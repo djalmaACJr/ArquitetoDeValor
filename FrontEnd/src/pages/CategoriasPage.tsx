@@ -366,6 +366,7 @@ export default function CategoriasPage() {
       id_pai:    form.nivel === 'sub' ? form.id_pai : null,
       icone:     form.icone || undefined,
       cor:       form.cor   || undefined,
+      despesa_esporadica: form.esporadica,
     }
     if (editando) {
       const { ok, erro: e } = await editar(editando.id, { ...payload, ativa: form.ativa })
@@ -596,6 +597,7 @@ export default function CategoriasPage() {
           categoriasPai={pais}
           editandoId={editando?.id ?? null}
           mostrarAtiva={!!editando}
+          mostrarEsporadica
           erro={erro}
         />
 

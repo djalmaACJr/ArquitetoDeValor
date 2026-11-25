@@ -35,6 +35,7 @@ ChartJS.register(
 import type { Conta, Transacao, DespesaCategoria } from '../types'
 import type { Lancamento } from '../hooks/useLancamentos'
 import { useSaldoBaseMes } from '../hooks/useSaldoBaseMes'
+import { useMediaDespesasMensais } from '../hooks/useMediaDespesasMensais'
 import { useTrilhaAuditoria, type TrilhaAuditoriaItem, type OperacaoAuditoria } from '../hooks/useTrilhaAuditoria'
 import DiffAuditoria from '../components/ui/DiffAuditoria'
 import DrawerLancamento from '../components/ui/DrawerLancamento'
@@ -49,6 +50,7 @@ import { qk } from '../lib/queryKeys'
 import { useContextoUserId } from '../hooks/useEspacoAtivo'
 import { useLembretes } from '../hooks/useLembretes'
 import { useDividendos } from '../hooks/useDividendos'
+import { useAssembleiasFii } from '../hooks/useAssembleiasFii'
 import { useOcultarValores } from '../hooks/useOcultarValores'
 import { BotaoOcultar } from '../components/ui/BotaoOcultar'
 import type { Lembrete } from '../types'
@@ -138,6 +140,26 @@ const CardSaldo = memo(function CardSaldo({ contas, oculto, mes, historico, modo
     return Math.round((diaAtual / totalDias) * 100)
   })()
 
+  // Reserva: quantos meses o saldo exibido cobre no ritmo médio de gastos dos
+  // últimos 24 meses (despesas pagas, sem transferências). Proventos B3
+  // (inv_dividendos associados ao extrato) abatem o gasto na 2ª conta.
+  const mediaDesp = useMediaDespesasMensais()
+  const fmtMeses = (m: number) => m >= 120 ? 'Mais de 10 anos'
+    : m >= 24 ? `${(m / 12).toFixed(1).replace('.', ',')} anos`
+    : `${m.toFixed(1).replace('.', ',')} ${m >= 1.95 || m < 1 ? 'meses' : 'mês'}`
+  const reserva = (() => {
+    if (!mediaDesp || mediaDesp.meses === 0 || mediaDesp.media <= 0) return null
+    const { media, proventos } = mediaDesp
+    const texto = saldoExibido <= 0 ? 'Sem reserva' : fmtMeses(saldoExibido / media)
+    const detalhe = `Gasto médio de ${formatBRL(media)}/mês (${mediaDesp.meses} ${mediaDesp.meses === 1 ? 'mês' : 'meses'})${mediaDesp.categoriasIgnoradas > 0 ? ` · sem ${mediaDesp.categoriasIgnoradas} ${mediaDesp.categoriasIgnoradas === 1 ? 'categoria esporádica' : 'categorias esporádicas'}` : ''}`
+    const cobertura = Math.round((proventos / media) * 100)
+    const liquido = media - proventos
+    const comProventos = proventos <= 0 ? null
+      : liquido <= 0 ? 'Proventos cobrem todos os gastos'
+      : saldoExibido <= 0 ? 'Sem reserva' : fmtMeses(saldoExibido / liquido)
+    return { texto, detalhe, proventos, cobertura, comProventos }
+  })()
+
   // Label do subtitulo
   const labelData = (() => {
     if (!isMesAtual) {
@@ -185,6 +207,28 @@ const CardSaldo = memo(function CardSaldo({ contas, oculto, mes, historico, modo
         <div className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-av-green to-av-amber"
           style={{ width: oculto ? '0%' : `${progressoMes}%` }}/>
       </div>
+      {reserva && (
+        <div className="relative mt-3 pt-3 border-t border-white/10">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="min-w-0">
+              <p className="text-[15px] text-white/50">Reserva</p>
+              <p className="text-[20px] font-bold text-white leading-tight">{oculto ? OCULTO : reserva.texto}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[15px] text-white/50">Proventos B3 / mês</p>
+              <p className="text-[20px] font-bold text-av-green leading-tight break-words">
+                {oculto ? OCULTO : formatBRL(reserva.proventos)}
+              </p>
+            </div>
+          </div>
+          <p className="text-[13px] text-white/35 mt-1">{oculto ? '-' : reserva.detalhe}</p>
+          {reserva.comProventos && (
+            <p className="text-[13px] text-white/50 mt-0.5">
+              {oculto ? '-' : `Proventos cobrem ${reserva.cobertura}% dos gastos · reserva descontando proventos: ${reserva.comProventos}`}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 })
@@ -1906,6 +1950,28 @@ export default function DashboardPage() {
     return mapa
   }, [dividendosDoMes, mes])
 
+  // Assembleias de FIIs da carteira (análise por IA, v8.0.0) no mês exibido; hora no fuso de Brasília.
+  const { assembleias: assembleiasFii } = useAssembleiasFii()
+  const assembleiasDoMes = useMemo(() => {
+    const mapa = new Map<string, { ticker: string; hora: string; importante: boolean; prazo?: boolean }[]>()
+    const incluir = (iso: string | null, a: typeof assembleiasFii[number], prazo: boolean) => {
+      if (!iso) return
+      const d = new Date(iso)
+      if (Number.isNaN(d.getTime())) return
+      const dia = d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })   // YYYY-MM-DD
+      if (!dia.startsWith(mes)) return
+      const hora = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
+      const lista = mapa.get(dia) ?? []
+      lista.push({ ticker: a.inv_ativos?.ticker ?? '', hora, importante: a.relevancia === 'IMPORTANTE', prazo })
+      mapa.set(dia, lista)
+    }
+    for (const a of assembleiasFii) {
+      incluir(a.data_evento, a, false)
+      incluir(a.prazo_voto_em, a, true)   // prazo do voto à distância (pode cair em outro dia)
+    }
+    return mapa
+  }, [assembleiasFii, mes])
+
   return (
     <div className="p-5">
       <h1 className="text-[21px] font-bold text-gray-800 dark:text-gray-100 text-center sm:text-left mb-3">Dashboard</h1>
@@ -2017,6 +2083,8 @@ export default function DashboardPage() {
                 diasNegativos={diasNegativos}
                 ultimasParcelas={ultimasParcelas}
                 datasComProventos={datasComProventos}
+                assembleiasFii={assembleiasDoMes}
+                onAbrirAssembleia={() => navigate('/investimentos/relatorios?aba=assembleias')}
                 onEditar={l => { setLembreteEditando(l); setModalLembreteAberto(true) }}
                 onExcluir={id => excluirLembrete(id)}
                 onToggle={(id, novoStatus) => editarLembrete(id, { status: novoStatus })}
