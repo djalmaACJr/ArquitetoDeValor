@@ -1711,11 +1711,20 @@ export function tipoNomePorLabelB3(label: string, tipoAtivo: string): string {
 // Devolve null quando a FONTE falha (HTTP != 2xx, timeout, resposta
 // inválida) — o chamador distingue de "ativo sem proventos anunciados".
 export async function coletarProventosB3(ativo: AtivoBrl): Promise<ProventoB3[] | null> {
-  const brutos = ativo.tipo_ativo === "FII"
+  let brutos = ativo.tipo_ativo === "FII"
     ? await buscarProventosFundoB3(emissorB3(ativo.ticker))
     : await buscarProventosCompanhiaB3(emissorB3(ativo.ticker));
   if (brutos === null) return null;
   if (brutos.length === 0) return [];
+
+  // FII: a B3 lista junto, na mesma data, séries que NÃO são a cota negociada
+  // (ex.: recibos de subscrição BRXPMLR47M13/R48M12 do XPML) — somá-las inflava
+  // o provento (XPML11 nov/2026: 0,80 virava ~1,74+). A cota do fundo tem ISIN
+  // terminado em CTF###; havendo alguma, só ela vale.
+  if (ativo.tipo_ativo === "FII") {
+    const soCotas = brutos.filter((b) => /CTF\d{3}$/.test(b.isin ?? ""));
+    if (soCotas.length > 0) brutos = soCotas;
+  }
 
   const classeAlvo = classeDoTicker(ativo.ticker, ativo.acoes_subtipo);
 
@@ -1809,7 +1818,7 @@ export function urlSupplementFundoB3(identifier: string): string {
 
 // Proventos de COMPANHIA (ações/ETF) — GetListedSupplementCompany.
 // null = a B3 não respondeu (difere de "sem proventos anunciados").
-export async function buscarProventosCompanhiaB3(issuer: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null })[] | null> {
+export async function buscarProventosCompanhiaB3(issuer: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null; isin?: string })[] | null> {
   if (!issuer) return [];
   const data = await fetchB3<{ cashDividends?: B3CashDividend[] }[]>(urlSupplementCompanhiaB3(issuer), issuer);
   if (data === "falha") return null;
@@ -1819,7 +1828,7 @@ export async function buscarProventosCompanhiaB3(issuer: string): Promise<(Prove
 
 // Proventos de FUNDO (FII) — GetListedSupplementFunds.
 // null = a B3 não respondeu (difere de "sem proventos anunciados").
-export async function buscarProventosFundoB3(identifier: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null })[] | null> {
+export async function buscarProventosFundoB3(identifier: string): Promise<(ProventoB3 & { classe: "ON" | "PN" | null; isin?: string })[] | null> {
   if (!identifier) return [];
   const data = await fetchB3<{ cashDividends?: B3CashDividend[] }>(urlSupplementFundoB3(identifier), identifier);
   if (data === "falha") return null;
@@ -1838,8 +1847,8 @@ export interface B3CashDividend {
   lastDatePrior?: string;
 }
 
-export function mapearCashDividends(lista?: B3CashDividend[]): (ProventoB3 & { classe: "ON" | "PN" | null })[] {
-  const out: (ProventoB3 & { classe: "ON" | "PN" | null })[] = [];
+export function mapearCashDividends(lista?: B3CashDividend[]): (ProventoB3 & { classe: "ON" | "PN" | null; isin?: string })[] {
+  const out: (ProventoB3 & { classe: "ON" | "PN" | null; isin?: string })[] = [];
   for (const d of lista ?? []) {
     const payDate = brDataISO(String(d.paymentDate ?? ""));
     const rate    = brNumero(String(d.rate ?? ""));
@@ -1849,6 +1858,7 @@ export function mapearCashDividends(lista?: B3CashDividend[]): (ProventoB3 & { c
       payDate, rate, label: String(d.label ?? ""),
       dataCom: dataCom && dataPagamentoPlausivel(dataCom) ? dataCom : null,
       classe: classeDoIsin(String(d.isinCode ?? d.assetIssued ?? "")),
+      isin: String(d.isinCode ?? d.assetIssued ?? "").toUpperCase(),
     });
   }
   return out;
