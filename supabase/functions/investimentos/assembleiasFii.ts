@@ -22,7 +22,7 @@ import { logError, logRequest } from "../_shared/logger.ts";
 import { chamarProvedorIA, lerConfigIAAtiva, ErroIA, type ConfigIAAtiva } from "../_shared/ia.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@1.3.0";
 import { Db, hojeISO, recuarDias } from "./shared.ts";
-import { relatorioCasaComAtivo } from "./relatoriosFii.ts";
+import { filtrarRelatoriosDoAtivo } from "./relatoriosFii.ts";
 import { FNET_HEADERS, dataEntregaParaISO, fetchFnet, montarUrlBusca, type LinhaFnet } from "./fatosRelevantes.ts";
 
 const CATEGORIA_ASSEMBLEIA = 2;
@@ -242,7 +242,7 @@ async function assembleiasDoAtivo(ativo: { ticker: string; nome: string | null }
   const { data } = await admin.from("inv_assembleias_fii").select("*")
     .gte("data_evento", `${recuarDias(hojeISO(), TOLERANCIA_PASSADO_DIAS)}T00:00:00-03:00`)
     .order("data_evento", { ascending: true }).limit(1500);
-  const doFundo = ((data ?? []) as Assembleia[]).filter((a) => relatorioCasaComAtivo(ativo, a));
+  const doFundo = filtrarRelatoriosDoAtivo(ativo, (data ?? []) as Assembleia[]);
   return escolherPorAssembleia(doFundo);
 }
 

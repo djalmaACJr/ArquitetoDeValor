@@ -1,7 +1,7 @@
 // Testes das funções puras de relatoriosFii.ts — rode com:
 //   deno test --node-modules-dir=auto --allow-env --allow-net=none relatoriosFii.test.ts
 import { assertEquals } from "jsr:@std/assert@1";
-import { parseDataReferencia, parsearAnaliseIA, relatorioCasaComAtivo } from "./relatoriosFii.ts";
+import { filtrarRelatoriosDoAtivo, parseDataReferencia, parsearAnaliseIA, relatorioCasaComAtivo } from "./relatoriosFii.ts";
 
 Deno.test("parseDataReferencia aceita dd/MM/yyyy e MM/yyyy", () => {
   assertEquals(parseDataReferencia("31/10/2026"), "2026-10-31");
@@ -35,4 +35,18 @@ Deno.test("relatorioCasaComAtivo: MANA11 não casa com outros fundos Manatí (n�
   assertEquals(relatorioCasaComAtivo(ativo, { fundo_nome: "MANATÍ CAPITAL HEDGE FUND FUNDO DE INVESTIMENTO IMOBILIÁRIO DE RESPONSABILIDADE LIMITADA", fundo_pregao: "FII MANATI" }), true);
   assertEquals(relatorioCasaComAtivo(ativo, { fundo_nome: "MANATÍ RENDA CDI PLUS FUNDO DE INVESTIMENTO IMOBILIÁRIO RESPONSABILIDADE LIMITADA", fundo_pregao: null }), false);
   assertEquals(relatorioCasaComAtivo(ativo, { fundo_nome: "MANATÍ RECEBÍVEIS ESTRUTURADOS FUNDO DE INVESTIMENTO IMOBILIÁRIO DE RESPONSABILIDADE LIMITADA", fundo_pregao: null }), false);
+});
+
+Deno.test("filtrarRelatoriosDoAtivo: sigla (nome = ticker) só vale quando as regras fortes não acham nada", () => {
+  const xpml = { ticker: "XPML11", nome: "XPML11" };
+  const malls = { fundo_nome: "XP MALLS FUNDO DE INVESTIMENTO IMOBILIÁRIO FII", fundo_pregao: "FII XP MALLS" };
+  const xplog = { fundo_nome: "XP LOG FUNDO DE INVESTIMENTO IMOBILIÁRIO RESPONSABILIDADE LIMITADA - FII", fundo_pregao: "FII XP LOG" };
+  assertEquals(filtrarRelatoriosDoAtivo(xpml, [malls, xplog]), [malls]);
+  assertEquals(filtrarRelatoriosDoAtivo({ ticker: "XPLG11", nome: "XPLG11" }, [malls, xplog, { fundo_nome: "XP LOGÍSTICO PRIME YIELD FUNDO", fundo_pregao: null }]), [xplog]);
+  // RBRR11: o relatório "RBRR PAX" (regra forte) vence os falsos positivos de sigla
+  const rbrr = { ticker: "RBRR11", nome: "RBRR11" };
+  const pax = { fundo_nome: "RBRR", fundo_pregao: "FII RBRR PAX" };
+  assertEquals(filtrarRelatoriosDoAtivo(rbrr, [pax, { fundo_nome: "RBR PRIME", fundo_pregao: "FII RBR PR" }, { fundo_nome: "RIO BRAVO", fundo_pregao: "FII RIOB RR" }]), [pax]);
+  // MANA11 nome = ticker não casa com pregão longo de outro fundo
+  assertEquals(filtrarRelatoriosDoAtivo({ ticker: "MANA11", nome: "MANA11" }, [{ fundo_nome: "MANATÍ RENDA CDI", fundo_pregao: "FII MANATI RENDA CDI" }]), []);
 });

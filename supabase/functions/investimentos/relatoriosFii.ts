@@ -86,6 +86,33 @@ function tokensDistintivos(s: string): string[] {
 // por isso (b) existe. Pode errar para fundos com nomes parecidos — a UI mostra
 // de qual relatório a análise veio (link do PDF) para o usuário conferir.
 export function relatorioCasaComAtivo(ativo: { ticker: string; nome: string | null }, rel: { fundo_nome: string; fundo_pregao: string | null }): boolean {
+  return casaPorRegrasFortes(ativo, rel) || casaPorSigla(ativo, rel);
+}
+
+// Sigla: o núcleo do ticker é abreviação do PREGÃO ("XPML" ↔ "FII XP MALLS",
+// "XPLG" ↔ "FII XP LOG", "KNCR" ↔ "FII KINEA CR"): as letras do núcleo aparecem em
+// ordem no pregão (sem "FII"), começando pela 1ª letra, e o pregão não é bem maior
+// que a sigla ("MANA" não casa com "FII MANATI RENDA CDI"). Só o pregão (curto),
+// nunca o nome longo. É regra FRACA (pode casar fundo parecido, ex.: RBRR ↔ "RBR PR"):
+// `filtrarRelatoriosDoAtivo` só a usa quando as regras fortes não acham nada.
+function casaPorSigla(ativo: { ticker: string }, rel: { fundo_pregao: string | null }): boolean {
+  const nucleo = nucleoTicker(ativo.ticker);
+  if (nucleo.length < 4 || !rel.fundo_pregao) return false;
+  const alvo = rel.fundo_pregao.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .split(/[^a-z0-9]+/).filter((p) => p && p !== "fii" && p !== "fiagro").join("");
+  if (alvo[0] !== nucleo[0] || alvo.length > nucleo.length * 2) return false;
+  let i = 0;
+  for (const ch of alvo) if (ch === nucleo[i]) i++;
+  return i === nucleo.length;
+}
+
+/** Relatórios do ativo: pelas regras fortes; só se não houver nenhum, pela sigla. */
+export function filtrarRelatoriosDoAtivo<T extends { fundo_nome: string; fundo_pregao: string | null }>(ativo: { ticker: string; nome: string | null }, lista: T[]): T[] {
+  const fortes = lista.filter((r) => casaPorRegrasFortes(ativo, r));
+  return fortes.length > 0 ? fortes : lista.filter((r) => casaPorSigla(ativo, r));
+}
+
+function casaPorRegrasFortes(ativo: { ticker: string; nome: string | null }, rel: { fundo_nome: string; fundo_pregao: string | null }): boolean {
   const nucleo = nucleoTicker(ativo.ticker);
   const palavras = new Set(
     `${rel.fundo_pregao ?? ""} ${rel.fundo_nome}`.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean),
@@ -293,7 +320,7 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
 
     const cfgPorUsuario = new Map<string, ConfigIAAtiva | null>();
     externo: for (const ativo of ativos) {
-      const candidatos = relatorios.filter((r) => relatorioCasaComAtivo(ativo, r));
+      const candidatos = filtrarRelatoriosDoAtivo(ativo, relatorios);
       // só o relatório mais recente por ativo na janela (evita reanalisar reapresentações)
       const rel = candidatos[0];
       if (!rel) continue;
@@ -419,9 +446,9 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
       .select("id, fundo_nome, fundo_pregao, data_referencia, data_entrega, url_documento")
       .gte("data_entrega", recuarDias(hojeISO(), 120)).order("data_entrega", { ascending: false }).limit(1500);
     const mapa = new Map<number, Record<string, unknown>>();
-    for (const r of [...(rels ?? []), ...(recentes ?? [])]) {
-      const rr = r as { id: number; fundo_nome: string; fundo_pregao: string | null };
-      if (relatorioCasaComAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null }, rr)) mapa.set(Number(rr.id), r);
+    const candidatos = [...(rels ?? []), ...(recentes ?? [])] as { id: number; fundo_nome: string; fundo_pregao: string | null }[];
+    for (const rr of filtrarRelatoriosDoAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null }, candidatos)) {
+      mapa.set(Number(rr.id), rr as unknown as Record<string, unknown>);
     }
     const lista = [...mapa.values()].sort((a, b) => String(b.data_entrega).localeCompare(String(a.data_entrega))).slice(0, 12);
     const { data: feitas } = await c.from("inv_analises_relatorio").select("relatorio_id").eq("user_id", userId).eq("ativo_id", ativoId);
@@ -464,7 +491,7 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
     } else {
       const { data: recentes } = await admin.from("inv_relatorios_fii").select("*")
         .gte("data_entrega", recuarDias(hojeISO(), 120)).order("data_entrega", { ascending: false }).limit(1500);
-      rel = ((recentes ?? []) as Relatorio[]).find((r) => relatorioCasaComAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null }, r)) ?? null;
+      rel = filtrarRelatoriosDoAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null }, (recentes ?? []) as Relatorio[])[0] ?? null;
     }
     if (!rel) return erro("Nenhum relatório gerencial recente encontrado para este fundo (o cron diário busca os publicados nos últimos dias).", 404);
 
