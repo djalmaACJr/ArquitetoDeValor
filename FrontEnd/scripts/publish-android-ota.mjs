@@ -16,7 +16,7 @@
 import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
@@ -47,8 +47,15 @@ const APP_VERSION = versionMatch[1]
 // Extrai só a última linha `{...}` da saída da CLI (ela imprime logs de
 // progresso antes do JSON quando chamada com --json).
 function ultimoJson(saida) {
-  const linha = saida.trim().split('\n').filter(l => l.trim().startsWith('{')).pop()
-  return JSON.parse(linha)
+  // A CLI pode imprimir o JSON numa linha só ou indentado (várias linhas):
+  // tenta a partir de cada linha que abre com `{`, da última para a primeira.
+  const linhas = saida.trim().split('\n')
+  for (let i = linhas.length - 1; i >= 0; i--) {
+    if (!linhas[i].startsWith('{')) continue
+    try { return JSON.parse(linhas[i]) } catch { /* indentado: junta as linhas seguintes */ }
+    try { return JSON.parse(linhas.slice(i).join('\n')) } catch { /* tenta a anterior */ }
+  }
+  throw new Error('Não achei JSON na saída da CLI:\n' + saida)
 }
 
 console.log(`Publicando release Android v${APP_VERSION}...`)
@@ -62,7 +69,7 @@ const zipOutput = execSync(
   { cwd: FRONTEND_DIR, encoding: 'utf8' }
 )
 const { filename: zipFilename, checksum: checksumPlano } = ultimoJson(zipOutput)
-const zipPath = join(FRONTEND_DIR, zipFilename)
+const zipPath = resolve(FRONTEND_DIR, zipFilename)
 
 console.log('3/5 — assinando bundle (E2E v2)...')
 // A chave privada só existe em memória/arquivo temporário pelo tempo da
@@ -76,14 +83,14 @@ try {
     { cwd: FRONTEND_DIR, encoding: 'utf8' }
   )
   ;({ filename, checksum, ivSessionKey } = ultimoJson(encOutput))
-  zipEncPath = join(FRONTEND_DIR, filename)
+  zipEncPath = resolve(FRONTEND_DIR, filename)
 } finally {
   unlinkSync(tmpKeyPath)
 }
 
 console.log('4/5 — upload pro bucket app-releases...')
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { db: { schema: 'arqvalor' } })
-const storagePath = `android/${filename}`
+const storagePath = `android/${basename(filename)}`
 const zipBuffer = readFileSync(zipEncPath)
 const { error: erroUpload } = await supabase.storage
   .from('app-releases')
