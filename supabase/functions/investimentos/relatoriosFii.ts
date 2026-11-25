@@ -22,6 +22,7 @@ import { logError, logRequest, logSuccess } from "../_shared/logger.ts";
 import { chamarProvedorIA, lerConfigIAAtiva, ErroIA, type ConfigIAAtiva } from "../_shared/ia.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@1.3.0";
 import { Db, hojeISO, recuarDias } from "./shared.ts";
+import { buscarPregaoFundoB3, emissorB3 } from "./dividendos.ts";
 import { carregarContextoPessoal, gerarAnalisePessoal, personalizarAnaliseSalva } from "./analisePessoal.ts";
 import { processarAssembleiasCron } from "./assembleiasFii.ts";
 import {
@@ -106,8 +107,33 @@ function casaPorSigla(ativo: { ticker: string }, rel: { fundo_pregao: string | n
   return i === nucleo.length;
 }
 
-/** Relatórios do ativo: pelas regras fortes; só se não houver nenhum, pela sigla. */
-export function filtrarRelatoriosDoAtivo<T extends { fundo_nome: string; fundo_pregao: string | null }>(ativo: { ticker: string; nome: string | null }, lista: T[]): T[] {
+function normalizaPregao(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join(" ");
+}
+
+/** Pregão do fundo na B3 (ex.: "FII XP MALLS"): lê de inv_ativos.fii_pregao; se ainda
+ *  não resolvido, busca na B3 e grava. null = indisponível agora (cai nas regras por texto). */
+export async function pregaoDoFii(admin: Db, ativo: { id?: string; ticker: string }): Promise<string | null> {
+  try {
+    if (ativo.id) {
+      const { data } = await admin.from("inv_ativos").select("fii_pregao").eq("id", ativo.id).maybeSingle();
+      const salvo = String((data as { fii_pregao?: string | null } | null)?.fii_pregao ?? "").trim();
+      if (salvo) return salvo;
+    }
+    const pregao = await buscarPregaoFundoB3(emissorB3(ativo.ticker));
+    if (pregao && ativo.id) await admin.from("inv_ativos").update({ fii_pregao: pregao }).eq("id", ativo.id);
+    return pregao;
+  } catch (e) { logError("pregaoDoFii", e); return null; }
+}
+
+/** Relatórios do ativo: 1º pelo pregão EXATO da B3 (`ativo.pregao`); sem isso, pelas
+ *  regras fortes por texto; só se não houver nenhum, pela sigla. */
+export function filtrarRelatoriosDoAtivo<T extends { fundo_nome: string; fundo_pregao: string | null }>(ativo: { ticker: string; nome: string | null; pregao?: string | null }, lista: T[]): T[] {
+  if (ativo.pregao) {
+    const alvo = normalizaPregao(ativo.pregao);
+    const exatos = lista.filter((r) => r.fundo_pregao && normalizaPregao(r.fundo_pregao) === alvo);
+    if (exatos.length > 0) return exatos;
+  }
   const fortes = lista.filter((r) => casaPorRegrasFortes(ativo, r));
   return fortes.length > 0 ? fortes : lista.filter((r) => casaPorSigla(ativo, r));
 }
@@ -320,7 +346,7 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
 
     const cfgPorUsuario = new Map<string, ConfigIAAtiva | null>();
     externo: for (const ativo of ativos) {
-      const candidatos = filtrarRelatoriosDoAtivo(ativo, relatorios);
+      const candidatos = filtrarRelatoriosDoAtivo({ ...ativo, pregao: await pregaoDoFii(admin, ativo) }, relatorios);
       // só o relatório mais recente por ativo na janela (evita reanalisar reapresentações)
       const rel = candidatos[0];
       if (!rel) continue;
@@ -447,7 +473,8 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
       .gte("data_entrega", recuarDias(hojeISO(), 120)).order("data_entrega", { ascending: false }).limit(1500);
     const mapa = new Map<number, Record<string, unknown>>();
     const candidatos = [...(rels ?? []), ...(recentes ?? [])] as { id: number; fundo_nome: string; fundo_pregao: string | null }[];
-    for (const rr of filtrarRelatoriosDoAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null }, candidatos)) {
+    const pregaoAtivo = ativo.tipo_ativo === "FII" ? await pregaoDoFii(dbAdmin(), { id: String(ativo.id), ticker: String(ativo.ticker) }) : null;
+    for (const rr of filtrarRelatoriosDoAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null, pregao: pregaoAtivo }, candidatos)) {
       mapa.set(Number(rr.id), rr as unknown as Record<string, unknown>);
     }
     const lista = [...mapa.values()].sort((a, b) => String(b.data_entrega).localeCompare(String(a.data_entrega))).slice(0, 12);
@@ -481,17 +508,18 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
     }
 
     const admin = dbAdmin();
+    const alvoAtivo = { ticker: String(ativo.ticker), nome: ativo.nome as string | null, pregao: await pregaoDoFii(admin, { id: String(ativo.id), ticker: String(ativo.ticker) }) };
     let rel: Relatorio | null = null;
     if (body.relatorio_id != null) {
       const { data } = await admin.from("inv_relatorios_fii").select("*").eq("id", Number(body.relatorio_id)).maybeSingle();
       rel = data as Relatorio | null;
-      if (rel && !relatorioCasaComAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null }, rel)) {
+      if (rel && filtrarRelatoriosDoAtivo(alvoAtivo, [rel]).length === 0) {
         return erro("Este relatório não pertence ao fundo selecionado", 400);
       }
     } else {
       const { data: recentes } = await admin.from("inv_relatorios_fii").select("*")
         .gte("data_entrega", recuarDias(hojeISO(), 120)).order("data_entrega", { ascending: false }).limit(1500);
-      rel = filtrarRelatoriosDoAtivo({ ticker: String(ativo.ticker), nome: ativo.nome as string | null }, (recentes ?? []) as Relatorio[])[0] ?? null;
+      rel = filtrarRelatoriosDoAtivo(alvoAtivo, (recentes ?? []) as Relatorio[])[0] ?? null;
     }
     if (!rel) return erro("Nenhum relatório gerencial recente encontrado para este fundo (o cron diário busca os publicados nos últimos dias).", 404);
 

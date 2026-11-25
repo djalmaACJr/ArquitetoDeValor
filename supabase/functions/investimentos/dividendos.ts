@@ -1836,6 +1836,17 @@ export async function buscarProventosFundoB3(identifier: string): Promise<(Prove
   return mapearCashDividends(reg?.cashDividends);
 }
 
+// Nome de pregão do FUNDO na B3 (campo `fund`, ex.: "FII XP MALLS") — o mesmo texto
+// que o Fundos.NET traz em `nomePregao`. null = B3 não respondeu ou sem o campo.
+export async function buscarPregaoFundoB3(identifier: string): Promise<string | null> {
+  if (!identifier) return null;
+  const data = await fetchB3<{ fund?: string }>(urlSupplementFundoB3(identifier), identifier);
+  if (data === null || data === "falha") return null;
+  const reg = Array.isArray(data) ? data[0] : data;
+  const pregao = String(reg?.fund ?? "").replace(/\s+/g, " ").trim();
+  return pregao || null;
+}
+
 export interface B3CashDividend {
   paymentDate?: string; rate?: string; label?: string; isinCode?: string; assetIssued?: string;
   // "Data COM" — última data em que o investidor precisa ter o papel em

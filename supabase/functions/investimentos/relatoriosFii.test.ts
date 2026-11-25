@@ -50,3 +50,15 @@ Deno.test("filtrarRelatoriosDoAtivo: sigla (nome = ticker) só vale quando as re
   // MANA11 nome = ticker não casa com pregão longo de outro fundo
   assertEquals(filtrarRelatoriosDoAtivo({ ticker: "MANA11", nome: "MANA11" }, [{ fundo_nome: "MANATÍ RENDA CDI", fundo_pregao: "FII MANATI RENDA CDI" }]), []);
 });
+
+Deno.test("filtrarRelatoriosDoAtivo: pregão exato da B3 resolve GARE11/GGRC11/TGAR11 e vence falsos positivos", () => {
+  const guardian = { fundo_nome: "GUARDIAN REAL ESTATE FUNDO DE INVESTIMENTO IMOBILIÁRIO", fundo_pregao: "FII GUARDIAN" };
+  const guard = { fundo_nome: "GUARDIAN MULTIESTRATÉGIA", fundo_pregao: "FII GUARD MU" };
+  assertEquals(filtrarRelatoriosDoAtivo({ ticker: "GARE11", nome: "GARE11", pregao: "FII GUARDIAN" }, [guard, guardian]), [guardian]);
+  const ggr = { fundo_nome: "ZAGROS RENDA IMOBILIÁRIA", fundo_pregao: "FII GGR ZAG" };
+  assertEquals(filtrarRelatoriosDoAtivo({ ticker: "GGRC11", nome: "ZAGROS RENDA IMOBILIRIA FII RESP LTDA", pregao: "FII GGR ZAG " }, [ggr]), [ggr]);
+  const tg = { fundo_nome: "FUNDO DE INVESTIMENTO IMOBILIÁRIO TG ATIVO REAL", fundo_pregao: "FII TG ATIVO" };
+  assertEquals(filtrarRelatoriosDoAtivo({ ticker: "TGAR11", nome: "FDO INV IMOB TG ATIVO REAL RESP LIM", pregao: "FII TG ATIVO" }, [tg]), [tg]);
+  // pregão sem relatório correspondente: cai nas regras por texto (não zera)
+  assertEquals(filtrarRelatoriosDoAtivo({ ticker: "XPML11", nome: "XPML11", pregao: "FII XP MALLS" }, [{ fundo_nome: "X", fundo_pregao: "FII OUTRO" }]), []);
+});
