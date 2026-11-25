@@ -133,13 +133,18 @@ function formDoAtivo(ativo: InvestimentoAtivo | null): FormAtivo {
 // (AtivosInvestimentosPage) e a página de detalhe (DetalheInvestimentoPage).
 // Monte-o condicionalmente (`{aberto && <DrawerAtivo .../>}`): quando `ativo`
 // é informado abre em modo edição; senão, em modo criação com busca externa.
-export default function DrawerAtivo({ ativo, onClose, onToast }: {
+export default function DrawerAtivo({ ativo, onClose, onToast, onCriado, tipoInicial }: {
   ativo: InvestimentoAtivo | null
+  /** Só na criação: já começa com este tipo de ativo escolhido (ainda editável). */
+  tipoInicial?: TipoAtivoInvestimento
   onClose: () => void
   onToast: (m: string) => void
+  /** Chamado após CRIAR um ativo novo (não na edição) — ex.: a transferência de posição
+   *  seleciona o recém-cadastrado como destino. */
+  onCriado?: (novo: InvestimentoAtivo) => void
 }) {
   const editando = ativo
-  const [form, setForm] = useState<FormAtivo>(() => formDoAtivo(ativo))
+  const [form, setForm] = useState<FormAtivo>(() => (!ativo && tipoInicial ? { ...FORM_VAZIO, tipo_ativo: tipoInicial } : formDoAtivo(ativo)))
   const [salvando, setSalvando] = useState(false)
 
   // Busca externa (ticker → nome/preço/características)
@@ -392,6 +397,7 @@ export default function DrawerAtivo({ ativo, onClose, onToast }: {
       }
       const res = editando ? await editar(editando.id, payload) : await criar(payload)
       if (!res.ok) { onToast(res.erro ?? 'Erro ao salvar'); return }
+      if (!editando && res.dados) onCriado?.(res.dados)
 
       // Registra a movimentação inicial (cria a posição via operação) e reconstrói
       // o histórico de renda fixa a partir dela.

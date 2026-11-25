@@ -637,6 +637,10 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, quantidade_entrada: 0 })).status).toBe(400);
     expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, ativo_destino_id: oId })).status).toBe(400);
     expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, quantidade_saida: 999 })).status).toBe(400);
+    // destino de OUTRO tipo (ação) é recusado
+    const { data: dA } = await api("/investimentos/ativos", "POST", { ticker: "JESTINVTA", nome: "Jest Transf Acao", tipo_ativo: "ACOES" });
+    expect((await api("/investimentos/transferencias-ativo", "POST", { ...base, ativo_destino_id: dA.dados.id })).status).toBe(400);
+    await api(`/investimentos/ativos/${dA.dados.id}`, "DELETE");
 
     // transferência total: 10 cotas (custo 500) → 25 cotas do destino
     const { status, data } = await api("/investimentos/transferencias-ativo", "POST", base);
