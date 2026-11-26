@@ -114,15 +114,17 @@ export default function FormCamposCategoria({
 
       {/* Despesa esporádica — fica fora das médias de gasto */}
       {mostrarEsporadica && (
-        <Field label="Despesa esporádica">
+        <Field label="Despesa / receita esporádica">
           <Toggle
             checked={form.esporadica}
             onChange={v => set({ esporadica: v })}
-            label={form.esporadica ? 'Fora das médias de gasto' : 'Entra nas médias de gasto'}
+            label={form.esporadica ? 'Fora das médias' : 'Entra nas médias'}
           />
           <p className="text-[14px] mt-1.5" style={{ color: '#8b92a8' }}>
-            Use para gastos que não se repetem todo mês (IPVA, viagem, reforma). Ela deixa de
-            entrar na Reserva e na Projeção de economia; relatórios e extrato não mudam.
+            Use para valores que não se repetem todo mês: despesas (IPVA, viagem, reforma) ou
+            receitas (13º, bônus, venda de um bem). Os lançamentos dessa categoria, de despesa ou
+            de receita, deixam de entrar nas médias da Reserva (Dashboard) e da Projeção de
+            economia; relatórios, extrato e saldo não mudam.
             {form.nivel === 'pai' ? ' Vale também para as subcategorias.' : ''}
           </p>
         </Field>

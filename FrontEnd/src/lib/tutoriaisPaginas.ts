@@ -667,6 +667,11 @@ export const TUTORIAL_INVESTIMENTOS: PassoTutorial[] = [
     seletor: '[data-tutorial="investimentos-nav"]',
   },
   {
+    titulo: 'Localizar um ativo',
+    texto: 'Digite o ticker ou o nome para achar um ativo da carteira rapidamente. Escolha na lista (ou use as setas e Enter) para abrir o detalhe dele.',
+    seletor: '[data-tutorial="investimentos-busca"]',
+  },
+  {
     titulo: 'Filtrar por conta e atualizar dados',
     texto: 'Filtre tudo por uma conta de investimento específica ou veja o consolidado. "Atualizar cotação" busca o preço atual dos ativos; "Preencher histórico" aparece quando há lacunas no valor de mercado de algum mês.',
     seletor: '[data-tutorial="investimentos-header"]',

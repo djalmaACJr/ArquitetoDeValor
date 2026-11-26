@@ -1071,7 +1071,11 @@ export default function AvaliacoesInvestimentosPage() {
     setPendenteDecisao(null)
     decisaoRef.current = null
     setTimeout(() => setProgMentores(null), 1000)
-    const faltam = ativos.filter((a) => !jaAvaliados.has(a.id)).length
+    // "Faltam" = só o que ainda PODE ser avaliado (saldo > 0, dos tipos marcados) —
+    // a mesma base do botão "Continuar". Antes contava todos os ativos cadastrados,
+    // inclusive os sem posição, então o resumo nunca fechava em "carteira completa"
+    // e o botão ficava desabilitado (não havia nada avaliável pendente).
+    const faltam = filtrarTipos(ativosAvaliaveis).filter((a) => !jaAvaliados.has(a.id)).length
     setResumo({ avaliados: salvos, faltam, erros: errosSalvar })
     if (frequencia !== 'NENHUMA' && salvos > 0) {
       await sincronizarLembreteAgenda(frequencia, new Date())

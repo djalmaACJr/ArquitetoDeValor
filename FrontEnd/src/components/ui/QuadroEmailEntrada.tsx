@@ -60,8 +60,9 @@ function Mensagem({ m, onVista, onDecidir, onExcluir }: {
 }
 
 // Caixa de entrada por e-mail: o usuário encaminha e-mails de administradoras/B3 para um endereço próprio.
-export default function QuadroEmailEntrada({ avisar }: { avisar: (m: string) => void }) {
+export default function QuadroEmailEntrada({ avisar, filtro, onMostrarTodos }: { avisar: (m: string) => void; filtro?: (m: EmailEntradaMensagem) => boolean; onMostrarTodos?: () => void }) {
   const q = useEmailEntrada()
+  const mensagens = filtro ? q.mensagens.filter(filtro) : q.mensagens
   const [apelido, setApelido] = useState('')
   const [novoRem, setNovoRem] = useState('')
   const [copiado, setCopiado] = useState(false)
@@ -202,7 +203,14 @@ export default function QuadroEmailEntrada({ avisar }: { avisar: (m: string) => 
           {sub === 'caixa' && (
           <div className="space-y-2">
             <p className="text-white text-[14px] font-semibold flex items-center gap-2"><Inbox size={15} style={{ color: '#3b82f6' }} /> Caixa de entrada</p>
-            {q.mensagens.length === 0 ? (
+            {mensagens.length === 0 && filtro && q.mensagens.length > 0 ? (
+              <div className="text-[13px] text-center py-6 space-y-2" style={{ color: MUTED }}>
+                <p>Nenhuma mensagem com esses filtros.</p>
+                {onMostrarTodos && (
+                  <button onClick={onMostrarTodos} className="px-3 py-1.5 rounded-lg text-[13px] font-semibold text-white" style={{ background: '#3b82f6' }}>Mostrar todas ({q.mensagens.length})</button>
+                )}
+              </div>
+            ) : q.mensagens.length === 0 ? (
               <div className="text-[13px] text-center py-6 space-y-2" style={{ color: MUTED }}>
                 <p>Nenhuma mensagem recebida ainda.</p>
                 <p>Para receber, configure o encaminhamento automático no seu e-mail (Gmail, Outlook, Yahoo, iCloud e outros).</p>
@@ -210,7 +218,7 @@ export default function QuadroEmailEntrada({ avisar }: { avisar: (m: string) => 
                   Ver como configurar o encaminhamento
                 </button>
               </div>
-            ) : q.mensagens.map((m) => (
+            ) : mensagens.map((m) => (
               <Mensagem key={m.id} m={m} onVista={() => { void q.marcarVista(m.id) }}
                 onDecidir={(a) => { void rodar(() => q.decidirMensagem(m.id, a), a === 'aprovar' ? 'Remetente aprovado.' : 'Remetente bloqueado.') }}
                 onExcluir={() => { void rodar(() => q.excluirMensagem(m.id), 'Mensagem excluída.') }} />

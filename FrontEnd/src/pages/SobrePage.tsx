@@ -24,6 +24,20 @@ const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
   {
+    versao: '8.0.0',
+    data:   '2026-11-25',
+    titulo: 'Assembleias de FIIs e e-mail de entrada',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '🗳️ Assembleias de FIIs', d: 'o sistema avisa quando um FII da carteira convoca assembleia, com a data, o prazo para votar, a pauta e o caminho para participar. A IA resume o que está em votação e o que muda para você.' },
+      { t: '📧 E-mail de entrada', d: 'encaminhe para o seu endereço do sistema os e-mails de proventos e comunicados das corretoras e gestoras: o conteúdo é lido, resumido pela IA e fica guardado para consulta.' },
+      { t: '📉 Média de despesas mensais', d: 'a projeção de economia passa a usar a média real das suas despesas, ignorando as categorias que você marcar como fora do dia a dia.' },
+      { t: '💵 Dividendos de FIIs corrigidos', d: 'a B3 lista, junto do rendimento, séries que não são a sua cota (recibos de subscrição) e elas estavam sendo somadas. Agora só vale a cota: o valor por cota e o DY ficam iguais ao investidor10.' },
+      { t: '📑 Relatórios de mais FIIs', d: 'o sistema passa a guardar o nome de pregão do fundo na B3 e casa o ativo com o relatório e a assembleia pelo nome exato, em vez de adivinhar pelo texto (XPML11, XPLG11, GARE11 e outros não apareciam).' },
+      { t: '🔁 Transferir posição, mais seguro', d: 'o destino precisa ser do mesmo tipo do ativo de origem e ter posição ativa na conta escolhida, e a conta de destino é do mesmo tipo da origem. Se o ativo ainda não existe, dá para cadastrá-lo na própria tela.' },
+    ],
+  },
+  {
     versao: '7.9.0',
     data:   '2026-11-23',
     titulo: 'Análise em 2 etapas',
@@ -441,15 +455,15 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (8.0.0) */}
+        {/* Detalhe das novidades desta versão (8.1.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🗳️ Assembleias de FIIs', d: 'o sistema avisa quando um FII da carteira convoca assembleia, com a data, o prazo para votar, a pauta e o caminho para participar. A IA resume o que está em votação e o que muda para você.' },
-            { t: '📧 E-mail de entrada', d: 'encaminhe para o seu endereço do sistema os e-mails de proventos e comunicados das corretoras e gestoras: o conteúdo é lido, resumido pela IA e fica guardado para consulta.' },
-            { t: '📉 Média de despesas mensais', d: 'a projeção de economia passa a usar a média real das suas despesas, ignorando as categorias que você marcar como fora do dia a dia.' },
-            { t: '💵 Dividendos de FIIs corrigidos', d: 'a B3 lista, junto do rendimento, séries que não são a sua cota (recibos de subscrição) e elas estavam sendo somadas. Agora só vale a cota: o valor por cota e o DY ficam iguais ao investidor10.' },
-            { t: '📑 Relatórios de mais FIIs', d: 'o sistema passa a guardar o nome de pregão do fundo na B3 e casa o ativo com o relatório e a assembleia pelo nome exato, em vez de adivinhar pelo texto (XPML11, XPLG11, GARE11 e outros não apareciam).' },
-            { t: '🔁 Transferir posição, mais seguro', d: 'o destino precisa ser do mesmo tipo do ativo de origem e ter posição ativa na conta escolhida, e a conta de destino é do mesmo tipo da origem. Se o ativo ainda não existe, dá para cadastrá-lo na própria tela.' },
+            { t: '🔎 Localizar ativo', d: 'o painel de Investimentos ganhou um campo de busca: digite o ticker ou o nome e abra o ativo direto.' },
+            { t: '🗂️ Análise de Relatórios mais organizada', d: 'os filtros (tipo, ativo, mês e “somente novas”) ficam acima das abas e valem para Relatórios, Assembleias e E-mails; “somente novas” já vem marcado. A aba Relatórios separa as análises da configuração (análise automática e “Analisar agora”).' },
+            { t: '🔔 E-mails no aviso de login', d: 'o aviso ao entrar agora também mostra os e-mails novos e os que aguardam a sua aprovação, com atalho para a caixa de entrada.' },
+            { t: '🏷️ Esporádica vale para despesa e receita', d: 'marcar a categoria pai marca todas as subcategorias (e desmarcar também), e marcar ou desmarcar uma subcategoria atualiza o pai. As médias da Reserva e da Projeção de economia agora também deixam de fora receitas e proventos dessas categorias (13º, bônus…).' },
+            { t: '💰 Reserva ao lado do saldo', d: 'no Dashboard, o quadro Saldo acumulado mostra a Reserva ao lado do saldo quando há espaço, e embaixo em telas pequenas.' },
+            { t: '🧠 Avaliações de ativos', d: 'o resumo da rodada passa a contar só o que ainda pode ser avaliado (ativos com saldo), então fecha em “carteira completa” e o botão Continuar reflete o que realmente falta.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}

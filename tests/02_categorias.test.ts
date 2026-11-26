@@ -2,7 +2,7 @@
 // Arquiteto de Valor — Testes automatizados
 // tests/categorias.test.ts
 //
-// Cobre critérios de aceite: CA-CAT01 a CA-CAT13
+// Cobre critérios de aceite: CA-CAT01 a CA-CAT16
 // ============================================================
 import { api, limparCategoria } from "./setup";
 
@@ -187,5 +187,35 @@ beforeAll(async () => {
     }
     const { status } = await api(`/categorias/${protegida.id}`, "DELETE");
     expect(status).toBeGreaterThanOrEqual(400);
+  });
+
+  // ── CA-CAT16 ─────────────────────────────────────────────
+  test("CA-CAT16 — 'Despesa esporádica' é espelhada entre pai e filhas (pai→filhas, filha→pai, herança)", async () => {
+    const get = async (id: string) => {
+      const { data } = await api("/categorias") as { data: { dados: Record<string, unknown>[] } };
+      return data.dados.find((c) => c.id === id)!.despesa_esporadica as boolean;
+    };
+    // marcar o pai marca a filha
+    await api(`/categorias/${catPaiId}`, "PUT", { despesa_esporadica: true });
+    expect(await get(catFilhaId)).toBe(true);
+    // nova filha herda a marca do pai
+    const { data: nova } = await api("/categorias", "POST", { descricao: `tFil2${TS}`, id_pai: catPaiId, cor: "#654321" }) as { data: Record<string, unknown> };
+    const novaId = nova.id as string;
+    try {
+      expect(await get(novaId)).toBe(true);
+      // desmarcar uma filha desmarca o pai (e não mexe na irmã)
+      await api(`/categorias/${novaId}`, "PUT", { despesa_esporadica: false });
+      expect(await get(catPaiId)).toBe(false);
+      expect(await get(catFilhaId)).toBe(true);
+      // marcar a única filha desmarcada leva o pai junto
+      await api(`/categorias/${novaId}`, "PUT", { despesa_esporadica: true });
+      expect(await get(catPaiId)).toBe(true);
+      // desmarcar o pai desmarca todas as filhas
+      await api(`/categorias/${catPaiId}`, "PUT", { despesa_esporadica: false });
+      expect(await get(catFilhaId)).toBe(false);
+      expect(await get(novaId)).toBe(false);
+    } finally {
+      await limparCategoria(novaId);
+    }
   });
 });

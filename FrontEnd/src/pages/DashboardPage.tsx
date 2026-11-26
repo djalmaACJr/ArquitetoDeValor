@@ -197,18 +197,23 @@ const CardSaldo = memo(function CardSaldo({ contas, oculto, mes, historico, modo
           </span>
         )}
       </div>
-      <p className="relative text-[32px] font-bold text-av-green leading-none">
+      {/* Saldo e Reserva lado a lado quando há espaço; o flex-wrap leva a Reserva
+          para baixo do saldo em telas/cartões estreitos. */}
+      <div className="relative flex flex-wrap items-start gap-x-6 gap-y-3">
+      <div className="flex-1 min-w-[230px]">
+      <p className="text-[32px] font-bold text-av-green leading-none">
         {oculto ? OCULTO : formatBRL(saldoExibido)}
       </p>
-      <p className="relative text-[15px] text-white/35 mt-1.5">
+      <p className="text-[15px] text-white/35 mt-1.5">
         {oculto ? '-' : labelData}
       </p>
       <div className="relative mt-3 h-[3px] rounded-full bg-blue-400/15">
         <div className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-av-green to-av-amber"
           style={{ width: oculto ? '0%' : `${progressoMes}%` }}/>
       </div>
+      </div>
       {reserva && (
-        <div className="relative mt-3 pt-3 border-t border-white/10">
+        <div className="flex-[1.4] min-w-[280px] rounded-lg bg-white/[0.04] p-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="min-w-0">
               <p className="text-[15px] text-white/50">Reserva</p>
@@ -229,6 +234,7 @@ const CardSaldo = memo(function CardSaldo({ contas, oculto, mes, historico, modo
           )}
         </div>
       )}
+      </div>
     </div>
   )
 })

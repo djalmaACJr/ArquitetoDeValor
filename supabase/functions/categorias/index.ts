@@ -128,11 +128,19 @@ async function criar(c: ReturnType<typeof db>, body: Record<string, unknown>, us
     }
   }
 
+  // Subcategoria nova herda a marca "esporádica" do pai quando o corpo não a informa.
+  let esporadica = body.despesa_esporadica === true;
+  if (body.id_pai && body.despesa_esporadica === undefined) {
+    const { data: paiEsp } = await c.from("categorias")
+      .select("despesa_esporadica").eq("id", body.id_pai).single();
+    esporadica = paiEsp?.despesa_esporadica === true;
+  }
+
   const { data, error } = await c.from("categorias").insert({
     user_id: userId, descricao: body.descricao,
     id_pai: body.id_pai ?? null, icone: body.icone ?? null,
     cor: body.cor ?? null, ativa: true,
-    despesa_esporadica: body.despesa_esporadica === true,
+    despesa_esporadica: esporadica,
   }).select().single();
 
   if (error) {
@@ -207,6 +215,28 @@ async function editar(c: ReturnType<typeof db>, id: string, body: Record<string,
       .eq("id_pai", id);
     if (eCasc) logError("Cascata inativar filhas", eCasc);
     else logSuccess("Subcategorias inativadas em cascata", { id_pai: id });
+  }
+
+  // "Despesa esporádica" é espelhada entre pai e filhas:
+  //  - marcar/desmarcar o PAI aplica o mesmo valor a todas as filhas;
+  //  - marcar/desmarcar uma FILHA leva o pai junto (pai fica marcado só se todas as filhas estiverem).
+  if (typeof body.despesa_esporadica === "boolean" && !atual.protegida) {
+    const marcada = body.despesa_esporadica;
+    if (!data.id_pai) {
+      const { error: eEsp } = await c.from("categorias")
+        .update({ despesa_esporadica: marcada }).eq("id_pai", id);
+      if (eEsp) logError("Cascata esporádica nas filhas", eEsp);
+    } else {
+      const { data: irmas, error: eIrmas } = await c.from("categorias")
+        .select("despesa_esporadica").eq("id_pai", data.id_pai);
+      if (eIrmas) logError("Ler irmãs (esporádica)", eIrmas);
+      else {
+        const todasMarcadas = (irmas ?? []).every((i) => i.despesa_esporadica === true);
+        const { error: eEspPai } = await c.from("categorias")
+          .update({ despesa_esporadica: todasMarcadas }).eq("id", data.id_pai);
+        if (eEspPai) logError("Atualizar pai (esporádica)", eEspPai);
+      }
+    }
   }
 
   logSuccess("Categoria atualizada", { id });

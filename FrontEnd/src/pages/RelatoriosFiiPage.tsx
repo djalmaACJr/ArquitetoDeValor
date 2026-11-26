@@ -16,7 +16,7 @@ import QuadroEmailEntrada from '../components/ui/QuadroEmailEntrada'
 import { useEmailEntrada } from '../hooks/useEmailEntrada'
 import { formatData } from '../lib/utils'
 import { TIPO_ATIVO_LABEL } from '../lib/constants'
-import type { RelatorioFiiDisponivel } from '../types'
+import type { RelatorioFiiDisponivel, AnaliseAssembleiaFii, EmailEntradaMensagem } from '../types'
 
 const MUTED = '#8b92a8'
 const TODOS = 'TODOS'
@@ -66,29 +66,50 @@ export default function RelatoriosFiiPage() {
   const [filtroTipo, setFiltroTipo] = useState('')
   const [filtroFii, setFiltroFii] = useState('')
   const [filtroMes, setFiltroMes] = useState('')
-  const [soNovos, setSoNovos] = useState(false)
+  const [soNovos, setSoNovos] = useState(true)
   // A lista de análises não traz o tipo: cruza com os ativos já carregados.
   const tipoDoAtivo = useMemo(() => new Map(todosAtivos.map((a) => [a.id, a.tipo_ativo as string])), [todosAtivos])
+  // Os filtros valem para as 3 abas (Relatórios, Assembleias e E-mails): as
+  // opções vêm da união dos itens das três.
+  const { assembleias } = useAssembleiasFii()
+  const { mensagens: emails } = useEmailEntrada()
   const tiposDasAnalises = useMemo(() => {
     const s = new Set<string>()
-    for (const a of analises) { const t = tipoDoAtivo.get(a.ativo_id); if (t) s.add(t) }
+    const ids = [...analises.map((a) => a.ativo_id), ...assembleias.map((a) => a.ativo_id), ...emails.map((m) => m.ativo_id)]
+    for (const id of ids) { const t = id ? tipoDoAtivo.get(id) : undefined; if (t) s.add(t) }
     return TIPOS_ANALISAVEIS.filter((t) => s.has(t))
-  }, [analises, tipoDoAtivo])
+  }, [analises, assembleias, emails, tipoDoAtivo])
   const fiisDasAnalises = useMemo(() => {
     const m = new Map<string, string>()
-    for (const a of analises) if (!filtroTipo || tipoDoAtivo.get(a.ativo_id) === filtroTipo) m.set(a.ativo_id, a.inv_ativos?.ticker ?? '—')
+    const itens: { id: string | null; ticker?: string }[] = [
+      ...analises.map((a) => ({ id: a.ativo_id, ticker: a.inv_ativos?.ticker })),
+      ...assembleias.map((a) => ({ id: a.ativo_id, ticker: a.inv_ativos?.ticker })),
+      ...emails.map((e) => ({ id: e.ativo_id, ticker: e.inv_ativos?.ticker })),
+    ]
+    for (const it of itens) if (it.id && (!filtroTipo || tipoDoAtivo.get(it.id) === filtroTipo)) m.set(it.id, it.ticker ?? '—')
     return [...m.entries()].sort((x, y) => x[1].localeCompare(y[1]))
-  }, [analises, filtroTipo, tipoDoAtivo])
+  }, [analises, assembleias, emails, filtroTipo, tipoDoAtivo])
+  const mesDe = (iso: string | null | undefined) => (iso ?? '').slice(0, 7)
   const mesesDasAnalises = useMemo(() => {
     const s = new Set<string>()
-    for (const a of analises) if (a.data_referencia) s.add(a.data_referencia.slice(0, 7))
+    for (const a of analises) if (a.data_referencia) s.add(mesDe(a.data_referencia))
+    for (const a of assembleias) if (a.data_evento) s.add(mesDe(a.data_evento))
+    for (const e of emails) if (e.recebido_em) s.add(mesDe(e.recebido_em))
     return [...s].sort().reverse()
-  }, [analises])
-  const analisesFiltradas = useMemo(() => analises.filter((a) =>
-    (!filtroTipo || tipoDoAtivo.get(a.ativo_id) === filtroTipo) &&
-    (!filtroFii || a.ativo_id === filtroFii) &&
-    (!filtroMes || (a.data_referencia ?? '').slice(0, 7) === filtroMes) &&
-    (!soNovos || !a.visto_em)), [analises, filtroTipo, tipoDoAtivo, filtroFii, filtroMes, soNovos])
+  }, [analises, assembleias, emails])
+  const passaAtivo = (ativoId: string | null) =>
+    (!filtroTipo || (!!ativoId && tipoDoAtivo.get(ativoId) === filtroTipo)) && (!filtroFii || ativoId === filtroFii)
+  const analisesFiltradas = analises.filter((a) =>
+    passaAtivo(a.ativo_id) &&
+    (!filtroMes || mesDe(a.data_referencia) === filtroMes) &&
+    (!soNovos || !a.visto_em))
+  const filtrarAssembleia = (a: AnaliseAssembleiaFii) =>
+    passaAtivo(a.ativo_id) && (!filtroMes || mesDe(a.data_evento) === filtroMes) && (!soNovos || !a.visto_em)
+  // Mensagens em quarentena (remetente desconhecido) não têm ativo e pedem uma decisão: nunca somem pelo filtro.
+  const filtrarEmail = (m: EmailEntradaMensagem) =>
+    m.status === 'QUARENTENA' || (passaAtivo(m.ativo_id) && (!filtroMes || mesDe(m.recebido_em) === filtroMes) && (!soNovos || !m.visto_em))
+  const limparFiltros = () => { setFiltroTipo(''); setFiltroFii(''); setFiltroMes(''); setSoNovos(false) }
+  const filtrosAtivos =!!(filtroTipo || filtroFii || filtroMes || soNovos)
 
   function trocarTipoRun(tipo: string) {
     setTipoRun(tipo); setAtivoId(''); setDisponiveis([]); setRelatorioId('')
@@ -166,14 +187,14 @@ export default function RelatoriosFiiPage() {
   }
 
   const naoLidas = analises.filter((a) => !a.visto_em).length
-  const { assembleias } = useAssembleiasFii()
   const assembleiasNovas = assembleias.filter((a) => !a.visto_em).length
   // Aba na URL (?aba=assembleias) para o aviso de login abrir direto na aba certa.
   const [params, setParams] = useSearchParams()
-  const { mensagens: emails } = useEmailEntrada()
   const emailsPendentes = emails.filter((m) => m.status === 'QUARENTENA').length
   type Aba = 'relatorios' | 'assembleias' | 'emails'
   const aba: Aba = params.get('aba') === 'assembleias' ? 'assembleias' : params.get('aba') === 'emails' ? 'emails' : 'relatorios'
+  // Dentro de "Relatórios": a lista de análises x a configuração (análise automática e "Analisar agora").
+  const [sub, setSub] = useState<'analises' | 'config'>('analises')
   const trocarAba = (id: Aba) => setParams(id === 'relatorios' ? {} : { aba: id }, { replace: true })
 
   return (
@@ -188,6 +209,36 @@ export default function RelatoriosFiiPage() {
         </>
       ) : (
         <>
+          {/* Filtros: valem para as 3 abas e ficam acima delas */}
+          {!(aba === 'relatorios' && sub === 'config') && (analises.length > 0 || assembleias.length > 0 || emails.length > 0) && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[160px]">
+                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Filtrar por tipo</p>
+                <SelectDark value={filtroTipo} onChange={(e) => { setFiltroTipo(e.target.value); setFiltroFii('') }}>
+                  <option value="">Todos</option>
+                  {tiposDasAnalises.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t as keyof typeof TIPO_ATIVO_LABEL] ?? t}</option>)}
+                </SelectDark>
+              </div>
+              <div className="min-w-[160px]">
+                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Filtrar por ativo</p>
+                <SelectDark value={filtroFii} onChange={(e) => setFiltroFii(e.target.value)}>
+                  <option value="">Todos</option>
+                  {fiisDasAnalises.map(([id, tk]) => <option key={id} value={id}>{tk}</option>)}
+                </SelectDark>
+              </div>
+              <div className="min-w-[160px]">
+                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Mês</p>
+                <SelectDark value={filtroMes} onChange={(e) => setFiltroMes(e.target.value)}>
+                  <option value="">Todos</option>
+                  {mesesDasAnalises.map((m) => <option key={m} value={m}>{m.slice(5)}/{m.slice(0, 4)}</option>)}
+                </SelectDark>
+              </div>
+              <label className="flex items-center gap-2 text-[13px] text-white/85 cursor-pointer pb-2">
+                <input type="checkbox" checked={soNovos} onChange={(e) => setSoNovos(e.target.checked)} /> Somente novas
+              </label>
+            </div>
+          )}
+
           <div className="flex gap-1 border-b border-white/10" role="tablist">
             {([['relatorios', 'Relatórios', naoLidas, 'nova(s)'], ['assembleias', 'Assembleias', assembleiasNovas, 'nova(s)'], ['emails', 'E-mails', emailsPendentes, 'p/ aprovar']] as const).map(([id, rotulo, n, sufixo]) => (
               <button key={id} role="tab" aria-selected={aba === id} onClick={() => trocarAba(id)}
@@ -199,9 +250,9 @@ export default function RelatoriosFiiPage() {
           </div>
 
           {aba === 'emails' ? (
-            <QuadroEmailEntrada avisar={showToast} />
+            <QuadroEmailEntrada avisar={showToast} filtro={filtrosAtivos ? filtrarEmail : undefined} onMostrarTodos={limparFiltros} />
           ) : aba === 'assembleias' ? (
-            <QuadroAssembleiasFii fiis={fiisEmCarteira.filter((a) => a.tipo_ativo === 'FII')} avisar={showToast} />
+            <QuadroAssembleiasFii fiis={fiisEmCarteira.filter((a) => a.tipo_ativo === 'FII')} avisar={showToast} filtro={filtrosAtivos ? filtrarAssembleia : undefined} onMostrarTodos={limparFiltros} />
           ) : (
           <>
           <div>
@@ -211,6 +262,16 @@ export default function RelatoriosFiiPage() {
               e aponta pontos fortes, pontos de atenção e inconsistências, comparando com o período anterior. É uma leitura de apoio — confira o PDF e não trate como recomendação de investimento.
             </p>
           </div>
+          <div className="flex gap-1 border-b border-white/10" role="tablist" aria-label="Relatórios">
+            {([['analises', 'Análises', naoLidas], ['config', 'Configuração', 0]] as const).map(([id, rotulo, n]) => (
+              <button key={id} role="tab" aria-selected={sub === id} onClick={() => setSub(id)}
+                className="px-3 py-1.5 text-[13px] font-medium -mb-px border-b-2 transition-colors"
+                style={{ color: sub === id ? '#fff' : MUTED, borderColor: sub === id ? '#3b82f6' : 'transparent' }}>
+                {rotulo}{n > 0 && <span className="ml-1.5 text-[11px] text-blue-300">{n} nova(s)</span>}
+              </button>
+            ))}
+          </div>
+          {sub === 'config' && (
           <div className="rounded-xl border border-white/10 p-4 space-y-3" style={{ background: 'rgba(255,255,255,0.02)' }}>
             <label className="flex items-start gap-3 cursor-pointer">
               <input type="checkbox" className="mt-1" checked={auto.ativo} disabled={auto.loading} onChange={alternarAuto} />
@@ -296,39 +357,13 @@ export default function RelatoriosFiiPage() {
               </div>
             )}
           </div>
+          )}
 
+          {sub === 'analises' && (
+          <>
           <div className="flex items-center justify-between">
             <h2 className="text-white text-[16px] font-semibold">Análises {naoLidas > 0 && <span className="text-[12px] font-normal text-blue-300">· {naoLidas} nova(s)</span>}</h2>
           </div>
-
-          {analises.length > 0 && (
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="min-w-[160px]">
-                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Filtrar por tipo</p>
-                <SelectDark value={filtroTipo} onChange={(e) => { setFiltroTipo(e.target.value); setFiltroFii('') }}>
-                  <option value="">Todos</option>
-                  {tiposDasAnalises.map((t) => <option key={t} value={t}>{TIPO_ATIVO_LABEL[t as keyof typeof TIPO_ATIVO_LABEL] ?? t}</option>)}
-                </SelectDark>
-              </div>
-              <div className="min-w-[160px]">
-                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Filtrar por ativo</p>
-                <SelectDark value={filtroFii} onChange={(e) => setFiltroFii(e.target.value)}>
-                  <option value="">Todos</option>
-                  {fiisDasAnalises.map(([id, tk]) => <option key={id} value={id}>{tk}</option>)}
-                </SelectDark>
-              </div>
-              <div className="min-w-[160px]">
-                <p className="text-[12px] mb-1" style={{ color: MUTED }}>Mês do relatório</p>
-                <SelectDark value={filtroMes} onChange={(e) => setFiltroMes(e.target.value)}>
-                  <option value="">Todos</option>
-                  {mesesDasAnalises.map((m) => <option key={m} value={m}>{m.slice(5)}/{m.slice(0, 4)}</option>)}
-                </SelectDark>
-              </div>
-              <label className="flex items-center gap-2 text-[13px] text-white/85 cursor-pointer pb-2">
-                <input type="checkbox" checked={soNovos} onChange={(e) => setSoNovos(e.target.checked)} /> Somente novas
-              </label>
-            </div>
-          )}
 
           {loading ? (
             <p className="text-[13px]" style={{ color: MUTED }}>Carregando…</p>
@@ -337,7 +372,10 @@ export default function RelatoriosFiiPage() {
               Nenhuma análise ainda. Escolha um ativo e clique em "Analisar agora", ou ligue a análise automática.
             </p>
           ) : analisesFiltradas.length === 0 ? (
-            <p className="text-[13px] text-center py-8" style={{ color: MUTED }}>Nenhuma análise com esses filtros.</p>
+            <div className="text-[13px] text-center py-8 space-y-2" style={{ color: MUTED }}>
+              <p>Nenhuma análise com esses filtros.</p>
+              <button onClick={limparFiltros} className="px-3 py-1.5 rounded-lg text-[13px] font-semibold text-white" style={{ background: '#3b82f6' }}>Mostrar todas ({analises.length})</button>
+            </div>
           ) : (
             <div className="space-y-3">
               {analisesFiltradas.map((a) => (
@@ -346,6 +384,8 @@ export default function RelatoriosFiiPage() {
                   onExcluir={async () => { const r = await excluir(a.id); if (!r.ok) showToast(r.erro ?? 'Erro ao excluir') }} />
               ))}
             </div>
+          )}
+          </>
           )}
           </>
           )}

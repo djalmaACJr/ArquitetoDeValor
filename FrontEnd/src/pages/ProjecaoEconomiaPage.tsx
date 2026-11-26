@@ -110,8 +110,9 @@ export default function ProjecaoEconomiaPage() {
   const { mascote } = useMascotePreferido()
   const { categorias: todasCategorias } = useCategorias()
 
-  // Categorias marcadas como despesa esporádica (a marca da categoria pai vale
-  // para as filhas): ficam fora das médias de despesa/economia desta projeção.
+  // Categorias marcadas como esporádicas (a marca da categoria pai vale para as
+  // filhas): seus lançamentos, de despesa ou de receita, ficam fora das médias
+  // de receita/despesa/economia desta projeção.
   const esporadicas = useMemo(() => {
     const pais = new Set(todasCategorias.filter(c => !c.id_pai && c.despesa_esporadica).map(c => c.id))
     return new Set(
@@ -156,7 +157,8 @@ export default function ProjecaoEconomiaPage() {
     const byMes = new Map<string, DadosMes>()
     for (const l of lancamentos) {
       if (isTransf(l)) continue
-      if (l.tipo !== 'RECEITA' && l.categoria_id && esporadicas.has(l.categoria_id)) continue
+      // esporádica vale para despesa E receita (13º, bônus, venda de bem...)
+      if (l.categoria_id && esporadicas.has(l.categoria_id)) continue
       const m = l.data.substring(0, 7)
       if (!byMes.has(m)) byMes.set(m, { mes: m, receitas: 0, despesas: 0, economia: 0, porCategoria: {} })
       const d = byMes.get(m)!

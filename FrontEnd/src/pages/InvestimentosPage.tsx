@@ -24,6 +24,7 @@ import LoadingMascote from '../components/ui/LoadingMascote'
 import { SelectDark, Toast } from '../components/ui/shared'
 import QuadroTipoAtivos from '../components/ui/QuadroTipoAtivos'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
+import BuscaAtivo from '../components/ui/BuscaAtivo'
 import TutorialTour from '../components/ui/TutorialTour'
 import { TUTORIAL_INVESTIMENTOS } from '../lib/tutoriaisPaginas'
 import { linhaDeRanking, type AtivoLinha } from '../lib/ativosLinha'
@@ -871,7 +872,8 @@ export default function InvestimentosPage() {
             Visão consolidada da carteira por tipo de ativo
           </p>
         </div>
-        <div className="flex items-center gap-2" data-tutorial="investimentos-header">
+        <div className="flex items-center gap-2 flex-wrap" data-tutorial="investimentos-header">
+          <BuscaAtivo ativos={ativosRanking} />
           <SelectDark
             value={contaId}
             onChange={(e) => setContaId(e.target.value)}
