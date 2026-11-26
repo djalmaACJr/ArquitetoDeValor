@@ -756,6 +756,12 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     const inexistente = "00000000-0000-0000-0000-000000000000";
     expect((await api(`/investimentos/email-entrada/mensagens/${inexistente}`, "PUT", { acao: "aprovar" })).status).toBe(404);
     expect((await api(`/investimentos/email-entrada/mensagens/${inexistente}`, "PUT", { acao: "xyz" })).status).toBe(400);
+    // v8.2.0: texto completo (opt-in) — mensagem de outro usuário/inexistente nunca devolve corpo; a listagem não traz o texto.
+    expect((await api(`/investimentos/email-entrada/mensagens/${inexistente}/corpo`)).status).toBe(404);
+    for (const m of lista.data.dados.mensagens) {
+      expect(m).not.toHaveProperty("corpo");
+      expect(typeof m.tem_corpo).toBe("boolean");
+    }
   }, 60000);
 
   // O pré-agendamento do RESGATE no vencimento foi REMOVIDO do backend

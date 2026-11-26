@@ -167,11 +167,21 @@ export default function DetalheInvestimentoPage() {
   const [simulando, setSimulando] = useState(false)
   // Preenche "Nova movimentação" com os números da simulação quando o usuário
   // decide transformá-la numa compra de verdade (ver DrawerSimularCompra).
-  const [prefilCompra, setPrefilCompra] = useState<{ quantidade: string; preco_unitario: string } | null>(null)
+  const [prefilCompra, setPrefilCompra] = useState<{ quantidade: string; preco_unitario: string; saida?: boolean } | null>(null)
   const [provisionando, setProvisionando] = useState(false)
   // Simulação "comprando/vendendo N cotas" dentro do quadro de DY/YoC —
   // sempre ao preço ATUAL (não um preço hipotético digitado à parte).
   const [qtdSimulada, setQtdSimulada] = useState(0)
+  // Transforma a compra simulada no quadro em movimentação real (mesmo
+  // caminho do botão "Registrar esta compra" do DrawerSimularCompra).
+  const registrarCompraSimulada = (quantidade: number, precoUnitario: number) => {
+    const saida = direcaoSimulada === 'venda'
+    setPrefilCompra({
+      quantidade: String(saida ? Math.min(quantidade, qtdAtual) : quantidade),
+      preco_unitario: String(precoUnitario), ...(saida ? { saida: true } : {}),
+    })
+    setGerenciar(true)
+  }
   const [direcaoSimulada, setDirecaoSimulada] = useState<'compra' | 'venda'>('compra')
   const [salvandoCategoria, setSalvandoCategoria] = useState(false)
 
@@ -1541,6 +1551,13 @@ export default function DetalheInvestimentoPage() {
                     } : undefined} />
                 </div>
               )}
+              {qtdSimulada > 0 && (
+                <button onClick={() => registrarCompraSimulada(qtdSimulada, magicNumberFII.precoCota)}
+                  className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-semibold text-white"
+                  style={{ background: direcaoSimulada === 'venda' ? '#ef4444' : '#3b82f6' }}>
+                  <Plus size={14} /> {direcaoSimulada === 'venda' ? 'Registrar esta venda' : 'Registrar esta compra'}
+                </button>
+              )}
             </div>
           </section>
           </Quadro>
@@ -1620,6 +1637,13 @@ export default function DetalheInvestimentoPage() {
                       } : undefined} />
                   )}
                 </div>
+              )}
+              {qtdSimulada > 0 && (
+                <button onClick={() => registrarCompraSimulada(qtdSimulada, precoAtualEstimado)}
+                  className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-semibold text-white"
+                  style={{ background: direcaoSimulada === 'venda' ? '#ef4444' : '#3b82f6' }}>
+                  <Plus size={14} /> {direcaoSimulada === 'venda' ? 'Registrar esta venda' : 'Registrar esta compra'}
+                </button>
               )}
             </div>
           </section>

@@ -19,10 +19,27 @@ interface VersaoAnterior {
   itens:  { t: string; d: string }[]
 }
 
+// Quantas versões anteriores aparecem direto; o resto fica em "Versões mais antigas".
+const VERSOES_RECENTES = 5
+
 // AAAA-MM-DD → DD/MM/AAAA (sem passar por Date: evita virar o dia por fuso)
 const fmtDataVersao = (iso: string) => iso.split('-').reverse().join('/')
 
 const VERSOES_ANTERIORES: VersaoAnterior[] = [
+  {
+    versao: '8.1.0',
+    data:   '2026-11-26',
+    titulo: 'Busca de ativos e Análise de Relatórios reorganizada',
+    icone:  <FileText size={16} />,
+    itens: [
+      { t: '🔎 Localizar ativo', d: 'o painel de Investimentos ganhou um campo de busca: digite o ticker ou o nome e abra o ativo direto.' },
+      { t: '🗂️ Análise de Relatórios mais organizada', d: 'os filtros (tipo, ativo, mês e “somente novas”) ficam acima das abas e valem para Relatórios, Assembleias e E-mails; “somente novas” já vem marcado. A aba Relatórios separa as análises da configuração (análise automática e “Analisar agora”).' },
+      { t: '🔔 E-mails no aviso de login', d: 'o aviso ao entrar agora também mostra os e-mails novos e os que aguardam a sua aprovação, com atalho para a caixa de entrada.' },
+      { t: '🏷️ Esporádica vale para despesa e receita', d: 'marcar a categoria pai marca todas as subcategorias (e desmarcar também), e marcar ou desmarcar uma subcategoria atualiza o pai. As médias da Reserva e da Projeção de economia agora também deixam de fora receitas e proventos dessas categorias (13º, bônus…).' },
+      { t: '💰 Reserva ao lado do saldo', d: 'no Dashboard, o quadro Saldo acumulado mostra a Reserva ao lado do saldo quando há espaço, e embaixo em telas pequenas.' },
+      { t: '🧠 Avaliações de ativos', d: 'o resumo da rodada passa a contar só o que ainda pode ser avaliado (ativos com saldo), então fecha em “carteira completa” e o botão Continuar reflete o que realmente falta.' },
+    ],
+  },
   {
     versao: '8.0.0',
     data:   '2026-11-25',
@@ -349,6 +366,39 @@ export default function SobrePage() {
   const info = getVersionInfo()
   const descNivel = info.levels[info.current.level as keyof typeof info.levels]
   const [versaoAberta, setVersaoAberta] = useState<string | null>(null)
+  const [antigasAbertas, setAntigasAbertas] = useState(false)
+
+  const renderVersao = (v: VersaoAnterior) => {
+    const aberta = versaoAberta === v.versao
+    return (
+      <div key={v.versao} className="rounded-lg border border-white/10 overflow-hidden">
+        <button
+          onClick={() => setVersaoAberta(aberta ? null : v.versao)}
+          className="w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-white/[0.03]"
+        >
+          {aberta ? <ChevronDown size={14} style={{ color: '#8b92a8' }} /> : <ChevronRight size={14} style={{ color: '#8b92a8' }} />}
+          <span className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-av-blue/10 text-av-blue border border-av-blue/20">
+            {v.icone}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="text-[13.5px] font-medium text-white/85">v{v.versao} — {v.titulo}</span>
+            <span className="block text-[12px]" style={{ color: '#8b92a8' }}>Lançada em {fmtDataVersao(v.data)}</span>
+          </span>
+        </button>
+        {aberta && (
+          <div className="px-3 pb-3 pt-1">
+            <ul className="flex flex-col gap-2">
+              {v.itens.map(x => (
+                <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
+                  <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto flex flex-col gap-5">
@@ -455,15 +505,11 @@ export default function SobrePage() {
           {info.current.description}
         </p>
 
-        {/* Detalhe das novidades desta versão (8.1.0) */}
+        {/* Detalhe das novidades desta versão (8.2.0) */}
         <ul className="flex flex-col gap-2">
           {[
-            { t: '🔎 Localizar ativo', d: 'o painel de Investimentos ganhou um campo de busca: digite o ticker ou o nome e abra o ativo direto.' },
-            { t: '🗂️ Análise de Relatórios mais organizada', d: 'os filtros (tipo, ativo, mês e “somente novas”) ficam acima das abas e valem para Relatórios, Assembleias e E-mails; “somente novas” já vem marcado. A aba Relatórios separa as análises da configuração (análise automática e “Analisar agora”).' },
-            { t: '🔔 E-mails no aviso de login', d: 'o aviso ao entrar agora também mostra os e-mails novos e os que aguardam a sua aprovação, com atalho para a caixa de entrada.' },
-            { t: '🏷️ Esporádica vale para despesa e receita', d: 'marcar a categoria pai marca todas as subcategorias (e desmarcar também), e marcar ou desmarcar uma subcategoria atualiza o pai. As médias da Reserva e da Projeção de economia agora também deixam de fora receitas e proventos dessas categorias (13º, bônus…).' },
-            { t: '💰 Reserva ao lado do saldo', d: 'no Dashboard, o quadro Saldo acumulado mostra a Reserva ao lado do saldo quando há espaço, e embaixo em telas pequenas.' },
-            { t: '🧠 Avaliações de ativos', d: 'o resumo da rodada passa a contar só o que ainda pode ser avaliado (ativos com saldo), então fecha em “carteira completa” e o botão Continuar reflete o que realmente falta.' },
+            { t: '📖 Ler o e-mail no app', d: 'na aba E-mails, o botão “Ver e-mail completo” mostra o texto da mensagem. É opcional e vem desligado: ative em Configuração e ajuda → “Guardar o texto completo dos e-mails”. Vale só para e-mails novos de remetentes permitidos; desligar apaga os textos já guardados e eles somem no prazo de retenção.' },
+            { t: '✉️ Abrir no Gmail', d: 'outra opção da configuração: o botão “Abrir no Gmail” leva direto à mensagem na sua caixa do Gmail (conta principal do navegador). Não guarda o texto no app.' },
           ].map(x => (
             <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
               <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
@@ -476,37 +522,29 @@ export default function SobrePage() {
       <section className="bg-[#1a1f2e] rounded-xl p-5 border border-white/5">
         <h2 className="text-[15px] font-semibold text-white/80 mb-3">Versões anteriores</h2>
         <div className="flex flex-col gap-2">
-          {VERSOES_ANTERIORES.map(v => {
-            const aberta = versaoAberta === v.versao
-            return (
-              <div key={v.versao} className="rounded-lg border border-white/10 overflow-hidden">
-                <button
-                  onClick={() => setVersaoAberta(aberta ? null : v.versao)}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-white/[0.03]"
-                >
-                  {aberta ? <ChevronDown size={14} style={{ color: '#8b92a8' }} /> : <ChevronRight size={14} style={{ color: '#8b92a8' }} />}
-                  <span className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-av-blue/10 text-av-blue border border-av-blue/20">
-                    {v.icone}
+          {VERSOES_ANTERIORES.slice(0, VERSOES_RECENTES).map(renderVersao)}
+
+          {VERSOES_ANTERIORES.length > VERSOES_RECENTES && (
+            <div className="rounded-lg border border-white/10 overflow-hidden">
+              <button
+                onClick={() => setAntigasAbertas(a => !a)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-white/[0.03]"
+              >
+                {antigasAbertas ? <ChevronDown size={14} style={{ color: '#8b92a8' }} /> : <ChevronRight size={14} style={{ color: '#8b92a8' }} />}
+                <span className="min-w-0 flex-1">
+                  <span className="text-[13.5px] font-medium text-white/85">Versões mais antigas</span>
+                  <span className="block text-[12px]" style={{ color: '#8b92a8' }}>
+                    {VERSOES_ANTERIORES.length - VERSOES_RECENTES} versões
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="text-[13.5px] font-medium text-white/85">v{v.versao} — {v.titulo}</span>
-                    <span className="block text-[12px]" style={{ color: '#8b92a8' }}>Lançada em {fmtDataVersao(v.data)}</span>
-                  </span>
-                </button>
-                {aberta && (
-                  <div className="px-3 pb-3 pt-1">
-                    <ul className="flex flex-col gap-2">
-                      {v.itens.map(x => (
-                        <li key={x.t} className="text-[13px] leading-snug" style={{ color: '#8b92a8' }}>
-                          <span className="text-white/85 font-medium">{x.t}</span> — {x.d}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )
-          })}
+                </span>
+              </button>
+              {antigasAbertas && (
+                <div className="px-3 pb-3 pt-1 flex flex-col gap-2">
+                  {VERSOES_ANTERIORES.slice(VERSOES_RECENTES).map(renderVersao)}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 

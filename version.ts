@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "8.1.0"
+export const APP_VERSION = "8.2.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -20,7 +20,7 @@ export const getVersionInfo = () => ({
     // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
     // em FrontEnd/src/pages/SobrePage.tsx.
     date: "2026-11-26",
-    description: "Novo: busca de ativos no painel de Investimentos, filtros e avisos de e-mail na Análise de Relatórios, categorias esporádicas espelhadas entre pai e filhas (despesa e receita) e Reserva ao lado do saldo"
+    description: "Novo: ler o texto completo dos e-mails de entrada no próprio app (opcional, desligado por padrão) e atalho para abrir a mensagem no Gmail"
   }
 })
 

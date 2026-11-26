@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Copy, Inbox, Mail, ShieldAlert, Trash2 } from 'lucide-react'
+import { Check, Copy, ExternalLink, FileText, Inbox, Mail, ShieldAlert, Trash2 } from 'lucide-react'
 import { useEmailEntrada } from '../../hooks/useEmailEntrada'
 import { SelectDark } from './shared'
 import { AjudaEncaminhamento, SugestoesRemetentes } from './AjudaEmailEntrada'
@@ -15,10 +15,37 @@ function quandoBR(iso: string): string {
   return `${d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} ${d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`
 }
 
-function Mensagem({ m, onVista, onDecidir, onExcluir }: {
-  m: EmailEntradaMensagem; onVista: () => void; onDecidir: (a: 'aprovar' | 'bloquear') => void; onExcluir: () => void
+// Busca no Gmail pelo Message-ID (só funciona se a mensagem está na caixa do Gmail do usuário).
+// Sem '@' o id é o do provedor de entrada (fallback), que o Gmail não conhece — não oferece o atalho.
+function linkGmail(messageId: string): string | null {
+  const id = (messageId ?? '').trim().replace(/^<|>$/g, '')
+  if (!id.includes('@')) return null
+  return `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(`rfc822msgid:${id}`)}`
+}
+
+function Mensagem({ m, gmail, buscarCorpo, onVista, onDecidir, onExcluir }: {
+  m: EmailEntradaMensagem; gmail: boolean
+  buscarCorpo: (id: string) => Promise<{ ok: boolean; corpo: string | null; erro?: string | null }>
+  onVista: () => void; onDecidir: (a: 'aprovar' | 'bloquear') => void; onExcluir: () => void
 }) {
   const quarentena = m.status === 'QUARENTENA'
+  const [corpo, setCorpo] = useState<string | null>(null)
+  const [aberto, setAberto] = useState(false)
+  const [carregando, setCarregando] = useState(false)
+  const [falha, setFalha] = useState('')
+  const hrefGmail = gmail ? linkGmail(m.message_id) : null
+
+  async function alternarCorpo() {
+    if (aberto) { setAberto(false); return }
+    setAberto(true)
+    if (corpo !== null) return
+    setCarregando(true); setFalha('')
+    const r = await buscarCorpo(m.id)
+    setCarregando(false)
+    if (r.ok && r.corpo) setCorpo(r.corpo)
+    else setFalha(r.erro ?? 'O texto desta mensagem não está mais disponível.')
+  }
+
   return (
     <div className="rounded-xl border p-3 space-y-1.5"
       style={{ borderColor: quarentena ? 'rgba(240,180,41,0.5)' : !m.visto_em ? 'rgba(59,130,246,0.5)' : 'rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.02)' }}
@@ -41,6 +68,30 @@ function Mensagem({ m, onVista, onDecidir, onExcluir }: {
             <p className="text-[12px]" style={{ color: '#f0b429' }}>Pode ser sobre a assembleia de {m.inv_ativos.ticker}, um FII da sua carteira. Confira o documento oficial na aba Assembleias.</p>
           )}
           <p className="text-[11px]" style={{ color: MUTED }}>Resumo por IA a partir do e-mail — é só um aviso. Confirme datas e prazos no documento oficial.</p>
+        </div>
+      )}
+      {(m.tem_corpo || hrefGmail) && !quarentena && (
+        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+          {m.tem_corpo && (
+            <button onClick={() => { void alternarCorpo() }} aria-expanded={aberto}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] hover:bg-white/10" style={{ color: '#3b82f6', border: '1px solid rgba(59,130,246,0.4)' }}>
+              <FileText size={13} /> {aberto ? 'Ocultar e-mail' : 'Ver e-mail completo'}
+            </button>
+          )}
+          {hrefGmail && (
+            <a href={hrefGmail} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] hover:bg-white/10" style={{ color: '#3b82f6', border: '1px solid rgba(59,130,246,0.4)' }}>
+              <ExternalLink size={13} /> Abrir no Gmail
+            </a>
+          )}
+        </div>
+      )}
+      {aberto && (
+        <div className="rounded-lg p-3 max-h-[420px] overflow-y-auto" style={{ background: 'rgba(255,255,255,0.04)' }}>
+          {carregando ? <p className="text-[12px]" style={{ color: MUTED }}>Carregando…</p>
+            : falha ? <p className="text-[12px]" style={{ color: '#f87171' }}>{falha}</p>
+            : <p className="text-[12px] text-white/85 whitespace-pre-wrap break-words">{corpo}</p>}
+          <p className="text-[11px] mt-2" style={{ color: MUTED }}>Texto simples extraído do e-mail (sem formatação, imagens, links ou anexos). Para o original, abra no seu provedor.</p>
         </div>
       )}
       {quarentena && (
@@ -91,7 +142,9 @@ export default function QuadroEmailEntrada({ avisar, filtro, onMostrarTodos }: {
         <h2 className="text-white text-[16px] font-semibold flex items-center gap-2"><Mail size={16} style={{ color: '#3b82f6' }} /> E-mails</h2>
         <p className="text-[12px] mt-1" style={{ color: MUTED }}>
           Encaminhe para um endereço só seu os e-mails de administradoras e da B3 (convocações, comunicados). O e-mail serve de aviso:
-          o app não guarda o texto da mensagem e confirma datas e prazos no documento oficial. Remetentes desconhecidos ficam em quarentena até você aprovar.
+          {end?.guardar_corpo
+            ? 'o app guarda o texto das mensagens de remetentes permitidos (você ligou isso na configuração) e'
+            : 'por padrão o app não guarda o texto da mensagem (dá para ligar na configuração) e'} confirma datas e prazos no documento oficial. Remetentes desconhecidos ficam em quarentena até você aprovar.
         </p>
         <p className="text-[12px] mt-1" style={{ color: MUTED }}>
           Privacidade: o e-mail passa pelo provedor de entrada (Resend), que, segundo a política dele, mantém uma cópia por cerca de 30 dias.
@@ -150,6 +203,33 @@ export default function QuadroEmailEntrada({ avisar, filtro, onMostrarTodos }: {
                 <span className="block text-[12px]" style={{ color: MUTED }}>
                   Usa a sua IA ativa (Perfil → Integração com IA) e consome tokens da sua chave: no máximo 10 resumos por dia. Remetentes em quarentena nunca vão para a IA;
                   e-mails já aprovados antes não são resumidos retroativamente.
+                </span>
+              </span>
+            </label>
+
+            <label className="flex items-start gap-2 text-[13px] text-white/90 cursor-pointer" data-tutorial="email-guardar-corpo">
+              <input type="checkbox" className="mt-1" checked={end.guardar_corpo} disabled={ocupado}
+                onChange={() => {
+                  if (end.guardar_corpo && !window.confirm('Desligar? Os textos já guardados serão apagados do app (os resumos continuam).')) return
+                  void rodar(() => q.configurar({ guardar_corpo: !end.guardar_corpo }), end.guardar_corpo ? 'Textos guardados apagados.' : 'Guardar o texto ligado.')
+                }} />
+              <span>
+                Guardar o texto completo dos e-mails (para ler aqui no app)
+                <span className="block text-[12px]" style={{ color: MUTED }}>
+                  Desligado por padrão. Só vale para e-mails novos de remetentes permitidos (nunca da quarentena), em texto simples, até 20 mil caracteres, e some junto com a mensagem no prazo de retenção abaixo.
+                  Desligar apaga os textos já guardados.
+                </span>
+              </span>
+            </label>
+
+            <label className="flex items-start gap-2 text-[13px] text-white/90 cursor-pointer" data-tutorial="email-abrir-gmail">
+              <input type="checkbox" className="mt-1" checked={end.abrir_no_gmail} disabled={ocupado}
+                onChange={() => rodar(() => q.configurar({ abrir_no_gmail: !end.abrir_no_gmail }), end.abrir_no_gmail ? 'Atalho do Gmail desligado.' : 'Atalho do Gmail ligado.')} />
+              <span>
+                Mostrar “Abrir no Gmail” nas mensagens
+                <span className="block text-[12px]" style={{ color: MUTED }}>
+                  Abre a busca do Gmail pela mensagem (conta principal do navegador). Só encontra e-mails que estão na sua caixa do Gmail; se você encaminha manualmente,
+                  ele acha a cópia em “Enviados”. Não guarda nada além do identificador da mensagem.
                 </span>
               </span>
             </label>
@@ -219,7 +299,7 @@ export default function QuadroEmailEntrada({ avisar, filtro, onMostrarTodos }: {
                 </button>
               </div>
             ) : mensagens.map((m) => (
-              <Mensagem key={m.id} m={m} onVista={() => { void q.marcarVista(m.id) }}
+              <Mensagem key={m.id} m={m} gmail={!!end?.abrir_no_gmail} buscarCorpo={q.buscarCorpo} onVista={() => { void q.marcarVista(m.id) }}
                 onDecidir={(a) => { void rodar(() => q.decidirMensagem(m.id, a), a === 'aprovar' ? 'Remetente aprovado.' : 'Remetente bloqueado.') }}
                 onExcluir={() => { void rodar(() => q.excluirMensagem(m.id), 'Mensagem excluída.') }} />
             ))}
