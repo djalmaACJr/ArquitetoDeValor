@@ -182,6 +182,7 @@ Permite:
 - Campo `protegida` (boolean) — `true` para "Transferências". Trigger `trg_proteger_categoria` permite alterar **somente `cor` e `icone`**; bloqueia DELETE e mudanças em `descricao`/`id_pai`/`ativa`.
 - Banco bloqueia exclusão se houver subcategorias ou lançamentos vinculados.
 - Inativar categoria pai cascateia: trigger `trg_cascata_inativar_subcategorias` inativa as filhas em sequência.
+- **Esporádica** (`despesa_esporadica`, vale para despesa E receita): fora das médias da Reserva (despesas e proventos) e da Projeção de economia. Espelhada pai↔filhas pela Edge Function `categorias`: marcar/desmarcar o pai aplica às filhas; marcar/desmarcar uma filha atualiza o pai (marcado só se todas as filhas estão); filha nova herda a marca do pai.
 
 ### Contas
 
@@ -277,7 +278,7 @@ Antes da migration `20260505000001`, qualquer UPDATE em `transacoes` revalidava 
 | Arquivo | Cobertura |
 |---|---|
 | `01_contas.test.ts` | CA-CONTA01..19 |
-| `02_categorias.test.ts` | CA-CAT01..13 |
+| `02_categorias.test.ts` | CA-CAT01..16 |
 | `03_transacoes.test.ts` | CA-TX01..30 |
 | `04_transferencias.test.ts` | CA-TRF01..22 |
 | `05_lembretes.test.ts` | CA-LEM01..11 |

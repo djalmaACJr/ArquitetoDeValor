@@ -85,8 +85,9 @@ function Cartao({ a, onVisto, onExcluir }: { a: AnaliseAssembleiaFii; onVisto: (
 }
 
 // Assembleias de FIIs convocadas para os fundos da carteira.
-export default function QuadroAssembleiasFii({ fiis, avisar }: { fiis: { id: string; ticker: string }[]; avisar: (m: string) => void }) {
-  const { assembleias, loading, analisar, marcarVisto, excluir } = useAssembleiasFii()
+export default function QuadroAssembleiasFii({ fiis, avisar, filtro, onMostrarTodos }: { fiis: { id: string; ticker: string }[]; avisar: (m: string) => void; filtro?: (a: AnaliseAssembleiaFii) => boolean; onMostrarTodos?: () => void }) {
+  const { assembleias: todas, loading, analisar, marcarVisto, excluir } = useAssembleiasFii()
+  const assembleias = useMemo(() => (filtro ? todas.filter(filtro) : todas), [todas, filtro])
   const [buscando, setBuscando] = useState(false)
   const novas = useMemo(() => assembleias.filter((a) => !a.visto_em).length, [assembleias])
 
@@ -124,7 +125,12 @@ export default function QuadroAssembleiasFii({ fiis, avisar }: { fiis: { id: str
       {loading ? (
         <p className="text-[13px]" style={{ color: MUTED }}>Carregando…</p>
       ) : assembleias.length === 0 ? (
-        <p className="text-[13px] text-center py-6" style={{ color: MUTED }}>Nenhuma assembleia convocada encontrada para os seus FIIs.</p>
+        <div className="text-[13px] text-center py-6 space-y-2" style={{ color: MUTED }}>
+          <p>{filtro && todas.length > 0 ? 'Nenhuma assembleia com esses filtros.' : 'Nenhuma assembleia convocada encontrada para os seus FIIs.'}</p>
+          {filtro && todas.length > 0 && onMostrarTodos && (
+            <button onClick={onMostrarTodos} className="px-3 py-1.5 rounded-lg text-[13px] font-semibold text-white" style={{ background: '#3b82f6' }}>Mostrar todas ({todas.length})</button>
+          )}
+        </div>
       ) : (
         <div className="space-y-3">
           {assembleias.map((a) => (

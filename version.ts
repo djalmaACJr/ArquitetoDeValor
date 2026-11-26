@@ -5,7 +5,7 @@
 // 2º nível (Y): Correções/Hotfixes (ex: 1.0.0, 1.1.0, 1.2.0) 
 // 3º nível (Z): Tentativas (ex: 1.1.1, 1.1.2)
 
-export const APP_VERSION = "8.0.0"
+export const APP_VERSION = "8.1.0"
 
 export const getVersionInfo = () => ({
   version: APP_VERSION,
@@ -19,8 +19,8 @@ export const getVersionInfo = () => ({
     // Data de lançamento (AAAA-MM-DD) — exibida em Sobre › Versão atual.
     // Ao subir a versão, mova a data/descrição antigas para VERSOES_ANTERIORES
     // em FrontEnd/src/pages/SobrePage.tsx.
-    date: "2026-11-25",
-    description: "Novo: avisos de assembleias de FIIs, e-mail de entrada para encaminhar proventos e comunicados, e dividendos e relatórios de FIIs mais precisos"
+    date: "2026-11-26",
+    description: "Novo: busca de ativos no painel de Investimentos, filtros e avisos de e-mail na Análise de Relatórios, categorias esporádicas espelhadas entre pai e filhas (despesa e receita) e Reserva ao lado do saldo"
   }
 })
 

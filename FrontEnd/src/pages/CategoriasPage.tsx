@@ -351,7 +351,7 @@ export default function CategoriasPage() {
   const abrirNovo      = () => { setEditando(null); setForm(FORM_CATEGORIA_VAZIO); setErro(null); setDrawerOpen(true) }
   const abrirNovaSub   = (pai: Categoria) => {
     setEditando(null)
-    setForm({ ...FORM_CATEGORIA_VAZIO, nivel: 'sub', id_pai: pai.id, icone: pai.icone ?? '🏠', cor: pai.cor ?? '#00c896' })
+    setForm({ ...FORM_CATEGORIA_VAZIO, nivel: 'sub', id_pai: pai.id, icone: pai.icone ?? '🏠', cor: pai.cor ?? '#00c896', esporadica: pai.despesa_esporadica ?? false })
     setErro(null); setDrawerOpen(true)
   }
   const abrirEditar    = (c: Categoria) => { setEditando(c); setForm(formDeCategoriaExistente(c)); setErro(null); setDrawerOpen(true) }
