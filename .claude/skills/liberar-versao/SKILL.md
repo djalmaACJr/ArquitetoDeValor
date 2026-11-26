@@ -62,7 +62,10 @@ O push dispara a CI: `backend-api-tests` (~30 min, 2 jobs), `frontend-e2e` (~10�
 
 ## 5. Backend ANTES de esperar a CI
 Os testes de API/E2E rodam contra o Supabase real; sem o backend novo no ar eles testam o código velho.
-- Migrations novas: `supabase migration list` (só as suas pendentes) → `supabase db push --include-all`. Idempotentes. Depois mover o arquivo para `supabase/migrations/Aplicados/` (commit à parte).
+- Migrations novas: `supabase migration list` (só as suas pendentes) → `supabase db push --include-all`. Idempotentes.
+  - Se o push falhar com `LegacyDbPushMissingLocalError` (o remoto tem versões que não estão na pasta local, porque as aplicadas ficam em `Aplicados/`, que a CLI não lê), use o caminho manual, por migration, em ordem de versão:
+    `supabase db query --linked -f supabase/migrations/<versao>_<nome>.sql` e depois `supabase migration repair --status applied <versao> --linked`. Confirme com `supabase migration list` que local e remoto mostram a versão.
+  - Depois mover o arquivo para `supabase/migrations/Aplicados/` (commit à parte).
 - Edge Functions alteradas (incluindo as que usam `_shared/` alterado): `supabase functions deploy <modulo> --project-ref ftpelncgrakpphytfrfo` (mapa em `deploy.bat`).
 - Só vale para mudanças **retrocompatíveis** (o web antigo ainda está no ar até a etapa 8). Se não forem, avise o usuário antes.
 - Se o deploy acontecer depois do push da etapa 4, a CI já em andamento testou o backend velho: relance (`gh run rerun <id>`) ou faça novo push — não considere aquele resultado.
