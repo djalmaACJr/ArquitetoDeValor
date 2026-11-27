@@ -39,6 +39,7 @@ import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
 import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvPesos } from '../hooks/useInvPesos'
 import QuadroRelatoriosFii from '../components/ui/QuadroRelatoriosFii'
+import QuadroAvaliacaoMentores from '../components/ui/QuadroAvaliacaoMentores'
 import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
 import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
 import { useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAtivo'
@@ -65,7 +66,7 @@ type QuadroDetalheKey =
   | 'resumo' | 'posicao_destaques' | 'caracteristicas'
   | 'grafico_evolucao' | 'grafico_cotas' | 'grafico_rent_mes' | 'grafico_rent_acum'
   | 'grafico_dividendos_mes' | 'grafico_dy_mes' | 'grafico_ultimos_dividendos'
-  | 'magic_number' | 'dy_yoc' | 'valuation_acoes' | 'protecao_poder_compra' | 'relatorios_fii' | 'operacoes'
+  | 'magic_number' | 'dy_yoc' | 'valuation_acoes' | 'protecao_poder_compra' | 'relatorios_fii' | 'conselho' | 'operacoes'
 // Gráficos vêm em meia largura por padrão (lado a lado, como antes de virarem
 // quadros independentes) — os demais em largura total, como sempre foram.
 const QUADROS_GRAFICO: QuadroDetalheKey[] = [
@@ -167,11 +168,21 @@ export default function DetalheInvestimentoPage() {
   const [simulando, setSimulando] = useState(false)
   // Preenche "Nova movimentação" com os números da simulação quando o usuário
   // decide transformá-la numa compra de verdade (ver DrawerSimularCompra).
-  const [prefilCompra, setPrefilCompra] = useState<{ quantidade: string; preco_unitario: string } | null>(null)
+  const [prefilCompra, setPrefilCompra] = useState<{ quantidade: string; preco_unitario: string; saida?: boolean } | null>(null)
   const [provisionando, setProvisionando] = useState(false)
   // Simulação "comprando/vendendo N cotas" dentro do quadro de DY/YoC —
   // sempre ao preço ATUAL (não um preço hipotético digitado à parte).
   const [qtdSimulada, setQtdSimulada] = useState(0)
+  // Transforma a compra simulada no quadro em movimentação real (mesmo
+  // caminho do botão "Registrar esta compra" do DrawerSimularCompra).
+  const registrarCompraSimulada = (quantidade: number, precoUnitario: number) => {
+    const saida = direcaoSimulada === 'venda'
+    setPrefilCompra({
+      quantidade: String(saida ? Math.min(quantidade, qtdAtual) : quantidade),
+      preco_unitario: String(precoUnitario), ...(saida ? { saida: true } : {}),
+    })
+    setGerenciar(true)
+  }
   const [direcaoSimulada, setDirecaoSimulada] = useState<'compra' | 'venda'>('compra')
   const [salvandoCategoria, setSalvandoCategoria] = useState(false)
 
@@ -639,6 +650,7 @@ export default function DetalheInvestimentoPage() {
     if (ehFIIAtivo && magicNumberFII) ks.push('protecao_poder_compra')
     // Análise gasta a chave de IA de quem pede → só em "Meus dados".
     if (['FII', 'ACOES', 'STOCKS', 'REIT'].includes(ativo.tipo_ativo) && !emEspacoAgregado) ks.push('relatorios_fii')
+    ks.push('conselho')
     ks.push('operacoes')
     return ks
   }, [ativo, emEspacoAgregado, magicNumberFII, dySimuladoPvp1, dyPorMes, precoAtualEstimado, precoTetoBazin, qtdAtual])
@@ -1541,6 +1553,13 @@ export default function DetalheInvestimentoPage() {
                     } : undefined} />
                 </div>
               )}
+              {qtdSimulada > 0 && (
+                <button onClick={() => registrarCompraSimulada(qtdSimulada, magicNumberFII.precoCota)}
+                  className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-semibold text-white"
+                  style={{ background: direcaoSimulada === 'venda' ? '#ef4444' : '#3b82f6' }}>
+                  <Plus size={14} /> {direcaoSimulada === 'venda' ? 'Registrar esta venda' : 'Registrar esta compra'}
+                </button>
+              )}
             </div>
           </section>
           </Quadro>
@@ -1621,6 +1640,13 @@ export default function DetalheInvestimentoPage() {
                   )}
                 </div>
               )}
+              {qtdSimulada > 0 && (
+                <button onClick={() => registrarCompraSimulada(qtdSimulada, precoAtualEstimado)}
+                  className="mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-semibold text-white"
+                  style={{ background: direcaoSimulada === 'venda' ? '#ef4444' : '#3b82f6' }}>
+                  <Plus size={14} /> {direcaoSimulada === 'venda' ? 'Registrar esta venda' : 'Registrar esta compra'}
+                </button>
+              )}
             </div>
           </section>
           </Quadro>
@@ -1643,6 +1669,13 @@ export default function DetalheInvestimentoPage() {
           <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
             largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
             <QuadroRelatoriosFii key={ativo.id} ativoId={ativo.id} ticker={ativo.ticker} tipo={ativo.tipo_ativo} />
+          </Quadro>
+        )
+
+        if (chave === 'conselho') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <QuadroAvaliacaoMentores key={ativo.id} ativoId={ativo.id} />
           </Quadro>
         )
 

@@ -5,7 +5,8 @@
 //   GET    /email-entrada                      endereço + remetentes + mensagens
 //   POST   /email-entrada/endereco {apelido}   cria o endereço (uma vez)
 //   POST   /email-entrada/renovar              novo código (o endereço antigo deixa de funcionar)
-//   PUT    /email-entrada/config {ativo?, retencao_dias?}
+//   PUT    /email-entrada/config {ativo?, retencao_dias?, resumo_ia?, guardar_corpo?, abrir_no_gmail?}
+//   GET    /email-entrada/mensagens/:id/corpo  texto completo (só existe com guardar_corpo ligado — v8.2.0)
 //   POST   /email-entrada/remetentes {padrao, status?}
 //   DELETE /email-entrada/remetentes/:id
 //   PUT    /email-entrada/mensagens/:id {acao: 'aprovar'|'bloquear'|'visto'}
@@ -20,7 +21,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PADRAO = /^[a-z0-9._%+-]*@[a-z0-9.-]+\.[a-z]{2,}$/;
 const RETENCAO_MIN = 7, RETENCAO_MAX = 365;
 
-interface Endereco { apelido: string; codigo: string; ativo: boolean; retencao_dias: number; resumo_ia: boolean }
+const COLS_ENDERECO = "apelido, codigo, ativo, retencao_dias, resumo_ia, guardar_corpo, abrir_no_gmail";
+interface Endereco { apelido: string; codigo: string; ativo: boolean; retencao_dias: number; resumo_ia: boolean; guardar_corpo: boolean; abrir_no_gmail: boolean }
 const comEmail = (e: Endereco) => ({ ...e, email: `${e.apelido}-${e.codigo}@${DOMINIO}` });
 
 export async function rotaEmailEntrada(c: Db, req: Request, m: string, userId: string): Promise<Response> {
@@ -31,9 +33,9 @@ export async function rotaEmailEntrada(c: Db, req: Request, m: string, userId: s
 
   if (m === "GET" && sub === "") {
     const [end, rem, msg] = await Promise.all([
-      c.from("inv_email_enderecos").select("apelido, codigo, ativo, retencao_dias, resumo_ia").eq("user_id", userId).maybeSingle(),
+      c.from("inv_email_enderecos").select(COLS_ENDERECO).eq("user_id", userId).maybeSingle(),
       c.from("inv_email_remetentes").select("id, padrao, status, origem, created_at").eq("user_id", userId).order("padrao"),
-      c.from("inv_email_mensagens").select("id, remetente, assunto, recebido_em, status, classificacao, resumo, trecho, visto_em, ativo_id, inv_ativos(ticker)")
+      c.from("inv_email_mensagens").select("id, message_id, remetente, assunto, recebido_em, status, classificacao, resumo, trecho, tem_corpo, visto_em, ativo_id, inv_ativos(ticker)")
         .eq("user_id", userId).order("recebido_em", { ascending: false }).limit(100),
     ]);
     const falha = end.error ?? rem.error ?? msg.error;
@@ -45,14 +47,14 @@ export async function rotaEmailEntrada(c: Db, req: Request, m: string, userId: s
     const body = await req.json().catch(() => ({}));
     const { error } = await c.rpc("fn_email_criar_endereco", { p_apelido: String(body.apelido ?? "") });
     if (error) return erro(error.message.includes("APELIDO_INVALIDO") ? "Use de 3 a 20 letras minúsculas e números." : error.message);
-    const { data } = await c.from("inv_email_enderecos").select("apelido, codigo, ativo, retencao_dias, resumo_ia").eq("user_id", userId).maybeSingle();
+    const { data } = await c.from("inv_email_enderecos").select(COLS_ENDERECO).eq("user_id", userId).maybeSingle();
     return json({ dados: data ? comEmail(data as Endereco) : null }, 201);
   }
 
   if (m === "POST" && sub === "renovar") {
     const { error } = await c.rpc("fn_email_renovar_codigo");
     if (error) return erro(error.message);
-    const { data } = await c.from("inv_email_enderecos").select("apelido, codigo, ativo, retencao_dias, resumo_ia").eq("user_id", userId).maybeSingle();
+    const { data } = await c.from("inv_email_enderecos").select(COLS_ENDERECO).eq("user_id", userId).maybeSingle();
     return json({ dados: data ? comEmail(data as Endereco) : null });
   }
 
@@ -61,6 +63,8 @@ export async function rotaEmailEntrada(c: Db, req: Request, m: string, userId: s
     const upd: Record<string, unknown> = {};
     if (body.ativo !== undefined) upd.ativo = body.ativo === true;
     if (body.resumo_ia !== undefined) upd.resumo_ia = body.resumo_ia === true;
+    if (body.guardar_corpo !== undefined) upd.guardar_corpo = body.guardar_corpo === true;
+    if (body.abrir_no_gmail !== undefined) upd.abrir_no_gmail = body.abrir_no_gmail === true;
     if (body.retencao_dias !== undefined) {
       const d = Number(body.retencao_dias);
       if (!Number.isInteger(d) || d < RETENCAO_MIN || d > RETENCAO_MAX) return erro(`Retenção deve ser de ${RETENCAO_MIN} a ${RETENCAO_MAX} dias.`);
@@ -68,9 +72,14 @@ export async function rotaEmailEntrada(c: Db, req: Request, m: string, userId: s
     }
     if (Object.keys(upd).length === 0) return erro("Nada para alterar");
     const { data, error } = await c.from("inv_email_enderecos").update(upd).eq("user_id", userId)
-      .select("apelido, codigo, ativo, retencao_dias, resumo_ia").maybeSingle();
+      .select(COLS_ENDERECO).maybeSingle();
     if (error) return erro(error.message);
     if (!data) return erro("Crie o endereço de e-mail primeiro", 404);
+    // Desligar "guardar o texto" apaga os corpos já guardados (a promessa de privacidade vale retroativamente).
+    if (upd.guardar_corpo === false) {
+      const { error: eLimpa } = await c.from("inv_email_mensagens").update({ corpo: null }).eq("user_id", userId).not("corpo", "is", null);
+      if (eLimpa) return erro(eLimpa.message);
+    }
     return json({ dados: comEmail(data as Endereco) });
   }
 
@@ -89,6 +98,13 @@ export async function rotaEmailEntrada(c: Db, req: Request, m: string, userId: s
     const { error } = await c.from("inv_email_remetentes").delete().eq("id", id).eq("user_id", userId);
     if (error) return erro(error.message);
     return json({ mensagem: "Remetente removido" });
+  }
+
+  if (m === "GET" && sub === "mensagens" && UUID.test(id) && partes[i + 3] === "corpo") {
+    const { data, error } = await c.from("inv_email_mensagens").select("corpo").eq("id", id).eq("user_id", userId).maybeSingle();
+    if (error) return erro(error.message);
+    if (!data) return erro("Mensagem não encontrada", 404);
+    return json({ dados: { corpo: (data as { corpo: string | null }).corpo } });
   }
 
   if (m === "PUT" && sub === "mensagens" && UUID.test(id)) {

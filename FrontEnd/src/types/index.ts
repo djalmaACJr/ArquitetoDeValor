@@ -719,7 +719,7 @@ export interface AnaliseRelatorioFii {
   created_at:      string
   inv_ativos?:          { ticker: string; nome: string } | null
   inv_relatorios_fii?:  { url_documento: string; fundo_nome: string; data_entrega: string } | null
-  inv_documentos_resultado?: { url_documento: string | null; emissor_nome: string; data_entrega: string; tipo_doc: string; fonte: 'EDGAR' | 'CVM' } | null
+  inv_documentos_resultado?: { url_documento: string | null; emissor_nome: string; data_entrega: string; tipo_doc: string; fonte: 'EDGAR' | 'CVM' | 'MANUAL' } | null
 }
 
 // Alerta de FII "em vias de mudar de forma" (liquidação, fusão, transformação,
@@ -744,16 +744,17 @@ export interface RelatorioFiiDisponivel {
   data_entrega:    string
   url_documento:   string | null
   tipo_doc?:       string            // 10-Q | 10-K | ITR | DFP (ações/stocks)
-  fonte?:          'EDGAR' | 'CVM'
+  fonte?:          'EDGAR' | 'CVM' | 'MANUAL'
   analisado:       boolean
 }
 
 // Assembleias de FIIs (Fundos.NET, categoria Assembleia) — GET /investimentos/assembleias-fii (v8.0.0).
 // E-mail de entrada (v8.0.0, fase 2)
-export interface EmailEntradaEndereco { apelido: string; codigo: string; ativo: boolean; retencao_dias: number; resumo_ia: boolean; email: string }
+export interface EmailEntradaEndereco { apelido: string; codigo: string; ativo: boolean; retencao_dias: number; resumo_ia: boolean; guardar_corpo: boolean; abrir_no_gmail: boolean; email: string }
 export interface EmailEntradaRemetente { id: string; padrao: string; status: 'PERMITIDO' | 'BLOQUEADO'; origem: 'PADRAO' | 'USUARIO' | 'APROVADO'; created_at: string }
 export interface EmailEntradaMensagem {
-  id: string; remetente: string; assunto: string; recebido_em: string
+  id: string; message_id: string; remetente: string; assunto: string; recebido_em: string
+  tem_corpo: boolean
   status: 'PENDENTE' | 'PROCESSADO' | 'QUARENTENA' | 'IGNORADO' | 'ERRO'
   classificacao: 'ASSEMBLEIA' | 'RENDIMENTO' | 'FATO_RELEVANTE' | 'OUTRO' | null
   resumo: string | null; trecho: string | null; visto_em: string | null

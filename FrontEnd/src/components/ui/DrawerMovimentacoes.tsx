@@ -26,7 +26,8 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
   // Pré-preenche quantidade/preço unitário do formulário de entrada — usado
   // pelo "Simular compra" (DetalheInvestimentoPage) para virar a simulação
   // numa movimentação real sem o usuário ter que redigitar os números.
-  valoresIniciais?: { quantidade: string; preco_unitario: string }
+  // `saida` abre o formulário como venda/resgate (simulação de venda).
+  valoresIniciais?: { quantidade: string; preco_unitario: string; saida?: boolean }
   // Abre o drawer já editando esta operação (botão de editar do quadro
   // "Operações recentes" da página do ativo).
   editarOperacaoId?: string
@@ -43,7 +44,7 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
   // Tesouro Direto fica de fora: tem título com PU marcado a mercado de verdade.
   const rfSemQtde = ativo.tipo_ativo === 'RENDA_FIXA'
   const vazio = () => ({
-    conta_id: '', tipo_operacao: tipoEntradaPara(ativo.tipo_ativo),
+    conta_id: '', tipo_operacao: valoresIniciais?.saida ? tipoSaidaPara(ativo.tipo_ativo) : tipoEntradaPara(ativo.tipo_ativo),
     quantidade: valoresIniciais?.quantidade ?? '', preco_unitario: valoresIniciais?.preco_unitario ?? '', data_operacao: hoje(),
   })
   const [form, setForm] = useState(vazio)
@@ -198,6 +199,9 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
       if (bf.ok && (bf.dados?.meses_gravados ?? 0) > 0) onToast(`Histórico reconstruído: ${bf.dados!.meses_gravados} mês(es).`)
     })
     if (!eraEdicao && onRegistrarNova) setPerguntarNova(true)
+    // Nova movimentação registrada com sucesso: fecha a tela (no atalho "Nova
+    // movimentação" quem decide é a pergunta pós-registro).
+    else if (!eraEdicao) onClose()
   }
 
   // "Nova movimentação para este ativo": volta ao formulário já preenchido com
@@ -256,7 +260,7 @@ export default function DrawerMovimentacoes({ ativo, onClose, onToast, onRegistr
     <Drawer open onClose={onClose} titulo={`Movimentações · ${ativo.ticker}`} subtitulo={ativo.nome}>
       {valoresIniciais && !editId && (
         <p className="text-[12px] rounded-lg border border-blue-400/30 bg-blue-400/[0.06] px-3 py-2" style={{ color: '#93c5fd' }}>
-          Quantidade e preço vieram da simulação de compra — confira a conta e a data antes de registrar.
+          Quantidade e preço vieram da simulação de {valoresIniciais.saida ? 'venda' : 'compra'} — confira a conta e a data antes de registrar.
         </p>
       )}
       {/* Saldo atual (derivado das operações) */}

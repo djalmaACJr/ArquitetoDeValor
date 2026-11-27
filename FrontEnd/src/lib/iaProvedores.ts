@@ -245,3 +245,9 @@ export function rotuloModelo(p: IAProvedor | null, modeloId: string | null | und
   if (!modeloId) return p?.modelo ?? ''
   return p?.modelos.find(m => m.id === modeloId)?.label ?? modeloId
 }
+
+// Rótulo de um mentor/config de IA: apelido dado pelo usuário, senão o nome do provedor.
+export function rotuloMentor(nome: string | null, provedor: string): string {
+  if (nome && nome.trim()) return nome.trim()
+  return provedorPorId(provedor)?.label ?? provedor
+}

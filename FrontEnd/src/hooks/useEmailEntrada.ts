@@ -37,7 +37,12 @@ export function useEmailEntrada() {
     ...data, loading,
     criarEndereco:    (apelido: string) => chamar('/endereco', 'POST', { apelido }),
     renovarCodigo:    () => chamar('/renovar', 'POST'),
-    configurar:       (cfg: { ativo?: boolean; retencao_dias?: number; resumo_ia?: boolean }) => chamar('/config', 'PUT', cfg),
+    configurar:       (cfg: { ativo?: boolean; retencao_dias?: number; resumo_ia?: boolean; guardar_corpo?: boolean; abrir_no_gmail?: boolean }) => chamar('/config', 'PUT', cfg),
+    // Texto completo de uma mensagem (só existe com "guardar o texto" ligado). Não entra no cache da lista.
+    buscarCorpo: async (id: string): Promise<{ ok: boolean; corpo: string | null; erro?: string | null }> => {
+      const res = await apiFetch<{ corpo: string | null }>(`${BASE}/mensagens/${id}/corpo`)
+      return { ok: res.ok, corpo: res.dados?.corpo ?? null, erro: res.erro }
+    },
     adicionarRemetente: (padrao: string, status: 'PERMITIDO' | 'BLOQUEADO' = 'PERMITIDO') => chamar('/remetentes', 'POST', { padrao, status }),
     removerRemetente: (id: string) => chamar(`/remetentes/${id}`, 'DELETE'),
     decidirMensagem:  (id: string, acao: 'aprovar' | 'bloquear') => chamar(`/mensagens/${id}`, 'PUT', { acao }),

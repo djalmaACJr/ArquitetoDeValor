@@ -7,7 +7,8 @@
 //  • usuário resolvido pelo código secreto do destinatário (`apelido-codigo@entrada.…`);
 //  • remetente fora da lista → QUARENTENA; remetente permitido SEM autenticação DKIM/DMARC válida
 //    também vai para QUARENTENA (o campo From é falsificável);
-//  • o corpo não é guardado (só assunto/classificação; trecho curto apenas em quarentena);
+//  • o corpo NÃO é guardado por padrão (só assunto/classificação; trecho curto apenas em quarentena).
+//    Opt-in `guardar_corpo` (v8.2.0): guarda o texto higienizado só de remetentes PERMITIDOS, nunca em quarentena;
 //  • service_role aqui é legítimo: não é rota de usuário, é webhook de sistema.
 // ============================================================
 import "@supabase/functions-js/edge-runtime.d.ts";
@@ -65,13 +66,13 @@ Deno.serve(async (req) => {
   const db = dbAdmin();
 
   // Destinatário → usuário. Respostas sempre 200 para não revelar se um código existe.
-  let dono: { user_id: string; resumo_ia: boolean } | null = null;
+  let dono: { user_id: string; resumo_ia: boolean; guardar_corpo: boolean } | null = null;
   for (const para of [...(d.to ?? []), ...(d.received_for ?? [])]) {
     const dest = parsearDestinatario(para, DOMINIO);
     if (!dest) continue;
-    const { data } = await db.from("inv_email_enderecos").select("user_id, resumo_ia")
+    const { data } = await db.from("inv_email_enderecos").select("user_id, resumo_ia, guardar_corpo")
       .eq("apelido", dest.apelido).eq("codigo", dest.codigo).eq("ativo", true).maybeSingle();
-    if (data) { dono = data as { user_id: string; resumo_ia: boolean }; break; }
+    if (data) { dono = data as { user_id: string; resumo_ia: boolean; guardar_corpo: boolean }; break; }
   }
   if (!dono) return resp(200, { ignorado: true });
 
@@ -103,6 +104,8 @@ Deno.serve(async (req) => {
     status: quarentena ? "QUARENTENA" : "PROCESSADO",
     classificacao: classificarMensagem(assunto, texto),
     trecho: quarentena ? texto.slice(0, 600) : null,
+    // Texto completo só se o usuário optou (guardar_corpo) e o remetente é permitido — nunca em quarentena.
+    corpo: !quarentena && dono.guardar_corpo && texto ? texto : null,
   }, { onConflict: "user_id,message_id", ignoreDuplicates: true }).select("id");
 
   // Resumo por IA: só remetente PERMITIDO, só se a linha é nova (reenvio do webhook não gasta IA de novo),

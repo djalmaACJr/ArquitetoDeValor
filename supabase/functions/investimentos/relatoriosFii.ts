@@ -23,10 +23,12 @@ import { chamarProvedorIA, lerConfigIAAtiva, ErroIA, type ConfigIAAtiva } from "
 import { extractText, getDocumentProxy } from "npm:unpdf@1.3.0";
 import { Db, hojeISO, recuarDias } from "./shared.ts";
 import { buscarPregaoFundoB3, emissorB3 } from "./dividendos.ts";
+import { periodoEsperado } from "./coberturaRelatorios.ts";
+import { detectarCompetencia, identificarAtivo, validarAtivo } from "./identificarRelatorio.ts";
 import { carregarContextoPessoal, gerarAnalisePessoal, personalizarAnaliseSalva } from "./analisePessoal.ts";
 import { processarAssembleiasCron } from "./assembleiasFii.ts";
 import {
-  TIPOS_COM_RESULTADO, analisarESalvarDocumento, documentosDoAtivo, listarDisponiveis,
+  TIPOS_COM_RESULTADO, analisarESalvarDocumento, documentosDoAtivo, listarDisponiveis, refDoAtivo,
   processarResultadosCron, sincronizarDocumentosAtivo,
 } from "./resultadosEmpresas.ts";
 import {
@@ -410,6 +412,9 @@ export async function rotaRelatoriosFiiCron(req: Request, m: string): Promise<Re
 //   GET  /relatorios-fii/disponiveis?ativo_id= relatórios do fundo (analisados ou não)
 //   POST /relatorios-fii/analisar {ativo_id, relatorio_id?, config_id?}
 //   POST /relatorios-fii/analise-pessoal {analise_id, config_id?}   etapa 2: personaliza a análise (perfil, posição, peso, tempo de carteira)
+//   POST /relatorios-fii/manual {pdf_base64, ativo_id?, data_referencia?}   sobe um relatório (PDF) à mão; fica privado do usuário.
+//        ativo_id → confere que o PDF é daquele ativo; sem ele → identifica o ativo pelo texto. Sem data_referencia → detecta no PDF.
+//   DELETE /relatorios-fii/manual?id=MANUAL:...   remove um relatório enviado à mão (e suas análises)
 //   PUT  /relatorios-fii/:id {visto:boolean}
 //   DELETE /relatorios-fii/:id
 // ============================================================
@@ -453,6 +458,172 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
     return json({ dados: r });
   }
 
+  // Relatório enviado à mão (PDF em base64): o texto é extraído aqui e gravado como
+  // documento PRIVADO do usuário (fonte 'MANUAL'); a análise é um passo à parte (/analisar).
+  if (m === "POST" && sub === "manual") {
+    const body = await req.json().catch(() => ({}));
+    const b64 = String(body.pdf_base64 ?? "").replace(/^data:[^,]*,/, "");
+    if (!b64) return erro("Selecione o arquivo PDF do relatório");
+    if (b64.length > MAX_PDF_BYTES * 1.4) return erro("PDF grande demais (máx. 15 MB)", 413);
+
+    // Ativos do usuário que têm relatório periódico — base para conferir/identificar o dono do PDF.
+    const { data: lista } = await c.from("inv_ativos").select("id, ticker, nome, tipo_ativo")
+      .eq("user_id", userId).in("tipo_ativo", ["FII", ...TIPOS_COM_RESULTADO]).limit(1000);
+    const ativos = (lista ?? []).map((a) => ({ id: String(a.id), ticker: String(a.ticker), nome: a.nome as string | null, tipo_ativo: String(a.tipo_ativo) }));
+
+    let texto: string;
+    let textoCompleto: string;
+    try {
+      const bin = atob(b64);
+      const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      if (buf.byteLength > MAX_PDF_BYTES) return erro("PDF grande demais (máx. 15 MB)", 413);
+      if (String.fromCharCode(...buf.slice(0, 4)) !== "%PDF") return erro("O arquivo não é um PDF válido");
+      const pdf = await getDocumentProxy(buf);
+      const { text } = await extractText(pdf, { mergePages: true });
+      textoCompleto = String(text ?? "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+      if (textoCompleto.length < 500) return erro("Não consegui ler texto neste PDF (parece ser imagem escaneada).", 422);
+      texto = textoCompleto.slice(0, MAX_TEXTO);
+    } catch (e) {
+      logError("Relatório manual (PDF)", e);
+      return erro("Não foi possível ler este PDF.", 422);
+    }
+
+    // De quem é o PDF? Com ativo_id, confere que é dele; sem, descobre pelo texto.
+    let ativo: typeof ativos[number] | undefined;
+    if (body.ativo_id) {
+      ativo = ativos.find((a) => a.id === String(body.ativo_id));
+      if (!ativo) return erro("Ativo não encontrado ou sem relatório periódico para analisar", 404);
+      const v = validarAtivo(textoCompleto, ativo, ativos);
+      if (!v.ok) {
+        return erro(v.motivo === "outro"
+          ? `Este PDF parece ser de ${v.outro.ticker}, não de ${ativo.ticker}. Confira o arquivo.`
+          : `Não encontrei ${ativo.ticker} (nem o nome do ativo) neste PDF. Confira se é o arquivo certo.`, 422);
+      }
+    } else {
+      const r = identificarAtivo(textoCompleto, ativos);
+      if (r.tipo === "nenhum") return erro("Não identifiquei nenhum ativo seu neste PDF. Selecione o ativo e tente de novo.", 422);
+      if (r.tipo === "ambiguo") return erro(`O PDF cita mais de um ativo seu (${r.candidatos.map((a) => a.ticker).join(", ")}). Selecione o ativo e tente de novo.`, 409);
+      ativo = ativos.find((a) => a.id === r.ativo.id)!;
+    }
+    const tipo = ativo.tipo_ativo;
+
+    // Competência: a informada tem prioridade; senão, a detectada no início do PDF.
+    const comp = String(body.data_referencia ?? "").match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
+    let dataRef: string | null = null;
+    if (comp) {
+      if (Number(comp[2]) < 1 || Number(comp[2]) > 12) return erro("Competência inválida");
+      dataRef = `${comp[1]}-${comp[2]}-01`;
+    } else {
+      dataRef = detectarCompetencia(textoCompleto);
+      if (!dataRef) return erro("Não consegui descobrir o mês do relatório pelo PDF. Informe a competência.", 422);
+    }
+
+    // Duplicidade: hash do TEXTO normalizado (imune a metadados/recompressão do PDF).
+    // Só barra reenvio do PRÓPRIO usuário — checar contra outros usuários revelaria o que
+    // eles enviam (os arquivos são privados) e bloquearia quem tem direito à própria análise.
+    const normalizado = textoCompleto.toLowerCase().replace(/\s+/g, "");
+    const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(normalizado));
+    const hash = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const { data: jaEnviado } = await dbAdmin().from("inv_documentos_resultado").select("id, data_referencia")
+      .eq("user_id", userId).eq("hash_conteudo", hash).maybeSingle();
+    if (jaEnviado) {
+      return erro(`Este relatório já foi enviado por você${jaEnviado.data_referencia ? ` (competência ${String(jaEnviado.data_referencia).slice(0, 7)})` : ""}. Use "Analisar" na lista.`, 409);
+    }
+
+    const id = `MANUAL:${crypto.randomUUID()}`;
+    const ref = (tipo === "FII" ? ativo.ticker.trim().toUpperCase() : refDoAtivo({ ticker: ativo.ticker, tipo_ativo: tipo }));
+    const { data, error } = await dbAdmin().from("inv_documentos_resultado").insert({
+      id, fonte: "MANUAL", user_id: userId, ticker_ref: ref, emissor_chave: "MANUAL",
+      emissor_nome: ativo.nome || ativo.ticker, tipo_doc: "Relatório (enviado por você)",
+      data_referencia: dataRef, data_entrega: new Date().toISOString(), url_documento: null, texto, texto_status: "OK", hash_conteudo: hash,
+    }).select("id, emissor_nome, data_referencia, data_entrega, tipo_doc, fonte").single();
+    if (error) {
+      if (error.code === "23505") return erro('Este relatório já foi enviado por você. Use "Analisar" na lista.', 409);   // envio duplo simultâneo
+      logError("Salvar relatório manual", error); return erro(error.message, 500);
+    }
+    return json({ dados: { ...data, fundo_nome: data.emissor_nome, url_documento: null, analisado: false, ativo_id: ativo.id, ticker: ativo.ticker } }, 201);
+  }
+
+  if (m === "DELETE" && sub === "manual") {
+    const id = url.searchParams.get("id") ?? "";
+    if (!id.startsWith("MANUAL:")) return erro("id inválido");
+    // Análises do próprio usuário que apontam para este documento (documento_id é TEXT, sem FK/cascade).
+    const { error: eAn } = await c.from("inv_analises_relatorio").delete().eq("user_id", userId).eq("documento_id", id);
+    if (eAn) return erro(eAn.message);
+    const { error } = await dbAdmin().from("inv_documentos_resultado").delete().eq("id", id).eq("user_id", userId).eq("fonte", "MANUAL");
+    if (error) return erro(error.message);
+    return json({ mensagem: "Relatório removido" });
+  }
+
+  // Cobertura de relatórios num mês, respeitando a periodicidade de cada tipo
+  // (ver coberturaRelatorios.ts): FII é mensal; ações/stocks/REITs, trimestrais. Tipos sem
+  // relatório periódico (renda fixa, tesouro, cripto…) nem entram. "Tem" = cache do
+  // Fundos.NET, documento CVM/SEC, enviado à mão ou análise já feita naquele período.
+  if (m === "GET" && sub === "cobertura") {
+    const mes = url.searchParams.get("mes") ?? "";
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) return erro("mes inválido (use AAAA-MM)");
+    const hoje = hojeISO();
+
+    const { data: pos, error: errPos } = await c.from("inv_posicoes")
+      .select("ativo_id, quantidade, inv_ativos!inner(id, user_id, ticker, nome, tipo_ativo, fii_pregao)")
+      .eq("status", "ATIVA").gt("quantidade", 0).eq("inv_ativos.user_id", userId)
+      .in("inv_ativos.tipo_ativo", ["FII", ...TIPOS_COM_RESULTADO]);
+    if (errPos) { logError("Cobertura: posições", errPos); return erro(errPos.message); }
+    const vistos = new Set<string>();
+    const ativos: { id: string; ticker: string; nome: string | null; tipo_ativo: string; fii_pregao: string | null }[] = [];
+    for (const p of pos ?? []) {
+      const a = p.inv_ativos as unknown as { id: string; ticker: string; nome: string | null; tipo_ativo: string; fii_pregao: string | null } | null;
+      if (!a || vistos.has(String(a.id))) continue;
+      vistos.add(String(a.id));
+      ativos.push({ id: String(a.id), ticker: String(a.ticker), nome: a.nome, tipo_ativo: String(a.tipo_ativo), fii_pregao: a.fii_pregao });
+    }
+
+    const periodos = new Map<string, NonNullable<ReturnType<typeof periodoEsperado>>>();
+    for (const t of new Set(ativos.map((a) => a.tipo_ativo))) {
+      const pe = periodoEsperado(t, mes, hoje);
+      if (pe) periodos.set(t, pe);
+    }
+    const todos = [...periodos.values()];
+    const periodoFii = periodos.get("FII");
+    const menorDe = todos.map((p) => p.de).sort()[0];
+    const maiorAte = todos.map((p) => p.ate).sort().reverse()[0];
+
+    let relsFii: { fundo_nome: string; fundo_pregao: string | null }[] = [];
+    if (periodoFii) {
+      const { data } = await c.from("inv_relatorios_fii").select("id, fundo_nome, fundo_pregao, data_referencia, data_entrega")
+        .or(`and(data_referencia.gte.${periodoFii.de},data_referencia.lt.${periodoFii.ate}),and(data_referencia.is.null,data_entrega.gte.${periodoFii.de},data_entrega.lt.${periodoFii.ate})`)
+        .limit(3000);
+      relsFii = (data ?? []) as typeof relsFii;
+    }
+    let docs: { ticker_ref: string; data_referencia: string | null }[] = [];
+    let analises: { ativo_id: string; data_referencia: string | null }[] = [];
+    if (menorDe && maiorAte) {
+      const rd = await c.from("inv_documentos_resultado").select("ticker_ref, data_referencia")
+        .gte("data_referencia", menorDe).lt("data_referencia", maiorAte).limit(3000);
+      docs = (rd.data ?? []) as typeof docs;
+      const ra = await c.from("inv_analises_relatorio").select("ativo_id, data_referencia").eq("user_id", userId)
+        .gte("data_referencia", menorDe).lt("data_referencia", maiorAte).limit(3000);
+      analises = (ra.data ?? []) as typeof analises;
+    }
+    const naJanela = (d: string | null, p: { de: string; ate: string }) => !!d && d >= p.de && d < p.ate;
+
+    const itens = ativos.flatMap((a) => {
+      const p = periodos.get(a.tipo_ativo);
+      if (!p) return [];
+      const ref = a.tipo_ativo === "FII" ? a.ticker.trim().toUpperCase() : refDoAtivo({ ticker: a.ticker, tipo_ativo: a.tipo_ativo });
+      const tem = analises.some((x) => x.ativo_id === a.id && naJanela(x.data_referencia, p))
+        || docs.some((d) => d.ticker_ref === ref && naJanela(d.data_referencia, p))
+        || (a.tipo_ativo === "FII" && filtrarRelatoriosDoAtivo({ ticker: a.ticker, nome: a.nome, pregao: a.fii_pregao }, relsFii).length > 0);
+      return [{
+        ativo_id: a.id, ticker: a.ticker, nome: a.nome, tipo_ativo: a.tipo_ativo,
+        periodicidade: p.periodicidade, periodo: p.rotulo,
+        status: tem ? "TEM" : p.devido ? "FALTA" : "NO_PRAZO",
+      }];
+    }).sort((x, y) => x.ticker.localeCompare(y.ticker));
+    return json({ dados: { mes, itens } });
+  }
+
   if (m === "GET" && sub === "disponiveis") {
     const ativoId = url.searchParams.get("ativo_id");
     if (!ativoId) return erro("ativo_id obrigatório");
@@ -478,9 +649,17 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
       mapa.set(Number(rr.id), rr as unknown as Record<string, unknown>);
     }
     const lista = [...mapa.values()].sort((a, b) => String(b.data_entrega).localeCompare(String(a.data_entrega))).slice(0, 12);
-    const { data: feitas } = await c.from("inv_analises_relatorio").select("relatorio_id").eq("user_id", userId).eq("ativo_id", ativoId);
-    const analisados = new Set((feitas ?? []).map((f) => Number(f.relatorio_id)));
-    return json({ dados: lista.map((r) => ({ ...r, analisado: analisados.has(Number(r.id)) })) });
+    const { data: feitas } = await c.from("inv_analises_relatorio").select("relatorio_id, documento_id").eq("user_id", userId).eq("ativo_id", ativoId);
+    const analisados = new Set((feitas ?? []).filter((f) => f.relatorio_id != null).map((f) => Number(f.relatorio_id)));
+    const docsFeitos = new Set((feitas ?? []).filter((f) => f.documento_id != null).map((f) => String(f.documento_id)));
+    const manuais = (await documentosDoAtivo(c, { ticker: String(ativo.ticker), tipo_ativo: String(ativo.tipo_ativo) }, 24, userId))
+      .filter((d) => d.fonte === "MANUAL")
+      .map((d) => ({
+        id: d.id, fundo_nome: d.emissor_nome, fundo_pregao: d.ticker_ref, data_referencia: d.data_referencia,
+        data_entrega: d.data_entrega, url_documento: null, tipo_doc: d.tipo_doc, fonte: "MANUAL", analisado: docsFeitos.has(d.id),
+      }));
+    const todos = [...lista.map((r) => ({ ...r, analisado: analisados.has(Number(r.id)) })), ...manuais];
+    return json({ dados: todos });
   }
 
   if (m === "POST" && sub === "analisar") {
@@ -492,14 +671,15 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
     if (!ativo) return erro("Ativo não encontrado", 404);
     const ehDoc = (TIPOS_COM_RESULTADO as readonly string[]).includes(String(ativo.tipo_ativo));
     if (ativo.tipo_ativo !== "FII" && !ehDoc) return erro("Este tipo de ativo não tem relatório periódico para analisar");
+    const idManual = typeof body.relatorio_id === "string" && body.relatorio_id.startsWith("MANUAL:") ? body.relatorio_id : null;
 
     // config_id (opcional): usa outro motor de IA já cadastrado, sem trocar a ativa.
     const cfgRes = await lerConfigIAAtiva(c, userId, body.config_id ? String(body.config_id) : undefined);
     if (!cfgRes.ok) return erro(cfgRes.erro, cfgRes.status);
 
-    if (ehDoc) {
+    if (ehDoc || idManual) {
       const alvo = { id: String(ativo.id), user_id: userId, ticker: String(ativo.ticker), nome: ativo.nome as string | null, tipo_ativo: String(ativo.tipo_ativo) };
-      const docs = await documentosDoAtivo(c, alvo, 24);
+      const docs = await documentosDoAtivo(c, alvo, 24, userId);
       const doc = body.relatorio_id != null ? docs.find((d) => d.id === String(body.relatorio_id)) : docs[0];
       if (!doc) return erro("Nenhum documento de resultado encontrado para este ativo. Use \"Buscar relatórios\" primeiro.", 404);
       const rd = await analisarESalvarDocumento(c, userId, cfgRes.config, alvo, doc, "MANUAL");

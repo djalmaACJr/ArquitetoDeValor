@@ -64,7 +64,7 @@ export default function CartaoAnaliseRelatorio({ a, onVisto, onExcluir, onPerson
             {nova && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-400/15 text-blue-300">NOVA</span>}
           </p>
           <p className="text-[12px]" style={{ color: MUTED }}>
-            {a.inv_documentos_resultado ? (a.inv_documentos_resultado.fonte === 'EDGAR' ? `Relatório ${a.inv_documentos_resultado.tipo_doc}` : 'Resultado') : 'Relatório'} de {a.data_referencia ? formatData(a.data_referencia) : '—'} · {a.origem === 'CRON' ? 'automática' : 'manual'}
+            {a.inv_documentos_resultado ? (a.inv_documentos_resultado.fonte === 'EDGAR' ? `Relatório ${a.inv_documentos_resultado.tipo_doc}` : a.inv_documentos_resultado.fonte === 'MANUAL' ? 'Relatório enviado' : 'Resultado') : 'Relatório'} de {a.data_referencia ? formatData(a.data_referencia) : '—'} · {a.origem === 'CRON' ? 'automática' : 'manual'}
             {a.mentor_nome || a.provedor ? ` · ${a.mentor_nome || a.provedor}` : ''}
           </p>
         </div>

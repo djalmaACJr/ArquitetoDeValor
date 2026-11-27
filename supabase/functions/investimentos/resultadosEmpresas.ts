@@ -38,7 +38,7 @@ export interface AtivoEmpresa {
   id: string; user_id: string; ticker: string; nome: string | null; tipo_ativo: string; acoes_subtipo?: string | null;
 }
 export interface DocumentoResultado {
-  id: string; fonte: "EDGAR" | "CVM"; ticker_ref: string; emissor_chave: string; emissor_nome: string;
+  id: string; fonte: "EDGAR" | "CVM" | "MANUAL"; ticker_ref: string; emissor_chave: string; emissor_nome: string;
   tipo_doc: string; data_referencia: string | null; data_entrega: string; url_documento: string | null;
   texto: string | null; texto_status: string;
 }
@@ -179,12 +179,18 @@ export async function cvmPrecisaAtualizar(): Promise<boolean> {
 
 // ── Documentos de um ativo ─────────────────────────────────────────────
 
-export async function documentosDoAtivo(c: Db, ativo: { ticker: string; tipo_ativo: string }, limite = 12): Promise<DocumentoResultado[]> {
+// Inclui os relatórios enviados manualmente (fonte 'MANUAL') do próprio `userId` —
+// nunca os de outro usuário (a RLS já filtra no client do usuário; o filtro explícito
+// cobre o client admin do cron). Para FII só há documentos MANUAL (o resto vive em
+// inv_relatorios_fii).
+export async function documentosDoAtivo(c: Db, ativo: { ticker: string; tipo_ativo: string }, limite = 12, userId?: string): Promise<DocumentoResultado[]> {
   const fonte = fonteDoTipo(ativo.tipo_ativo);
-  if (!fonte) return [];
-  const { data, error } = await c.from("inv_documentos_resultado")
+  const ref = fonte ? refDoAtivo(ativo) : ativo.ticker.trim().toUpperCase();
+  let q = c.from("inv_documentos_resultado")
     .select("id, fonte, ticker_ref, emissor_chave, emissor_nome, tipo_doc, data_referencia, data_entrega, url_documento, texto_status")
-    .eq("fonte", fonte).eq("ticker_ref", refDoAtivo(ativo))
+    .in("fonte", fonte ? [fonte, "MANUAL"] : ["MANUAL"]).eq("ticker_ref", ref);
+  q = userId ? q.or(`user_id.is.null,user_id.eq.${userId}`) : q.is("user_id", null);
+  const { data, error } = await q
     .order("data_referencia", { ascending: false, nullsFirst: false }).limit(limite);
   if (error) { logError("Docs do ativo", error); return []; }
   return (data ?? []) as DocumentoResultado[];
@@ -214,7 +220,7 @@ async function garantirTextoDoc(doc: DocumentoResultado): Promise<string | null>
   const admin = dbAdmin();
   const { data } = await admin.from("inv_documentos_resultado").select("texto, texto_status").eq("id", doc.id).maybeSingle();
   if (data?.texto_status === "OK" && data.texto) return String(data.texto);
-  const texto = doc.fonte === "EDGAR" ? await textoEdgar(doc) : null;
+  const texto = doc.fonte === "EDGAR" ? await textoEdgar(doc) : null; // MANUAL: o texto já nasce gravado (texto_status OK)
   if (!texto) {
     await admin.from("inv_documentos_resultado").update({ texto_status: "ERRO" }).eq("id", doc.id);
     return null;
@@ -245,6 +251,12 @@ ${REGRAS_COMUNS}`;
 const PERSONA_EDGAR = `Você está conversando com uma pessoa comum, que NUNCA estudou finanças. Ela tem ações de uma empresa americana e só quer saber: "a empresa está indo bem? meu investimento está seguro?". Você recebe, em inglês, a parte do relatório trimestral/anual em que a própria empresa explica seus resultados (vendas, lucro, custos, riscos). Traduza o essencial para português do Brasil e explique como um amigo explicaria no WhatsApp.
 ${REGRAS_COMUNS}`;
 
+const PERSONA_MANUAL_FII = `Você está conversando com uma pessoa comum, que NUNCA estudou finanças. Ela tem cotas de um fundo imobiliário (FII) e só quer saber: "está tudo bem com o meu fundo? meu dinheiro mensal está seguro?". Você recebe o texto de um relatório do fundo (relatório gerencial) que ela mesma enviou. Explique como um amigo explicaria no WhatsApp.
+${REGRAS_COMUNS.replace('a empresa vai bem, mais ou menos ou mal, e o que isso significa para quem tem as ações', 'o fundo está bem, mais ou menos ou preocupante, e o que isso muda para quem recebe os rendimentos todo mês')}`;
+
+const PERSONA_MANUAL_EMPRESA = `Você está conversando com uma pessoa comum, que NUNCA estudou finanças. Ela tem ações de uma empresa e só quer saber: "a empresa está indo bem? meu investimento está seguro?". Você recebe o texto de um relatório de resultados que ela mesma enviou (pode estar em inglês: traduza o essencial para português do Brasil). Explique como um amigo explicaria no WhatsApp.
+${REGRAS_COMUNS}`;
+
 async function analisarComIA(
   cfg: ConfigIAAtiva, ativo: AtivoEmpresa, doc: DocumentoResultado, texto: string,
   anterior: { resumo: string; pontos_atencao: unknown } | null,
@@ -252,10 +264,10 @@ async function analisarComIA(
   const blocoAnterior = anterior
     ? `\n\nAnálise do documento ANTERIOR (para comparar):\nResumo: ${anterior.resumo}\nPontos de atenção: ${JSON.stringify(anterior.pontos_atencao)}`
     : "";
-  const tipoTxt = doc.fonte === "CVM" ? "Resultado (dados da CVM)" : `Relatório ${doc.tipo_doc} (SEC) — seção "Management's Discussion and Analysis"`;
+  const tipoTxt = doc.fonte === "MANUAL" ? "Relatório enviado pelo usuário" : doc.fonte === "CVM" ? "Resultado (dados da CVM)" : `Relatório ${doc.tipo_doc} (SEC) — seção "Management's Discussion and Analysis"`;
   const pergunta = `Ativo: ${ativo.ticker}${ativo.nome ? ` — ${ativo.nome}` : ""}\nEmpresa: ${doc.emissor_nome}\n${tipoTxt}, data-base ${doc.data_referencia ?? "?"}${blocoAnterior}\n\n--- TEXTO ---\n${texto}`;
   const bruto = await chamarProvedorIA(cfg.provedor, {
-    apiKey: cfg.apiKey, persona: doc.fonte === "CVM" ? PERSONA_CVM : PERSONA_EDGAR, modelo: cfg.modelo ?? undefined,
+    apiKey: cfg.apiKey, persona: doc.fonte === "MANUAL" ? (ativo.tipo_ativo === "FII" ? PERSONA_MANUAL_FII : PERSONA_MANUAL_EMPRESA) : doc.fonte === "CVM" ? PERSONA_CVM : PERSONA_EDGAR, modelo: cfg.modelo ?? undefined,
     mensagens: [{ role: "user", content: pergunta }], maxTokens: 900, buscaWeb: false,
   });
   const analise = parsearAnaliseIA(bruto);
@@ -334,7 +346,7 @@ export async function processarResultadosCron(
     if (jaTratado.has(chave)) continue;
     jaTratado.add(chave);
 
-    const [doc] = await documentosDoAtivo(admin, ativo, 1);
+    const [doc] = await documentosDoAtivo(admin, ativo, 1, ativo.user_id);
     const limiteData = recuarDias(hojeISO(), fonte === "CVM" ? JANELA_CVM_DIAS : JANELA_EDGAR_DIAS);
     if (!doc || (doc.data_referencia ?? doc.data_entrega.slice(0, 10)) < limiteData) continue;
     const { data: ja } = await admin.from("inv_analises_relatorio").select("id")
@@ -354,14 +366,14 @@ export async function processarResultadosCron(
     } else res.falhas_analise++;
   }
 
-  const { count } = await admin.from("inv_documentos_resultado").delete({ count: "exact" }).lt("data_entrega", `${recuarDias(hojeISO(), 400)}T00:00:00Z`);
+  const { count } = await admin.from("inv_documentos_resultado").delete({ count: "exact" }).is("user_id", null) /* relatórios enviados à mão (user_id) só saem por ação do dono */.lt("data_entrega", `${recuarDias(hojeISO(), 400)}T00:00:00Z`);
   res.expurgados = count ?? 0;
   return res;
 }
 
 // Lista (para a UI) os documentos de um ativo + se já foram analisados pelo usuário.
 export async function listarDisponiveis(c: Db, userId: string, ativo: { id: string; ticker: string; tipo_ativo: string }) {
-  const docs = await documentosDoAtivo(c, ativo);
+  const docs = await documentosDoAtivo(c, ativo, 12, userId);
   const { data: feitas } = await c.from("inv_analises_relatorio").select("documento_id").eq("user_id", userId).eq("ativo_id", ativo.id).not("documento_id", "is", null);
   const analisados = new Set((feitas ?? []).map((f) => String(f.documento_id)));
   return docs.map((d) => ({

@@ -10,12 +10,13 @@
 // Sem persistência — a conversa some ao sair da página (mesmo padrão do
 // useChatMascote em modo `configId`).
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Send, Trash2, Users, ChevronDown, ChevronUp, Bot, Paperclip, Check, X } from 'lucide-react'
+import { Send, Trash2, Users, ChevronDown, Paperclip, Check, X } from 'lucide-react'
 import InvestimentosNav from '../components/ui/InvestimentosNav'
 import { useIAPreferencia } from '../hooks/useIAPreferencia'
 import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
-import { provedorPorId } from '../lib/iaProvedores'
-import { useChatMentorAtivos, type MentorRespostaConselho } from '../hooks/useChatMentorAtivos'
+import CardMentorConselho from '../components/ui/CardMentorConselho'
+import { rotuloMentor } from '../lib/iaProvedores'
+import { useChatMentorAtivos } from '../hooks/useChatMentorAtivos'
 import { useInvestimentosPosicoes } from '../hooks/useInvestimentosPosicoes'
 import { useInvestimentosOperacoes } from '../hooks/useInvestimentosOperacoes'
 import { useDividendos } from '../hooks/useDividendos'
@@ -25,39 +26,12 @@ import { formatData } from '../lib/utils'
 
 const MUTED = '#8b92a8'
 
-function rotuloMentor(nome: string | null, provedor: string): string {
-  if (nome && nome.trim()) return nome.trim()
-  return provedorPorId(provedor)?.label ?? provedor
-}
-
 const SUGESTOES = [
   'RBRY11 está interessante para compra no preço atual?',
   'KNRI11 ainda vale a pena ou já está caro?',
   'Vale trocar uma ação de banco por um ETF internacional agora?',
 ]
 
-// Bloco colapsável com a resposta de 1 mentor do conselho.
-function CardMentorConselho({ mentor }: { mentor: MentorRespostaConselho }) {
-  const [aberto, setAberto] = useState(false)
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20">
-      <button type="button" onClick={() => setAberto(a => !a)}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left">
-        <span className="flex items-center gap-2 text-[13px] font-medium text-white/85 truncate">
-          <Bot size={13} style={{ color: mentor.erro ? '#f87171' : '#00c896' }} />
-          {rotuloMentor(mentor.nome, mentor.provedor)}
-        </span>
-        {aberto ? <ChevronUp size={14} style={{ color: MUTED }} /> : <ChevronDown size={14} style={{ color: MUTED }} />}
-      </button>
-      {aberto && (
-        <div className="px-3 pb-3 text-[13.5px] leading-relaxed whitespace-pre-wrap"
-          style={{ color: mentor.erro ? '#f87171' : '#c5cad8' }}>
-          {mentor.erro ?? mentor.resposta}
-        </div>
-      )}
-    </div>
-  )
-}
 
 // Dropdown compacto (checkboxes) pra restringir o recorte da carteira
 // anexada — mesmo padrão do SeletorEscopo do ChatMascote (carteira inteira

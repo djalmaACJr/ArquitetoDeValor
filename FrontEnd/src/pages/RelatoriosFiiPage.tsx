@@ -11,6 +11,8 @@ import { useEmEspacoDeAgregado } from '../hooks/useEspacoAtivo'
 import { useIAPreferencia } from '../hooks/useIAPreferencia'
 import { provedorPorId } from '../lib/iaProvedores'
 import CartaoAnalise from '../components/ui/CartaoAnaliseRelatorio'
+import EnviarRelatorioManual from '../components/ui/EnviarRelatorioManual'
+import RelatoriosFaltantes from '../components/ui/RelatoriosFaltantes'
 import QuadroAssembleiasFii from '../components/ui/QuadroAssembleiasFii'
 import QuadroEmailEntrada from '../components/ui/QuadroEmailEntrada'
 import { useEmailEntrada } from '../hooks/useEmailEntrada'
@@ -32,6 +34,7 @@ const DESCRICAO_MODO: Record<ModoAnalise, string> = {
 export default function RelatoriosFiiPage() {
   const emEspacoAgregado = useEmEspacoDeAgregado()
   const [toast, setToast] = useState<string | null>(null)
+  const [versaoRel, setVersaoRel] = useState(0) // sobe a cada relatório enviado → recarrega "ativos sem relatório"
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 4000) }
 
   const { ativos: todosAtivos } = useInvestimentosAtivos()
@@ -350,6 +353,9 @@ export default function RelatoriosFiiPage() {
               </button>
             </div>
             <p className="text-[12px]" style={{ color: MUTED }}>{DESCRICAO_MODO[modo]}</p>
+            <EnviarRelatorioManual ativoId={ativoSel && !todos ? ativoSel : undefined}
+              onConcluido={(m) => { showToast(m); setVersaoRel((v) => v + 1); if (ativoSel && !todos) void trocarAtivo(ativoSel) }} />
+            <RelatoriosFaltantes versao={versaoRel} />
             {resumo && (
               <div role="status" className="flex items-start justify-between gap-3 rounded-lg px-3 py-2 text-[13px] text-white" style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.4)' }}>
                 <span>✅ {resumo}</span>
