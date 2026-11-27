@@ -2,9 +2,9 @@
 // Arquiteto de Valor — Testes automatizados
 // tests/limpar.test.ts
 //
-// Cobre critérios de aceite: CA-LIM01 a CA-LIM12
+// Cobre critérios de aceite: CA-LIM01 a CA-LIM13
 // ============================================================
-import { api, apiSemAuth } from "./setup";
+import { api, apiSemAuth, clienteServiceRole, getUserId } from "./setup";
 
 // IDs criados durante os testes para validação
 let contaId:    string;
@@ -308,4 +308,17 @@ describe("Limpar — CA-LIM01 a CA-LIM12", () => {
     const { status: s2 } = await api(`/lembretes/${id}`, "DELETE")
     expect(s2).toBe(204)
   })
+
+  // A conta de teste é descartável (o CA-LIM08 já apaga tudo dela), mas cada INSERT/UPDATE/DELETE das suítes
+  // vai para a trilha de auditoria — em out/2026 a conta de teste chegou a 73% da tabela (167 mil linhas).
+  // Última suíte da ordem: apaga a trilha da conta de teste. Pula sem SUPABASE_SERVICE_ROLE_KEY.
+  test("CA-LIM13 — purga a trilha de auditoria da conta de teste (não acumular lixo de teste)", async () => {
+    const admin = clienteServiceRole();
+    if (!admin) { console.warn("[CA-LIM13] SUPABASE_SERVICE_ROLE_KEY ausente — trilha da conta de teste não foi purgada"); return; }
+    const uid = await getUserId();
+    const { error } = await admin.from("trilha_auditoria").delete().eq("user_id", uid);
+    expect(error).toBeNull();
+    const { count } = await admin.from("trilha_auditoria").select("id", { count: "exact", head: true }).eq("user_id", uid);
+    expect(count).toBe(0);
+  }, 120000);
 })
