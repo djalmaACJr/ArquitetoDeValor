@@ -719,7 +719,7 @@ export interface AnaliseRelatorioFii {
   created_at:      string
   inv_ativos?:          { ticker: string; nome: string } | null
   inv_relatorios_fii?:  { url_documento: string; fundo_nome: string; data_entrega: string } | null
-  inv_documentos_resultado?: { url_documento: string | null; emissor_nome: string; data_entrega: string; tipo_doc: string; fonte: 'EDGAR' | 'CVM' } | null
+  inv_documentos_resultado?: { url_documento: string | null; emissor_nome: string; data_entrega: string; tipo_doc: string; fonte: 'EDGAR' | 'CVM' | 'MANUAL' } | null
 }
 
 // Alerta de FII "em vias de mudar de forma" (liquidação, fusão, transformação,
@@ -744,7 +744,7 @@ export interface RelatorioFiiDisponivel {
   data_entrega:    string
   url_documento:   string | null
   tipo_doc?:       string            // 10-Q | 10-K | ITR | DFP (ações/stocks)
-  fonte?:          'EDGAR' | 'CVM'
+  fonte?:          'EDGAR' | 'CVM' | 'MANUAL'
   analisado:       boolean
 }
 

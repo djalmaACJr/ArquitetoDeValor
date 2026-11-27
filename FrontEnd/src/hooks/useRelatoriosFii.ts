@@ -127,3 +127,39 @@ export function useRelatoriosAuto() {
 
   return { ativo: flags.auto, pessoal: flags.auto && flags.pessoal, loading: isLoading, definir, definirPessoal }
 }
+
+// Envia à mão o PDF de um relatório (quando a fonte automática não o tem). O texto é
+// extraído no servidor e fica privado do usuário; devolve o documento criado, que então
+// pode ser analisado normalmente (`analisar(ativoId, doc.id)`).
+// `ativoId` opcional: sem ele o servidor identifica o ativo pelo texto do PDF; com ele, confere que é dele.
+// `mesAno` opcional: sem ele a competência é detectada no PDF.
+export async function enviarRelatorioManual(ativoId: string | undefined, arquivo: File, mesAno?: string): Promise<OpResult<RelatorioFiiDisponivel & { ativo_id: string; ticker: string }>> {
+  const bytes = new Uint8Array(await arquivo.arrayBuffer())
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  const res = await apiMutate<RelatorioFiiDisponivel & { ativo_id: string; ticker: string }>('/investimentos/relatorios-fii/manual', 'POST', {
+    ativo_id: ativoId || undefined, pdf_base64: btoa(bin), data_referencia: mesAno || undefined,
+  })
+  return { ok: res.ok, dados: res.dados, erro: res.erro }
+}
+
+export async function excluirRelatorioManual(id: string): Promise<boolean> {
+  const res = await apiMutate(`/investimentos/relatorios-fii/manual?id=${encodeURIComponent(id)}`, 'DELETE')
+  return res.ok
+}
+
+export interface CoberturaRelatorio {
+  ativo_id: string; ticker: string; nome: string | null; tipo_ativo: string
+  periodicidade: 'MENSAL' | 'TRIMESTRAL'
+  /** Período esperado: "10/2026" (FII) ou "3T26". */
+  periodo: string
+  /** NO_PRAZO = o prazo de divulgação ainda não venceu. */
+  status: 'TEM' | 'FALTA' | 'NO_PRAZO'
+}
+
+// Dos ativos em carteira, quais têm (ou não) o relatório esperado para o mês `mes` (AAAA-MM) —
+// a periodicidade depende do tipo (FII mensal; ações/stocks trimestrais). Tipos sem relatório não vêm.
+export async function buscarCoberturaRelatorios(mes: string): Promise<CoberturaRelatorio[] | null> {
+  const res = await apiFetch<{ mes: string; itens: CoberturaRelatorio[] }>(`/investimentos/relatorios-fii/cobertura?mes=${mes}`)
+  return res.ok ? (res.dados?.itens ?? []) : null
+}

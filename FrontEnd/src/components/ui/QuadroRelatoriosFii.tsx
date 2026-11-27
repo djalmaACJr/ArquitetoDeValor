@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ExternalLink, FileSearch, RefreshCw, Sparkles } from 'lucide-react'
 import CartaoAnaliseRelatorio from './CartaoAnaliseRelatorio'
-import { useRelatoriosFii, listarRelatoriosDisponiveis, sincronizarRelatoriosFii } from '../../hooks/useRelatoriosFii'
+import EnviarRelatorioManual from './EnviarRelatorioManual'
+import { useRelatoriosFii, listarRelatoriosDisponiveis, sincronizarRelatoriosFii, excluirRelatorioManual } from '../../hooks/useRelatoriosFii'
 import { formatData } from '../../lib/utils'
 import type { AnaliseRelatorioFii, RelatorioFiiDisponivel } from '../../types'
 
@@ -103,6 +104,9 @@ export default function QuadroRelatoriosFii({ ativoId, ticker, tipo = 'FII' }: {
         </button>
       </div>
 
+      <EnviarRelatorioManual ativoId={ativoId} ticker={ticker}
+        onConcluido={(m, ok) => { setMsg(ok ? null : m); void carregar() }} />
+
       {msg && <p className="text-[12.5px]" style={{ color: '#ff5c7a' }}>{msg}</p>}
 
       {carregando ? (
@@ -121,7 +125,7 @@ export default function QuadroRelatoriosFii({ ativoId, ticker, tipo = 'FII' }: {
           {i.tipo === 'pendente' ? (
             <div className="flex items-center justify-between gap-2 rounded-lg border border-white/10 px-3 py-2">
               <span className="text-[13px] text-white/85">
-                {formatData(dataDisponivel(i.r))} <span className="text-[11px] ml-1" style={{ color: MUTED }}>· não analisado</span>
+                {formatData(dataDisponivel(i.r))} <span className="text-[11px] ml-1" style={{ color: MUTED }}>· {i.r.fonte === 'MANUAL' ? 'enviado por você · ' : ''}não analisado</span>
               </span>
               <span className="flex items-center gap-1.5">
                 {i.r.url_documento && (
@@ -129,6 +133,10 @@ export default function QuadroRelatoriosFii({ ativoId, ticker, tipo = 'FII' }: {
                     className="flex items-center gap-1 text-[12px] px-2 py-1 rounded-md border border-white/10 hover:border-white/25 text-white/80">
                     <ExternalLink size={12} /> {i.r.fonte === 'CVM' ? 'Fonte' : i.r.fonte === 'EDGAR' ? (i.r.tipo_doc ?? 'SEC') : 'PDF'}
                   </a>
+                )}
+                {i.r.fonte === 'MANUAL' && (
+                  <button onClick={async () => { if (await excluirRelatorioManual(String(i.r.id))) void carregar(); else setMsg('Não foi possível remover o relatório.') }} disabled={ocupado !== null}
+                    className="text-[12px] px-2 py-1 rounded-md border border-white/10 hover:border-white/25 text-white/60 disabled:opacity-50">Remover</button>
                 )}
                 <button onClick={() => rodar(i.r.id)} disabled={ocupado !== null}
                   className="flex items-center gap-1 text-[12px] px-2 py-1 rounded-md font-semibold text-white disabled:opacity-50" style={{ background: '#3b82f6' }}>

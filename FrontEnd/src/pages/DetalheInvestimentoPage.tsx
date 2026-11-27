@@ -39,6 +39,7 @@ import { useInvQuestionarios } from '../hooks/useInvQuestionarios'
 import { useInvPerfil } from '../hooks/useInvPerfil'
 import { useInvPesos } from '../hooks/useInvPesos'
 import QuadroRelatoriosFii from '../components/ui/QuadroRelatoriosFii'
+import QuadroAvaliacaoMentores from '../components/ui/QuadroAvaliacaoMentores'
 import { useOrdemReordenavel, AlcaArrastar } from '../hooks/useOrdemReordenavel'
 import { usePreferenciasOrdemQuadros } from '../hooks/usePreferenciasOrdemQuadros'
 import { useEmEspacoDeAgregado, usePermissaoModulo } from '../hooks/useEspacoAtivo'
@@ -65,7 +66,7 @@ type QuadroDetalheKey =
   | 'resumo' | 'posicao_destaques' | 'caracteristicas'
   | 'grafico_evolucao' | 'grafico_cotas' | 'grafico_rent_mes' | 'grafico_rent_acum'
   | 'grafico_dividendos_mes' | 'grafico_dy_mes' | 'grafico_ultimos_dividendos'
-  | 'magic_number' | 'dy_yoc' | 'valuation_acoes' | 'protecao_poder_compra' | 'relatorios_fii' | 'operacoes'
+  | 'magic_number' | 'dy_yoc' | 'valuation_acoes' | 'protecao_poder_compra' | 'relatorios_fii' | 'conselho' | 'operacoes'
 // Gráficos vêm em meia largura por padrão (lado a lado, como antes de virarem
 // quadros independentes) — os demais em largura total, como sempre foram.
 const QUADROS_GRAFICO: QuadroDetalheKey[] = [
@@ -649,6 +650,7 @@ export default function DetalheInvestimentoPage() {
     if (ehFIIAtivo && magicNumberFII) ks.push('protecao_poder_compra')
     // Análise gasta a chave de IA de quem pede → só em "Meus dados".
     if (['FII', 'ACOES', 'STOCKS', 'REIT'].includes(ativo.tipo_ativo) && !emEspacoAgregado) ks.push('relatorios_fii')
+    ks.push('conselho')
     ks.push('operacoes')
     return ks
   }, [ativo, emEspacoAgregado, magicNumberFII, dySimuladoPvp1, dyPorMes, precoAtualEstimado, precoTetoBazin, qtdAtual])
@@ -1667,6 +1669,13 @@ export default function DetalheInvestimentoPage() {
           <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
             largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
             <QuadroRelatoriosFii key={ativo.id} ativoId={ativo.id} ticker={ativo.ticker} tipo={ativo.tipo_ativo} />
+          </Quadro>
+        )
+
+        if (chave === 'conselho') return (
+          <Quadro key={chave} dragHandleProps={alcaQuadro(chave)} dropTargetProps={alvoQuadro(chave)} contorno={contornoQuadro(chave)}
+            largura={quadrosMetade.includes(chave) ? 'metade' : 'total'} onToggleLargura={() => toggleLarguraQuadro(chave)}>
+            <QuadroAvaliacaoMentores key={ativo.id} ativoId={ativo.id} />
           </Quadro>
         )
 
