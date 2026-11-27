@@ -366,7 +366,7 @@ export async function processarResultadosCron(
     } else res.falhas_analise++;
   }
 
-  const { count } = await admin.from("inv_documentos_resultado").delete({ count: "exact" }).lt("data_entrega", `${recuarDias(hojeISO(), 400)}T00:00:00Z`);
+  const { count } = await admin.from("inv_documentos_resultado").delete({ count: "exact" }).is("user_id", null) /* relatórios enviados à mão (user_id) só saem por ação do dono */.lt("data_entrega", `${recuarDias(hojeISO(), 400)}T00:00:00Z`);
   res.expurgados = count ?? 0;
   return res;
 }

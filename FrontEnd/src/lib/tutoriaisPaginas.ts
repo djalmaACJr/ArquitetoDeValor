@@ -774,6 +774,12 @@ export const TUTORIAL_INVESTIMENTOS_DETALHE: PassoTutorial[] = [
     posicao: 'acima',
   },
   {
+    titulo: 'Avaliação do Conselho',
+    texto: 'A nota final do ativo, o consenso dos mentores, a nota de cada um e o histórico das avaliações já feitas — as mesmas da página Avaliações, aqui só deste ativo.',
+    seletor: '[data-tutorial="detalhe-avaliacao-mentores"]',
+    posicao: 'acima',
+  },
+  {
     titulo: 'Operações recentes',
     texto: 'Totais por tipo de operação no período selecionado, seguidos da lista das últimas movimentações registradas.',
     seletor: '[data-tutorial="detalhe-operacoes"]',

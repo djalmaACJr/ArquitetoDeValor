@@ -31,7 +31,7 @@ export default function EnviarRelatorioManual({ ativoId, ticker, onConcluido }: 
   async function enviar() {
     if (!arquivo) { setErro('Escolha o arquivo PDF.'); return }
     if (arquivo.size > MAX_MB * 1024 * 1024) { setErro(`PDF maior que ${MAX_MB} MB.`); return }
-    if (!/^\d{4}-\d{2}$/.test(mes)) { setErro('Informe o mês de competência do relatório.'); return }
+    if (mes && !/^\d{4}-\d{2}$/.test(mes)) { setErro('Competência inválida.'); return }   // vazia: o servidor detecta pelo PDF
     setErro(null); setOcupado('enviando')
     const up = await enviarRelatorioManual(ativoId, arquivo, mes)
     if (!up.ok || !up.dados) { setOcupado(null); setErro(up.erro ?? 'Não foi possível enviar o relatório.'); return }

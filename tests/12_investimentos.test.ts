@@ -764,6 +764,19 @@ describe("Investimentos — CA-INV01 a CA-INV18", () => {
     }
   }, 60000);
 
+  // Relatório enviado à mão (v8.2.0): só validações de entrada (não cria documento na conta de teste).
+  test("CA-INV38 — relatório manual e cobertura: validam entrada e nunca criam dado com PDF inválido", async () => {
+    expect((await api("/investimentos/relatorios-fii/manual", "POST", {})).status).toBe(400);
+    const naoPdf = Buffer.from("isto não é um pdf".repeat(50)).toString("base64");
+    expect((await api("/investimentos/relatorios-fii/manual", "POST", { pdf_base64: naoPdf })).status).toBe(400);
+    expect((await api("/investimentos/relatorios-fii/manual?id=qualquer", "DELETE")).status).toBe(400);
+    expect((await api("/investimentos/relatorios-fii/cobertura?mes=2026-13")).status).toBe(400);
+    expect((await api("/investimentos/relatorios-fii/cobertura")).status).toBe(400);
+    const ok = await api("/investimentos/relatorios-fii/cobertura?mes=2026-10");
+    expect(ok.status).toBe(200);
+    expect(Array.isArray(ok.data.dados.itens)).toBe(true);
+  }, 60000);
+
   // O pré-agendamento do RESGATE no vencimento foi REMOVIDO do backend
   // (poluía a lista de operações e distorcia totais sem filtro de data —
   // ver comentário em fecharPosicoesVencidas). Hoje o fechamento é só via

@@ -538,13 +538,19 @@ export async function rotaRelatoriosFii(c: Db, req: Request, m: string, userId: 
       emissor_nome: ativo.nome || ativo.ticker, tipo_doc: "Relatório (enviado por você)",
       data_referencia: dataRef, data_entrega: new Date().toISOString(), url_documento: null, texto, texto_status: "OK", hash_conteudo: hash,
     }).select("id, emissor_nome, data_referencia, data_entrega, tipo_doc, fonte").single();
-    if (error) { logError("Salvar relatório manual", error); return erro(error.message, 500); }
+    if (error) {
+      if (error.code === "23505") return erro('Este relatório já foi enviado por você. Use "Analisar" na lista.', 409);   // envio duplo simultâneo
+      logError("Salvar relatório manual", error); return erro(error.message, 500);
+    }
     return json({ dados: { ...data, fundo_nome: data.emissor_nome, url_documento: null, analisado: false, ativo_id: ativo.id, ticker: ativo.ticker } }, 201);
   }
 
   if (m === "DELETE" && sub === "manual") {
     const id = url.searchParams.get("id") ?? "";
     if (!id.startsWith("MANUAL:")) return erro("id inválido");
+    // Análises do próprio usuário que apontam para este documento (documento_id é TEXT, sem FK/cascade).
+    const { error: eAn } = await c.from("inv_analises_relatorio").delete().eq("user_id", userId).eq("documento_id", id);
+    if (eAn) return erro(eAn.message);
     const { error } = await dbAdmin().from("inv_documentos_resultado").delete().eq("id", id).eq("user_id", userId).eq("fonte", "MANUAL");
     if (error) return erro(error.message);
     return json({ mensagem: "Relatório removido" });

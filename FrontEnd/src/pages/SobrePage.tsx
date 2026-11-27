@@ -508,6 +508,9 @@ export default function SobrePage() {
         {/* Detalhe das novidades desta versão (8.2.0) */}
         <ul className="flex flex-col gap-2">
           {[
+            { t: '🧠 Avaliação do Conselho na página do ativo', d: 'a página de cada ativo mostra a nota final, o consenso dos mentores, a nota de cada um e o histórico das avaliações.' },
+            { t: '📄 Enviar relatório em PDF', d: 'quando o relatório de um FII ou empresa não é encontrado sozinho, você sobe o PDF na página do ativo ou na Análise de Relatórios. O sistema confere se o arquivo é mesmo daquele ativo, detecta o mês, recusa reenvio do mesmo PDF e analisa. O arquivo fica visível só para você.' },
+            { t: '📋 Ativos sem relatório', d: 'a Análise de Relatórios lista, mês a mês, os ativos que ainda não têm relatório, respeitando a periodicidade de cada tipo (FII mensal; ações e stocks trimestrais), com atalho para o ativo.' },
             { t: '📖 Ler o e-mail no app', d: 'na aba E-mails, o botão “Ver e-mail completo” mostra o texto da mensagem. É opcional e vem desligado: ative em Configuração e ajuda → “Guardar o texto completo dos e-mails”. Vale só para e-mails novos de remetentes permitidos; desligar apaga os textos já guardados e eles somem no prazo de retenção.' },
             { t: '✉️ Abrir no Gmail', d: 'outra opção da configuração: o botão “Abrir no Gmail” leva direto à mensagem na sua caixa do Gmail (conta principal do navegador). Não guarda o texto no app.' },
           ].map(x => (
